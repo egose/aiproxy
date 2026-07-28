@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags:
+    - v*.*.*
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+    - name: Setup Tools
+      uses: ./.github/actions/setup-tools
+
+    - name: Build
+      run: |
+        make build-all VERSION=${GITHUB_REF_NAME}
+        make build-archive
+
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: aiproxy-${{ github.ref_name }}
+        path: dist/*.tar.gz
+
+    - name: Release
+      uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
+      with:
+        generate_release_notes: true
+        files: dist/*.tar.gz

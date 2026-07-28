@@ -1,0 +1,56 @@
+# AGENTS.md
+
+Operational guide for AI agents (and humans) working in this repo.
+
+## Build & run
+
+| Command                                     | Effect                                                    |
+| ------------------------------------------- | --------------------------------------------------------- |
+| `make build`                                | Build `dist/aiproxy` for the host platform (CGO disabled) |
+| `make build-all`                            | Cross-compile for every `OS_ARCH_PAIRS`                   |
+| `make run CONFIG=path/to/config.hcl`        | `go run` the server against a config                      |
+| `make validate CONFIG=path/to/config.hcl`   | Load + validate config without serving                    |
+| `make docker-build`                         | Multi-stage container build as `aiproxy:$(VERSION)`       |
+| `make docker-run CONFIG=path/to/config.hcl` | Run the container image with a mounted config             |
+
+The HCL config uses `env("VAR")` for secret/placeholder substitution; values
+are textually inlined **before** HCL parsing. Run `set -a; . ./.env; set +a`
+before invoking the binary locally so env vars resolve.
+
+## Lint / typecheck / test
+
+| Command          | Effect                                                  |
+| ---------------- | ------------------------------------------------------- |
+| `make vet`       | `go vet ./...`                                          |
+| `make test`      | `go test ./...` (unit tests only)                       |
+| `make test-race` | `go test -race ./...`                                   |
+| `make cover`     | Unit tests with coverage profile at `dist/coverage.out` |
+
+`make vet test` is the default pre-commit sanity check; run it after any
+non-trivial change. There is no separate typecheck target — Go's compiler
+is the typecheck, and `make build` exercises it.
+
+(Integration tests are intentionally skipped for now. Add them back once the
+repo has sandbox services for stable end-to-end provider coverage.)
+
+## Conventions
+
+- **No comments** in source files unless the surrounding code dictates
+  otherwise — the design doc at `docs/design.md` holds the rationale.
+- Module path: `github.com/egose/aiproxy`.
+- All HCL blocks use two-label syntax: `provider "openai" "openai" {}`.
+- Provider/alias/model names are lowercase, no spaces, no `/`.
+- Public model strings: `<provider-name>/<model-name>` or `alias/<alias-name>`.
+- Exactly one of `api_key` or `api_key_ref` per provider; `api_key_ref.path`
+  defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json`, falling back to
+  `~/.config/aiproxy/keys.json`.
+- Direct (`<provider>/<model>`) requests never fail over to a different
+  target. Alias requests retry the next target on transport / 5xx only;
+  client 4xx errors are returned verbatim.
+- The openai/openai-compatible adapter is pass-through: it only rewrites the
+  `model` field to the configured `upstream_name`, injects the upstream
+  `Authorization: Bearer` header, and copies the body (including SSE streams)
+  back. `anthropic` and `gemini` use built-in request/response translation for
+  chat completions. `gemini` also supports embeddings translation, and both
+  translated providers support a conservative non-streaming `/v1/responses`
+  subset. Anthropic embeddings are still deferred.

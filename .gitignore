@@ -1,0 +1,16 @@
+# Build artifacts
+/dist/
+
+# Local env file (copy of .env.example with real secrets)
+/.env
+
+# Editor / OS cruft
+.DS_Store
+*.swp
+*.swo
+*~
+
+node_modules
+id_ed25519*
+.wip
+aiproxy

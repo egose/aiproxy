@@ -1,0 +1,22 @@
+name: Check code/commit conventions
+
+on: push
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+    - name: Setup Tools
+      uses: ./.github/actions/setup-tools
+
+    - name: Setup NPM Packages
+      uses: ./.github/actions/setup-npm
+
+    - name: Run pre-commit
+      uses: egose/actions/precommit@799b388fb3497236093c6eb7e3eac0b4c8f956ce
+      with:
+        config: .pre-commit-config.yaml
+        commit-on-push: false
+        commit-on-pr: false

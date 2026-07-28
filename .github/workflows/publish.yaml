@@ -1,0 +1,38 @@
+name: Publish Docker image
+
+on:
+  push:
+    tags:
+    - v*.*.*
+
+env:
+  DOCKER_REGISTRY: ghcr.io
+  IMAGE_NAME: egose/aiproxy
+
+jobs:
+  build-push:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+      security-events: write
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+    - name: Setup Tools
+      uses: ./.github/actions/setup-tools
+
+    - name: Build and Push
+      uses: egose/actions/docker-build-push@799b388fb3497236093c6eb7e3eac0b4c8f956ce
+      with:
+        registry-url: ${{ env.DOCKER_REGISTRY }}
+        registry-username: ${{ github.actor }}
+        registry-password: ${{ secrets.GITHUB_TOKEN }}
+        image-name: ${{ env.IMAGE_NAME }}
+        metadata-tags: |
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+        trivy: true

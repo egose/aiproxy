@@ -1,0 +1,45 @@
+name: Test
+
+on:
+  pull_request:
+    paths-ignore:
+    - '**.md'
+  push:
+    paths-ignore:
+    - '**.md'
+
+jobs:
+  vet-build:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+    - name: Setup Tools (asdf)
+      uses: ./.github/actions/setup-tools
+
+    - name: go vet
+      run: make vet
+
+    - name: go build (host)
+      run: make build
+
+    - name: go build (all targets)
+      run: make build-all
+
+  unit-test:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+    - name: Setup Tools (asdf)
+      uses: ./.github/actions/setup-tools
+
+    - name: go test ./...
+      run: make test
+
+    - name: go test -race ./...
+      run: make test-race
+
+  # Integration tests are intentionally skipped for now.
+  # Reintroduce them once sandbox services exist for stable end-to-end
+  # provider coverage.

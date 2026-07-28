@@ -1,0 +1,760 @@
+package httpapi
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/egose/aiproxy/internal/auth"
+	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/modelresolver"
+	"github.com/egose/aiproxy/internal/observability"
+	"github.com/egose/aiproxy/internal/provider"
+)
+
+type stubAdapter struct {
+	got    provider.Request
+	result *provider.Result
+	err    error
+}
+
+func (s *stubAdapter) Do(ctx context.Context, r provider.Request) (*provider.Result, error) {
+	s.got = r
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.result != nil {
+		return s.result, nil
+	}
+	return &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       []byte(`{"id":"chatcmpl-stub"}`),
+	}, nil
+}
+
+func newRT() *config.Runtime {
+	return &config.Runtime{
+		Providers: []config.Provider{
+			{
+				Type:    config.ProviderTypeOpenAI,
+				Name:    "openai",
+				BaseURL: "https://api.openai.com/v1",
+				APIKey:  "sk",
+				ModelByName: map[string]config.Model{
+					"gpt-4o-mini": {Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"},
+				},
+				Models: []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}},
+			},
+		},
+		ProviderByName: map[string]config.Provider{
+			"openai": {
+				Type:    config.ProviderTypeOpenAI,
+				Name:    "openai",
+				BaseURL: "https://api.openai.com/v1",
+				APIKey:  "sk",
+				ModelByName: map[string]config.Model{
+					"gpt-4o-mini": {Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"},
+				},
+				Models: []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}},
+			},
+		},
+		AliasByName: map[string]config.Alias{
+			"chat_default": {
+				Name:      "chat_default",
+				Algorithm: config.AlgorithmRoundRobin,
+				Targets:   []config.AliasTarget{{Provider: "openai", Model: "gpt-4o-mini"}},
+			},
+		},
+		Aliases: []config.Alias{
+			{
+				Name:      "chat_default",
+				Algorithm: config.AlgorithmRoundRobin,
+				Targets:   []config.AliasTarget{{Provider: "openai", Model: "gpt-4o-mini"}},
+			},
+		},
+	}
+}
+
+func newHandler(t *testing.T, rt *config.Runtime, adapter provider.Adapter) http.Handler {
+	t.Helper()
+	return NewHandler(Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   adapter,
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:   BuildModelCatalog(rt),
+		Metrics:   observability.NewMetrics(),
+		Providers: rt.ProviderByName,
+	})
+}
+
+func TestHandlerDirectRoute(t *testing.T) {
+	stub := &stubAdapter{}
+	h := newHandler(t, newRT(), stub)
+
+	body := []byte(`{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if stub.got.UpstreamModel != "gpt-4o-mini" {
+		t.Errorf("upstream model = %q", stub.got.UpstreamModel)
+	}
+	if stub.got.APIKey != "sk" {
+		t.Errorf("api key forwarded = %q", stub.got.APIKey)
+	}
+	if got := w.Body.String(); got == "" {
+		t.Errorf("empty response body")
+	}
+}
+
+func TestHandlerRewritesModelToUpstream(t *testing.T) {
+	rt := newRT()
+	rt.ProviderByName["openai"].ModelByName["gpt-4o-mini"] = config.Model{
+		Name: "gpt-4o-mini", UpstreamName: "gpt-4o-2024-08-06",
+	}
+	stub := &stubAdapter{}
+	h := newHandler(t, rt, stub)
+
+	body := []byte(`{"model":"openai/gpt-4o-mini","messages":[]}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	if stub.got.UpstreamModel != "gpt-4o-2024-08-06" {
+		t.Errorf("upstream model = %q, want gpt-4o-2024-08-06", stub.got.UpstreamModel)
+	}
+}
+
+func TestHandlerAliasRoute(t *testing.T) {
+	stub := &stubAdapter{}
+	h := newHandler(t, newRT(), stub)
+
+	body := []byte(`{"model":"alias/chat_default","messages":[]}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if stub.got.APIKey != "sk" {
+		t.Errorf("alias target credentials not forwarded: %q", stub.got.APIKey)
+	}
+}
+
+func TestHandlerEmbeddingsRoute(t *testing.T) {
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       []byte(`{"object":"list","data":[],"model":"text-embedding-3-large"}`),
+	}}
+	h := newHandler(t, newRT(), stub)
+
+	body := []byte(`{"model":"openai/gpt-4o-mini","input":"hello"}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader(body))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if stub.got.Operation != provider.OpEmbeddings {
+		t.Fatalf("operation = %v, want OpEmbeddings", stub.got.Operation)
+	}
+	if stub.got.PublicModel != "openai/gpt-4o-mini" {
+		t.Fatalf("public model = %q", stub.got.PublicModel)
+	}
+}
+
+func TestHandlerResponsesRoute(t *testing.T) {
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       []byte(`{"object":"response","id":"resp_123"}`),
+	}}
+	h := newHandler(t, newRT(), stub)
+
+	body := []byte(`{"model":"openai/gpt-4o-mini","input":"hello"}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if stub.got.Operation != provider.OpResponses {
+		t.Fatalf("operation = %v, want OpResponses", stub.got.Operation)
+	}
+	if stub.got.PublicModel != "openai/gpt-4o-mini" {
+		t.Fatalf("public model = %q", stub.got.PublicModel)
+	}
+}
+
+func TestHandlerRejectsEmbeddingsForChatOnlyModel(t *testing.T) {
+	rt := newRT()
+	providerCfg := rt.ProviderByName["openai"]
+	providerCfg.ModelByName["gpt-4o-mini"] = config.Model{
+		Name:         "gpt-4o-mini",
+		UpstreamName: "gpt-4o-mini",
+		Capabilities: []config.Capability{config.CapabilityChat},
+	}
+	providerCfg.Models = []config.Model{{
+		Name:         "gpt-4o-mini",
+		UpstreamName: "gpt-4o-mini",
+		Capabilities: []config.Capability{config.CapabilityChat},
+	}}
+	rt.ProviderByName["openai"] = providerCfg
+	rt.Providers = []config.Provider{providerCfg}
+
+	stub := &stubAdapter{}
+	h := newHandler(t, rt, stub)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","input":"hello"}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if stub.got.Operation != 0 || stub.got.PublicModel != "" {
+		t.Fatalf("adapter should not have been called, got request %+v", stub.got)
+	}
+}
+
+func TestHandlerRejectsResponsesForAliasWithoutSharedCapability(t *testing.T) {
+	rt := &config.Runtime{
+		Providers: []config.Provider{
+			{
+				Type:   config.ProviderTypeOpenAI,
+				Name:   "openai",
+				APIKey: "sk-openai",
+				Models: []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini", Capabilities: []config.Capability{config.CapabilityChat, config.CapabilityResponses}}},
+				ModelByName: map[string]config.Model{
+					"gpt-4o-mini": {Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini", Capabilities: []config.Capability{config.CapabilityChat, config.CapabilityResponses}},
+				},
+			},
+			{
+				Type:   config.ProviderTypeGemini,
+				Name:   "gemini",
+				APIKey: "gem-key",
+				Models: []config.Model{{Name: "gemini-2.5-pro", UpstreamName: "gemini-2.5-pro", Capabilities: []config.Capability{config.CapabilityChat}}},
+				ModelByName: map[string]config.Model{
+					"gemini-2.5-pro": {Name: "gemini-2.5-pro", UpstreamName: "gemini-2.5-pro", Capabilities: []config.Capability{config.CapabilityChat}},
+				},
+			},
+		},
+		ProviderByName: map[string]config.Provider{},
+		Aliases: []config.Alias{{
+			Name:      "mixed",
+			Algorithm: config.AlgorithmRoundRobin,
+			Targets:   []config.AliasTarget{{Provider: "openai", Model: "gpt-4o-mini"}, {Provider: "gemini", Model: "gemini-2.5-pro"}},
+		}},
+		AliasByName: map[string]config.Alias{},
+	}
+	for _, p := range rt.Providers {
+		rt.ProviderByName[p.Name] = p
+	}
+	for _, a := range rt.Aliases {
+		rt.AliasByName[a.Name] = a
+	}
+
+	stub := &stubAdapter{}
+	h := newHandler(t, rt, stub)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(`{"model":"alias/mixed","input":"hello"}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if stub.got.PublicModel != "" {
+		t.Fatalf("adapter should not have been called, got request %+v", stub.got)
+	}
+}
+
+func TestHandlerEmbeddingsUnsupportedProvider(t *testing.T) {
+	rt := &config.Runtime{
+		Providers: []config.Provider{{
+			Type:   config.ProviderTypeAnthropic,
+			Name:   "anthropic",
+			APIKey: "sk-ant",
+			Models: []config.Model{{Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"}},
+			ModelByName: map[string]config.Model{
+				"claude-sonnet": {Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"},
+			},
+		}},
+		ProviderByName: map[string]config.Provider{
+			"anthropic": {
+				Type:   config.ProviderTypeAnthropic,
+				Name:   "anthropic",
+				APIKey: "sk-ant",
+				Models: []config.Model{{Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"}},
+				ModelByName: map[string]config.Model{
+					"claude-sonnet": {Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"},
+				},
+			},
+		},
+	}
+	h := newHandler(t, rt, provider.New())
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader([]byte(`{"model":"anthropic/claude-sonnet","input":"hello"}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	if resp.Error.Type != "unsupported_operation" {
+		t.Fatalf("error type = %q", resp.Error.Type)
+	}
+}
+
+func TestHandlerRejectsResponsesForChatOnlyModel(t *testing.T) {
+	rt := &config.Runtime{
+		Providers: []config.Provider{{
+			Type:   config.ProviderTypeGemini,
+			Name:   "gemini",
+			APIKey: "gem-key",
+			Models: []config.Model{{Name: "gemini-2.5-pro", UpstreamName: "gemini-2.5-pro", Capabilities: []config.Capability{config.CapabilityChat}}},
+			ModelByName: map[string]config.Model{
+				"gemini-2.5-pro": {Name: "gemini-2.5-pro", UpstreamName: "gemini-2.5-pro", Capabilities: []config.Capability{config.CapabilityChat}},
+			},
+		}},
+		ProviderByName: map[string]config.Provider{
+			"gemini": {
+				Type:   config.ProviderTypeGemini,
+				Name:   "gemini",
+				APIKey: "gem-key",
+				Models: []config.Model{{Name: "gemini-2.5-pro", UpstreamName: "gemini-2.5-pro", Capabilities: []config.Capability{config.CapabilityChat}}},
+				ModelByName: map[string]config.Model{
+					"gemini-2.5-pro": {Name: "gemini-2.5-pro", UpstreamName: "gemini-2.5-pro", Capabilities: []config.Capability{config.CapabilityChat}},
+				},
+			},
+		},
+	}
+	h := newHandler(t, rt, provider.New())
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(`{"model":"gemini/gemini-2.5-pro","input":"hello"}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	if resp.Error.Type != "unsupported_operation" {
+		t.Fatalf("error type = %q", resp.Error.Type)
+	}
+}
+
+func TestHandlerUnknownModel(t *testing.T) {
+	stub := &stubAdapter{}
+	h := newHandler(t, newRT(), stub)
+
+	body := []byte(`{"model":"unknown/model","messages":[]}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandlerMissingModelField(t *testing.T) {
+	stub := &stubAdapter{}
+	h := newHandler(t, newRT(), stub)
+
+	body := []byte(`{"messages":[]}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHandlerUnknownEndpoint(t *testing.T) {
+	h := newHandler(t, newRT(), &stubAdapter{})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/v1/foo", nil)
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandlerListModelsIncludesProvidersAndAliases(t *testing.T) {
+	rt := newRT()
+	rt.ProviderByName["openai"] = config.Provider{
+		Type:        config.ProviderTypeOpenAI,
+		Name:        "openai",
+		DisplayName: "OpenAI",
+		BaseURL:     "https://api.openai.com/v1",
+		APIKey:      "sk",
+		ModelByName: map[string]config.Model{
+			"gpt-4o-mini": {Name: "gpt-4o-mini", DisplayName: "GPT-4o mini", UpstreamName: "gpt-4o-mini", Capabilities: []config.Capability{config.CapabilityChat}},
+			"gpt-4.1":     {Name: "gpt-4.1", DisplayName: "GPT-4.1", UpstreamName: "gpt-4.1", Capabilities: []config.Capability{config.CapabilityChat, config.CapabilityResponses}},
+		},
+		Models: []config.Model{
+			{Name: "gpt-4o-mini", DisplayName: "GPT-4o mini", UpstreamName: "gpt-4o-mini", Capabilities: []config.Capability{config.CapabilityChat}},
+			{Name: "gpt-4.1", DisplayName: "GPT-4.1", UpstreamName: "gpt-4.1", Capabilities: []config.Capability{config.CapabilityChat, config.CapabilityResponses}},
+		},
+	}
+	rt.Providers = []config.Provider{rt.ProviderByName["openai"]}
+	h := newHandler(t, rt, &stubAdapter{})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Object string      `json:"object"`
+		Data   []ModelCard `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal models response: %v", err)
+	}
+	if resp.Object != "list" {
+		t.Fatalf("object = %q, want list", resp.Object)
+	}
+	gotIDs := make([]string, 0, len(resp.Data))
+	for _, card := range resp.Data {
+		gotIDs = append(gotIDs, card.ID)
+		if card.Object != "model" {
+			t.Fatalf("model object = %q, want model", card.Object)
+		}
+	}
+	want := []string{"openai/gpt-4o-mini", "openai/gpt-4.1", "alias/chat_default"}
+	if len(gotIDs) != len(want) {
+		t.Fatalf("models count = %d, want %d (%v)", len(gotIDs), len(want), gotIDs)
+	}
+	for i := range want {
+		if gotIDs[i] != want[i] {
+			t.Fatalf("models[%d] = %q, want %q (all=%v)", i, gotIDs[i], want[i], gotIDs)
+		}
+	}
+	if resp.Data[0].OwnedBy != "openai" {
+		t.Fatalf("first owned_by = %q, want openai", resp.Data[0].OwnedBy)
+	}
+	if resp.Data[0].DisplayName != "GPT-4o mini" {
+		t.Fatalf("first display_name = %q", resp.Data[0].DisplayName)
+	}
+	if resp.Data[0].ProviderType != "openai" {
+		t.Fatalf("first provider_type = %q", resp.Data[0].ProviderType)
+	}
+	if len(resp.Data[0].Capabilities) != 1 || resp.Data[0].Capabilities[0] != "chat" {
+		t.Fatalf("first capabilities = %+v", resp.Data[0].Capabilities)
+	}
+	if resp.Data[1].DisplayName != "GPT-4.1" {
+		t.Fatalf("second display_name = %q", resp.Data[1].DisplayName)
+	}
+	if len(resp.Data[1].Capabilities) != 2 || resp.Data[1].Capabilities[1] != "responses" {
+		t.Fatalf("second capabilities = %+v", resp.Data[1].Capabilities)
+	}
+	if resp.Data[2].OwnedBy != "alias" {
+		t.Fatalf("alias owned_by = %q, want alias", resp.Data[2].OwnedBy)
+	}
+	if resp.Data[2].ProviderType != "" {
+		t.Fatalf("alias provider_type = %q, want empty", resp.Data[2].ProviderType)
+	}
+	if len(resp.Data[2].Capabilities) != 1 || resp.Data[2].Capabilities[0] != "chat" {
+		t.Fatalf("alias capabilities = %+v", resp.Data[2].Capabilities)
+	}
+	if len(resp.Data[2].AliasTargets) != 1 {
+		t.Fatalf("alias targets = %+v", resp.Data[2].AliasTargets)
+	}
+	if resp.Data[2].AliasTargets[0].Provider != "openai" || resp.Data[2].AliasTargets[0].Model != "gpt-4o-mini" {
+		t.Fatalf("alias target summary = %+v", resp.Data[2].AliasTargets[0])
+	}
+	if resp.Data[2].AliasTargets[0].DisplayName != "GPT-4o mini" {
+		t.Fatalf("alias target display_name = %q", resp.Data[2].AliasTargets[0].DisplayName)
+	}
+}
+
+func TestHandlerHealthEndpoints(t *testing.T) {
+	h := newHandler(t, newRT(), &stubAdapter{})
+	for _, p := range []string{"/healthz", "/readyz"} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, p, nil)
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Errorf("%s: status = %d", p, w.Code)
+		}
+		b, _ := io.ReadAll(w.Body)
+		if string(b) != "ok" {
+			t.Errorf("%s: body = %q", p, string(b))
+		}
+	}
+}
+
+func TestHandlerReadyzFailsWithoutProviders(t *testing.T) {
+	rt := &config.Runtime{ProviderByName: map[string]config.Provider{}, AliasByName: map[string]config.Alias{}}
+	h := newHandler(t, rt, &stubAdapter{})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", w.Code)
+	}
+}
+
+func TestHandlerMetricsEndpointAndCounters(t *testing.T) {
+	rt := newRT()
+	metrics := observability.NewMetrics()
+	metrics.RecordConfig(rt)
+	stub := &stubAdapter{}
+	h := NewHandler(Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   stub,
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:   BuildModelCatalog(rt),
+		Metrics:   metrics,
+		Providers: rt.ProviderByName,
+	})
+
+	post := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`)))
+	postW := httptest.NewRecorder()
+	h.ServeHTTP(postW, post)
+	if postW.Code != http.StatusOK {
+		t.Fatalf("chat status = %d", postW.Code)
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsW := httptest.NewRecorder()
+	h.ServeHTTP(metricsW, metricsReq)
+	if metricsW.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d", metricsW.Code)
+	}
+	body := metricsW.Body.String()
+	for _, want := range []string{
+		"aiproxy_active_providers 1",
+		"aiproxy_disabled_providers 0",
+		"aiproxy_aliases 1",
+		"aiproxy_ready 1",
+		`aiproxy_provider_selections_total{model="gpt-4o-mini",operation="chat_completions",provider="openai",public_model="openai/gpt-4o-mini"} 1`,
+		`aiproxy_upstream_requests_total{operation="chat_completions",outcome="success",provider="openai"} 1`,
+		`aiproxy_upstream_request_duration_seconds_count{operation="chat_completions",outcome="success",provider="openai"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics output missing %q\n%s", want, body)
+		}
+	}
+}
+
+func TestHandlerBearerAuthRejects(t *testing.T) {
+	rt := newRT()
+	h := NewHandler(Dependencies{
+		Resolver: modelresolver.New(rt),
+		Adapter:  &stubAdapter{},
+		Auth: auth.NewAuthenticator(config.Auth{
+			Mode:    config.AuthModeBearerStatic,
+			Clients: map[string]config.Client{"ci": {Token: "tok"}},
+		}),
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini"}`)))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestHandlerStreamingPassthroughFlushesIncrementally(t *testing.T) {
+	pr, pw := io.Pipe()
+	stub := &stubAdapter{
+		result: &provider.Result{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"text/event-stream"},
+			},
+			Streaming:  true,
+			StreamBody: pr,
+		},
+	}
+	h := newHandler(t, newRT(), stub)
+	server := httptest.NewServer(h)
+	defer server.Close()
+
+	firstChunkWritten := make(chan struct{})
+	allowSecondChunk := make(chan struct{})
+	go func() {
+		_, _ = io.WriteString(pw, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
+		close(firstChunkWritten)
+		<-allowSecondChunk
+		_, _ = io.WriteString(pw, "data: [DONE]\n\n")
+		_ = pw.Close()
+	}()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","stream":true,"messages":[]}`)))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	reader := bufio.NewReader(resp.Body)
+	lineCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			errCh <- err
+			return
+		}
+		lineCh <- line
+	}()
+
+	select {
+	case <-firstChunkWritten:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first chunk to be written")
+	}
+
+	select {
+	case line := <-lineCh:
+		if line != "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n" {
+			t.Fatalf("unexpected first SSE line: %q", line)
+		}
+	case err := <-errCh:
+		t.Fatalf("read first stream line: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first streamed line; handler likely buffered instead of flushing")
+	}
+
+	close(allowSecondChunk)
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read rest of stream: %v", err)
+	}
+	if !bytes.Contains(body, []byte("[DONE]")) {
+		t.Fatalf("expected remaining stream body to include [DONE], got %q", string(body))
+	}
+	if !resp.ProtoAtLeast(1, 1) {
+		t.Fatalf("unexpected response protocol: %s", resp.Proto)
+	}
+}
+
+func TestHandlerInvalidTranslatedRequestReturns400(t *testing.T) {
+	rt := &config.Runtime{
+		Providers: []config.Provider{{
+			Type:   config.ProviderTypeAnthropic,
+			Name:   "anthropic",
+			APIKey: "sk-ant",
+			Models: []config.Model{{Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"}},
+			ModelByName: map[string]config.Model{
+				"claude-sonnet": {Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"},
+			},
+		}},
+		ProviderByName: map[string]config.Provider{},
+		AliasByName:    map[string]config.Alias{},
+	}
+	rt.ProviderByName["anthropic"] = rt.Providers[0]
+	h := newHandler(t, rt, provider.New())
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"anthropic/claude-sonnet","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/x.png"}}]}]}`)))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	if resp.Error.Type != "invalid_request" {
+		t.Fatalf("error type = %q", resp.Error.Type)
+	}
+}
+
+func TestCloseResultDefersOnCloseUntilStreamEnds(t *testing.T) {
+	pr, pw := io.Pipe()
+	var closed int32
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Streaming:  true,
+		StreamBody: pr,
+		OnClose: func() {
+			atomic.StoreInt32(&closed, 1)
+		},
+	}}
+	h := newHandler(t, newRT(), stub)
+	server := httptest.NewServer(h)
+	defer server.Close()
+
+	allowClose := make(chan struct{})
+	go func() {
+		_, _ = io.WriteString(pw, "data: hello\n\n")
+		<-allowClose
+		_ = pw.Close()
+	}()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","stream":true,"messages":[]}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(resp.Body)
+	_, err = reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read first line: %v", err)
+	}
+	if atomic.LoadInt32(&closed) != 0 {
+		t.Fatalf("OnClose fired before stream completion")
+	}
+	close(allowClose)
+	_, _ = io.ReadAll(reader)
+	_ = resp.Body.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&closed) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if atomic.LoadInt32(&closed) == 0 {
+		t.Fatalf("OnClose did not fire after stream completion")
+	}
+}

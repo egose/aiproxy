@@ -1,0 +1,103 @@
+package provider
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+)
+
+func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
+	if r.BaseURL == "" {
+		r.BaseURL = defaultOpenAIBaseURL
+	}
+	body, err := io.ReadAll(r.Inbound.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	rewritten, err := rewriteModel(body, r.UpstreamModel)
+	if err != nil {
+		return nil, ErrInvalidRequest{Message: fmt.Sprintf("rewrite model: %v", err)}
+	}
+
+	path, err := openAIPathForOperation(r.Operation)
+	if err != nil {
+		return nil, err
+	}
+	target := joinBaseURLAndPath(r.BaseURL, path)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(rewritten))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+r.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+	if accept := r.Inbound.Header.Get("Accept"); accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+
+	streaming := (r.Operation == OpChatCompletions || r.Operation == OpResponses) && isStream(body)
+	resp, err := clientFor(r).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("upstream call: %w", err)
+	}
+	if streaming {
+		return &Result{
+			StatusCode: resp.StatusCode,
+			Header:     resp.Header,
+			StreamBody: resp.Body,
+			Streaming:  true,
+		}, nil
+	}
+	defer resp.Body.Close()
+
+	outBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read upstream body: %w", err)
+	}
+	return &Result{
+		StatusCode: resp.StatusCode,
+		Header:     resp.Header,
+		Body:       outBody,
+	}, nil
+}
+
+func openAIPathForOperation(op Operation) (string, error) {
+	switch op {
+	case OpChatCompletions:
+		return "/v1/chat/completions", nil
+	case OpEmbeddings:
+		return "/v1/embeddings", nil
+	case OpResponses:
+		return "/v1/responses", nil
+	default:
+		return "", ErrUnsupportedOperation{ProviderType: "openai-compatible", Operation: op}
+	}
+}
+
+func joinBaseURLAndPath(baseURL, path string) string {
+	baseURL = strings.TrimRight(baseURL, "/")
+	if strings.HasSuffix(baseURL, "/v1") && strings.HasPrefix(path, "/v1/") {
+		return baseURL + strings.TrimPrefix(path, "/v1")
+	}
+	return baseURL + path
+}
+
+func rewriteModel(body []byte, upstreamModel string) (json.RawMessage, error) {
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	m["model"] = upstreamModel
+	return json.Marshal(m)
+}
+
+func isStream(body []byte) bool {
+	var probe struct {
+		Stream bool `json:"stream"`
+	}
+	_ = json.Unmarshal(body, &probe)
+	return probe.Stream
+}
