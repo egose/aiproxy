@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">aiproxy docs icon</title>
+  <desc id="desc">A blue documentation and routing icon for the aiproxy site.</desc>
+  <defs>
+    <linearGradient id="bg" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#60a5fa" />
+      <stop offset="1" stop-color="#1d4ed8" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#bg)" />
+  <rect x="15" y="14" width="24" height="36" rx="6" fill="#eff6ff" />
+  <path d="M33 14h6l10 10v20a6 6 0 0 1-6 6h-4V24a10 10 0 0 0-6-9.167Z" fill="#dbeafe" />
+  <path d="M39 14v8a3 3 0 0 0 3 3h7" fill="#bfdbfe" />
+  <circle cx="24" cy="28" r="3" fill="#2563eb" />
+  <circle cx="24" cy="38" r="3" fill="#2563eb" />
+  <circle cx="33" cy="33" r="3" fill="#2563eb" />
+  <path d="M26.5 29.5 30.5 32" fill="none" stroke="#2563eb" stroke-linecap="round" stroke-width="2.5" />
+  <path d="M26.5 36.5 30.5 34" fill="none" stroke="#2563eb" stroke-linecap="round" stroke-width="2.5" />
+</svg>

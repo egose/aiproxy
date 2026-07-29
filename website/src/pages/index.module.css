@@ -1,0 +1,137 @@
+.heroBanner {
+  padding: 5rem 1.5rem 3rem;
+}
+
+.heroInner {
+  max-width: 760px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.eyebrow {
+  margin: 0 0 0.75rem;
+  color: var(--ifm-color-primary);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.heroTitle {
+  margin-bottom: 1rem;
+  font-size: clamp(2.6rem, 6vw, 4.5rem);
+  line-height: 1.05;
+}
+
+.heroSubtitle {
+  margin: 0;
+  color: var(--ifm-color-emphasis-800);
+  font-size: 1.2rem;
+}
+
+.heroDescription {
+  max-width: 680px;
+  margin: 1.25rem auto 0;
+  color: var(--ifm-color-emphasis-700);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.buttons {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2rem;
+  flex-wrap: wrap;
+}
+
+.main {
+  padding: 0 1.5rem 4rem;
+}
+
+.highlightsSection,
+.quickLinksSection {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.highlightsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.card,
+.quickLinksPanel {
+  border: 1px solid var(--site-border-color);
+  border-radius: 20px;
+  background: var(--site-surface-color);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.06);
+}
+
+.card {
+  padding: 1.5rem;
+}
+
+.cardTitle {
+  margin-bottom: 0.75rem;
+  font-size: 1.1rem;
+}
+
+.cardBody {
+  margin: 0;
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.7;
+}
+
+.quickLinksSection {
+  margin-top: 1rem;
+}
+
+.quickLinksPanel {
+  padding: 1.5rem;
+}
+
+.quickLinksTitle {
+  margin-bottom: 1rem;
+  font-size: 1.15rem;
+}
+
+.quickLinksRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.quickLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.7rem 1rem;
+  border-radius: 999px;
+  background: var(--ifm-color-emphasis-100);
+  color: var(--ifm-font-color-base);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.quickLink:hover {
+  background: var(--ifm-color-emphasis-200);
+  color: var(--ifm-font-color-base);
+  text-decoration: none;
+}
+
+@media screen and (max-width: 996px) {
+  .heroBanner {
+    padding: 4rem 1rem 2.5rem;
+  }
+
+  .main {
+    padding: 0 1rem 3rem;
+  }
+
+  .highlightsGrid {
+    grid-template-columns: 1fr;
+  }
+}

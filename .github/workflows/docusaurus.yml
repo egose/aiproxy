@@ -1,0 +1,86 @@
+name: Publish Docusaurus
+
+on:
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/docusaurus.yml
+    - website/**
+  pull_request:
+    paths:
+    - .github/workflows/docusaurus.yml
+    - website/**
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@0c17529a66aca453f9227af23103ed11469b1e47
+      with:
+        version: 11.17.0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: 20
+        cache: pnpm
+        cache-dependency-path: website/pnpm-lock.yaml
+
+    - name: Install website dependencies
+      run: pnpm install --frozen-lockfile
+      working-directory: website
+
+    - name: Typecheck the website
+      run: pnpm typecheck
+      working-directory: website
+
+    - name: Build the Docusaurus site
+      run: pnpm build
+      working-directory: website
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@0c17529a66aca453f9227af23103ed11469b1e47
+      with:
+        version: 11.17.0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: 20
+        cache: pnpm
+        cache-dependency-path: website/pnpm-lock.yaml
+
+    - name: Install website dependencies
+      run: pnpm install --frozen-lockfile
+      working-directory: website
+
+    - name: Build the Docusaurus site
+      run: pnpm build
+      working-directory: website
+
+    - name: Deploy GitHub Pages
+      uses: JamesIves/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f
+      with:
+        branch: cf-pages
+        folder: ./website/build
+        clean: true
