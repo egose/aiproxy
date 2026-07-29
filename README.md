@@ -87,10 +87,16 @@ asdf global aiproxy <version>
 Once installed, the `aiproxy` binary is available directly on your `PATH`:
 
 ```sh
+aiproxy serve
+aiproxy validate
 aiproxy serve --config /etc/aiproxy/config.hcl
 aiproxy validate --config /etc/aiproxy/config.hcl
 aiproxy version
 ```
+
+By default, the CLI looks for the config file at `$XDG_CONFIG_HOME/aiproxy/config.hcl`,
+falling back to `~/.config/aiproxy/config.hcl` when `XDG_CONFIG_HOME` is unset.
+Pass `--config` to use a different file.
 
 ## Example Configuration
 
