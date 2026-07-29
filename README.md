@@ -32,6 +32,8 @@ OpenAI-compatible responses.
   names
 - request accounting is tracked in-process by tenant, client, model, operation,
   and status; `/metrics` exposes aggregated usage event counters
+- optional `provider_health` config can use Redis to share transient provider
+  health state across instances; without it, health remains in-process only
 
 ### Provider Types
 
@@ -229,7 +231,8 @@ provider with `api_key_ref { path = "..." key = "..." }`.
 - Provider health state is shared in-process across requests and aliases.
   Transient transport failures and upstream `5xx` responses temporarily mark a
   provider unhealthy for routing and readiness decisions, but this state is not
-  coordinated across multiple proxy instances.
+  coordinated across multiple proxy instances unless `provider_health.redis_url`
+  is configured.
 - Direct `<provider>/<model>` requests do not fail over to other targets.
 - Alias requests retry the next target only on transport errors, timeouts, and
   upstream `5xx`; upstream `4xx` responses are returned to the client verbatim.

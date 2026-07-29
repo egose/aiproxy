@@ -59,7 +59,8 @@ repo has sandbox services for stable end-to-end provider coverage.)
   model names.
 - Provider health state is shared in-process across requests and alias routing.
   Transient transport failures and upstream `5xx` responses temporarily mark a
-  provider unhealthy, but this state is not coordinated across instances.
+  provider unhealthy. An optional `provider_health` Redis config can share that
+  transient state across instances.
 - The openai/openai-compatible adapter is pass-through: it only rewrites the
   `model` field to the configured `upstream_name`, injects the upstream
   `Authorization: Bearer` header, and copies the body (including SSE streams)

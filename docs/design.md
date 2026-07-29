@@ -166,6 +166,9 @@ The proxy also records in-process accounting events keyed by:
 - operation
 - status
 
+These events are also aggregated in-process by the same key dimensions to form
+the first billing/accounting scaffold.
+
 ### Optional Local Rate Limit
 
 The `auth` block may include a `rate_limit` sub-block:
@@ -823,8 +826,7 @@ The following are intentionally out of scope for the MVP:
 - anthropic embeddings
 - translated-provider image endpoints
 - translated-provider audio endpoints
-- billing
-- dynamic provider health state shared across instances
+- external billing / invoicing systems
 
 ## Provider Health
 
@@ -835,6 +837,13 @@ Transient transport failures and upstream `5xx` responses mark a provider
 temporarily unhealthy for alias routing and readiness decisions.
 
 Provider health state is not coordinated across multiple proxy instances.
+
+An optional `provider_health` block may configure Redis-backed transient health
+state sharing across instances:
+
+- `redis_url`
+- optional `key_prefix`
+- optional `cooldown`
 
 ## Reload Behavior
 
