@@ -1,11 +1,14 @@
-## [0.0.4](https://github.com/egose/aiproxy/compare/v0.0.3...v0.0.4) (2026-07-29)
+## [0.1.0](https://github.com/egose/aiproxy/compare/v0.0.4...v0.1.0) (2026-07-29)
 
-### Bug Fixes
+### Features
 
-* archive build outputs from target directory ([473d28c](https://github.com/egose/aiproxy/commit/473d28cd87b8f4defb6b02fcf2aa86e7d9b69216))
-* disable trivy in publish workflow ([7178a80](https://github.com/egose/aiproxy/commit/7178a80b8b0ae61e5ffe876c2c72a6d8e4d2c171))
+* **website:** add default config paths and example subcommands ([499af0b](https://github.com/egose/aiproxy/commit/499af0b8749d6afcd1d9c2b57a29daaa1ddb0ae4))
 
-## [0.0.3](https://github.com/egose/aiproxy/compare/c3b0146ff893f3a43bf76d10fcec56a37fc0389f...v0.0.3) (2026-07-29)
+### Documentation
+
+* **website:** document default config locations and CLI examples ([2e3ddec](https://github.com/egose/aiproxy/commit/2e3ddec6d69a411713c6a34fe059e4eee613f4a5))
+
+## [0.0.4](https://github.com/egose/aiproxy/compare/c3b0146ff893f3a43bf76d10fcec56a37fc0389f...v0.0.4) (2026-07-29)
 
 ### Features
 
@@ -27,6 +30,11 @@
 * **website:** add reusable upstream execution and improve provider streaming handling ([93a9fc4](https://github.com/egose/aiproxy/commit/93a9fc45a98ad6b3662fc6a177bf8be06a181e02))
 * **website:** launch Docusaurus documentation site and publishing workflow ([b75d0f1](https://github.com/egose/aiproxy/commit/b75d0f1e3c7cabedf4eb57d0797bcac7185eb458))
 * **website:** refresh website docs homepage and styling ([bae25e8](https://github.com/egose/aiproxy/commit/bae25e8eb881a5111be80654bac53fce8d104c98))
+
+### Bug Fixes
+
+* archive build outputs from target directory ([473d28c](https://github.com/egose/aiproxy/commit/473d28cd87b8f4defb6b02fcf2aa86e7d9b69216))
+* disable trivy in publish workflow ([7178a80](https://github.com/egose/aiproxy/commit/7178a80b8b0ae61e5ffe876c2c72a6d8e4d2c171))
 
 ### Documentation
 
