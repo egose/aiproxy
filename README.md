@@ -27,6 +27,9 @@ OpenAI-compatible responses.
 - optional `rate_limit` on the `auth` block applies a local in-memory request
   rate limit; in `bearer_static` mode it is enforced per authenticated client,
   and in `none` mode it is enforced against a shared anonymous bucket
+- optional `tenant` and `allowed_models` on `auth.client` let you attach client
+  identity metadata and enforce a static allow-list of proxy-visible model
+  names
 
 ### Provider Types
 

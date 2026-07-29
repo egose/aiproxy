@@ -150,6 +150,14 @@ deployments.
 The proxy validates the inbound `Authorization: Bearer ...` token against
 statically configured client credentials from HCL.
 
+Each static client may also define:
+
+- optional `tenant`
+- optional `allowed_models`
+
+`allowed_models` applies a static allow-list against the proxy-visible model
+name, including both direct `<provider>/<model>` strings and `alias/<name>`.
+
 ### Optional Local Rate Limit
 
 The `auth` block may include a `rate_limit` sub-block:
@@ -167,7 +175,6 @@ Exceeded requests return `429 Too Many Requests` with `Retry-After`.
 Deferred auth features:
 
 - token rotation
-- tenant-scoped policy
 - external auth integration
 
 ## Resolution Model
@@ -808,7 +815,7 @@ The following are intentionally out of scope for the MVP:
 - anthropic embeddings
 - translated-provider image endpoints
 - translated-provider audio endpoints
-- billing and tenancy
+- billing
 - dynamic provider health state shared across instances
 
 ## Provider Health

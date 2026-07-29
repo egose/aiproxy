@@ -54,6 +54,9 @@ repo has sandbox services for stable end-to-end provider coverage.)
 - The optional `auth.rate_limit` block applies a local in-memory request rate
   limit. In `bearer_static` mode it is keyed per authenticated client; in
   `none` mode it uses a shared anonymous bucket.
+- Static `auth.client` blocks may also define optional `tenant` and
+  `allowed_models` fields. `allowed_models` is enforced against proxy-visible
+  model names.
 - Provider health state is shared in-process across requests and alias routing.
   Transient transport failures and upstream `5xx` responses temporarily mark a
   provider unhealthy, but this state is not coordinated across instances.
