@@ -36,10 +36,10 @@ func trimLeadingWhitespace(src []byte) []byte {
 // If both api_key and api_key_ref are set, the loader rejects the config.
 // Validation enforces the "exactly one" rule; resolution just reads the file.
 func resolveProviderCredential(p *Provider) error {
-	if p.APIKey != "" && p.APIKeyRef != nil {
+	if p.APIKey != "" && p.APIKeyRef != nil { // pragma: allowlist secret
 		return fmt.Errorf("only one of api_key or api_key_ref may be set")
 	}
-	if p.APIKeyRef == nil {
+	if p.APIKeyRef == nil { // pragma: allowlist secret
 		return nil
 	}
 	if p.APIKeyRef.Key == "" {

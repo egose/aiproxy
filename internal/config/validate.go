@@ -9,11 +9,27 @@ func Validate(rt *Runtime) error {
 	if err := validateAuth(rt.Auth); err != nil {
 		return err
 	}
+	if err := validateProviderHealth(rt.ProviderHealth); err != nil {
+		return err
+	}
 	if err := validateProviders(rt.Providers); err != nil {
 		return err
 	}
 	if err := validateAliases(rt.Aliases, rt.ProviderByName); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateProviderHealth(h ProviderHealth) error {
+	if h.RedisURL == "" {
+		return nil
+	}
+	if h.Cooldown < 0 {
+		return fmt.Errorf("provider_health: cooldown must not be negative")
+	}
+	if h.KeyPrefix == "" {
+		return fmt.Errorf("provider_health: key_prefix must not be empty")
 	}
 	return nil
 }

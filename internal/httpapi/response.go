@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/provider"
 )
@@ -19,6 +20,11 @@ type apiError struct {
 type modelsResponse struct {
 	Object string      `json:"object"`
 	Data   []ModelCard `json:"data"`
+}
+
+type billingUsageResponse struct {
+	Object string               `json:"object"`
+	Data   []accounting.Summary `json:"data"`
 }
 
 func (h *Handler) writeResult(w http.ResponseWriter, r *provider.Result) {
@@ -50,6 +56,13 @@ func (h *Handler) writeModels(w http.ResponseWriter, catalog []ModelCard) {
 		Data:   make([]ModelCard, 0, len(catalog)),
 	}
 	resp.Data = append(resp.Data, catalog...)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) writeBillingUsage(w http.ResponseWriter, summaries []accounting.Summary) {
+	resp := billingUsageResponse{Object: "list", Data: summaries}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)

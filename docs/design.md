@@ -63,6 +63,7 @@ The proxy must:
 The initial public API surface is:
 
 - `GET /v1/models`
+- `GET /v1/billing/usage`
 - `GET /metrics`
 - `POST /v1/chat/completions`
 - `POST /v1/embeddings` for `openai`, `openai-compatible`, and `gemini`
@@ -165,6 +166,13 @@ The proxy also records in-process accounting events keyed by:
 - model
 - operation
 - status
+
+These events are also aggregated in-process by the same key dimensions to form
+the first billing/accounting scaffold.
+
+`GET /v1/billing/usage` exposes those aggregated summaries. In static bearer
+auth mode, responses are scoped to the caller's tenant when present, otherwise
+to the caller's client identity.
 
 ### Optional Local Rate Limit
 
@@ -823,8 +831,7 @@ The following are intentionally out of scope for the MVP:
 - anthropic embeddings
 - translated-provider image endpoints
 - translated-provider audio endpoints
-- billing
-- dynamic provider health state shared across instances
+- external billing / invoicing systems
 
 ## Provider Health
 
@@ -835,6 +842,13 @@ Transient transport failures and upstream `5xx` responses mark a provider
 temporarily unhealthy for alias routing and readiness decisions.
 
 Provider health state is not coordinated across multiple proxy instances.
+
+An optional `provider_health` block may configure Redis-backed transient health
+state sharing across instances:
+
+- `redis_url`
+- optional `key_prefix`
+- optional `cooldown`
 
 ## Reload Behavior
 

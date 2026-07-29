@@ -35,6 +35,7 @@ type Dependencies struct {
 	Health      *providerhealth.Tracker
 	RateLimiter ratelimit.Limiter
 	Accounting  accounting.Recorder
+	Usage       accounting.Reader
 	Logger      *slog.Logger
 }
 
@@ -122,6 +123,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.handleMetrics(deps, rw, r) {
+		return
+	}
+	if h.handleBilling(deps, rw, r, logger) {
 		return
 	}
 	if h.handleModels(deps, rw, r, logger) {
@@ -243,7 +247,7 @@ func (w *statusRecorder) Flush() {
 
 func metricsPathLabel(r *http.Request) string {
 	switch r.URL.Path {
-	case "/healthz", "/readyz", "/metrics", "/v1/models":
+	case "/healthz", "/readyz", "/metrics", "/v1/models", "/v1/billing/usage":
 		return r.URL.Path
 	}
 	if _, ok := operationFromRequest(r); ok {
@@ -311,6 +315,28 @@ func (h *Handler) handleModels(deps Dependencies, w http.ResponseWriter, r *http
 		return true
 	}
 	h.writeModels(w, deps.Catalog)
+	return true
+}
+
+func (h *Handler) handleBilling(deps Dependencies, w http.ResponseWriter, r *http.Request, logger *slog.Logger) bool {
+	if r.URL.Path != "/v1/billing/usage" || r.Method != http.MethodGet {
+		return false
+	}
+	principal, err := deps.Auth.Authenticate(r)
+	if err != nil {
+		logger.Warn("auth failed", "error", err)
+		h.writeRequestError(deps.Metrics, w, r, http.StatusUnauthorized, "auth_failed", err.Error())
+		return true
+	}
+	if !h.allowRequest(deps, w, r, principal) {
+		return true
+	}
+	if deps.Usage == nil {
+		h.writeRequestError(deps.Metrics, w, r, http.StatusNotFound, "not_found", "billing usage not configured")
+		return true
+	}
+	summaries := accounting.FilterSummaries(deps.Usage.Summaries(), principalTenant(principal), principalName(principal))
+	h.writeBillingUsage(w, summaries)
 	return true
 }
 

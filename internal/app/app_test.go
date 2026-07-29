@@ -246,4 +246,12 @@ provider "openai" "openai" {
 	if summaries[0] != (accounting.Summary{Tenant: "team-a", Client: "ci", Model: "openai/gpt-4o-mini", Operation: "chat_completions", StatusCode: 200, Count: 1}) {
 		t.Fatalf("summary = %+v", summaries[0])
 	}
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/v1/billing/usage", nil)
+	r.Header.Set("Authorization", "Bearer tok")
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("billing usage status = %d, body=%s", w.Code, w.Body.String())
+	}
 }
