@@ -16,14 +16,25 @@
   <rect x="72" y="72" width="1056" height="486" rx="36" fill="#ffffff" stroke="#bfdbfe" stroke-width="2" />
 
   <rect x="132" y="132" width="292" height="292" rx="56" fill="url(#panel)" />
-  <rect x="190" y="176" width="100" height="150" rx="18" fill="#eff6ff" />
-  <path d="M280 176h30l44 44v96a18 18 0 0 1-18 18h-46V220a44 44 0 0 0-10-28Z" fill="#dbeafe" />
-  <path d="M310 176v26a10 10 0 0 0 10 10h34" fill="#bfdbfe" />
-  <circle cx="228" cy="236" r="12" fill="#2563eb" />
-  <circle cx="228" cy="292" r="12" fill="#2563eb" />
-  <circle cx="286" cy="264" r="12" fill="#2563eb" />
-  <path d="M238 242 274 259" fill="none" stroke="#2563eb" stroke-linecap="round" stroke-width="10" />
-  <path d="M238 286 274 269" fill="none" stroke="#2563eb" stroke-linecap="round" stroke-width="10" />
+
+  <rect x="216" y="186" width="124" height="92" rx="40" fill="#eff6ff" />
+  <path d="M260 278h36l-18 30Z" fill="#eff6ff" />
+  <circle cx="248" cy="232" r="8" fill="#2563eb" />
+  <circle cx="278" cy="232" r="8" fill="#2563eb" />
+  <circle cx="308" cy="232" r="8" fill="#2563eb" />
+
+  <circle cx="174" cy="204" r="18" fill="#dbeafe" />
+  <circle cx="174" cy="344" r="18" fill="#dbeafe" />
+  <circle cx="382" cy="204" r="18" fill="#dbeafe" />
+  <circle cx="382" cy="344" r="18" fill="#dbeafe" />
+
+  <path d="M192 204h58" fill="none" stroke="#dbeafe" stroke-linecap="round" stroke-width="12" />
+  <path d="M192 344h78l22-30" fill="none" stroke="#dbeafe" stroke-linecap="round" stroke-linejoin="round" stroke-width="12" />
+  <path d="M364 204h-56" fill="none" stroke="#dbeafe" stroke-linecap="round" stroke-width="12" />
+  <path d="M364 344h-78l-22-30" fill="none" stroke="#dbeafe" stroke-linecap="round" stroke-linejoin="round" stroke-width="12" />
+
+  <path d="M232 192l14 12-14 12" fill="none" stroke="#93c5fd" stroke-linecap="round" stroke-linejoin="round" stroke-width="8" />
+  <path d="M324 192l-14 12 14 12" fill="none" stroke="#93c5fd" stroke-linecap="round" stroke-linejoin="round" stroke-width="8" />
 
   <text x="484" y="220" fill="#2563eb" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="800" letter-spacing="4">DOCUMENTATION</text>
   <text x="484" y="314" fill="#0f172a" font-family="Inter, Arial, sans-serif" font-size="82" font-weight="800">aiproxy</text>
@@ -32,9 +43,9 @@
   <g fill="#1d4ed8" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="700">
     <text x="484" y="468">chat completions</text>
     <text x="764" y="468">responses</text>
-    <text x="484" y="514">embeddings</text>
-    <text x="678" y="514">alias routing</text>
-    <text x="900" y="514">metrics</text>
-    <text x="484" y="560">deployment docs</text>
+    <text x="484" y="514">provider translation</text>
+    <text x="792" y="514">alias routing</text>
+    <text x="484" y="560">streaming SSE</text>
+    <text x="740" y="560">usage metrics</text>
   </g>
 </svg>
