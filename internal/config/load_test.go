@@ -102,6 +102,45 @@ provider "openai" "openai" {
 	}
 }
 
+func TestLoadAllowsProviderModelNamesWithSlash(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai-compatible" "nvidia" {
+  base_url = "https://integrate.api.nvidia.com/v1"
+  api_key = "k"
+  model "z-ai/glm-5.2" {
+    capabilities = ["chat"]
+  }
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if _, ok := rt.Providers[0].ModelByName["z-ai/glm-5.2"]; !ok {
+		t.Fatalf("model with slash not loaded: %+v", rt.Providers[0].ModelByName)
+	}
+	if rt.Providers[0].Models[0].UpstreamName != "z-ai/glm-5.2" {
+		t.Fatalf("upstream_name = %q", rt.Providers[0].Models[0].UpstreamName)
+	}
+}
+
+func TestLoadRejectsProviderModelNamesWithEmptySlashSegment(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "k"
+  model "z-ai/" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "each '/'-separated segment") {
+		t.Fatalf("expected slash-segment validation error, got %v", err)
+	}
+}
+
 func TestLoadClientTenantAndAllowedModels(t *testing.T) {
 	cfg := `
 listener "http" "public" { address = ":8080" }

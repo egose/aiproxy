@@ -796,6 +796,96 @@ func TestHandlerSanitizesUpstreamErrors(t *testing.T) {
 	}
 }
 
+func TestHandlerNormalizesPlainTextUpstreamErrors(t *testing.T) {
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusNotFound,
+		Header:     http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}, "Vary": []string{"Origin"}},
+		Body:       []byte("404 page not found\n"),
+	}}
+	h := newHandler(t, newRT(), stub)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("content-type = %q", got)
+	}
+	if got := w.Header().Get("Vary"); got != "" {
+		t.Fatalf("vary header leaked upstream value: %q", got)
+	}
+	var resp apiError
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.Error.Type != "upstream_not_found" {
+		t.Fatalf("error type = %q", resp.Error.Type)
+	}
+	if resp.Error.Message != "404 page not found" {
+		t.Fatalf("error message = %q", resp.Error.Message)
+	}
+}
+
+func TestHandlerNormalizesStreamingPlainTextUpstreamErrors(t *testing.T) {
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusNotFound,
+		Header:     http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}},
+		StreamBody: io.NopCloser(strings.NewReader("404 page not found\n")),
+		Streaming:  true,
+	}}
+	h := newHandler(t, newRT(), stub)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","stream":true,"messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("content-type = %q", got)
+	}
+	var resp apiError
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.Error.Type != "upstream_not_found" {
+		t.Fatalf("error type = %q", resp.Error.Type)
+	}
+	if resp.Error.Message != "404 page not found" {
+		t.Fatalf("error message = %q", resp.Error.Message)
+	}
+}
+
+func TestHandlerPreservesJSONUpstreamErrors(t *testing.T) {
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "Retry-After": []string{"12"}},
+		Body:       []byte(`{"error":{"message":"upstream said no","type":"invalid_request_error"}}`),
+	}}
+	h := newHandler(t, newRT(), stub)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("content-type = %q", got)
+	}
+	if got := w.Header().Get("Retry-After"); got != "12" {
+		t.Fatalf("retry-after = %q", got)
+	}
+	if got := strings.TrimSpace(w.Body.String()); got != `{"error":{"message":"upstream said no","type":"invalid_request_error"}}` {
+		t.Fatalf("body = %s", got)
+	}
+}
+
 func TestHandlerHealthEndpoints(t *testing.T) {
 	h := newHandler(t, newRT(), &stubAdapter{})
 	for _, p := range []string{"/healthz", "/readyz"} {

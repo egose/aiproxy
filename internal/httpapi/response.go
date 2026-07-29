@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/textproto"
@@ -31,6 +32,10 @@ type billingUsageResponse struct {
 
 func (h *Handler) writeResult(w http.ResponseWriter, r *provider.Result) {
 	defer closeResult(r)
+	if r.StatusCode >= 400 && !isJSONContentType(r.Header.Get("Content-Type")) {
+		h.writeUpstreamError(w, r)
+		return
+	}
 	copyResponseHeaders(w.Header(), r.Header)
 	w.WriteHeader(r.StatusCode)
 	if r.Streaming && r.StreamBody != nil {
@@ -43,6 +48,51 @@ func (h *Handler) writeResult(w http.ResponseWriter, r *provider.Result) {
 		return
 	}
 	_, _ = w.Write(r.Body)
+}
+
+func (h *Handler) writeUpstreamError(w http.ResponseWriter, r *provider.Result) {
+	body := r.Body
+	if r.Streaming && r.StreamBody != nil {
+		read, err := io.ReadAll(io.LimitReader(r.StreamBody, maxUpstreamErrorBodyBytes))
+		if err == nil {
+			body = read
+		}
+	}
+	e := apiError{}
+	e.Error.Type = upstreamErrorType(r.StatusCode)
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		e.Error.Message = fmt.Sprintf("upstream returned status %d", r.StatusCode)
+	} else {
+		e.Error.Message = trimmed
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(r.StatusCode)
+	_ = json.NewEncoder(w).Encode(e)
+}
+
+const maxUpstreamErrorBodyBytes int64 = 4 << 10
+
+func isJSONContentType(contentType string) bool {
+	contentType = strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0])
+	return contentType == "application/json" || contentType == "application/vnd.api+json"
+}
+
+func upstreamErrorType(status int) string {
+	switch {
+	case status >= 500:
+		return "upstream_error"
+	case status == http.StatusUnauthorized:
+		return "upstream_auth_failed"
+	case status == http.StatusForbidden:
+		return "upstream_forbidden"
+	case status == http.StatusNotFound:
+		return "upstream_not_found"
+	case status == http.StatusTooManyRequests:
+		return "upstream_rate_limited"
+	default:
+		return "upstream_error"
+	}
 }
 
 func (h *Handler) writeModels(w http.ResponseWriter, catalog []ModelCard) {
