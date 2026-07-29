@@ -1,3 +1,10 @@
+## [0.3.0](https://github.com/egose/aiproxy/compare/v0.2.0...v0.3.0) (2026-07-29)
+
+### Features
+
+* allow slash-separated provider model names ([11dbf66](https://github.com/egose/aiproxy/commit/11dbf668962e4c0be56b12e6118058a9152f0e83))
+* normalize upstream errors into JSON responses ([d86e9ad](https://github.com/egose/aiproxy/commit/d86e9ada191edc626a485322ef9332fa88761872))
+
 ## [0.2.0](https://github.com/egose/aiproxy/compare/v0.1.0...v0.2.0) (2026-07-29)
 
 ### Features
