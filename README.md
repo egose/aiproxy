@@ -211,8 +211,8 @@ provider with `api_key_ref { path = "..." key = "..." }`.
   differ from the exact string sent upstream; it defaults to the model block
   label.
 - `capabilities` (optional on `model` blocks) lets you narrow the effective
-  API surface for a model. Supported values are `chat`, `responses`, and
-  `embeddings`.
+  API surface for a model. Supported values are `chat`, `responses`,
+  `embeddings`, `images`, `audio_transcriptions`, and `audio_speech`.
 - `/v1/models` returns effective capabilities for both direct models and
   aliases. Alias capabilities are the safe intersection of their target models.
 - `/v1/models` also includes richer metadata:

@@ -277,6 +277,9 @@ Capability values:
 - `chat`
 - `responses`
 - `embeddings`
+- `images`
+- `audio_transcriptions`
+- `audio_speech`
 
 Default capability behavior:
 
