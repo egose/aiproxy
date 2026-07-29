@@ -1,4 +1,6 @@
-## 0.0.2 (2026-07-29)
+## [0.0.3](https://github.com/egose/aiproxy/compare/v0.0.2...v0.0.3) (2026-07-29)
+
+## [0.0.2](https://github.com/egose/aiproxy/compare/c3b0146ff893f3a43bf76d10fcec56a37fc0389f...v0.0.2) (2026-07-29)
 
 ### Features
 
