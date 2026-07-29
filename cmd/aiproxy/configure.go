@@ -101,6 +101,11 @@ type providerHealthInput struct {
 	Cooldown  string
 }
 
+type loggingInput struct {
+	Level     string
+	AccessLog bool
+}
+
 type listenerOptions struct {
 	Name           string
 	Address        string
@@ -153,6 +158,13 @@ type providerHealthOptions struct {
 	NonInteractive bool
 }
 
+type loggingOptions struct {
+	Level          string
+	AccessLog      bool
+	HasAccessLog   bool
+	NonInteractive bool
+}
+
 func newConfigureCommand() *cobra.Command {
 	var cfgPath string
 	cmd := &cobra.Command{
@@ -165,7 +177,7 @@ func newConfigureCommand() *cobra.Command {
 			"aiproxy configure alias --config /etc/aiproxy/config.hcl --non-interactive --name chat_default --target primary/gpt-4o-mini --target backup/qwen3-32b",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prompts := promptSession{in: bufio.NewReader(cmd.InOrStdin()), out: cmd.OutOrStdout()}
-			choice, err := prompts.askChoice("Block to configure", []string{"provider", "alias", "auth", "listener", "provider-health"}, "provider")
+			choice, err := prompts.askChoice("Block to configure", []string{"provider", "alias", "auth", "listener", "logging", "provider-health"}, "provider")
 			if err != nil {
 				return err
 			}
@@ -180,6 +192,8 @@ func newConfigureCommand() *cobra.Command {
 				return runConfigureAuth(&prompts, resolvedConfigPath, false, authOptions{})
 			case "alias":
 				return runConfigureAlias(&prompts, resolvedConfigPath, false, aliasOptions{})
+			case "logging":
+				return runConfigureLogging(&prompts, resolvedConfigPath, false, loggingOptions{})
 			case "provider-health":
 				return runConfigureProviderHealth(&prompts, resolvedConfigPath, false, providerHealthOptions{})
 			default:
@@ -192,6 +206,7 @@ func newConfigureCommand() *cobra.Command {
 	cmd.AddCommand(newConfigureAuthCommand())
 	cmd.AddCommand(newConfigureProviderCommand())
 	cmd.AddCommand(newConfigureAliasCommand())
+	cmd.AddCommand(newConfigureLoggingCommand())
 	cmd.AddCommand(newConfigureProviderHealthCommand())
 	return cmd
 }
@@ -316,6 +331,28 @@ func newConfigureProviderHealthCommand() *cobra.Command {
 	cmd.Flags().StringVar(&options.RedisURL, "redis-url", "", "provider_health.redis_url")
 	cmd.Flags().StringVar(&options.KeyPrefix, "key-prefix", "", "provider_health.key_prefix")
 	cmd.Flags().StringVar(&options.Cooldown, "cooldown", "", "provider_health.cooldown")
+	cmd.Flags().BoolVar(&options.NonInteractive, "non-interactive", false, "fail instead of prompting for missing values")
+	return cmd
+}
+
+func newConfigureLoggingCommand() *cobra.Command {
+	var deleteBlock bool
+	var options loggingOptions
+	cmd := &cobra.Command{
+		Use:   "logging",
+		Short: "Interactively create or replace the logging block",
+		Example: "aiproxy configure logging\n" +
+			"aiproxy configure logging --config /etc/aiproxy/config.hcl --non-interactive --level warn --access-log=false",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			options.HasAccessLog = cmd.Flags().Changed("access-log")
+			prompts := promptSession{in: bufio.NewReader(cmd.InOrStdin()), out: cmd.OutOrStdout()}
+			return runConfigureLogging(&prompts, inheritedConfigPath(cmd), deleteBlock, options)
+		},
+	}
+	cmd.Flags().BoolVar(&deleteBlock, "delete", false, "delete the logging block")
+	cmd.Flags().StringVar(&options.Level, "level", "", "logging.level")
+	cmd.Flags().BoolVar(&options.AccessLog, "access-log", false, "logging.access_log")
+	cmd.Flags().Lookup("access-log").NoOptDefVal = "true"
 	cmd.Flags().BoolVar(&options.NonInteractive, "non-interactive", false, "fail instead of prompting for missing values")
 	return cmd
 }
@@ -688,6 +725,67 @@ func runConfigureProviderHealth(prompts *promptSession, configPath string, delet
 		return err
 	}
 	_, _ = fmt.Fprintf(prompts.out, "updated provider_health block in %s\n", configPath)
+	return nil
+}
+
+func runConfigureLogging(prompts *promptSession, configPath string, deleteBlock bool, options loggingOptions) error {
+	var err error
+	configPath, err = resolveConfigPath(prompts, configPath)
+	if err != nil {
+		return err
+	}
+	doc, err := loadConfigDocument(configPath)
+	if err != nil {
+		return err
+	}
+	if deleteBlock {
+		updated, removed, err := removeBlock(doc.source, func(block topLevelBlock) bool { return block.Type == "logging" })
+		if err != nil {
+			return err
+		}
+		if !removed {
+			return fmt.Errorf("logging block not found in %s", configPath)
+		}
+		if err := writeConfigFile(configPath, updated); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(prompts.out, "deleted logging block from %s\n", configPath)
+		return nil
+	}
+	if hasBlockType(doc.blocks, "logging") && !options.NonInteractive {
+		action, err := prompts.askChoice("Logging action", []string{"replace", "delete"}, "replace")
+		if err != nil {
+			return err
+		}
+		if action == "delete" {
+			updated, _, err := removeBlock(doc.source, func(block topLevelBlock) bool { return block.Type == "logging" })
+			if err != nil {
+				return err
+			}
+			if err := writeConfigFile(configPath, updated); err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintf(prompts.out, "deleted logging block from %s\n", configPath)
+			return nil
+		}
+	}
+
+	input, err := promptLoggingInput(prompts, existingLoggingInput(doc.blocks), options)
+	if err != nil {
+		return err
+	}
+
+	updated, err := upsertBlock(doc.source, renderLoggingBlock(input), func(block topLevelBlock) bool {
+		return block.Type == "logging"
+	})
+	if err != nil {
+		return err
+	}
+
+	if err := writeConfigFile(configPath, updated); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(prompts.out, "updated logging block in %s\n", configPath)
 	return nil
 }
 
@@ -1521,6 +1619,31 @@ func promptProviderHealthInput(prompts *promptSession, existing *providerHealthI
 	return providerHealthInput{RedisURL: redisURL, KeyPrefix: keyPrefix, Cooldown: cooldown}, nil
 }
 
+func promptLoggingInput(prompts *promptSession, existing *loggingInput, options loggingOptions) (loggingInput, error) {
+	defaults := loggingInput{Level: "info", AccessLog: true}
+	if existing != nil {
+		defaults = *existing
+	}
+	if options.Level != "" {
+		defaults.Level = options.Level
+	}
+	if options.HasAccessLog {
+		defaults.AccessLog = options.AccessLog
+	}
+	if options.NonInteractive {
+		return defaults, nil
+	}
+	level, err := prompts.askChoice("Log level", []string{"debug", "info", "warn", "error"}, defaults.Level)
+	if err != nil {
+		return loggingInput{}, err
+	}
+	accessLog, err := prompts.askYesNo("Enable access log", defaults.AccessLog)
+	if err != nil {
+		return loggingInput{}, err
+	}
+	return loggingInput{Level: level, AccessLog: accessLog}, nil
+}
+
 func (p *promptSession) ask(label, def string) (string, error) {
 	prompt := label
 	if def != "" {
@@ -1790,6 +1913,26 @@ func existingProviderHealthInput(blocks []topLevelBlock) *providerHealthInput {
 	}
 }
 
+func existingLoggingInput(blocks []topLevelBlock) *loggingInput {
+	block := findBlock(blocks, func(block topLevelBlock) bool { return block.Type == "logging" })
+	if block == nil {
+		return nil
+	}
+	parsed, src, err := parseBlockSyntax(block.Text)
+	if err != nil {
+		return nil
+	}
+	input := &loggingInput{Level: "info", AccessLog: true}
+	input.Level = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "level"))
+	if input.Level == "" {
+		input.Level = "info"
+	}
+	if expr := attributeExpr(src, parsed.Body, "access_log"); strings.TrimSpace(expr) != "" {
+		input.AccessLog = parseBoolExpr(expr, true)
+	}
+	return input
+}
+
 func parseBlockSyntax(blockText string) (*hclsyntax.Block, []byte, error) {
 	src := []byte(blockText)
 	file, diags := hclsyntax.ParseConfig(src, "configure.hcl", hcl.Pos{Line: 1, Column: 1})
@@ -1846,6 +1989,18 @@ func parseLiteralOrExpression(expr string) string {
 		return unquoted
 	}
 	return expr
+}
+
+func parseBoolExpr(expr string, def bool) bool {
+	value := strings.TrimSpace(expr)
+	switch value {
+	case "true":
+		return true
+	case "false":
+		return false
+	default:
+		return def
+	}
 }
 
 func parseQuotedListExpr(expr string) []string {
@@ -2036,6 +2191,19 @@ func renderProviderHealthBlock(input providerHealthInput) string {
 		b.WriteString(strconv.Quote(input.Cooldown))
 		b.WriteString("\n")
 	}
+	b.WriteString("}\n")
+	return b.String()
+}
+
+func renderLoggingBlock(input loggingInput) string {
+	var b strings.Builder
+	b.WriteString("logging {\n")
+	b.WriteString("  level = ")
+	b.WriteString(strconv.Quote(input.Level))
+	b.WriteString("\n")
+	b.WriteString("  access_log = ")
+	b.WriteString(strconv.FormatBool(input.AccessLog))
+	b.WriteString("\n")
 	b.WriteString("}\n")
 	return b.String()
 }

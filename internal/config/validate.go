@@ -9,6 +9,9 @@ func Validate(rt *Runtime) error {
 	if err := validateAuth(rt.Auth); err != nil {
 		return err
 	}
+	if err := validateLogging(rt.Logging); err != nil {
+		return err
+	}
 	if err := validateProviderHealth(rt.ProviderHealth); err != nil {
 		return err
 	}
@@ -19,6 +22,15 @@ func Validate(rt *Runtime) error {
 		return err
 	}
 	return nil
+}
+
+func validateLogging(l Logging) error {
+	switch l.Level {
+	case LogLevelDebug, LogLevelInfo, LogLevelWarn, LogLevelError:
+		return nil
+	default:
+		return fmt.Errorf("logging: invalid level %q (must be debug, info, warn, or error)", l.Level)
+	}
 }
 
 func validateProviderHealth(h ProviderHealth) error {

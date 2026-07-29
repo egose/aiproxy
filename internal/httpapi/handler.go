@@ -24,19 +24,21 @@ import (
 )
 
 type Dependencies struct {
-	Resolver    *modelresolver.Resolver
-	Adapter     provider.Adapter
-	Auth        auth.Authenticator
-	Authorizer  auth.Authorizer
-	Client      *http.Client
-	Catalog     []ModelCard
-	Metrics     *observability.Metrics
-	Providers   map[string]config.Provider
-	Health      *providerhealth.Tracker
-	RateLimiter ratelimit.Limiter
-	Accounting  accounting.Recorder
-	Usage       accounting.Reader
-	Logger      *slog.Logger
+	Resolver     *modelresolver.Resolver
+	Adapter      provider.Adapter
+	Auth         auth.Authenticator
+	Authorizer   auth.Authorizer
+	Client       *http.Client
+	Catalog      []ModelCard
+	Metrics      *observability.Metrics
+	Providers    map[string]config.Provider
+	Health       *providerhealth.Tracker
+	RateLimiter  ratelimit.Limiter
+	Accounting   accounting.Recorder
+	Usage        accounting.Reader
+	AccessLog    bool
+	HasAccessLog bool
+	Logger       *slog.Logger
 }
 
 const maxRequestBodyBytes int64 = 8 << 20
@@ -77,6 +79,9 @@ func normalizeDependencies(deps Dependencies) Dependencies {
 			deps.Accounting = accounting.NewNoop()
 		}
 	}
+	if !deps.HasAccessLog {
+		deps.AccessLog = true
+	}
 	return deps
 }
 
@@ -98,13 +103,43 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	deps := h.current()
 	rw := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
 	start := time.Now()
+	requestID := observability.RequestID(r.Header.Get("X-Request-Id"))
+	rw.Header().Set("X-Request-Id", requestID)
+	logger := deps.Logger.With("request_id", requestID)
 	requestBytes := 0
 	var principal *auth.Principal
 	accountingModel := ""
 	var publicModel string
 	var op provider.Operation
 	opKnown := false
+	responseStreaming := false
 	defer func() {
+		if deps.AccessLog {
+			logAttrs := []any{
+				"status", rw.statusCode,
+				"duration_ms", time.Since(start).Milliseconds(),
+				"response_bytes", rw.bytesWritten,
+			}
+			if opKnown {
+				logAttrs = append(logAttrs, "operation", op.String())
+			}
+			if publicModel != "" {
+				logAttrs = append(logAttrs, "public_model", publicModel)
+			}
+			if principal != nil {
+				if principal.Name != "" {
+					logAttrs = append(logAttrs, "client", principal.Name)
+				}
+				if principal.Tenant != "" {
+					logAttrs = append(logAttrs, "tenant", principal.Tenant)
+				}
+			}
+			if responseStreaming {
+				logger.Info("response stream finished", logAttrs...)
+			} else {
+				logger.Info("response sent", logAttrs...)
+			}
+		}
 		if deps.Metrics != nil {
 			path := metricsPathLabel(r)
 			deps.Metrics.RecordHTTP(r.Method, path, rw.statusCode, time.Since(start).Seconds())
@@ -121,10 +156,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}()
-
-	requestID := observability.RequestID(r.Header.Get("X-Request-Id"))
-	rw.Header().Set("X-Request-Id", requestID)
-	logger := deps.Logger.With("request_id", requestID)
 
 	if h.handleHealth(deps, rw, r) {
 		return
@@ -146,6 +177,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opKnown = true
+	logger = logger.With("operation", op.String())
 
 	var err error
 	principal, err = deps.Auth.Authenticate(r)
@@ -171,7 +203,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadRequest, "invalid_model", "model field is required")
 		return
 	}
-	logger = logger.With("model", publicModel)
+	logger = logger.With("public_model", publicModel)
+	if principal != nil {
+		logger = logger.With("client", principalName(principal), "tenant", principalTenant(principal))
+	}
+	if deps.AccessLog {
+		logger.Info("request received", "method", r.Method, "path", r.URL.Path, "request_bytes", requestBytes)
+	}
 	if !deps.Authorizer.Allow(principal, publicModel) {
 		accountingModel = accountingModelForbidden
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusForbidden, "forbidden", "client is not allowed to access this model")
@@ -193,7 +231,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var result *provider.Result
 	if resolved.Kind == modelresolver.KindDirect {
-		result, err = h.dispatchDirect(deps, r.Context(), op, resolved, r, body)
+		result, err = h.dispatchDirect(deps, r.Context(), op, resolved, r, body, logger)
 	} else {
 		result, err = h.dispatchAlias(deps, r.Context(), op, resolved, r, body, logger)
 	}
@@ -218,7 +256,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if result.Streaming {
+		responseStreaming = true
 		streamStart := time.Now()
+		if deps.AccessLog {
+			logger.Info("response stream started", "status", result.StatusCode)
+		}
 		h.writeResult(rw, result)
 		if deps.Metrics != nil {
 			deps.Metrics.RecordHTTPStream(r.Method, metricsPathLabel(r), rw.statusCode, time.Since(streamStart).Seconds())

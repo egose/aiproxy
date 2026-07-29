@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -32,6 +33,7 @@ const (
 type BuildOptions struct {
 	ConfigPath string
 	Version    string
+	LogOutput  io.Writer
 }
 
 type App struct {
@@ -49,13 +51,12 @@ type App struct {
 }
 
 func Build(ctx context.Context, opts BuildOptions) (*App, error) {
-	logger := observability.NewLogger(nil)
-	slog.SetDefault(logger)
-
 	rt, err := loadRuntime(opts.ConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
+	logger := observability.NewLogger(opts.LogOutput, observability.LoggerOptions{Level: observability.ParseLevel(string(rt.Logging.Level))})
+	slog.SetDefault(logger)
 	observability.LogStartup(logger, rt)
 
 	adapter := provider.New()
@@ -142,19 +143,21 @@ func (a *App) Reload() error {
 
 func buildDependencies(rt *config.Runtime, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, usage accounting.Recorder, httpClient *http.Client) httpapi.Dependencies {
 	return httpapi.Dependencies{
-		Resolver:    modelresolver.New(rt),
-		Adapter:     adapter,
-		Auth:        auth.NewAuthenticator(rt.Auth),
-		Authorizer:  auth.NewAuthorizer(rt.Auth),
-		Client:      httpClient,
-		Catalog:     httpapi.BuildModelCatalog(rt),
-		Metrics:     metrics,
-		Providers:   rt.ProviderByName,
-		Health:      health,
-		RateLimiter: ratelimit.New(rt.Auth),
-		Accounting:  accounting.NewMulti(metrics, usage),
-		Usage:       aOrUsage(usage),
-		Logger:      logger,
+		Resolver:     modelresolver.New(rt),
+		Adapter:      adapter,
+		Auth:         auth.NewAuthenticator(rt.Auth),
+		Authorizer:   auth.NewAuthorizer(rt.Auth),
+		Client:       httpClient,
+		Catalog:      httpapi.BuildModelCatalog(rt),
+		Metrics:      metrics,
+		Providers:    rt.ProviderByName,
+		Health:       health,
+		RateLimiter:  ratelimit.New(rt.Auth),
+		Accounting:   accounting.NewMulti(metrics, usage),
+		Usage:        aOrUsage(usage),
+		AccessLog:    rt.Logging.AccessLog,
+		HasAccessLog: true,
+		Logger:       logger,
 	}
 }
 

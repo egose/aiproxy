@@ -8,11 +8,28 @@ import (
 	"github.com/google/uuid"
 )
 
-func NewLogger(w io.Writer) *slog.Logger {
+type LoggerOptions struct {
+	Level slog.Leveler
+}
+
+func NewLogger(w io.Writer, opts LoggerOptions) *slog.Logger {
 	if w == nil {
 		w = os.Stdout
 	}
-	return slog.New(slog.NewJSONHandler(w, nil))
+	return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: opts.Level}))
+}
+
+func ParseLevel(level string) slog.Level {
+	switch level {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 func RequestID(existing string) string {

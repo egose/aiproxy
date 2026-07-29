@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -100,6 +101,51 @@ func newHandler(t *testing.T, rt *config.Runtime, adapter provider.Adapter) http
 	})
 }
 
+func newLoggedHandler(t *testing.T, rt *config.Runtime, adapter provider.Adapter) (http.Handler, *bytes.Buffer) {
+	t.Helper()
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	return NewHandler(Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   adapter,
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:   BuildModelCatalog(rt),
+		Metrics:   observability.NewMetrics(),
+		Providers: rt.ProviderByName,
+		Logger:    logger,
+	}), &logs
+}
+
+func parseLogEntries(t *testing.T, logs *bytes.Buffer) []map[string]any {
+	t.Helper()
+	scanner := bufio.NewScanner(bytes.NewReader(logs.Bytes()))
+	entries := make([]map[string]any, 0)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		entry := map[string]any{}
+		if err := json.Unmarshal(line, &entry); err != nil {
+			t.Fatalf("unmarshal log entry %q: %v", string(line), err)
+		}
+		entries = append(entries, entry)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan logs: %v", err)
+	}
+	return entries
+}
+
+func findLogEntry(entries []map[string]any, msg string) map[string]any {
+	for _, entry := range entries {
+		if entry["msg"] == msg {
+			return entry
+		}
+	}
+	return nil
+}
+
 type denySecondLimiter struct {
 	count int32
 }
@@ -143,6 +189,54 @@ func TestHandlerDirectRoute(t *testing.T) {
 	}
 	if got := w.Body.String(); got == "" {
 		t.Errorf("empty response body")
+	}
+}
+
+func TestHandlerLogsDirectRequestLifecycle(t *testing.T) {
+	stub := &stubAdapter{}
+	h, logs := newLoggedHandler(t, newRT(), stub)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	entries := parseLogEntries(t, logs)
+	requestReceived := findLogEntry(entries, "request received")
+	if requestReceived == nil {
+		t.Fatal("missing request received log")
+	}
+	if requestReceived["public_model"] != "openai/gpt-4o-mini" {
+		t.Fatalf("request received public_model = %#v", requestReceived["public_model"])
+	}
+	if requestReceived["operation"] != "chat_completions" {
+		t.Fatalf("request received operation = %#v", requestReceived["operation"])
+	}
+	upstreamStarted := findLogEntry(entries, "upstream request started")
+	if upstreamStarted == nil {
+		t.Fatal("missing upstream request started log")
+	}
+	if upstreamStarted["provider"] != "openai" || upstreamStarted["upstream_model"] != "gpt-4o-mini" {
+		t.Fatalf("upstream request started = %#v", upstreamStarted)
+	}
+	upstreamFinished := findLogEntry(entries, "upstream request finished")
+	if upstreamFinished == nil {
+		t.Fatal("missing upstream request finished log")
+	}
+	if upstreamFinished["status"] != float64(http.StatusOK) {
+		t.Fatalf("upstream request finished status = %#v", upstreamFinished["status"])
+	}
+	responseSent := findLogEntry(entries, "response sent")
+	if responseSent == nil {
+		t.Fatal("missing response sent log")
+	}
+	if responseSent["status"] != float64(http.StatusOK) {
+		t.Fatalf("response sent status = %#v", responseSent["status"])
+	}
+	if responseSent["response_bytes"] != float64(len(w.Body.Bytes())) {
+		t.Fatalf("response sent response_bytes = %#v, want %d", responseSent["response_bytes"], len(w.Body.Bytes()))
 	}
 }
 
@@ -1148,6 +1242,42 @@ func TestHandlerMetricsIncludeStreamingResponses(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics output missing %q\n%s", want, body)
 		}
+	}
+}
+
+func TestHandlerLogsStreamingLifecycle(t *testing.T) {
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Streaming:  true,
+		StreamBody: io.NopCloser(strings.NewReader("data: hello\n\ndata: [DONE]\n\n")),
+	}}
+	h, logs := newLoggedHandler(t, newRT(), stub)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	entries := parseLogEntries(t, logs)
+	streamStarted := findLogEntry(entries, "response stream started")
+	if streamStarted == nil {
+		t.Fatal("missing response stream started log")
+	}
+	if streamStarted["status"] != float64(http.StatusOK) {
+		t.Fatalf("response stream started status = %#v", streamStarted["status"])
+	}
+	streamFinished := findLogEntry(entries, "response stream finished")
+	if streamFinished == nil {
+		t.Fatal("missing response stream finished log")
+	}
+	if streamFinished["status"] != float64(http.StatusOK) {
+		t.Fatalf("response stream finished status = %#v", streamFinished["status"])
+	}
+	if streamFinished["response_bytes"] != float64(len(w.Body.Bytes())) {
+		t.Fatalf("response stream finished response_bytes = %#v, want %d", streamFinished["response_bytes"], len(w.Body.Bytes()))
 	}
 }
 

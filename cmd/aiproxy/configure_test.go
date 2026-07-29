@@ -423,6 +423,74 @@ provider "openai" "primary" {
 	}
 }
 
+func TestConfigureLoggingCreatesBlock(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+
+	input := strings.Join([]string{
+		configPath,
+		"3",
+		"n",
+	}, "\n") + "\n"
+
+	stdout, stderr, err := executeRootCommand(input, "configure", "logging")
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	checks := []string{
+		"logging {",
+		`level = "warn"`,
+		"access_log = false",
+	}
+	for _, check := range checks {
+		if !strings.Contains(configText, check) {
+			t.Fatalf("logging config missing %q:\n%s", check, configText)
+		}
+	}
+	if !strings.Contains(stdout, `updated logging block`) {
+		t.Fatalf("stdout missing logging summary:\n%s", stdout)
+	}
+}
+
+func TestConfigureLoggingNonInteractiveFlags(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+
+	stdout, stderr, err := executeRootCommand(
+		"",
+		"configure", "logging",
+		"--config", configPath,
+		"--non-interactive",
+		"--level", "error",
+		"--access-log=false",
+	)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	checks := []string{
+		"logging {",
+		`level = "error"`,
+		"access_log = false",
+	}
+	for _, check := range checks {
+		if !strings.Contains(configText, check) {
+			t.Fatalf("logging config missing %q:\n%s", check, configText)
+		}
+	}
+}
+
 func TestConfigureRootCommandPromptsForBlockSelection(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.hcl")

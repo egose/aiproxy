@@ -9,6 +9,7 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 	rt := &Runtime{
 		ProviderByName: make(map[string]Provider),
 		AliasByName:    make(map[string]Alias),
+		Logging:        Logging{Level: LogLevelInfo, AccessLog: true},
 	}
 	seenProviderNames := make(map[string]bool)
 	disabledProviderNames := make(map[string]bool)
@@ -24,6 +25,13 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		return nil, err
 	}
 	rt.Auth = auth
+	if raw.Logging != nil {
+		logging, err := buildLogging(raw.Logging)
+		if err != nil {
+			return nil, err
+		}
+		rt.Logging = logging
+	}
 	if raw.ProviderHealth != nil {
 		providerHealth, err := buildProviderHealth(raw.ProviderHealth)
 		if err != nil {
@@ -67,6 +75,20 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 	}
 
 	return rt, nil
+}
+
+func buildLogging(rawLogging *rawLogging) (Logging, error) {
+	out := Logging{Level: LogLevelInfo, AccessLog: true}
+	if rawLogging == nil {
+		return out, nil
+	}
+	if rawLogging.Level != "" {
+		out.Level = LogLevel(rawLogging.Level)
+	}
+	if rawLogging.AccessLog != nil {
+		out.AccessLog = *rawLogging.AccessLog
+	}
+	return out, nil
 }
 
 func buildProviderHealth(rawHealth *rawProviderHealth) (ProviderHealth, error) {
