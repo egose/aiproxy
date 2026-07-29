@@ -17,6 +17,7 @@ OpenAI-compatible responses.
 - `POST /v1/responses` for `openai`, `openai-compatible`, `anthropic`, and `gemini` providers (JSON and SSE streaming)
 - `POST /v1/images/generations` for `openai` and `openai-compatible` providers
 - `POST /v1/audio/transcriptions` for `openai` and `openai-compatible` providers
+- `POST /v1/audio/speech` for `openai` and `openai-compatible` providers
 
 ### Auth Modes
 
@@ -45,7 +46,7 @@ OpenAI-compatible responses.
 
 ### Not in MVP
 
-- Audio speech generation endpoints, quotas, billing, tenancy
+- Quotas, billing, tenancy
 
 The server supports live config reload on `SIGHUP` for runtime request-routing
 state such as auth, providers, models, aliases, and metrics-backed inventory.
@@ -238,6 +239,9 @@ provider with `api_key_ref { path = "..." key = "..." }`.
   `openai-compatible` providers. Requests targeting translated providers return
   a client-visible unsupported-operation error.
 - `POST /v1/audio/transcriptions` is currently implemented for `openai` and
+  `openai-compatible` providers. Requests targeting translated providers return
+  a client-visible unsupported-operation error.
+- `POST /v1/audio/speech` is currently implemented for `openai` and
   `openai-compatible` providers. Requests targeting translated providers return
   a client-visible unsupported-operation error.
 - `POST /v1/responses` is currently implemented for `openai`,

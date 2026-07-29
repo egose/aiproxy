@@ -64,5 +64,6 @@ repo has sandbox services for stable end-to-end provider coverage.)
   chat completions. `gemini` also supports embeddings translation, and both
   translated providers support a conservative `/v1/responses` subset for both
   JSON and SSE streaming. `POST /v1/images/generations` and
-  `POST /v1/audio/transcriptions` are currently supported only for `openai`
-  and `openai-compatible`. Anthropic embeddings are still deferred.
+  `POST /v1/audio/transcriptions` and `POST /v1/audio/speech` are currently
+  supported only for `openai` and `openai-compatible`. Anthropic embeddings are
+  still deferred.

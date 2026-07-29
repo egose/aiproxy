@@ -69,6 +69,7 @@ The initial public API surface is:
 - `POST /v1/responses` for `openai`, `openai-compatible`, `anthropic`, and `gemini`
 - `POST /v1/images/generations` for `openai` and `openai-compatible`
 - `POST /v1/audio/transcriptions` for `openai` and `openai-compatible`
+- `POST /v1/audio/speech` for `openai` and `openai-compatible`
 
 The MVP supports both:
 
@@ -80,7 +81,7 @@ The MVP supports both:
 The design should leave room for later support of:
 
 - translated-provider embeddings
-- audio transcription and speech endpoints
+- translated-provider audio transcription and speech endpoints
 
 These later endpoints should reuse the same provider, model, alias, credential,
 and adapter concepts rather than defining a separate config model.
@@ -804,7 +805,6 @@ The following are intentionally out of scope for the MVP:
 - anthropic embeddings
 - translated-provider image endpoints
 - translated-provider audio endpoints
-- audio speech generation endpoints
 - billing and tenancy
 - dynamic provider health state shared across instances
 
