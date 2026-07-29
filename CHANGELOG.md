@@ -1,6 +1,11 @@
-## [0.0.3](https://github.com/egose/aiproxy/compare/v0.0.2...v0.0.3) (2026-07-29)
+## [0.0.4](https://github.com/egose/aiproxy/compare/v0.0.3...v0.0.4) (2026-07-29)
 
-## [0.0.2](https://github.com/egose/aiproxy/compare/c3b0146ff893f3a43bf76d10fcec56a37fc0389f...v0.0.2) (2026-07-29)
+### Bug Fixes
+
+* archive build outputs from target directory ([473d28c](https://github.com/egose/aiproxy/commit/473d28cd87b8f4defb6b02fcf2aa86e7d9b69216))
+* disable trivy in publish workflow ([7178a80](https://github.com/egose/aiproxy/commit/7178a80b8b0ae61e5ffe876c2c72a6d8e4d2c171))
+
+## [0.0.3](https://github.com/egose/aiproxy/compare/c3b0146ff893f3a43bf76d10fcec56a37fc0389f...v0.0.3) (2026-07-29)
 
 ### Features
 
