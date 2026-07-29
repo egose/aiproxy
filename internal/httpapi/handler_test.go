@@ -691,6 +691,111 @@ func TestHandlerListModelsIncludesProvidersAndAliases(t *testing.T) {
 	}
 }
 
+func TestHandlerListModelsFiltersUnauthorizedModels(t *testing.T) {
+	rt := newRT()
+	h := NewHandler(Dependencies{
+		Resolver: modelresolver.New(rt),
+		Adapter:  &stubAdapter{},
+		Auth: auth.NewAuthenticator(config.Auth{
+			Mode: config.AuthModeBearerStatic,
+			Clients: map[string]config.Client{
+				"ci": {Name: "ci", Token: "tok", AllowedModels: []string{"openai/gpt-4o-mini"}},
+			},
+		}),
+		Authorizer: auth.NewAuthorizer(config.Auth{
+			Mode: config.AuthModeBearerStatic,
+			Clients: map[string]config.Client{
+				"ci": {Name: "ci", Token: "tok", AllowedModels: []string{"openai/gpt-4o-mini"}},
+			},
+		}),
+		Catalog:   BuildModelCatalog(rt),
+		Metrics:   observability.NewMetrics(),
+		Providers: rt.ProviderByName,
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	r.Header.Set("Authorization", "Bearer tok")
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data []ModelCard `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal models response: %v", err)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("models = %+v", resp.Data)
+	}
+	if resp.Data[0].ID != "openai/gpt-4o-mini" {
+		t.Fatalf("model id = %q", resp.Data[0].ID)
+	}
+}
+
+func TestHandlerStripsHopByHopHeaders(t *testing.T) {
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"Connection":   []string{"Keep-Alive, X-Remove"},
+			"Keep-Alive":   []string{"timeout=5"},
+			"Trailer":      []string{"Expires"},
+			"Upgrade":      []string{"websocket"},
+			"X-Remove":     []string{"gone"},
+			"X-Keep":       []string{"ok"},
+		},
+		Body: []byte(`{"id":"chatcmpl-stub"}`),
+	}}
+	h := newHandler(t, newRT(), stub)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Connection"); got != "" {
+		t.Fatalf("connection header = %q", got)
+	}
+	if got := w.Header().Get("Keep-Alive"); got != "" {
+		t.Fatalf("keep-alive header = %q", got)
+	}
+	if got := w.Header().Get("Trailer"); got != "" {
+		t.Fatalf("trailer header = %q", got)
+	}
+	if got := w.Header().Get("Upgrade"); got != "" {
+		t.Fatalf("upgrade header = %q", got)
+	}
+	if got := w.Header().Get("X-Remove"); got != "" {
+		t.Fatalf("x-remove header = %q", got)
+	}
+	if got := w.Header().Get("X-Keep"); got != "ok" {
+		t.Fatalf("x-keep header = %q", got)
+	}
+}
+
+func TestHandlerSanitizesUpstreamErrors(t *testing.T) {
+	h := newHandler(t, newRT(), &stubAdapter{err: errors.New("dial tcp internal.example:443: connect: connection refused")})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "internal.example") {
+		t.Fatalf("response leaked upstream details: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "upstream request failed") {
+		t.Fatalf("response = %s", w.Body.String())
+	}
+}
+
 func TestHandlerHealthEndpoints(t *testing.T) {
 	h := newHandler(t, newRT(), &stubAdapter{})
 	for _, p := range []string{"/healthz", "/readyz"} {
@@ -1051,6 +1156,91 @@ func TestHandlerAccountingRecordsTenantClientModelAndStatus(t *testing.T) {
 	}
 	if events[0].Tenant != "team-a" || events[0].Client != "ci" || events[0].Model != "openai/gpt-4o-mini" || events[0].Operation != "chat_completions" || events[0].StatusCode != http.StatusOK {
 		t.Fatalf("event = %+v", events[0])
+	}
+}
+
+func TestHandlerAccountingCollapsesUnknownModels(t *testing.T) {
+	rt := newRT()
+	usage := accounting.NewAggregator()
+	h := NewHandler(Dependencies{
+		Resolver:   modelresolver.New(rt),
+		Adapter:    &stubAdapter{},
+		Auth:       auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:    BuildModelCatalog(rt),
+		Metrics:    observability.NewMetrics(),
+		Providers:  rt.ProviderByName,
+		Accounting: usage,
+	})
+
+	for _, model := range []string{"unknown/model-a", "unknown/model-b"} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"`+model+`","messages":[]}`)))
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+		}
+	}
+
+	summaries := usage.Summaries()
+	if len(summaries) != 1 {
+		t.Fatalf("summaries = %+v", summaries)
+	}
+	if summaries[0].Model != accountingModelNotFound {
+		t.Fatalf("summary model = %q", summaries[0].Model)
+	}
+	if summaries[0].Count != 2 {
+		t.Fatalf("summary count = %d", summaries[0].Count)
+	}
+	if summaries[0].StatusCode != http.StatusNotFound {
+		t.Fatalf("summary status = %d", summaries[0].StatusCode)
+	}
+}
+
+func TestHandlerAccountingCollapsesForbiddenModels(t *testing.T) {
+	rt := newRT()
+	usage := accounting.NewAggregator()
+	h := NewHandler(Dependencies{
+		Resolver: modelresolver.New(rt),
+		Adapter:  &stubAdapter{},
+		Auth: auth.NewAuthenticator(config.Auth{
+			Mode: config.AuthModeBearerStatic,
+			Clients: map[string]config.Client{
+				"ci": {Name: "ci", Token: "tok", AllowedModels: []string{"openai/gpt-4.1"}},
+			},
+		}),
+		Authorizer: auth.NewAuthorizer(config.Auth{
+			Mode: config.AuthModeBearerStatic,
+			Clients: map[string]config.Client{
+				"ci": {Name: "ci", Token: "tok", AllowedModels: []string{"openai/gpt-4.1"}},
+			},
+		}),
+		Metrics:    observability.NewMetrics(),
+		Providers:  rt.ProviderByName,
+		Accounting: usage,
+	})
+
+	for _, model := range []string{"openai/gpt-4o-mini", "alias/chat_default"} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"`+model+`","messages":[]}`)))
+		r.Header.Set("Authorization", "Bearer tok")
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+		}
+	}
+
+	summaries := usage.Summaries()
+	if len(summaries) != 1 {
+		t.Fatalf("summaries = %+v", summaries)
+	}
+	if summaries[0].Model != accountingModelForbidden {
+		t.Fatalf("summary model = %q", summaries[0].Model)
+	}
+	if summaries[0].Count != 2 {
+		t.Fatalf("summary count = %d", summaries[0].Count)
+	}
+	if summaries[0].StatusCode != http.StatusForbidden {
+		t.Fatalf("summary status = %d", summaries[0].StatusCode)
 	}
 }
 

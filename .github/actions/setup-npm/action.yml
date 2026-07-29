@@ -10,3 +10,4 @@ runs:
       ignore-scripts: 'true'
       paths: |
         .
+        website

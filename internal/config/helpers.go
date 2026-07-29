@@ -83,6 +83,9 @@ func parseTimeouts(t *rawTimeouts) (Timeouts, error) {
 		if err != nil {
 			return out, fmt.Errorf("invalid read_header timeout: %w", err)
 		}
+		if d < 0 {
+			return out, fmt.Errorf("invalid read_header timeout: must not be negative")
+		}
 		out.ReadHeader = d
 	}
 	if t.Idle != "" {
@@ -90,12 +93,18 @@ func parseTimeouts(t *rawTimeouts) (Timeouts, error) {
 		if err != nil {
 			return out, fmt.Errorf("invalid idle timeout: %w", err)
 		}
+		if d < 0 {
+			return out, fmt.Errorf("invalid idle timeout: must not be negative")
+		}
 		out.Idle = d
 	}
 	if t.Write != "" {
 		d, err := time.ParseDuration(t.Write)
 		if err != nil {
 			return out, fmt.Errorf("invalid write timeout: %w", err)
+		}
+		if d < 0 {
+			return out, fmt.Errorf("invalid write timeout: must not be negative")
 		}
 		out.Write = d
 	}

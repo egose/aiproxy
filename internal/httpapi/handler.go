@@ -41,6 +41,12 @@ type Dependencies struct {
 
 const maxRequestBodyBytes int64 = 8 << 20
 
+const (
+	accountingModelInvalidBody = "_invalid_model"
+	accountingModelForbidden   = "_forbidden_model"
+	accountingModelNotFound    = "_unresolved_model"
+)
+
 func NewHandler(deps Dependencies) *Handler {
 	deps = normalizeDependencies(deps)
 	return &Handler{deps: deps}
@@ -94,6 +100,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	requestBytes := 0
 	var principal *auth.Principal
+	accountingModel := ""
 	var publicModel string
 	var op provider.Operation
 	opKnown := false
@@ -108,7 +115,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Timestamp:  time.Now(),
 				Tenant:     principalTenant(principal),
 				Client:     principalName(principal),
-				Model:      publicModel,
+				Model:      accountingModel,
 				Operation:  op.String(),
 				StatusCode: rw.statusCode,
 			})
@@ -160,33 +167,35 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestBytes = len(body)
 	publicModel = extractModelForRequest(r.Header.Get("Content-Type"), body)
 	if publicModel == "" {
+		accountingModel = accountingModelInvalidBody
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadRequest, "invalid_model", "model field is required")
 		return
 	}
 	logger = logger.With("model", publicModel)
 	if !deps.Authorizer.Allow(principal, publicModel) {
+		accountingModel = accountingModelForbidden
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusForbidden, "forbidden", "client is not allowed to access this model")
 		return
 	}
 
 	resolved, err := deps.Resolver.Resolve(publicModel)
 	if err != nil {
+		accountingModel = accountingModelNotFound
 		logger.Info("resolve failed", "error", err)
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusNotFound, "model_not_found", err.Error())
 		return
 	}
+	accountingModel = publicModel
 	if err := ensureOperationSupported(op, resolved, deps.Providers); err != nil {
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadRequest, "unsupported_operation", err.Error())
 		return
 	}
 
-	r.Body = io.NopCloser(bytes.NewReader(body))
-
 	var result *provider.Result
 	if resolved.Kind == modelresolver.KindDirect {
-		result, err = h.dispatchDirect(deps, r.Context(), op, resolved, r)
+		result, err = h.dispatchDirect(deps, r.Context(), op, resolved, r, body)
 	} else {
-		result, err = h.dispatchAlias(deps, r.Context(), op, resolved, r, logger)
+		result, err = h.dispatchAlias(deps, r.Context(), op, resolved, r, body, logger)
 	}
 	if err != nil {
 		logger.Error("upstream failed", "error", err)
@@ -200,7 +209,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.writeRequestError(deps.Metrics, rw, r, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadGateway, "upstream_error", err.Error())
+		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadGateway, "upstream_error", "upstream request failed")
 		return
 	}
 	if result == nil {
@@ -271,7 +280,7 @@ func (h *Handler) handleHealth(deps Dependencies, w http.ResponseWriter, r *http
 			_, _ = w.Write([]byte("not ready"))
 			return true
 		}
-		if deps.Health != nil && !deps.Health.AnyHealthy(deps.Providers) {
+		if deps.Health != nil && !deps.Health.AnyHealthyContext(r.Context(), deps.Providers) {
 			if deps.Metrics != nil {
 				deps.Metrics.SetReadyWithReason(false, "no_healthy_providers")
 			}
@@ -314,7 +323,7 @@ func (h *Handler) handleModels(deps Dependencies, w http.ResponseWriter, r *http
 	if !h.allowRequest(deps, w, r, principal) {
 		return true
 	}
-	h.writeModels(w, deps.Catalog)
+	h.writeModels(w, filterModelCatalog(deps.Catalog, deps.Authorizer, principal))
 	return true
 }
 
@@ -430,4 +439,19 @@ func extractModel(body []byte) string {
 	}
 	_ = json.Unmarshal(body, &probe)
 	return probe.Model
+}
+
+func filterModelCatalog(catalog []ModelCard, authorizer auth.Authorizer, principal *auth.Principal) []ModelCard {
+	if authorizer == nil {
+		out := make([]ModelCard, len(catalog))
+		copy(out, catalog)
+		return out
+	}
+	out := make([]ModelCard, 0, len(catalog))
+	for _, card := range catalog {
+		if authorizer.Allow(principal, card.ID) {
+			out = append(out, card)
+		}
+	}
+	return out
 }

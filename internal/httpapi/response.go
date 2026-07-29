@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/textproto"
+	"strings"
 
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/observability"
@@ -29,14 +31,7 @@ type billingUsageResponse struct {
 
 func (h *Handler) writeResult(w http.ResponseWriter, r *provider.Result) {
 	defer closeResult(r)
-	for key, vals := range r.Header {
-		if key == "Content-Length" || key == "Transfer-Encoding" {
-			continue
-		}
-		for _, v := range vals {
-			w.Header().Add(key, v)
-		}
-	}
+	copyResponseHeaders(w.Header(), r.Header)
 	w.WriteHeader(r.StatusCode)
 	if r.Streaming && r.StreamBody != nil {
 		if flusher, ok := w.(http.Flusher); ok {
@@ -119,6 +114,36 @@ func copyAndFlush(dst io.Writer, src io.Reader, flusher http.Flusher) (int64, er
 				return written, nil
 			}
 			return written, er
+		}
+	}
+}
+
+func copyResponseHeaders(dst, src http.Header) {
+	blocked := map[string]struct{}{
+		"Connection":          {},
+		"Keep-Alive":          {},
+		"Proxy-Authenticate":  {},
+		"Proxy-Authorization": {},
+		"Te":                  {},
+		"Trailer":             {},
+		"Transfer-Encoding":   {},
+		"Upgrade":             {},
+		"Content-Length":      {},
+	}
+	for _, value := range src.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			token = textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(token))
+			if token != "" {
+				blocked[token] = struct{}{}
+			}
+		}
+	}
+	for key, vals := range src {
+		if _, skip := blocked[textproto.CanonicalMIMEHeaderKey(key)]; skip {
+			continue
+		}
+		for _, v := range vals {
+			dst.Add(key, v)
 		}
 	}
 }

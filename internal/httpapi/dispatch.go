@@ -18,9 +18,12 @@ import (
 	"github.com/egose/aiproxy/internal/provider"
 )
 
-func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op provider.Operation, r modelresolver.ResolveResult, inbound *http.Request) (*provider.Result, error) {
+func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op provider.Operation, r modelresolver.ResolveResult, inbound *http.Request, body []byte) (*provider.Result, error) {
 	if deps.Metrics != nil {
 		deps.Metrics.RecordProviderSelection(op, r.Provider.Name+"/"+r.Model.Name, r.Provider.Name, r.Model.Name)
+	}
+	if inbound != nil {
+		inbound = cloneRequestWithBody(ctx, inbound, body)
 	}
 	start := time.Now()
 	result, err := deps.Adapter.Do(ctx, provider.Request{
@@ -30,6 +33,7 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		BaseURL:       r.Provider.BaseURL,
 		APIKey:        r.Provider.APIKey,
 		UpstreamModel: r.Model.UpstreamName,
+		Body:          body,
 		Inbound:       inbound,
 		Client:        deps.Client,
 	})
@@ -40,16 +44,12 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		}
 		deps.Metrics.RecordUpstream(op, r.Provider.Name, status, err, time.Since(start).Seconds())
 	}
-	h.recordProviderHealth(deps, r.Provider.Name, result, err)
+	h.recordProviderHealth(deps, ctx, r.Provider.Name, result, err)
 	h.instrumentUpstreamResponseSize(deps, op, r.Provider.Name, result, err)
 	return result, err
 }
 
-func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provider.Operation, r modelresolver.ResolveResult, inbound *http.Request, logger *slog.Logger) (*provider.Result, error) {
-	body, err := io.ReadAll(inbound.Body)
-	if err != nil {
-		return nil, err
-	}
+func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provider.Operation, r modelresolver.ResolveResult, inbound *http.Request, body []byte, logger *slog.Logger) (*provider.Result, error) {
 	var lastErr error
 	tried := make(map[string]bool, len(r.Alias.Targets))
 	var unhealthyFallback *modelresolver.ResolveResult
@@ -77,7 +77,7 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			r.Selector.Release(t)
 			continue
 		}
-		if deps.Health != nil && !deps.Health.IsHealthy(t.Provider) {
+		if deps.Health != nil && !deps.Health.IsHealthyContext(ctx, t.Provider) {
 			r.Selector.Release(t)
 			if unhealthyFallback == nil {
 				copy := modelresolver.ResolveResult{Provider: prov, Model: model}
@@ -100,8 +100,7 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 				}
 			})
 		}
-		req := inbound.Clone(ctx)
-		req.Body = io.NopCloser(bytes.NewReader(body))
+		req := cloneRequestWithBody(ctx, inbound, body)
 		start := time.Now()
 		result, err := deps.Adapter.Do(ctx, provider.Request{
 			Operation:     op,
@@ -110,6 +109,7 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			BaseURL:       prov.BaseURL,
 			APIKey:        prov.APIKey,
 			UpstreamModel: model.UpstreamName,
+			Body:          body,
 			Inbound:       req,
 			Client:        deps.Client,
 		})
@@ -120,7 +120,7 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			}
 			deps.Metrics.RecordUpstream(op, t.Provider, status, err, time.Since(start).Seconds())
 		}
-		h.recordProviderHealth(deps, t.Provider, result, err)
+		h.recordProviderHealth(deps, ctx, t.Provider, result, err)
 		h.instrumentUpstreamResponseSize(deps, op, t.Provider, result, err)
 		if err != nil {
 			releaseTarget()
@@ -181,8 +181,7 @@ func (h *Handler) dispatchAliasFallback(deps Dependencies, ctx context.Context, 
 			deps.Metrics.AddAliasInFlight(aliasName, resolved.Provider.Name, resolved.Model.Name, -1)
 		}
 	}
-	req := inbound.Clone(ctx)
-	req.Body = io.NopCloser(bytes.NewReader(body))
+	req := cloneRequestWithBody(ctx, inbound, body)
 	start := time.Now()
 	result, err := deps.Adapter.Do(ctx, provider.Request{
 		Operation:     op,
@@ -191,6 +190,7 @@ func (h *Handler) dispatchAliasFallback(deps Dependencies, ctx context.Context, 
 		BaseURL:       resolved.Provider.BaseURL,
 		APIKey:        resolved.Provider.APIKey,
 		UpstreamModel: resolved.Model.UpstreamName,
+		Body:          body,
 		Inbound:       req,
 		Client:        deps.Client,
 	})
@@ -201,7 +201,7 @@ func (h *Handler) dispatchAliasFallback(deps Dependencies, ctx context.Context, 
 		}
 		deps.Metrics.RecordUpstream(op, resolved.Provider.Name, status, err, time.Since(start).Seconds())
 	}
-	h.recordProviderHealth(deps, resolved.Provider.Name, result, err)
+	h.recordProviderHealth(deps, ctx, resolved.Provider.Name, result, err)
 	h.instrumentUpstreamResponseSize(deps, op, resolved.Provider.Name, result, err)
 	if err != nil {
 		release()
@@ -217,7 +217,7 @@ func (h *Handler) dispatchAliasFallback(deps Dependencies, ctx context.Context, 
 	return result, nil
 }
 
-func (h *Handler) recordProviderHealth(deps Dependencies, providerName string, result *provider.Result, err error) {
+func (h *Handler) recordProviderHealth(deps Dependencies, ctx context.Context, providerName string, result *provider.Result, err error) {
 	if deps.Health == nil || providerName == "" {
 		return
 	}
@@ -230,14 +230,14 @@ func (h *Handler) recordProviderHealth(deps Dependencies, providerName string, r
 		if errors.As(err, &unsupported) {
 			return
 		}
-		deps.Health.MarkFailure(providerName)
+		deps.Health.MarkFailureContext(ctx, providerName)
 		return
 	}
 	if result != nil && result.StatusCode >= 500 {
-		deps.Health.MarkFailure(providerName)
+		deps.Health.MarkFailureContext(ctx, providerName)
 		return
 	}
-	deps.Health.MarkSuccess(providerName)
+	deps.Health.MarkSuccessContext(ctx, providerName)
 }
 
 func nextUntriedAliasTarget(targets []config.AliasTarget, tried map[string]bool) alias.Target {
@@ -273,6 +273,16 @@ func (h *Handler) instrumentUpstreamResponseSize(deps Dependencies, op provider.
 type countingReadCloser struct {
 	io.ReadCloser
 	bytesRead int64
+}
+
+func cloneRequestWithBody(ctx context.Context, inbound *http.Request, body []byte) *http.Request {
+	if inbound == nil {
+		return nil
+	}
+	req := inbound.Clone(ctx)
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.ContentLength = int64(len(body))
+	return req
 }
 
 func (r *countingReadCloser) Read(p []byte) (int, error) {

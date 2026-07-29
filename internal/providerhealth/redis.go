@@ -7,10 +7,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const redisOperationTimeout = 2 * time.Second
+
 type redisBackend struct {
 	client    *redis.Client
 	keyPrefix string
-	ctx       context.Context
 }
 
 func newRedisBackend(redisURL, keyPrefix string) *redisBackend {
@@ -21,25 +22,41 @@ func newRedisBackend(redisURL, keyPrefix string) *redisBackend {
 	if keyPrefix == "" {
 		keyPrefix = "aiproxy:provider-health"
 	}
-	return &redisBackend{client: redis.NewClient(opts), keyPrefix: keyPrefix, ctx: context.Background()}
+	return &redisBackend{client: redis.NewClient(opts), keyPrefix: keyPrefix}
 }
 
 func (b *redisBackend) key(name string) string {
 	return b.keyPrefix + ":" + name
 }
 
-func (b *redisBackend) MarkSuccess(name string) error {
-	return b.client.Del(b.ctx, b.key(name)).Err()
+func (b *redisBackend) MarkSuccess(ctx context.Context, name string) error {
+	ctx, cancel := redisOperationContext(ctx)
+	defer cancel()
+	return b.client.Del(ctx, b.key(name)).Err()
 }
 
-func (b *redisBackend) MarkFailure(name string, cooldown time.Duration) error {
-	return b.client.Set(b.ctx, b.key(name), "unhealthy", cooldown).Err()
+func (b *redisBackend) MarkFailure(ctx context.Context, name string, cooldown time.Duration) error {
+	ctx, cancel := redisOperationContext(ctx)
+	defer cancel()
+	return b.client.Set(ctx, b.key(name), "unhealthy", cooldown).Err()
 }
 
-func (b *redisBackend) IsHealthy(name string) (bool, error) {
-	count, err := b.client.Exists(b.ctx, b.key(name)).Result()
+func (b *redisBackend) IsHealthy(ctx context.Context, name string) (bool, error) {
+	ctx, cancel := redisOperationContext(ctx)
+	defer cancel()
+	count, err := b.client.Exists(ctx, b.key(name)).Result()
 	if err != nil {
 		return true, err
 	}
 	return count == 0, nil
+}
+
+func redisOperationContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Deadline(); ok {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, redisOperationTimeout)
 }

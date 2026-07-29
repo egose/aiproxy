@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/observability"
+	"github.com/egose/aiproxy/internal/providerhealth"
 )
 
 func writeConfigFile(t *testing.T, contents string) string {
@@ -205,6 +207,44 @@ provider "openai" "openai" {
 	}
 }
 
+func TestReloadPreservesProviderHealthStateWhenConfigIsUnchanged(t *testing.T) {
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test"})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	a.health.MarkFailure("openai")
+
+	rewriteConfigFile(t, configPath, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	if err := a.Reload(); err != nil {
+		t.Fatalf("reload app: %v", err)
+	}
+	if a.health.IsHealthy("openai") {
+		t.Fatal("provider health should be preserved across reload")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readyz status = %d, want 503", w.Code)
+	}
+}
+
 func TestBuildWiresUsageAggregator(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -253,5 +293,32 @@ provider "openai" "openai" {
 	a.Server.Handler.ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("billing usage status = %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestNewHTTPClientDoesNotSetWholeRequestTimeout(t *testing.T) {
+	client := newHTTPClient()
+	if client.Timeout != 0 {
+		t.Fatalf("timeout = %v", client.Timeout)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T", client.Transport)
+	}
+	if transport.ResponseHeaderTimeout != 60*time.Second {
+		t.Fatalf("response header timeout = %v", transport.ResponseHeaderTimeout)
+	}
+}
+
+func TestReloadHealthTrackerReusesExistingTrackerWhenConfigMatches(t *testing.T) {
+	tracker := providerhealth.New(nil, config.ProviderHealth{Cooldown: 15 * time.Second})
+	current := &config.Runtime{ProviderHealth: config.ProviderHealth{Cooldown: 15 * time.Second}}
+	next := &config.Runtime{ProviderHealth: config.ProviderHealth{Cooldown: 15 * time.Second}}
+	if got := reloadHealthTracker(tracker, observability.NewMetrics(), current, next); got != tracker {
+		t.Fatal("expected tracker reuse")
+	}
+	changed := &config.Runtime{ProviderHealth: config.ProviderHealth{Cooldown: 30 * time.Second}}
+	if got := reloadHealthTracker(tracker, observability.NewMetrics(), current, changed); got == tracker {
+		t.Fatal("expected new tracker when config changes")
 	}
 }

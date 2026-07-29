@@ -33,14 +33,31 @@ func NewAuthenticator(cfg config.Auth) Authenticator {
 	if cfg.Mode == config.AuthModeNone {
 		return nopAuthenticator{}
 	}
-	return &staticAuthenticator{clients: cfg.Clients}
+	tokens := make(map[string]Principal, len(cfg.Clients))
+	for name, c := range cfg.Clients {
+		tokens[c.Token] = Principal{Name: name, Tenant: c.Tenant}
+	}
+	return &staticAuthenticator{tokens: tokens}
 }
 
 func NewAuthorizer(cfg config.Auth) Authorizer {
 	if cfg.Mode == config.AuthModeNone {
 		return AuthorizerFunc(func(*Principal, string) bool { return true })
 	}
-	return &staticAuthorizer{clients: cfg.Clients}
+	allowed := make(map[string]map[string]struct{}, len(cfg.Clients))
+	clients := make(map[string]struct{}, len(cfg.Clients))
+	for name, c := range cfg.Clients {
+		clients[name] = struct{}{}
+		if len(c.AllowedModels) == 0 {
+			continue
+		}
+		models := make(map[string]struct{}, len(c.AllowedModels))
+		for _, model := range c.AllowedModels {
+			models[model] = struct{}{}
+		}
+		allowed[name] = models
+	}
+	return &staticAuthorizer{clients: clients, allowed: allowed}
 }
 
 func (nopAuthenticator) Authenticate(r *http.Request) (*Principal, error) {
@@ -48,11 +65,12 @@ func (nopAuthenticator) Authenticate(r *http.Request) (*Principal, error) {
 }
 
 type staticAuthenticator struct {
-	clients map[string]config.Client
+	tokens map[string]Principal
 }
 
 type staticAuthorizer struct {
-	clients map[string]config.Client
+	clients map[string]struct{}
+	allowed map[string]map[string]struct{}
 }
 
 func (s *staticAuthenticator) Authenticate(r *http.Request) (*Principal, error) {
@@ -68,10 +86,10 @@ func (s *staticAuthenticator) Authenticate(r *http.Request) (*Principal, error) 
 	if token == "" {
 		return nil, ErrInvalidToken
 	}
-	for name, c := range s.clients {
-		if c.Token == token {
-			return &Principal{Name: name, Tenant: c.Tenant}, nil
-		}
+	principal, ok := s.tokens[token]
+	if ok {
+		matched := principal
+		return &matched, nil
 	}
 	return nil, ErrInvalidToken
 }
@@ -80,19 +98,15 @@ func (s *staticAuthorizer) Allow(principal *Principal, model string) bool {
 	if principal == nil {
 		return false
 	}
-	client, ok := s.clients[principal.Name]
-	if !ok {
+	if _, ok := s.clients[principal.Name]; !ok {
 		return false
 	}
-	if len(client.AllowedModels) == 0 {
+	allowed, ok := s.allowed[principal.Name]
+	if !ok {
 		return true
 	}
-	for _, allowed := range client.AllowedModels {
-		if allowed == model {
-			return true
-		}
-	}
-	return false
+	_, ok = allowed[model]
+	return ok
 }
 
 var (

@@ -146,6 +146,47 @@ func TestOpenAIEmbeddingsRewritesModelAndForwards(t *testing.T) {
 	}
 }
 
+func TestReadUpstreamBodyRejectsOversizeResponses(t *testing.T) {
+	body, err := readUpstreamBody(strings.NewReader(strings.Repeat("a", maxUpstreamBodyBytes+1)))
+	if err == nil {
+		t.Fatalf("expected oversize error, got body len %d", len(body))
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestAdapterUsesProvidedBodyWithoutReadingInboundBody(t *testing.T) {
+	var seenBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		seenBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-1"}`))
+	}))
+	defer upstream.Close()
+
+	a := New()
+	res, err := a.Do(context.Background(), Request{
+		Operation:     OpChatCompletions,
+		BaseURL:       upstream.URL,
+		APIKey:        "sk-test",
+		UpstreamModel: "gpt-4o-2024-08-06",
+		Body:          []byte(`{"model":"openai/gpt-4o-mini","messages":[]}`),
+		Inbound:       httptest.NewRequest(http.MethodPost, "/v1/chat/completions", http.NoBody),
+		Client:        upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", res.StatusCode)
+	}
+	if !strings.Contains(seenBody, `"model":"gpt-4o-2024-08-06"`) {
+		t.Fatalf("upstream body did not use provided body: %s", seenBody)
+	}
+}
+
 func TestOpenAIResponsesRewritesModelAndForwards(t *testing.T) {
 	var seenAuth, seenBody, seenPath string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,66 @@
+name: Publish Docusaurus
+
+on:
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/docusaurus.yml
+    - website/**
+  pull_request:
+    paths:
+    - .github/workflows/docusaurus.yml
+    - website/**
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+    - name: Setup Tools
+      uses: ./.github/actions/setup-tools
+
+    - name: Setup NPM Packages
+      uses: ./.github/actions/setup-npm
+
+    - name: Typecheck the website
+      run: pnpm typecheck
+      working-directory: website
+
+    - name: Build the Docusaurus site
+      run: pnpm build
+      working-directory: website
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+    - name: Setup Tools
+      uses: ./.github/actions/setup-tools
+
+    - name: Setup NPM Packages
+      uses: ./.github/actions/setup-npm
+
+    - name: Build the Docusaurus site
+      run: pnpm build
+      working-directory: website
+
+    - name: Deploy GitHub Pages
+      uses: JamesIves/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f
+      with:
+        branch: cf-pages
+        folder: ./website/build
+        clean: true

@@ -113,7 +113,7 @@ func (a *adapter) doGeminiChat(ctx context.Context, r Request) (*Result, error) 
 	if r.BaseURL == "" {
 		r.BaseURL = defaultGeminiBaseURL
 	}
-	body, err := io.ReadAll(r.Inbound.Body)
+	body, err := requestBody(r)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
@@ -142,7 +142,7 @@ func (a *adapter) doGeminiChat(ctx context.Context, r Request) (*Result, error) 
 	}
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
-		errBody, err := io.ReadAll(resp.Body)
+		errBody, err := readUpstreamBody(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("read error body: %w", err)
 		}
@@ -162,7 +162,7 @@ func (a *adapter) doGeminiChat(ctx context.Context, r Request) (*Result, error) 
 	}
 	defer resp.Body.Close()
 
-	outBody, err := io.ReadAll(resp.Body)
+	outBody, err := readUpstreamBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}
@@ -181,7 +181,7 @@ func (a *adapter) doGeminiEmbeddings(ctx context.Context, r Request) (*Result, e
 	if r.BaseURL == "" {
 		r.BaseURL = defaultGeminiBaseURL
 	}
-	body, err := io.ReadAll(r.Inbound.Body)
+	body, err := requestBody(r)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
@@ -207,7 +207,7 @@ func (a *adapter) doGeminiEmbeddings(ctx context.Context, r Request) (*Result, e
 	}
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
-		errBody, err := io.ReadAll(resp.Body)
+		errBody, err := readUpstreamBody(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("read error body: %w", err)
 		}
@@ -218,7 +218,7 @@ func (a *adapter) doGeminiEmbeddings(ctx context.Context, r Request) (*Result, e
 		}, nil
 	}
 	defer resp.Body.Close()
-	outBody, err := io.ReadAll(resp.Body)
+	outBody, err := readUpstreamBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}
@@ -237,7 +237,7 @@ func (a *adapter) doGeminiResponses(ctx context.Context, r Request) (*Result, er
 	if r.BaseURL == "" {
 		r.BaseURL = defaultGeminiBaseURL
 	}
-	body, err := io.ReadAll(r.Inbound.Body)
+	body, err := requestBody(r)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
@@ -270,7 +270,7 @@ func (a *adapter) doGeminiResponses(ctx context.Context, r Request) (*Result, er
 	}
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
-		errBody, err := io.ReadAll(resp.Body)
+		errBody, err := readUpstreamBody(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("read error body: %w", err)
 		}
@@ -280,7 +280,7 @@ func (a *adapter) doGeminiResponses(ctx context.Context, r Request) (*Result, er
 		return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: translateGeminiResponsesStream(resp.Body, r.PublicModel), Streaming: true}, nil
 	}
 	defer resp.Body.Close()
-	outBody, err := io.ReadAll(resp.Body)
+	outBody, err := readUpstreamBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}

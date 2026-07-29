@@ -1,6 +1,7 @@
 package providerhealth
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -11,9 +12,9 @@ import (
 const defaultCooldown = 30 * time.Second
 
 type backend interface {
-	MarkSuccess(name string) error
-	MarkFailure(name string, cooldown time.Duration) error
-	IsHealthy(name string) (bool, error)
+	MarkSuccess(ctx context.Context, name string) error
+	MarkFailure(ctx context.Context, name string, cooldown time.Duration) error
+	IsHealthy(ctx context.Context, name string) (bool, error)
 }
 
 type Tracker struct {
@@ -64,30 +65,42 @@ func (t *Tracker) SetProviders(providers map[string]config.Provider) {
 }
 
 func (t *Tracker) MarkSuccess(name string) {
+	t.MarkSuccessContext(context.Background(), name)
+}
+
+func (t *Tracker) MarkSuccessContext(ctx context.Context, name string) {
 	if t == nil || name == "" {
 		return
 	}
-	_ = t.backend.MarkSuccess(name)
+	_ = t.backend.MarkSuccess(ctx, name)
 	if t.metrics != nil {
 		t.metrics.SetProviderHealthy(name, true)
 	}
 }
 
 func (t *Tracker) MarkFailure(name string) {
+	t.MarkFailureContext(context.Background(), name)
+}
+
+func (t *Tracker) MarkFailureContext(ctx context.Context, name string) {
 	if t == nil || name == "" {
 		return
 	}
-	_ = t.backend.MarkFailure(name, t.cooldown)
+	_ = t.backend.MarkFailure(ctx, name, t.cooldown)
 	if t.metrics != nil {
 		t.metrics.SetProviderHealthy(name, false)
 	}
 }
 
 func (t *Tracker) IsHealthy(name string) bool {
+	return t.IsHealthyContext(context.Background(), name)
+}
+
+func (t *Tracker) IsHealthyContext(ctx context.Context, name string) bool {
 	if t == nil || name == "" {
 		return true
 	}
-	healthy, err := t.backend.IsHealthy(name)
+	healthy, err := t.backend.IsHealthy(ctx, name)
 	if err != nil {
 		return true
 	}
@@ -98,11 +111,15 @@ func (t *Tracker) IsHealthy(name string) bool {
 }
 
 func (t *Tracker) AnyHealthy(providers map[string]config.Provider) bool {
+	return t.AnyHealthyContext(context.Background(), providers)
+}
+
+func (t *Tracker) AnyHealthyContext(ctx context.Context, providers map[string]config.Provider) bool {
 	if len(providers) == 0 {
 		return false
 	}
 	for name := range providers {
-		if t.IsHealthy(name) {
+		if t.IsHealthyContext(ctx, name) {
 			return true
 		}
 	}
@@ -119,21 +136,21 @@ func newMemoryBackend() *memoryBackend {
 	return &memoryBackend{states: make(map[string]time.Time), now: time.Now}
 }
 
-func (b *memoryBackend) MarkSuccess(name string) error {
+func (b *memoryBackend) MarkSuccess(_ context.Context, name string) error {
 	b.mu.Lock()
 	b.states[name] = time.Time{}
 	b.mu.Unlock()
 	return nil
 }
 
-func (b *memoryBackend) MarkFailure(name string, cooldown time.Duration) error {
+func (b *memoryBackend) MarkFailure(_ context.Context, name string, cooldown time.Duration) error {
 	b.mu.Lock()
 	b.states[name] = b.now().Add(cooldown)
 	b.mu.Unlock()
 	return nil
 }
 
-func (b *memoryBackend) IsHealthy(name string) (bool, error) {
+func (b *memoryBackend) IsHealthy(_ context.Context, name string) (bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	until, ok := b.states[name]

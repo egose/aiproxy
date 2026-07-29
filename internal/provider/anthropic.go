@@ -61,7 +61,7 @@ func (a *adapter) doAnthropicChat(ctx context.Context, r Request) (*Result, erro
 	if r.BaseURL == "" {
 		r.BaseURL = defaultAnthropicBaseURL
 	}
-	body, err := io.ReadAll(r.Inbound.Body)
+	body, err := requestBody(r)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
@@ -88,7 +88,7 @@ func (a *adapter) doAnthropicChat(ctx context.Context, r Request) (*Result, erro
 	}
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
-		errBody, err := io.ReadAll(resp.Body)
+		errBody, err := readUpstreamBody(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("read error body: %w", err)
 		}
@@ -108,7 +108,7 @@ func (a *adapter) doAnthropicChat(ctx context.Context, r Request) (*Result, erro
 	}
 	defer resp.Body.Close()
 
-	outBody, err := io.ReadAll(resp.Body)
+	outBody, err := readUpstreamBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}
@@ -127,7 +127,7 @@ func (a *adapter) doAnthropicResponses(ctx context.Context, r Request) (*Result,
 	if r.BaseURL == "" {
 		r.BaseURL = defaultAnthropicBaseURL
 	}
-	body, err := io.ReadAll(r.Inbound.Body)
+	body, err := requestBody(r)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
@@ -158,7 +158,7 @@ func (a *adapter) doAnthropicResponses(ctx context.Context, r Request) (*Result,
 	}
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
-		errBody, err := io.ReadAll(resp.Body)
+		errBody, err := readUpstreamBody(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("read error body: %w", err)
 		}
@@ -168,7 +168,7 @@ func (a *adapter) doAnthropicResponses(ctx context.Context, r Request) (*Result,
 		return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: translateAnthropicResponsesStream(resp.Body, r.PublicModel), Streaming: true}, nil
 	}
 	defer resp.Body.Close()
-	outBody, err := io.ReadAll(resp.Body)
+	outBody, err := readUpstreamBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}

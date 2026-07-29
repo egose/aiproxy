@@ -79,3 +79,21 @@ func TestBearerStaticAuthorizerAllowsConfiguredModels(t *testing.T) {
 		t.Fatal("expected unrelated model to be denied")
 	}
 }
+
+func TestBearerStaticAuthorizerAllowsClientWithoutAllowedModels(t *testing.T) {
+	a := NewAuthorizer(config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{
+		"ci": {Name: "ci", Token: "tok"},
+	}})
+	if !a.Allow(&Principal{Name: "ci"}, "openai/gpt-4o-mini") {
+		t.Fatal("expected unrestricted client to be allowed")
+	}
+}
+
+func TestBearerStaticAuthorizerRejectsUnknownPrincipal(t *testing.T) {
+	a := NewAuthorizer(config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{
+		"ci": {Name: "ci", Token: "tok"},
+	}})
+	if a.Allow(&Principal{Name: "unknown"}, "openai/gpt-4o-mini") {
+		t.Fatal("expected unknown principal to be denied")
+	}
+}

@@ -1,0 +1,6 @@
+# pnpm-workspace.yaml
+allowBuilds:
+  core-js: false
+  core-js-pure: false
+  esbuild: false
+confirmModulesPurge: false
