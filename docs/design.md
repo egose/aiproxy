@@ -27,7 +27,6 @@ Configuration is written in HCL with an Alloy-like two-label block style.
 
 ## Non-Goals For MVP
 
-- Dynamic config reload
 - Admin API for provider or alias management
 - Provider-specific public APIs exposed directly to clients
 - Global cross-instance balancing state
@@ -633,10 +632,24 @@ Defaults:
 
 Initial `/metrics` coverage includes:
 
+- inbound HTTP request counts by method/path/status
+- inbound HTTP request latency by method/path/status
+- inbound HTTP request body size histograms by method/path
+- outbound HTTP response body size histograms by method/path/status
+- streaming response counts by method/path/status
+- streaming response duration by method/path/status
+- proxy-generated HTTP error counts by method/path/status/error_type
 - provider selection counts
 - alias retry counts
+- alias in-flight request gauges by target
+- auth mode startup state
+- build version info
+- provider counts by type and active/disabled state
+- alias counts by algorithm
 - skipped-provider state
 - readiness state
+- readiness reason state
+- upstream response body size histograms by operation/provider/outcome
 - upstream request counts by operation/provider/outcome
 - upstream request latency by operation/provider/outcome
 
@@ -722,7 +735,6 @@ internal/observability/
 - image and audio APIs
 - rate limiting and quotas
 - per-client policy
-- hot config reload
 - broader provider catalog
 
 ## Testing Strategy
@@ -779,7 +791,24 @@ The following are intentionally out of scope for the MVP:
 - rate limiting
 - billing and tenancy
 - dynamic provider health state shared across instances
-- live config reload
+
+## Reload Behavior
+
+The server supports in-process config reload on `SIGHUP`.
+
+Reload currently rebuilds and swaps:
+
+- inbound auth configuration
+- provider/model catalog
+- alias routing state
+- readiness and startup inventory metrics
+
+Reload does not replace the active listener socket.
+
+The following config changes still require a full restart:
+
+- listener address changes
+- listener timeout changes
 
 ## Appendix: Open Questions And Rejected Alternatives
 

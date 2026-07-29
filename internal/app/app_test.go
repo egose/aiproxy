@@ -23,6 +23,13 @@ func writeConfigFile(t *testing.T, contents string) string {
 	return path
 }
 
+func rewriteConfigFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("rewrite config: %v", err)
+	}
+}
+
 func TestStartupSummaryIncludesEnabledSkippedAndAliases(t *testing.T) {
 	rt := &config.Runtime{
 		Providers: []config.Provider{{
@@ -109,5 +116,90 @@ provider "openai" "openai" {
 	inactiveApp.Server.Handler.ServeHTTP(inactiveW, inactiveR)
 	if inactiveW.Code != http.StatusServiceUnavailable {
 		t.Fatalf("inactive readyz status = %d, want 503", inactiveW.Code)
+	}
+}
+
+func TestReloadSwapsRuntimeWithoutRestart(t *testing.T) {
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test"})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("initial readyz status = %d", w.Code)
+	}
+
+	rewriteConfigFile(t, configPath, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = ""
+  model "gpt-4o-mini" {}
+}
+`)
+	if err := a.Reload(); err != nil {
+		t.Fatalf("reload app: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("reloaded readyz status = %d, want 503", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("models status = %d", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "openai/gpt-4o-mini") {
+		t.Fatalf("models should not include disabled provider after reload: %s", w.Body.String())
+	}
+}
+
+func TestReloadRejectsListenerShapeChange(t *testing.T) {
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test"})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+
+	rewriteConfigFile(t, configPath, `
+listener "http" "public" { address = ":12345" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	if err := a.Reload(); err == nil {
+		t.Fatal("expected reload to reject listener change")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("readyz status after failed reload = %d, want 200", w.Code)
 	}
 }

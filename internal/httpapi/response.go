@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/provider"
 )
 
@@ -20,7 +21,7 @@ type modelsResponse struct {
 	Data   []ModelCard `json:"data"`
 }
 
-func (h *handler) writeResult(w http.ResponseWriter, r *provider.Result) {
+func (h *Handler) writeResult(w http.ResponseWriter, r *provider.Result) {
 	defer closeResult(r)
 	for key, vals := range r.Header {
 		if key == "Content-Length" || key == "Transfer-Encoding" {
@@ -43,24 +44,31 @@ func (h *handler) writeResult(w http.ResponseWriter, r *provider.Result) {
 	_, _ = w.Write(r.Body)
 }
 
-func (h *handler) writeModels(w http.ResponseWriter) {
+func (h *Handler) writeModels(w http.ResponseWriter, catalog []ModelCard) {
 	resp := modelsResponse{
 		Object: "list",
-		Data:   make([]ModelCard, 0, len(h.deps.Catalog)),
+		Data:   make([]ModelCard, 0, len(catalog)),
 	}
-	resp.Data = append(resp.Data, h.deps.Catalog...)
+	resp.Data = append(resp.Data, catalog...)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func (h *handler) writeError(w http.ResponseWriter, status int, errType, message string) {
+func (h *Handler) writeError(w http.ResponseWriter, status int, errType, message string) {
 	e := apiError{}
 	e.Error.Type = errType
 	e.Error.Message = message
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(e)
+}
+
+func (h *Handler) writeRequestError(metrics *observability.Metrics, w http.ResponseWriter, r *http.Request, status int, errType, message string) {
+	if metrics != nil {
+		metrics.RecordHTTPError(r.Method, metricsPathLabel(r), status, errType)
+	}
+	h.writeError(w, status, errType, message)
 }
 
 func closeResult(r *provider.Result) {

@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/egose/aiproxy/internal/auth"
@@ -26,61 +30,50 @@ type BuildOptions struct {
 }
 
 type App struct {
-	Config *config.Runtime
-	Server *http.Server
+	mu       sync.RWMutex
+	Config   *config.Runtime
+	Server   *http.Server
+	handler  *httpapi.Handler
+	metrics  *observability.Metrics
+	logger   *slog.Logger
+	adapter  provider.Adapter
+	client   *http.Client
+	buildOpt BuildOptions
 }
 
 func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	logger := observability.NewLogger(nil)
 	slog.SetDefault(logger)
 
-	rt, err := config.LoadFile(opts.ConfigPath)
+	rt, err := loadRuntime(opts.ConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	observability.LogStartup(logger, rt)
 
-	authenticator := auth.NewAuthenticator(rt.Auth)
-	resolver := modelresolver.New(rt)
 	adapter := provider.New()
 	metrics := observability.NewMetrics()
+	metrics.SetBuildInfo(opts.Version)
 	metrics.RecordConfig(rt)
 
 	httpClient := &http.Client{Timeout: 5 * time.Minute}
 
-	handler := httpapi.NewHandler(httpapi.Dependencies{
-		Resolver:  resolver,
-		Adapter:   adapter,
-		Auth:      authenticator,
-		Client:    httpClient,
-		Catalog:   httpapi.BuildModelCatalog(rt),
-		Metrics:   metrics,
-		Providers: rt.ProviderByName,
-		Logger:    logger,
-	})
+	handler := httpapi.NewHandler(buildDependencies(rt, logger, adapter, metrics, httpClient))
 
 	server := &http.Server{
-		Addr:           rt.Listener.Address,
-		Handler:        handler,
-		ReadTimeout:    defaultReadTimeout,
-		MaxHeaderBytes: defaultMaxHeaderBytes,
+		Handler: handler,
 	}
-	if rt.Listener.Timeouts.ReadHeader > 0 {
-		server.ReadHeaderTimeout = rt.Listener.Timeouts.ReadHeader
-	}
-	if rt.Listener.Timeouts.Idle > 0 {
-		server.IdleTimeout = rt.Listener.Timeouts.Idle
-	}
-	if rt.Listener.Timeouts.Write > 0 {
-		server.WriteTimeout = rt.Listener.Timeouts.Write
-	}
+	applyServerConfig(server, rt.Listener)
 
-	return &App{Config: rt, Server: server}, nil
+	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, client: httpClient, buildOpt: opts}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
-	logger := slog.Default()
-	logger.Info("starting server", "address", a.Server.Addr)
+	a.logger.Info("starting server", "address", a.Server.Addr)
+
+	reloadCh := make(chan os.Signal, 1)
+	signal.Notify(reloadCh, syscall.SIGHUP)
+	defer signal.Stop(reloadCh)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -89,17 +82,83 @@ func (a *App) Run(ctx context.Context) error {
 		}
 	}()
 
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
-		logger.Info("shutting down server")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := a.Server.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("server shutdown: %w", err)
+	for {
+		select {
+		case err := <-errCh:
+			return err
+		case <-reloadCh:
+			if err := a.Reload(); err != nil {
+				a.logger.Error("config reload failed", "error", err)
+			} else {
+				a.logger.Info("config reloaded")
+			}
+		case <-ctx.Done():
+			a.logger.Info("shutting down server")
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := a.Server.Shutdown(shutdownCtx); err != nil {
+				return fmt.Errorf("server shutdown: %w", err)
+			}
+			a.logger.Info("server stopped")
+			return nil
 		}
-		logger.Info("server stopped")
-		return nil
+	}
+}
+
+func (a *App) Reload() error {
+	rt, err := loadRuntime(a.buildOpt.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+
+	a.mu.RLock()
+	current := a.Config
+	a.mu.RUnlock()
+	if current != nil && (rt.Listener.Address != current.Listener.Address || rt.Listener.Timeouts != current.Listener.Timeouts) {
+		return fmt.Errorf("listener changes require restart")
+	}
+
+	a.metrics.SetBuildInfo(a.buildOpt.Version)
+	a.metrics.RecordConfig(rt)
+	a.handler.UpdateDependencies(buildDependencies(rt, a.logger, a.adapter, a.metrics, a.client))
+	a.mu.Lock()
+	a.Config = rt
+	a.mu.Unlock()
+	observability.LogStartup(a.logger, rt)
+	return nil
+}
+
+func buildDependencies(rt *config.Runtime, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, httpClient *http.Client) httpapi.Dependencies {
+	return httpapi.Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   adapter,
+		Auth:      auth.NewAuthenticator(rt.Auth),
+		Client:    httpClient,
+		Catalog:   httpapi.BuildModelCatalog(rt),
+		Metrics:   metrics,
+		Providers: rt.ProviderByName,
+		Logger:    logger,
+	}
+}
+
+func loadRuntime(path string) (*config.Runtime, error) {
+	return config.LoadFile(path)
+}
+
+func applyServerConfig(server *http.Server, listener config.Listener) {
+	server.Addr = listener.Address
+	server.ReadTimeout = defaultReadTimeout
+	server.MaxHeaderBytes = defaultMaxHeaderBytes
+	server.ReadHeaderTimeout = 0
+	server.IdleTimeout = 0
+	server.WriteTimeout = 0
+	if listener.Timeouts.ReadHeader > 0 {
+		server.ReadHeaderTimeout = listener.Timeouts.ReadHeader
+	}
+	if listener.Timeouts.Idle > 0 {
+		server.IdleTimeout = listener.Timeouts.Idle
+	}
+	if listener.Timeouts.Write > 0 {
+		server.WriteTimeout = listener.Timeouts.Write
 	}
 }

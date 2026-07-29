@@ -17,6 +17,10 @@ The HCL config uses `env("VAR")` for secret/placeholder substitution; values
 are textually inlined **before** HCL parsing. Run `set -a; . ./.env; set +a`
 before invoking the binary locally so env vars resolve.
 
+The server supports `SIGHUP`-triggered live config reload for auth, provider,
+model, alias, and metrics-backed inventory state. Listener address or timeout
+changes still require restart.
+
 ## Lint / typecheck / test
 
 | Command          | Effect                                                  |
@@ -52,5 +56,5 @@ repo has sandbox services for stable end-to-end provider coverage.)
   `Authorization: Bearer` header, and copies the body (including SSE streams)
   back. `anthropic` and `gemini` use built-in request/response translation for
   chat completions. `gemini` also supports embeddings translation, and both
-  translated providers support a conservative non-streaming `/v1/responses`
-  subset. Anthropic embeddings are still deferred.
+  translated providers support a conservative `/v1/responses` subset for both
+  JSON and SSE streaming. Anthropic embeddings are still deferred.

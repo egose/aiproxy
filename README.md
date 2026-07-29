@@ -14,7 +14,7 @@ OpenAI-compatible responses.
 - `GET /metrics`
 - `POST /v1/chat/completions` (JSON and SSE streaming)
 - `POST /v1/embeddings` for `openai`, `openai-compatible`, and `gemini` providers
-- `POST /v1/responses` for `openai`, `openai-compatible`, `anthropic`, and `gemini` providers
+- `POST /v1/responses` for `openai`, `openai-compatible`, `anthropic`, and `gemini` providers (JSON and SSE streaming)
 
 ### Auth Modes
 
@@ -41,7 +41,10 @@ OpenAI-compatible responses.
 ### Not in MVP
 
 - Rate limiting, quotas, billing, tenancy
-- Hot config reload
+
+The server supports live config reload on `SIGHUP` for runtime request-routing
+state such as auth, providers, models, aliases, and metrics-backed inventory.
+Listener address and timeout changes still require a restart.
 
 See [docs/design.md](docs/design.md) for the full design document.
 
@@ -224,11 +227,17 @@ provider with `api_key_ref { path = "..." key = "..." }`.
   models return a client-visible unsupported-operation error.
 - `POST /v1/responses` is currently implemented for `openai`,
   `openai-compatible`, `anthropic`, and `gemini` providers. The translated
-  provider path currently supports a conservative request subset and does not
-  implement streaming responses.
+  provider path supports a conservative request subset for both JSON and
+  streaming responses.
 - `/metrics` exposes Prometheus-format metrics for provider selection, alias
-  retries, skipped providers, readiness state, and upstream request counts /
-  latency by operation and provider.
+  retries, skipped providers, readiness state, startup inventory gauges for
+  build version / auth mode / provider types / alias algorithms, explicit
+  readiness reason gauges, inbound HTTP request counts / latency by method and
+  path, request / response body size histograms,
+  streaming response counts / duration, proxy-generated HTTP error counts by
+  endpoint and error type, alias in-flight request gauges by target, and
+  upstream request counts / latency / response body size by operation and
+  provider.
 - API keys and client bearer tokens are never logged.
 
 ## Deferred / Planned

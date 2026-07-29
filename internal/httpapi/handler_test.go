@@ -523,12 +523,33 @@ func TestHandlerHealthEndpoints(t *testing.T) {
 
 func TestHandlerReadyzFailsWithoutProviders(t *testing.T) {
 	rt := &config.Runtime{ProviderByName: map[string]config.Provider{}, AliasByName: map[string]config.Alias{}}
-	h := newHandler(t, rt, &stubAdapter{})
+	metrics := observability.NewMetrics()
+	metrics.RecordConfig(rt)
+	h := NewHandler(Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   &stubAdapter{},
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Metrics:   metrics,
+		Providers: rt.ProviderByName,
+	})
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", w.Code)
+	}
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsW := httptest.NewRecorder()
+	h.ServeHTTP(metricsW, metricsReq)
+	body := metricsW.Body.String()
+	for _, want := range []string{
+		"aiproxy_ready 0",
+		`aiproxy_ready_reason_info{reason="active_providers"} 0`,
+		`aiproxy_ready_reason_info{reason="no_active_providers"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics output missing %q\n%s", want, body)
+		}
 	}
 }
 
@@ -561,13 +582,103 @@ func TestHandlerMetricsEndpointAndCounters(t *testing.T) {
 	}
 	body := metricsW.Body.String()
 	for _, want := range []string{
+		`aiproxy_http_requests_total{method="POST",path="/v1/chat/completions",status="200"} 1`,
+		`aiproxy_http_request_duration_seconds_count{method="POST",path="/v1/chat/completions",status="200"} 1`,
+		`aiproxy_http_request_body_bytes_count{method="POST",path="/v1/chat/completions"} 1`,
+		`aiproxy_http_response_body_bytes_count{method="POST",path="/v1/chat/completions",status="200"} 1`,
 		"aiproxy_active_providers 1",
 		"aiproxy_disabled_providers 0",
 		"aiproxy_aliases 1",
 		"aiproxy_ready 1",
+		`aiproxy_ready_reason_info{reason="active_providers"} 1`,
+		`aiproxy_ready_reason_info{reason="no_active_providers"} 0`,
 		`aiproxy_provider_selections_total{model="gpt-4o-mini",operation="chat_completions",provider="openai",public_model="openai/gpt-4o-mini"} 1`,
 		`aiproxy_upstream_requests_total{operation="chat_completions",outcome="success",provider="openai"} 1`,
 		`aiproxy_upstream_request_duration_seconds_count{operation="chat_completions",outcome="success",provider="openai"} 1`,
+		`aiproxy_upstream_response_body_bytes_count{operation="chat_completions",outcome="success",provider="openai"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics output missing %q\n%s", want, body)
+		}
+	}
+}
+
+func TestHandlerMetricsIncludeProxyErrors(t *testing.T) {
+	rt := newRT()
+	metrics := observability.NewMetrics()
+	metrics.RecordConfig(rt)
+	h := NewHandler(Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   &stubAdapter{},
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:   BuildModelCatalog(rt),
+		Metrics:   metrics,
+		Providers: rt.ProviderByName,
+	})
+
+	badReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"messages":[{"role":"user","content":"hi"}]}`)))
+	badW := httptest.NewRecorder()
+	h.ServeHTTP(badW, badReq)
+	if badW.Code != http.StatusBadRequest {
+		t.Fatalf("bad request status = %d", badW.Code)
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsW := httptest.NewRecorder()
+	h.ServeHTTP(metricsW, metricsReq)
+	if metricsW.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d", metricsW.Code)
+	}
+	body := metricsW.Body.String()
+	for _, want := range []string{
+		`aiproxy_http_errors_total{error_type="invalid_model",method="POST",path="/v1/chat/completions",status="400"} 1`,
+		`aiproxy_http_requests_total{method="POST",path="/v1/chat/completions",status="400"} 1`,
+		`aiproxy_http_request_body_bytes_count{method="POST",path="/v1/chat/completions"} 1`,
+		`aiproxy_http_response_body_bytes_count{method="POST",path="/v1/chat/completions",status="400"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics output missing %q\n%s", want, body)
+		}
+	}
+}
+
+func TestHandlerMetricsIncludeStreamingResponses(t *testing.T) {
+	rt := newRT()
+	metrics := observability.NewMetrics()
+	metrics.RecordConfig(rt)
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Streaming:  true,
+		StreamBody: io.NopCloser(strings.NewReader("data: hello\n\ndata: [DONE]\n\n")),
+	}}
+	h := NewHandler(Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   stub,
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:   BuildModelCatalog(rt),
+		Metrics:   metrics,
+		Providers: rt.ProviderByName,
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","stream":true,"messages":[]}`)))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("streaming status = %d", w.Code)
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsW := httptest.NewRecorder()
+	h.ServeHTTP(metricsW, metricsReq)
+	if metricsW.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d", metricsW.Code)
+	}
+	body := metricsW.Body.String()
+	for _, want := range []string{
+		`aiproxy_http_stream_responses_total{method="POST",path="/v1/chat/completions",status="200"} 1`,
+		`aiproxy_http_stream_duration_seconds_count{method="POST",path="/v1/chat/completions",status="200"} 1`,
+		`aiproxy_upstream_response_body_bytes_count{operation="chat_completions",outcome="success",provider="openai"} 1`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics output missing %q\n%s", want, body)
