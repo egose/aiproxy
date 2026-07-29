@@ -21,6 +21,10 @@ Direct CLI usage:
 ```sh
 aiproxy serve
 aiproxy validate
+aiproxy paths
+aiproxy examples
+aiproxy configure
+aiproxy configure provider
 aiproxy serve --config /etc/aiproxy/config.hcl
 aiproxy validate --config /etc/aiproxy/config.hcl
 aiproxy version
@@ -33,6 +37,85 @@ When running locally with env-based secrets, load your environment before invoki
 
 ```sh
 set -a; . ./.env; set +a
+```
+
+## Configure Wizard
+
+`aiproxy` includes an interactive config editor for the top-level HCL blocks and
+the provider secrets JSON file.
+
+Interactive entrypoints:
+
+```sh
+aiproxy configure
+aiproxy configure provider
+aiproxy configure auth
+aiproxy configure alias
+aiproxy configure listener
+aiproxy configure provider-health
+```
+
+The root `aiproxy configure` command shows a block selector. The block-specific
+subcommands can also be used directly.
+
+Supported workflows:
+
+- create or update `listener`, `auth`, `provider`, `alias`, and `provider_health`
+- update provider secrets when using `api_key_ref`
+- delete existing blocks with `--delete`
+
+For scripted environments, use `--non-interactive` on block subcommands.
+
+Provider example:
+
+```sh
+aiproxy configure provider \
+  --config /etc/aiproxy/config.hcl \
+  --non-interactive \
+  --name backup \
+  --type openai-compatible \
+  --display-name "Backup provider" \
+  --base-url https://llm.internal/v1 \
+  --secrets-path /etc/aiproxy/keys.json \
+  --secrets-key localai \
+  --api-key "$LOCALAI_API_KEY" \
+  --model qwen3-32b=qwen/qwen3-32b \
+  --model-capabilities qwen3-32b=chat,responses
+```
+
+Alias example:
+
+```sh
+aiproxy configure alias \
+  --config /etc/aiproxy/config.hcl \
+  --non-interactive \
+  --name chat_default \
+  --algorithm round_robin \
+  --target primary/gpt-4o-mini \
+  --target backup/qwen3-32b
+```
+
+Auth example:
+
+```sh
+aiproxy configure auth \
+  --config /etc/aiproxy/config.hcl \
+  --non-interactive \
+  --name main \
+  --mode bearer_static \
+  --rate-limit-rpm 120 \
+  --rate-limit-burst 120 \
+  --client internal-app \
+  --client-token-env internal-app=AIPROXY_CLIENT_TOKEN \
+  --client-tenant internal-app=internal \
+  --client-allowed-models internal-app=alias/chat_default,openai/gpt-4o-mini
+```
+
+Delete examples:
+
+```sh
+aiproxy configure provider --config /etc/aiproxy/config.hcl --delete --name backup
+aiproxy configure alias --config /etc/aiproxy/config.hcl --delete --name chat_default
 ```
 
 ## Docker

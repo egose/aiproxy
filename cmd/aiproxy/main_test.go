@@ -81,6 +81,9 @@ func TestRootHelpIncludesDefaultPaths(t *testing.T) {
 		"~/.config/aiproxy/config.hcl",
 		"$XDG_CONFIG_HOME/aiproxy/keys.json",
 		"~/.config/aiproxy/keys.json",
+		"aiproxy paths",
+		"aiproxy examples",
+		"aiproxy configure",
 	}
 	for _, check := range checks {
 		if !strings.Contains(help, check) {
@@ -149,22 +152,26 @@ func TestExamplesCommandIncludesCommandsAndConfig(t *testing.T) {
 
 	out := buf.String()
 	checks := []string{
+		"+-",
 		"aiproxy serve",
 		"aiproxy validate",
+		"aiproxy configure",
+		"aiproxy configure provider",
 		"aiproxy serve --config /etc/aiproxy/config.hcl",
+		"| Common commands",
 		"listener \"http\" \"public\"",
 		"provider \"openai\" \"openai\"",
 		"env(\"OPENAI_API_KEY\")",
-		"Alias failover example:",
+		"| Alias failover example",
 		"alias \"chat_default\"",
 		"provider \"openai-compatible\" \"backup\"",
-		"api_key_ref override example:",
+		"| api_key_ref override example",
 		"path = \"/etc/aiproxy/keys.json\"",
 		"\"openai\": \"sk-...\"",
 		"\"localai\": \"secret\"",
-		"Docker example:",
+		"| Docker example",
 		"docker run --rm \\",
-		"systemd example:",
+		"| systemd example",
 		"ExecStart=/usr/local/bin/aiproxy serve --config /etc/aiproxy/config.hcl",
 	}
 	for _, check := range checks {
@@ -188,17 +195,17 @@ func TestExamplesConfigCommandPrintsConfigExamples(t *testing.T) {
 
 	out := buf.String()
 	checks := []string{
-		"Common commands:",
-		"Minimal config:",
-		"Alias failover example:",
-		"api_key_ref override example:",
+		"| Common commands",
+		"| Minimal config",
+		"| Alias failover example",
+		"| api_key_ref override example",
 	}
 	for _, check := range checks {
 		if !strings.Contains(out, check) {
 			t.Fatalf("config examples output missing %q:\n%s", check, out)
 		}
 	}
-	if strings.Contains(out, "Docker example:") || strings.Contains(out, "systemd example:") {
+	if strings.Contains(out, "| Docker example") || strings.Contains(out, "| systemd example") {
 		t.Fatalf("config examples output unexpectedly included deployment sections:\n%s", out)
 	}
 }
@@ -217,9 +224,9 @@ func TestExamplesAllCommandPrintsCombinedExamples(t *testing.T) {
 
 	out := buf.String()
 	checks := []string{
-		"Common commands:",
-		"Docker example:",
-		"systemd example:",
+		"| Common commands",
+		"| Docker example",
+		"| systemd example",
 	}
 	for _, check := range checks {
 		if !strings.Contains(out, check) {
@@ -242,7 +249,7 @@ func TestExamplesAuthCommandPrintsAuthExample(t *testing.T) {
 
 	out := buf.String()
 	checks := []string{
-		"Auth example:",
+		"| Auth example",
 		"rate_limit {",
 		"allowed_models = [\"alias/chat_default\", \"openai/gpt-4o-mini\"]",
 	}
@@ -251,7 +258,7 @@ func TestExamplesAuthCommandPrintsAuthExample(t *testing.T) {
 			t.Fatalf("auth examples output missing %q:\n%s", check, out)
 		}
 	}
-	if strings.Contains(out, "Docker example:") || strings.Contains(out, "Alias failover example:") {
+	if strings.Contains(out, "| Docker example") || strings.Contains(out, "| Alias failover example") {
 		t.Fatalf("auth examples output unexpectedly included other sections:\n%s", out)
 	}
 }
@@ -270,8 +277,8 @@ func TestExamplesAliasCommandPrintsAliasExample(t *testing.T) {
 
 	out := buf.String()
 	checks := []string{
-		"Auth example:",
-		"Alias failover example:",
+		"| Alias failover example",
+		"| Auth example",
 		"alias \"chat_default\"",
 		"provider \"openai-compatible\" \"backup\"",
 	}
@@ -280,7 +287,7 @@ func TestExamplesAliasCommandPrintsAliasExample(t *testing.T) {
 			t.Fatalf("alias examples output missing %q:\n%s", check, out)
 		}
 	}
-	if strings.Contains(out, "Docker example:") || strings.Contains(out, "systemd example:") || strings.Contains(out, "Minimal config:") {
+	if strings.Contains(out, "| Docker example") || strings.Contains(out, "| systemd example") || strings.Contains(out, "| Minimal config") {
 		t.Fatalf("alias examples output unexpectedly included other sections:\n%s", out)
 	}
 }
@@ -298,10 +305,10 @@ func TestExamplesDockerCommandPrintsDockerExample(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "Docker example:") || !strings.Contains(out, "docker run --rm \\") {
+	if !strings.Contains(out, "| Docker example") || !strings.Contains(out, "docker run --rm \\") {
 		t.Fatalf("docker examples output missing expected content:\n%s", out)
 	}
-	if strings.Contains(out, "systemd example:") || strings.Contains(out, "Minimal config:") {
+	if strings.Contains(out, "| systemd example") || strings.Contains(out, "| Minimal config") {
 		t.Fatalf("docker examples output unexpectedly included other sections:\n%s", out)
 	}
 }
@@ -319,10 +326,10 @@ func TestExamplesSystemdCommandPrintsSystemdExample(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "systemd example:") || !strings.Contains(out, "ExecStart=/usr/local/bin/aiproxy serve --config /etc/aiproxy/config.hcl") {
+	if !strings.Contains(out, "| systemd example") || !strings.Contains(out, "ExecStart=/usr/local/bin/aiproxy serve --config /etc/aiproxy/config.hcl") {
 		t.Fatalf("systemd examples output missing expected content:\n%s", out)
 	}
-	if strings.Contains(out, "Docker example:") || strings.Contains(out, "Minimal config:") {
+	if strings.Contains(out, "| Docker example") || strings.Contains(out, "| Minimal config") {
 		t.Fatalf("systemd examples output unexpectedly included other sections:\n%s", out)
 	}
 }

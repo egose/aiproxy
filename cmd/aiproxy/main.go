@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/egose/aiproxy/internal/app"
@@ -29,11 +30,12 @@ func newRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "aiproxy",
 		Short: "Proxy multiple AI providers behind a single API",
-		Long:  "aiproxy proxies multiple AI providers behind a single OpenAI-compatible API.\n\nDefault config path: $XDG_CONFIG_HOME/aiproxy/config.hcl\nFallback config path: ~/.config/aiproxy/config.hcl\nDefault secrets path: $XDG_CONFIG_HOME/aiproxy/keys.json\nFallback secrets path: ~/.config/aiproxy/keys.json",
+		Long:  "aiproxy proxies multiple AI providers behind a single OpenAI-compatible API.\n\nDefault config path: $XDG_CONFIG_HOME/aiproxy/config.hcl\nFallback config path: ~/.config/aiproxy/config.hcl\nDefault secrets path: $XDG_CONFIG_HOME/aiproxy/keys.json\nFallback secrets path: ~/.config/aiproxy/keys.json\n\nUse `aiproxy paths` to print resolved paths, `aiproxy examples` for boxed config examples, and `aiproxy configure` to create or update config blocks interactively.",
 	}
 	rootCmd.AddCommand(newServeCommand())
 	rootCmd.AddCommand(newValidateCommand())
 	rootCmd.AddCommand(newPathsCommand())
+	rootCmd.AddCommand(newConfigureCommand())
 	rootCmd.AddCommand(newExamplesCommand())
 	rootCmd.AddCommand(newVersionCommand())
 	return rootCmd
@@ -193,29 +195,27 @@ func newSystemdExamplesCommand() *cobra.Command {
 }
 
 func allExamplesText() string {
-	return configExamplesText() + "\n" + dockerExamplesText() + "\n" + systemdExamplesText()
+	return strings.Join([]string{configExamplesText(), dockerExamplesText(), systemdExamplesText()}, "\n\n")
 }
 
 func configExamplesText() string {
-	return commandExamplesText() + "\n" + minimalConfigExamplesText() + "\n" + aliasExamplesText() + "\n" + secretsExamplesText() + "\n" + apiKeyRefExamplesText()
+	return strings.Join([]string{commandExamplesText(), minimalConfigExamplesText(), aliasExamplesText(), secretsExamplesText(), apiKeyRefExamplesText()}, "\n\n")
 }
 
 func commandExamplesText() string {
-	return `Common commands:
-aiproxy serve
+	return renderExampleBox("Common commands", `aiproxy serve
 aiproxy validate
 aiproxy serve --config /etc/aiproxy/config.hcl
 aiproxy validate --config /etc/aiproxy/config.hcl
 aiproxy paths
-aiproxy version
-`
+aiproxy configure
+aiproxy configure provider
+aiproxy configure provider --config /etc/aiproxy/config.hcl --non-interactive --name backup --type openai-compatible --base-url https://llm.internal/v1 --secrets-key localai --api-key "$LOCALAI_API_KEY" --model qwen3-32b
+aiproxy version`)
 }
 
 func minimalConfigExamplesText() string {
-	return `
-
-Minimal config:
-listener "http" "public" {
+	return renderExampleBox("Minimal config", `listener "http" "public" {
   address = ":8080"
 }
 
@@ -227,13 +227,11 @@ provider "openai" "openai" {
   api_key = env("OPENAI_API_KEY")
 
   model "gpt-4o-mini" {}
-}
-`
+}`)
 }
 
 func authExamplesText() string {
-	return `Auth example:
-auth "main" {
+	return renderExampleBox("Auth example", `auth "main" {
   mode = "bearer_static"
 
   rate_limit {
@@ -246,15 +244,13 @@ auth "main" {
     tenant         = "internal"
     allowed_models = ["alias/chat_default", "openai/gpt-4o-mini"]
   }
-}
-`
+}`)
 }
 
 func aliasExamplesText() string {
-	return authExamplesText() + `
-
-Alias failover example:
-listener "http" "public" {
+	return strings.Join([]string{
+		authExamplesText(),
+		renderExampleBox("Alias failover example", `listener "http" "public" {
   address = ":8080"
 }
 
@@ -294,22 +290,19 @@ alias "chat_default" {
     provider = "backup"
     model    = "qwen3-32b"
   }
-}
-`
+}`),
+	}, "\n\n")
 }
 
 func secretsExamplesText() string {
-	return `Secrets file example:
-{
+	return renderExampleBox("Secrets file example", `{
   "openai": "sk-...",
   "localai": "secret"
-}
-`
+}`)
 }
 
 func apiKeyRefExamplesText() string {
-	return `api_key_ref override example:
-provider "openai-compatible" "localai" {
+	return renderExampleBox("api_key_ref override example", `provider "openai-compatible" "localai" {
   base_url = "https://llm.internal/v1"
 
   api_key_ref {
@@ -318,23 +311,19 @@ provider "openai-compatible" "localai" {
   }
 
   model "qwen3-32b" {}
-}
-`
+}`)
 }
 
 func dockerExamplesText() string {
-	return `Docker example:
-docker run --rm \
+	return renderExampleBox("Docker example", `docker run --rm \
   -p 8080:8080 \
   -v /etc/aiproxy/config.hcl:/etc/aiproxy/config.hcl:ro \
   -v /etc/aiproxy/keys.json:/etc/aiproxy/keys.json:ro \
-  aiproxy:latest serve --config /etc/aiproxy/config.hcl
-`
+  aiproxy:latest serve --config /etc/aiproxy/config.hcl`)
 }
 
 func systemdExamplesText() string {
-	return `systemd example:
-[Unit]
+	return renderExampleBox("systemd example", `[Unit]
 Description=aiproxy
 After=network-online.target
 Wants=network-online.target
@@ -346,7 +335,35 @@ Environment=OPENAI_API_KEY=
 
 [Install]
 WantedBy=multi-user.target
-`
+`)
+}
+
+func renderExampleBox(title, body string) string {
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	width := len(title)
+	for _, line := range lines {
+		if len(line) > width {
+			width = len(line)
+		}
+	}
+
+	var b strings.Builder
+	border := "+-" + strings.Repeat("-", width) + "-+\n"
+	b.WriteString(border)
+	b.WriteString("| " + padRight(title, width) + " |\n")
+	b.WriteString(border)
+	for _, line := range lines {
+		b.WriteString("| " + padRight(line, width) + " |\n")
+	}
+	b.WriteString("+-" + strings.Repeat("-", width) + "-+")
+	return b.String()
+}
+
+func padRight(s string, width int) string {
+	if len(s) >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-len(s))
 }
 
 func newVersionCommand() *cobra.Command {
