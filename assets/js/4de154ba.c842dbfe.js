@@ -42,6 +42,10 @@ const toc = [{
   "id": "build-and-run",
   "level": 2
 }, {
+  "value": "Configure Wizard",
+  "id": "configure-wizard",
+  "level": 2
+}, {
   "value": "Docker",
   "id": "docker",
   "level": 2
@@ -110,7 +114,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-sh",
-        children: "aiproxy serve\naiproxy validate\naiproxy serve --config /etc/aiproxy/config.hcl\naiproxy validate --config /etc/aiproxy/config.hcl\naiproxy version\n"
+        children: "aiproxy serve\naiproxy validate\naiproxy paths\naiproxy examples\naiproxy configure\naiproxy configure provider\naiproxy serve --config /etc/aiproxy/config.hcl\naiproxy validate --config /etc/aiproxy/config.hcl\naiproxy version\n"
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Without ", (0,jsx_runtime.jsx)(_components.code, {
@@ -128,6 +132,80 @@ function _createMdxContent(props) {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-sh",
         children: "set -a; . ./.env; set +a\n"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "configure-wizard",
+      children: "Configure Wizard"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy"
+      }), " includes an interactive config editor for the top-level HCL blocks and\nthe provider secrets JSON file."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Interactive entrypoints:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "aiproxy configure\naiproxy configure provider\naiproxy configure auth\naiproxy configure alias\naiproxy configure listener\naiproxy configure provider-health\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The root ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy configure"
+      }), " command shows a block selector. The block-specific\nsubcommands can also be used directly."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Supported workflows:"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["create or update ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "listener"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "auth"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "provider"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "alias"
+        }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "provider_health"
+        })]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["update provider secrets when using ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "api_key_ref"
+        })]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["delete existing blocks with ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "--delete"
+        })]
+      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["For scripted environments, use ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--non-interactive"
+      }), " on block subcommands."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Provider example:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "aiproxy configure provider \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name backup \\\n  --type openai-compatible \\\n  --display-name \"Backup provider\" \\\n  --base-url https://llm.internal/v1 \\\n  --secrets-path /etc/aiproxy/keys.json \\\n  --secrets-key localai \\\n  --api-key \"$LOCALAI_API_KEY\" \\\n  --model qwen3-32b=qwen/qwen3-32b \\\n  --model-capabilities qwen3-32b=chat,responses\n"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Alias example:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "aiproxy configure alias \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name chat_default \\\n  --algorithm round_robin \\\n  --target primary/gpt-4o-mini \\\n  --target backup/qwen3-32b\n"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Auth example:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "aiproxy configure auth \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name main \\\n  --mode bearer_static \\\n  --rate-limit-rpm 120 \\\n  --rate-limit-burst 120 \\\n  --client internal-app \\\n  --client-token-env internal-app=AIPROXY_CLIENT_TOKEN \\\n  --client-tenant internal-app=internal \\\n  --client-allowed-models internal-app=alias/chat_default,openai/gpt-4o-mini\n"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Delete examples:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "aiproxy configure provider --config /etc/aiproxy/config.hcl --delete --name backup\naiproxy configure alias --config /etc/aiproxy/config.hcl --delete --name chat_default\n"
       })
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "docker",
