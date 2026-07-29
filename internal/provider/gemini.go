@@ -245,11 +245,14 @@ func (a *adapter) doGeminiResponses(ctx context.Context, r Request) (*Result, er
 	if err != nil {
 		return nil, ErrInvalidRequest{Message: fmt.Sprintf("translate request: %v", err)}
 	}
-	translated, _, err := translateOpenAIToGemini(mustMarshalJSON(chatReq))
+	translated, streaming, err := translateOpenAIToGemini(mustMarshalJSON(chatReq))
 	if err != nil {
 		return nil, ErrInvalidRequest{Message: fmt.Sprintf("translate request: %v", err)}
 	}
 	path := "/v1beta/models/" + r.UpstreamModel + ":generateContent"
+	if streaming {
+		path = "/v1beta/models/" + r.UpstreamModel + ":streamGenerateContent?alt=sse"
+	}
 	target := strings.TrimRight(r.BaseURL, "/") + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(translated))
 	if err != nil {
@@ -257,6 +260,9 @@ func (a *adapter) doGeminiResponses(ctx context.Context, r Request) (*Result, er
 	}
 	req.Header.Set("x-goog-api-key", r.APIKey)
 	req.Header.Set("Content-Type", "application/json")
+	if streaming {
+		req.Header.Set("Accept", "text/event-stream")
+	}
 
 	resp, err := clientFor(r).Do(req)
 	if err != nil {
@@ -269,6 +275,9 @@ func (a *adapter) doGeminiResponses(ctx context.Context, r Request) (*Result, er
 			return nil, fmt.Errorf("read error body: %w", err)
 		}
 		return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translateGeminiError(errBody)}, nil
+	}
+	if streaming {
+		return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: translateGeminiResponsesStream(resp.Body, r.PublicModel), Streaming: true}, nil
 	}
 	defer resp.Body.Close()
 	outBody, err := io.ReadAll(resp.Body)
@@ -569,6 +578,43 @@ func translateGeminiStream(src io.ReadCloser, publicModel string) io.ReadCloser 
 	return pr
 }
 
+func translateGeminiResponsesStream(src io.ReadCloser, publicModel string) io.ReadCloser {
+	pr, pw := io.Pipe()
+	go func() {
+		defer src.Close()
+		defer pw.Close()
+
+		reader := bufio.NewReader(src)
+		state := newResponsesStreamState(publicModel, "resp_gemini")
+		for {
+			payload, err := readSSEPayload(reader)
+			if err != nil && err != io.EOF {
+				_ = pw.CloseWithError(err)
+				return
+			}
+			if payload != "" {
+				done, processErr := processGeminiResponsesPayload(pw, payload, state)
+				if processErr != nil {
+					_ = pw.CloseWithError(processErr)
+					return
+				}
+				if done {
+					return
+				}
+			}
+			if err == io.EOF {
+				if !state.Completed {
+					if err := writeResponsesCompleted(pw, state); err != nil {
+						_ = pw.CloseWithError(err)
+					}
+				}
+				return
+			}
+		}
+	}()
+	return pr
+}
+
 func readSSEPayload(reader *bufio.Reader) (string, error) {
 	var dataLines []string
 	for {
@@ -659,6 +705,35 @@ func processGeminiPayload(w io.Writer, payload, publicModel string, sentRole *bo
 		return true, true, nil
 	}
 	return wrote, false, nil
+}
+
+func processGeminiResponsesPayload(w io.Writer, payload string, state *responsesStreamState) (bool, error) {
+	var resp geminiResponse
+	if err := json.Unmarshal([]byte(payload), &resp); err != nil {
+		return false, err
+	}
+	state.setUsage(openAIUsage{
+		PromptTokens:     resp.UsageMetadata.PromptTokenCount,
+		CompletionTokens: resp.UsageMetadata.CandidatesTokenCount,
+		TotalTokens:      resp.UsageMetadata.TotalTokenCount,
+	})
+	if err := writeResponsesCreated(w, state); err != nil {
+		return false, err
+	}
+	if len(resp.Candidates) == 0 {
+		return false, nil
+	}
+	candidate := resp.Candidates[0]
+	text := joinGeminiText(candidate.Content.Parts)
+	if text != "" {
+		if err := writeResponsesDelta(w, state, text); err != nil {
+			return false, err
+		}
+	}
+	if mapGeminiFinishReason(candidate.FinishReason) == "" {
+		return false, nil
+	}
+	return true, writeResponsesCompleted(w, state)
 }
 
 func joinGeminiText(parts []geminiPart) string {

@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -232,6 +233,7 @@ func TestEndToEndGeminiEmbeddings(t *testing.T) {
 	gemini := newGeminiStub(t,
 		`{"embedding":{"values":[0.1,0.2,0.3]},"usageMetadata":{"promptTokenCount":4,"totalTokenCount":4}}`,
 		``,
+		``,
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -285,6 +287,7 @@ provider "gemini" "gemini" {
 func TestEndToEndAnthropicResponses(t *testing.T) {
 	anthropic := newAnthropicStub(t,
 		`{"id":"msg_resp","role":"assistant","content":[{"type":"text","text":"from-anthropic-responses"}],"stop_reason":"end_turn","usage":{"input_tokens":7,"output_tokens":5}}`,
+		``,
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -340,6 +343,7 @@ func TestEndToEndGeminiResponses(t *testing.T) {
 	gemini := newGeminiStub(t,
 		`{"embedding":{"values":[0.1]},"usageMetadata":{"promptTokenCount":1,"totalTokenCount":1}}`,
 		`{"candidates":[{"content":{"role":"model","parts":[{"text":"from-gemini-responses"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":6,"candidatesTokenCount":4,"totalTokenCount":10}}`,
+		``,
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -385,5 +389,113 @@ provider "gemini" "gemini" {
 	}
 	if !strings.Contains(calls[0].Body, `"systemInstruction"`) {
 		t.Fatalf("gemini request missing instructions: %s", calls[0].Body)
+	}
+}
+
+func TestEndToEndAnthropicResponsesStreaming(t *testing.T) {
+	anthropic := newAnthropicStub(t,
+		`{"id":"msg_unused","role":"assistant","content":[{"type":"text","text":"unused"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`,
+		"event: message_start\n"+
+			"data: {\"message\":{\"id\":\"msg_resp_stream\",\"usage\":{\"input_tokens\":7}}}\n\n"+
+			"event: content_block_delta\n"+
+			"data: {\"delta\":{\"type\":\"text_delta\",\"text\":\"from-anthropic-\"}}\n\n"+
+			"event: content_block_delta\n"+
+			"data: {\"delta\":{\"type\":\"text_delta\",\"text\":\"stream\"}}\n\n"+
+			"event: message_delta\n"+
+			"data: {\"usage\":{\"input_tokens\":7,\"output_tokens\":5}}\n\n"+
+			"event: message_stop\n"+
+			"data: {}\n\n",
+	)
+	configPath := writeConfig(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "anthropic" "anthropic" {
+  base_url = "`+anthropic.URL()+`"
+  api_key  = "sk-ant"
+  model "claude-sonnet" {}
+}
+`)
+	server := newTestServer(t, configPath)
+
+	resp, err := server.Client().Post(server.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"anthropic/claude-sonnet","stream":true,"input":"hello"}`))
+	if err != nil {
+		t.Fatalf("post anthropic streaming responses: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("responses status = %d", resp.StatusCode)
+	}
+	if !strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("content-type = %q", resp.Header.Get("Content-Type"))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read streaming responses: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"type":"response.created"`) || !strings.Contains(text, `"type":"response.completed"`) {
+		t.Fatalf("unexpected stream body: %q", text)
+	}
+	if !strings.Contains(text, `"text":"from-anthropic-stream"`) {
+		t.Fatalf("missing translated final text: %q", text)
+	}
+	if !strings.Contains(text, "data: [DONE]") {
+		t.Fatalf("missing done marker: %q", text)
+	}
+	calls := anthropic.Calls()
+	if len(calls) != 1 || calls[0].Path != "/v1/messages" {
+		t.Fatalf("anthropic calls = %+v", calls)
+	}
+	if !strings.Contains(calls[0].Body, `"stream":true`) {
+		t.Fatalf("anthropic request missing stream flag: %s", calls[0].Body)
+	}
+}
+
+func TestEndToEndGeminiResponsesStreaming(t *testing.T) {
+	gemini := newGeminiStub(t,
+		`{"embedding":{"values":[0.1]},"usageMetadata":{"promptTokenCount":1,"totalTokenCount":1}}`,
+		`{"candidates":[{"content":{"role":"model","parts":[{"text":"unused"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}`,
+		"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"from-gemini-\"}]}}],\"usageMetadata\":{\"promptTokenCount\":6}}\n\n"+
+			"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"stream\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":4,\"totalTokenCount\":10}}\n\n",
+	)
+	configPath := writeConfig(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "gemini" "gemini" {
+  base_url = "`+gemini.URL()+`"
+  api_key  = "gem-key"
+  model "gemini-2.5-pro" {}
+}
+`)
+	server := newTestServer(t, configPath)
+
+	resp, err := server.Client().Post(server.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"gemini/gemini-2.5-pro","stream":true,"input":"hello"}`))
+	if err != nil {
+		t.Fatalf("post gemini streaming responses: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("responses status = %d", resp.StatusCode)
+	}
+	if !strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("content-type = %q", resp.Header.Get("Content-Type"))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read streaming responses: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"type":"response.created"`) || !strings.Contains(text, `"type":"response.completed"`) {
+		t.Fatalf("unexpected stream body: %q", text)
+	}
+	if !strings.Contains(text, `"text":"from-gemini-stream"`) {
+		t.Fatalf("missing translated final text: %q", text)
+	}
+	if !strings.Contains(text, "data: [DONE]") {
+		t.Fatalf("missing done marker: %q", text)
+	}
+	calls := gemini.Calls()
+	if len(calls) != 1 || calls[0].Path != "/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse" {
+		t.Fatalf("gemini calls = %+v", calls)
 	}
 }

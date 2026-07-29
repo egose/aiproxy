@@ -16,15 +16,16 @@ type anthropicRecordedCall struct {
 }
 
 type anthropicStub struct {
-	server      *httptest.Server
-	mu          sync.Mutex
-	messageBody string
-	calls       []anthropicRecordedCall
+	server            *httptest.Server
+	mu                sync.Mutex
+	messageBody       string
+	messageStreamBody string
+	calls             []anthropicRecordedCall
 }
 
-func newAnthropicStub(t *testing.T, messageBody string) *anthropicStub {
+func newAnthropicStub(t *testing.T, messageBody, messageStreamBody string) *anthropicStub {
 	t.Helper()
-	s := &anthropicStub{messageBody: messageBody}
+	s := &anthropicStub{messageBody: messageBody, messageStreamBody: messageStreamBody}
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -39,9 +40,14 @@ func newAnthropicStub(t *testing.T, messageBody string) *anthropicStub {
 		})
 		s.mu.Unlock()
 
-		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v1/messages":
+			if r.Header.Get("Accept") == "text/event-stream" {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(s.messageStreamBody))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(s.messageBody))
 		default:
 			http.NotFound(w, r)

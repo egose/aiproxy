@@ -233,7 +233,9 @@ func TestGeminiEmbeddingsRejectsInvalidInputShape(t *testing.T) {
 
 func TestAnthropicResponsesTranslation(t *testing.T) {
 	var seenBody []byte
+	var seenAccept string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAccept = r.Header.Get("Accept")
 		var err error
 		seenBody, err = io.ReadAll(r.Body)
 		if err != nil {
@@ -298,11 +300,91 @@ func TestAnthropicResponsesTranslation(t *testing.T) {
 	if out.Output[0].Role != "assistant" || out.Output[0].Content[0].Text != "Hello from Claude responses" {
 		t.Fatalf("output = %+v", out.Output)
 	}
+	if seenAccept != "" {
+		t.Fatalf("unexpected Accept header for non-streaming request: %q", seenAccept)
+	}
+}
+
+func TestAnthropicResponsesStreamingTranslation(t *testing.T) {
+	var seenBody []byte
+	var seenAccept string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAccept = r.Header.Get("Accept")
+		var err error
+		seenBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: message_start\n")
+		_, _ = io.WriteString(w, "data: {\"message\":{\"id\":\"msg_resp_stream\",\"usage\":{\"input_tokens\":9}}}\n\n")
+		_, _ = io.WriteString(w, "event: content_block_delta\n")
+		_, _ = io.WriteString(w, "data: {\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello from Claude \"}}\n\n")
+		_, _ = io.WriteString(w, "event: content_block_delta\n")
+		_, _ = io.WriteString(w, "data: {\"delta\":{\"type\":\"text_delta\",\"text\":\"stream\"}}\n\n")
+		_, _ = io.WriteString(w, "event: message_delta\n")
+		_, _ = io.WriteString(w, "data: {\"usage\":{\"input_tokens\":9,\"output_tokens\":4}}\n\n")
+		_, _ = io.WriteString(w, "event: message_stop\n")
+		_, _ = io.WriteString(w, "data: {}\n\n")
+	}))
+	defer upstream.Close()
+
+	a := New()
+	inbound := httptest.NewRequest(http.MethodPost, "/v1/responses",
+		io.NopCloser(strings.NewReader(`{"model":"anthropic/claude-sonnet","stream":true,"input":"hello"}`)))
+	res, err := a.Do(context.Background(), Request{
+		Operation:     OpResponses,
+		ProviderType:  config.ProviderTypeAnthropic,
+		PublicModel:   "anthropic/claude-sonnet",
+		BaseURL:       upstream.URL,
+		APIKey:        "sk-ant",
+		UpstreamModel: "claude-sonnet-4-20250514",
+		Inbound:       inbound,
+		Client:        upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	if seenAccept != "text/event-stream" {
+		t.Fatalf("accept = %q", seenAccept)
+	}
+	if !strings.Contains(string(seenBody), `"stream":true`) {
+		t.Fatalf("translated request missing stream flag: %s", string(seenBody))
+	}
+	if !res.Streaming || res.StreamBody == nil {
+		t.Fatalf("expected streaming result")
+	}
+	defer res.StreamBody.Close()
+	body, err := io.ReadAll(res.StreamBody)
+	if err != nil {
+		t.Fatalf("read stream body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"type":"response.created"`) {
+		t.Fatalf("missing response.created event: %q", text)
+	}
+	if !strings.Contains(text, `"type":"response.output_text.delta"`) || !strings.Contains(text, `"delta":"Hello from Claude `) {
+		t.Fatalf("missing translated delta event: %q", text)
+	}
+	if !strings.Contains(text, `"type":"response.output_text.done"`) {
+		t.Fatalf("missing output_text.done event: %q", text)
+	}
+	if !strings.Contains(text, `"type":"response.completed"`) || !strings.Contains(text, `"text":"Hello from Claude stream"`) {
+		t.Fatalf("missing completed response payload: %q", text)
+	}
+	if !strings.Contains(text, `"total_tokens":13`) {
+		t.Fatalf("missing usage in completed payload: %q", text)
+	}
+	if !strings.Contains(text, "data: [DONE]") {
+		t.Fatalf("missing done marker: %q", text)
+	}
 }
 
 func TestGeminiResponsesTranslation(t *testing.T) {
 	var seenBody []byte
+	var seenAccept string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAccept = r.Header.Get("Accept")
 		var err error
 		seenBody, err = io.ReadAll(r.Body)
 		if err != nil {
@@ -363,6 +445,78 @@ func TestGeminiResponsesTranslation(t *testing.T) {
 	}
 	if out.Output[0].Role != "assistant" || out.Output[0].Content[0].Text != "Hello from Gemini responses" {
 		t.Fatalf("output = %+v", out.Output)
+	}
+	if seenAccept != "" {
+		t.Fatalf("unexpected Accept header for non-streaming request: %q", seenAccept)
+	}
+}
+
+func TestGeminiResponsesStreamingTranslation(t *testing.T) {
+	var seenBody []byte
+	var seenPath string
+	var seenAccept string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPath = r.URL.RequestURI()
+		seenAccept = r.Header.Get("Accept")
+		var err error
+		seenBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello from Gemini \"}]}}],\"usageMetadata\":{\"promptTokenCount\":5}}\n\n")
+		_, _ = io.WriteString(w, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"stream\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":3,\"totalTokenCount\":8}}\n\n")
+	}))
+	defer upstream.Close()
+
+	a := New()
+	inbound := httptest.NewRequest(http.MethodPost, "/v1/responses",
+		io.NopCloser(strings.NewReader(`{"model":"gemini/gemini-2.5-pro","stream":true,"input":"hello"}`)))
+	res, err := a.Do(context.Background(), Request{
+		Operation:     OpResponses,
+		ProviderType:  config.ProviderTypeGemini,
+		PublicModel:   "gemini/gemini-2.5-pro",
+		BaseURL:       upstream.URL,
+		APIKey:        "gem-key",
+		UpstreamModel: "gemini-2.5-pro",
+		Inbound:       inbound,
+		Client:        upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	if seenPath != "/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse" {
+		t.Fatalf("stream path = %q", seenPath)
+	}
+	if seenAccept != "text/event-stream" {
+		t.Fatalf("accept = %q", seenAccept)
+	}
+	if !strings.Contains(string(seenBody), `"generationConfig"`) {
+		t.Fatalf("translated request missing generationConfig: %s", string(seenBody))
+	}
+	if !res.Streaming || res.StreamBody == nil {
+		t.Fatalf("expected streaming result")
+	}
+	defer res.StreamBody.Close()
+	body, err := io.ReadAll(res.StreamBody)
+	if err != nil {
+		t.Fatalf("read stream body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"type":"response.created"`) {
+		t.Fatalf("missing response.created event: %q", text)
+	}
+	if !strings.Contains(text, `"type":"response.output_text.delta"`) || !strings.Contains(text, `"delta":"Hello from Gemini `) {
+		t.Fatalf("missing translated delta event: %q", text)
+	}
+	if !strings.Contains(text, `"type":"response.completed"`) || !strings.Contains(text, `"text":"Hello from Gemini stream"`) {
+		t.Fatalf("missing completed response payload: %q", text)
+	}
+	if !strings.Contains(text, `"total_tokens":8`) {
+		t.Fatalf("missing usage in completed payload: %q", text)
+	}
+	if !strings.Contains(text, "data: [DONE]") {
+		t.Fatalf("missing done marker: %q", text)
 	}
 }
 
