@@ -19,6 +19,10 @@ func operationFromRequest(r *http.Request) (provider.Operation, bool) {
 		return provider.OpEmbeddings, true
 	case "/v1/responses":
 		return provider.OpResponses, true
+	case "/v1/images/generations":
+		return provider.OpImagesGenerations, true
+	case "/v1/audio/transcriptions":
+		return provider.OpAudioTranscriptions, true
 	default:
 		return 0, false
 	}
@@ -54,6 +58,10 @@ func requiredCapability(op provider.Operation) (config.Capability, bool) {
 		return config.CapabilityEmbeddings, true
 	case provider.OpResponses:
 		return config.CapabilityResponses, true
+	case provider.OpImagesGenerations:
+		return config.CapabilityImages, true
+	case provider.OpAudioTranscriptions:
+		return config.CapabilityAudio, true
 	default:
 		return "", false
 	}

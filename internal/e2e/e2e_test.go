@@ -1,9 +1,11 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -40,6 +42,8 @@ func TestEndToEndHealthAndReady(t *testing.T) {
 		`{"id":"chatcmpl_1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`,
 		`{"object":"list","data":[],"model":"text-embedding-3-large"}`,
 		`{"id":"resp_1","object":"response","output":[]}`,
+		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
+		`{"text":"hello world"}`,
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -69,6 +73,8 @@ func TestEndToEndDirectChatRouting(t *testing.T) {
 		`{"id":"chatcmpl_direct","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"from-openai"},"finish_reason":"stop"}]}`,
 		`{"object":"list","data":[],"model":"unused"}`,
 		`{"id":"resp_unused","object":"response","output":[]}`,
+		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
+		`{"text":"hello world"}`,
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -108,11 +114,15 @@ func TestEndToEndAliasRoutingToOpenAICompatible(t *testing.T) {
 		`{"id":"chatcmpl_openai","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"from-openai"},"finish_reason":"stop"}]}`,
 		`{"object":"list","data":[],"model":"unused"}`,
 		`{"id":"resp_unused","object":"response","output":[]}`,
+		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
+		`{"text":"hello world"}`,
 	)
 	localai := newOpenAIStub(t,
 		`{"id":"chatcmpl_alias","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"from-alias"},"finish_reason":"stop"}]}`,
 		`{"object":"list","data":[],"model":"unused"}`,
 		`{"id":"resp_unused","object":"response","output":[]}`,
+		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
+		`{"text":"hello world"}`,
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -167,6 +177,8 @@ func TestEndToEndEmbeddingsAndResponses(t *testing.T) {
 		`{"id":"chat_unused","object":"chat.completion","choices":[]}`,
 		`{"object":"list","data":[{"object":"embedding","embedding":[0.1,0.2],"index":0}],"model":"text-embedding-3-large"}`,
 		`{"id":"resp_123","object":"response","output":[]}`,
+		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
+		`{"text":"hello world"}`,
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -226,6 +238,115 @@ provider "openai" "openai" {
 	}
 	if calls[0].Path != "/v1/embeddings" || calls[1].Path != "/v1/responses" {
 		t.Fatalf("upstream paths = %+v", calls)
+	}
+}
+
+func TestEndToEndImagesGeneration(t *testing.T) {
+	openai := newOpenAIStub(t,
+		`{"id":"chat_unused","object":"chat.completion","choices":[]}`,
+		`{"object":"list","data":[],"model":"unused"}`,
+		`{"id":"resp_unused","object":"response","output":[]}`,
+		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
+		`{"text":"hello world"}`,
+	)
+	configPath := writeConfig(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  base_url = "`+openai.URL()+`"
+  api_key  = "sk-openai"
+  model "gpt-image-1" {
+    capabilities = ["images"]
+  }
+}
+`)
+	server := newTestServer(t, configPath)
+
+	resp, err := server.Client().Post(server.URL+"/v1/images/generations", "application/json", strings.NewReader(`{"model":"openai/gpt-image-1","prompt":"a cat"}`))
+	if err != nil {
+		t.Fatalf("post images: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("images status = %d", resp.StatusCode)
+	}
+	var out struct {
+		Data []struct {
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode images: %v", err)
+	}
+	if len(out.Data) != 1 || out.Data[0].URL != "https://example.com/image.png" {
+		t.Fatalf("unexpected images response: %+v", out)
+	}
+	calls := openai.Calls()
+	if len(calls) != 1 || calls[0].Path != "/v1/images/generations" {
+		t.Fatalf("upstream calls = %+v", calls)
+	}
+	if !strings.Contains(calls[0].Body, `"model":"gpt-image-1"`) {
+		t.Fatalf("upstream body missing rewritten model: %s", calls[0].Body)
+	}
+}
+
+func TestEndToEndAudioTranscriptions(t *testing.T) {
+	openai := newOpenAIStub(t,
+		`{"id":"chat_unused","object":"chat.completion","choices":[]}`,
+		`{"object":"list","data":[],"model":"unused"}`,
+		`{"id":"resp_unused","object":"response","output":[]}`,
+		`{"created":123,"data":[]}`,
+		`{"text":"hello world"}`,
+	)
+	configPath := writeConfig(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  base_url = "`+openai.URL()+`"
+  api_key  = "sk-openai"
+  model "gpt-4o-transcribe" {
+    capabilities = ["audio"]
+  }
+}
+`)
+	server := newTestServer(t, configPath)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormField("model")
+	_, _ = io.WriteString(part, "openai/gpt-4o-transcribe")
+	filePart, _ := writer.CreateFormFile("file", "sample.wav")
+	_, _ = io.WriteString(filePart, "audio-bytes")
+	_ = writer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/audio/transcriptions", bytes.NewReader(body.Bytes()))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("post audio transcriptions: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("audio status = %d", resp.StatusCode)
+	}
+	var out struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode audio: %v", err)
+	}
+	if out.Text != "hello world" {
+		t.Fatalf("unexpected audio response: %+v", out)
+	}
+	calls := openai.Calls()
+	if len(calls) != 1 || calls[0].Path != "/v1/audio/transcriptions" {
+		t.Fatalf("upstream calls = %+v", calls)
+	}
+	if !strings.Contains(calls[0].Body, "gpt-4o-transcribe") {
+		t.Fatalf("upstream body missing rewritten model: %s", calls[0].Body)
 	}
 }
 

@@ -15,6 +15,8 @@ const (
 	OpChatCompletions Operation = iota
 	OpEmbeddings
 	OpResponses
+	OpImagesGenerations
+	OpAudioTranscriptions
 )
 
 type Request struct {
@@ -75,6 +77,10 @@ func (o Operation) String() string {
 		return "embeddings"
 	case OpResponses:
 		return "responses"
+	case OpImagesGenerations:
+		return "images_generations"
+	case OpAudioTranscriptions:
+		return "audio_transcriptions"
 	default:
 		return "unknown"
 	}

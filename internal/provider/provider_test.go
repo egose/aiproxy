@@ -1,10 +1,12 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -186,6 +188,105 @@ func TestOpenAIResponsesRewritesModelAndForwards(t *testing.T) {
 	}
 	if !strings.Contains(string(res.Body), `"object":"response"`) {
 		t.Fatalf("unexpected responses payload: %s", string(res.Body))
+	}
+}
+
+func TestOpenAIImagesRewritesModelAndForwards(t *testing.T) {
+	var seenAuth, seenBody, seenPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("Authorization")
+		seenPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		seenBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`))
+	}))
+	defer upstream.Close()
+
+	a := New()
+	inbound := httptest.NewRequest(http.MethodPost, "/v1/images/generations",
+		io.NopCloser(strings.NewReader(`{"model":"openai/gpt-image-1","prompt":"a cat"}`)))
+	res, err := a.Do(context.Background(), Request{
+		Operation:     OpImagesGenerations,
+		ProviderType:  config.ProviderTypeOpenAI,
+		PublicModel:   "openai/gpt-image-1",
+		BaseURL:       upstream.URL,
+		APIKey:        "sk-test",
+		UpstreamModel: "gpt-image-1",
+		Inbound:       inbound,
+		Client:        upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	if seenPath != "/v1/images/generations" {
+		t.Fatalf("path = %q", seenPath)
+	}
+	if seenAuth != "Bearer sk-test" {
+		t.Fatalf("auth = %q", seenAuth)
+	}
+	if !strings.Contains(seenBody, `"model":"gpt-image-1"`) {
+		t.Fatalf("model was not rewritten: %s", seenBody)
+	}
+	if res.Streaming {
+		t.Fatalf("images should not stream")
+	}
+	if !strings.Contains(string(res.Body), `"url":"https://example.com/image.png"`) {
+		t.Fatalf("unexpected images payload: %s", string(res.Body))
+	}
+}
+
+func TestOpenAIAudioTranscriptionsRewriteMultipartModel(t *testing.T) {
+	var seenAuth, seenPath, seenType, seenBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("Authorization")
+		seenPath = r.URL.Path
+		seenType = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		seenBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"hello world"}`))
+	}))
+	defer upstream.Close()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	modelPart, _ := writer.CreateFormField("model")
+	_, _ = io.WriteString(modelPart, "openai/whisper-1")
+	filePart, _ := writer.CreateFormFile("file", "sample.wav")
+	_, _ = io.WriteString(filePart, "audio-bytes")
+	_ = writer.Close()
+
+	a := New()
+	inbound := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", io.NopCloser(bytes.NewReader(body.Bytes())))
+	inbound.Header.Set("Content-Type", writer.FormDataContentType())
+	res, err := a.Do(context.Background(), Request{
+		Operation:     OpAudioTranscriptions,
+		ProviderType:  config.ProviderTypeOpenAI,
+		PublicModel:   "openai/whisper-1",
+		BaseURL:       upstream.URL,
+		APIKey:        "sk-test",
+		UpstreamModel: "gpt-4o-transcribe",
+		Inbound:       inbound,
+		Client:        upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	if seenPath != "/v1/audio/transcriptions" {
+		t.Fatalf("path = %q", seenPath)
+	}
+	if seenAuth != "Bearer sk-test" {
+		t.Fatalf("auth = %q", seenAuth)
+	}
+	if !strings.HasPrefix(seenType, "multipart/form-data;") {
+		t.Fatalf("content-type = %q", seenType)
+	}
+	if !strings.Contains(seenBody, "gpt-4o-transcribe") {
+		t.Fatalf("model was not rewritten: %s", seenBody)
+	}
+	if !strings.Contains(string(res.Body), `"text":"hello world"`) {
+		t.Fatalf("unexpected audio payload: %s", string(res.Body))
 	}
 }
 

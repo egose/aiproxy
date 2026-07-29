@@ -21,15 +21,19 @@ type openAIStub struct {
 	chatBody  string
 	embedBody string
 	respBody  string
+	imageBody string
+	audioBody string
 	calls     []recordedCall
 }
 
-func newOpenAIStub(t *testing.T, chatBody, embedBody, respBody string) *openAIStub {
+func newOpenAIStub(t *testing.T, chatBody, embedBody, respBody, imageBody, audioBody string) *openAIStub {
 	t.Helper()
 	s := &openAIStub{
 		chatBody:  chatBody,
 		embedBody: embedBody,
 		respBody:  respBody,
+		imageBody: imageBody,
+		audioBody: audioBody,
 	}
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
@@ -53,6 +57,10 @@ func newOpenAIStub(t *testing.T, chatBody, embedBody, respBody string) *openAISt
 			_, _ = w.Write([]byte(s.embedBody))
 		case "/v1/responses":
 			_, _ = w.Write([]byte(s.respBody))
+		case "/v1/images/generations":
+			_, _ = w.Write([]byte(s.imageBody))
+		case "/v1/audio/transcriptions":
+			_, _ = w.Write([]byte(s.audioBody))
 		default:
 			http.NotFound(w, r)
 		}
