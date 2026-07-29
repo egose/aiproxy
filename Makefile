@@ -64,7 +64,7 @@ build-archive: ## Tar each cross-compiled dist/<os>-<arch>/ dir into a release a
 	  [ -d "$$d" ] || continue; \
 	  name=$$(basename "$$d"); \
 	  archive="$(DIST_DIR)/$(PREFIX)-$$name.tar.gz"; \
-	  (cd "$$d" && tar -czf "$$archive" .); \
+	  tar -czf "$$archive" -C "$$d" .; \
 	  echo "archived $$archive"; \
 	done
 
