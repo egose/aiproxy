@@ -13,4 +13,4 @@
 node_modules
 id_ed25519*
 .wip
-aiproxy
+/aiproxy
