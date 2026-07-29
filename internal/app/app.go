@@ -17,6 +17,8 @@ import (
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/provider"
+	"github.com/egose/aiproxy/internal/providerhealth"
+	"github.com/egose/aiproxy/internal/ratelimit"
 )
 
 const (
@@ -38,6 +40,7 @@ type App struct {
 	logger   *slog.Logger
 	adapter  provider.Adapter
 	client   *http.Client
+	health   *providerhealth.Tracker
 	buildOpt BuildOptions
 }
 
@@ -55,17 +58,19 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	metrics := observability.NewMetrics()
 	metrics.SetBuildInfo(opts.Version)
 	metrics.RecordConfig(rt)
+	health := providerhealth.New(metrics)
+	health.SetProviders(rt.ProviderByName)
 
 	httpClient := &http.Client{Timeout: 5 * time.Minute}
 
-	handler := httpapi.NewHandler(buildDependencies(rt, logger, adapter, metrics, httpClient))
+	handler := httpapi.NewHandler(buildDependencies(rt, logger, adapter, metrics, health, httpClient))
 
 	server := &http.Server{
 		Handler: handler,
 	}
 	applyServerConfig(server, rt.Listener)
 
-	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, client: httpClient, buildOpt: opts}, nil
+	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, client: httpClient, health: health, buildOpt: opts}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -120,7 +125,8 @@ func (a *App) Reload() error {
 
 	a.metrics.SetBuildInfo(a.buildOpt.Version)
 	a.metrics.RecordConfig(rt)
-	a.handler.UpdateDependencies(buildDependencies(rt, a.logger, a.adapter, a.metrics, a.client))
+	a.health.SetProviders(rt.ProviderByName)
+	a.handler.UpdateDependencies(buildDependencies(rt, a.logger, a.adapter, a.metrics, a.health, a.client))
 	a.mu.Lock()
 	a.Config = rt
 	a.mu.Unlock()
@@ -128,16 +134,18 @@ func (a *App) Reload() error {
 	return nil
 }
 
-func buildDependencies(rt *config.Runtime, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, httpClient *http.Client) httpapi.Dependencies {
+func buildDependencies(rt *config.Runtime, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, httpClient *http.Client) httpapi.Dependencies {
 	return httpapi.Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   adapter,
-		Auth:      auth.NewAuthenticator(rt.Auth),
-		Client:    httpClient,
-		Catalog:   httpapi.BuildModelCatalog(rt),
-		Metrics:   metrics,
-		Providers: rt.ProviderByName,
-		Logger:    logger,
+		Resolver:    modelresolver.New(rt),
+		Adapter:     adapter,
+		Auth:        auth.NewAuthenticator(rt.Auth),
+		Client:      httpClient,
+		Catalog:     httpapi.BuildModelCatalog(rt),
+		Metrics:     metrics,
+		Providers:   rt.ProviderByName,
+		Health:      health,
+		RateLimiter: ratelimit.New(rt.Auth),
+		Logger:      logger,
 	}
 }
 

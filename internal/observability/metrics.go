@@ -29,6 +29,7 @@ type Metrics struct {
 	upstreamRequests   *prometheus.CounterVec
 	upstreamLatency    *prometheus.HistogramVec
 	upstreamRespBytes  *prometheus.HistogramVec
+	providerHealthy    *prometheus.GaugeVec
 	skippedProviders   *prometheus.GaugeVec
 	buildInfo          *prometheus.GaugeVec
 	authModeInfo       *prometheus.GaugeVec
@@ -103,6 +104,10 @@ func NewMetrics() *Metrics {
 			Help:    "Size of upstream provider response bodies by operation, provider, and outcome.",
 			Buckets: prometheus.ExponentialBuckets(64, 2, 12),
 		}, []string{"operation", "provider", "outcome"}),
+		providerHealthy: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "aiproxy_provider_healthy",
+			Help: "Whether a provider is currently considered healthy for shared routing state (1=yes, 0=no).",
+		}, []string{"name"}),
 		skippedProviders: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "aiproxy_skipped_provider_info",
 			Help: "Static gauge for providers skipped during startup because they are not active.",
@@ -158,6 +163,7 @@ func NewMetrics() *Metrics {
 		m.upstreamRequests,
 		m.upstreamLatency,
 		m.upstreamRespBytes,
+		m.providerHealthy,
 		m.skippedProviders,
 		m.buildInfo,
 		m.authModeInfo,
@@ -216,6 +222,7 @@ func (m *Metrics) RecordConfig(rt *config.Runtime) {
 	}
 	for _, p := range rt.Providers {
 		providerTypeCounts[string(p.Type)+":active"]++
+		m.providerHealthy.WithLabelValues(p.Name).Set(1)
 	}
 	for _, p := range rt.DisabledProviders {
 		providerTypeCounts[string(p.Type)+":disabled"]++
@@ -237,7 +244,29 @@ func (m *Metrics) RecordConfig(rt *config.Runtime) {
 	for _, p := range rt.DisabledProviders {
 		m.skippedProviders.WithLabelValues(p.Name, string(p.Type)).Set(1)
 	}
-	m.SetReady(len(rt.Providers) > 0)
+	if len(rt.Providers) > 0 {
+		m.SetReadyWithReason(true, "active_providers")
+	} else {
+		m.SetReadyWithReason(false, "no_active_providers")
+	}
+}
+
+func (m *Metrics) SetProviderHealthy(name string, healthy bool) {
+	if m == nil || name == "" {
+		return
+	}
+	if healthy {
+		m.providerHealthy.WithLabelValues(name).Set(1)
+		return
+	}
+	m.providerHealthy.WithLabelValues(name).Set(0)
+}
+
+func (m *Metrics) RemoveProviderHealthy(name string) {
+	if m == nil || name == "" {
+		return
+	}
+	m.providerHealthy.DeleteLabelValues(name)
 }
 
 func (m *Metrics) RecordHTTP(method, path string, statusCode int, seconds float64) {
@@ -276,15 +305,23 @@ func (m *Metrics) RecordHTTPError(method, path string, statusCode int, errType s
 }
 
 func (m *Metrics) SetReady(ready bool) {
+	if ready {
+		m.SetReadyWithReason(true, "active_providers")
+		return
+	}
+	m.SetReadyWithReason(false, "no_active_providers")
+}
+
+func (m *Metrics) SetReadyWithReason(ready bool, reason string) {
 	if m == nil {
 		return
 	}
-	for _, reason := range []string{"active_providers", "no_active_providers"} {
+	for _, candidate := range []string{"active_providers", "no_active_providers", "no_healthy_providers"} {
 		value := 0.0
-		if (ready && reason == "active_providers") || (!ready && reason == "no_active_providers") {
+		if candidate == reason {
 			value = 1
 		}
-		m.readyReason.WithLabelValues(reason).Set(value)
+		m.readyReason.WithLabelValues(candidate).Set(value)
 	}
 	if ready {
 		m.readiness.Set(1)

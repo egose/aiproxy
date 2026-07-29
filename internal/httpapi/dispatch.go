@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/egose/aiproxy/internal/alias"
+	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/provider"
 )
@@ -38,6 +40,7 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		}
 		deps.Metrics.RecordUpstream(op, r.Provider.Name, status, err, time.Since(start).Seconds())
 	}
+	h.recordProviderHealth(deps, r.Provider.Name, result, err)
 	h.instrumentUpstreamResponseSize(deps, op, r.Provider.Name, result, err)
 	return result, err
 }
@@ -48,16 +51,37 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 		return nil, err
 	}
 	var lastErr error
+	tried := make(map[string]bool, len(r.Alias.Targets))
+	var unhealthyFallback *modelresolver.ResolveResult
 	for i := 0; i < len(r.Alias.Targets); i++ {
 		t := r.Selector.Select()
+		if key := t.Provider + "/" + t.Model; tried[key] {
+			t = nextUntriedAliasTarget(r.Alias.Targets, tried)
+		}
+		if t.Provider == "" && t.Model == "" {
+			continue
+		}
+		key := t.Provider + "/" + t.Model
+		tried[key] = true
 		prov, ok := deps.Resolver.Provider(t.Provider)
 		if !ok {
 			lastErr = fmt.Errorf("alias target provider %q not found", t.Provider)
+			r.Selector.Release(t)
 			continue
 		}
 		model, ok := prov.ModelByName[t.Model]
 		if !ok {
 			lastErr = fmt.Errorf("alias target model %q not found on provider %q", t.Model, t.Provider)
+			r.Selector.Release(t)
+			continue
+		}
+		if deps.Health != nil && !deps.Health.IsHealthy(t.Provider) {
+			r.Selector.Release(t)
+			if unhealthyFallback == nil {
+				copy := modelresolver.ResolveResult{Provider: prov, Model: model}
+				unhealthyFallback = &copy
+			}
+			lastErr = fmt.Errorf("alias has no healthy targets")
 			continue
 		}
 		logger = logger.With("target", t.Provider+"/"+t.Model)
@@ -94,6 +118,7 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			}
 			deps.Metrics.RecordUpstream(op, t.Provider, status, err, time.Since(start).Seconds())
 		}
+		h.recordProviderHealth(deps, t.Provider, result, err)
 		h.instrumentUpstreamResponseSize(deps, op, t.Provider, result, err)
 		if err != nil {
 			releaseTarget()
@@ -126,10 +151,102 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 		}
 		return result, nil
 	}
+	if unhealthyFallback != nil {
+		result, err := h.dispatchAliasFallback(deps, ctx, op, r.Alias.Name, *unhealthyFallback, inbound, body, logger)
+		if result != nil || err != nil {
+			return result, err
+		}
+	}
 	if lastErr == nil {
 		lastErr = errors.New("alias has no healthy targets")
 	}
 	return nil, lastErr
+}
+
+func (h *Handler) dispatchAliasFallback(deps Dependencies, ctx context.Context, op provider.Operation, aliasName string, resolved modelresolver.ResolveResult, inbound *http.Request, body []byte, logger *slog.Logger) (*provider.Result, error) {
+	logger = logger.With("target", resolved.Provider.Name+"/"+resolved.Model.Name)
+	if deps.Metrics != nil {
+		deps.Metrics.RecordProviderSelection(op, "alias/"+aliasName, resolved.Provider.Name, resolved.Model.Name)
+		deps.Metrics.AddAliasInFlight(aliasName, resolved.Provider.Name, resolved.Model.Name, 1)
+	}
+	released := false
+	release := func() {
+		if released {
+			return
+		}
+		released = true
+		if deps.Metrics != nil {
+			deps.Metrics.AddAliasInFlight(aliasName, resolved.Provider.Name, resolved.Model.Name, -1)
+		}
+	}
+	req := inbound.Clone(ctx)
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	start := time.Now()
+	result, err := deps.Adapter.Do(ctx, provider.Request{
+		Operation:     op,
+		ProviderType:  resolved.Provider.Type,
+		PublicModel:   "alias/" + aliasName,
+		BaseURL:       resolved.Provider.BaseURL,
+		APIKey:        resolved.Provider.APIKey,
+		UpstreamModel: resolved.Model.UpstreamName,
+		Inbound:       req,
+		Client:        deps.Client,
+	})
+	if deps.Metrics != nil {
+		status := 0
+		if result != nil {
+			status = result.StatusCode
+		}
+		deps.Metrics.RecordUpstream(op, resolved.Provider.Name, status, err, time.Since(start).Seconds())
+	}
+	h.recordProviderHealth(deps, resolved.Provider.Name, result, err)
+	h.instrumentUpstreamResponseSize(deps, op, resolved.Provider.Name, result, err)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	existingClose := result.OnClose
+	result.OnClose = func() {
+		if existingClose != nil {
+			existingClose()
+		}
+		release()
+	}
+	return result, nil
+}
+
+func (h *Handler) recordProviderHealth(deps Dependencies, providerName string, result *provider.Result, err error) {
+	if deps.Health == nil || providerName == "" {
+		return
+	}
+	if err != nil {
+		var invalid provider.ErrInvalidRequest
+		if errors.As(err, &invalid) {
+			return
+		}
+		var unsupported provider.ErrUnsupportedOperation
+		if errors.As(err, &unsupported) {
+			return
+		}
+		deps.Health.MarkFailure(providerName)
+		return
+	}
+	if result != nil && result.StatusCode >= 500 {
+		deps.Health.MarkFailure(providerName)
+		return
+	}
+	deps.Health.MarkSuccess(providerName)
+}
+
+func nextUntriedAliasTarget(targets []config.AliasTarget, tried map[string]bool) alias.Target {
+	for _, target := range targets {
+		key := target.Provider + "/" + target.Model
+		if tried[key] {
+			continue
+		}
+		return alias.Target{Provider: target.Provider, Model: target.Model}
+	}
+	return alias.Target{}
 }
 
 func (h *Handler) instrumentUpstreamResponseSize(deps Dependencies, op provider.Operation, providerName string, result *provider.Result, err error) {

@@ -26,6 +26,14 @@ func validateListener(l Listener) error {
 }
 
 func validateAuth(a Auth) error {
+	if a.RateLimit != nil {
+		if a.RateLimit.RequestsPerMinute <= 0 {
+			return fmt.Errorf("auth %q: rate_limit.requests_per_minute must be greater than zero", a.Name)
+		}
+		if a.RateLimit.Burst <= 0 {
+			return fmt.Errorf("auth %q: rate_limit.burst must be greater than zero", a.Name)
+		}
+	}
 	switch a.Mode {
 	case AuthModeNone:
 		if len(a.Clients) > 0 {
@@ -134,6 +142,8 @@ func isValidCapability(c Capability) bool {
 	switch c {
 	case CapabilityChat, CapabilityResponses, CapabilityEmbeddings:
 		return true
+	case CapabilityImages, CapabilityAudio:
+		return true
 	default:
 		return false
 	}
@@ -142,7 +152,7 @@ func isValidCapability(c Capability) bool {
 func providerSupportsCapability(t ProviderType, c Capability) bool {
 	switch t {
 	case ProviderTypeOpenAI, ProviderTypeOpenAICompatible:
-		return c == CapabilityChat || c == CapabilityResponses || c == CapabilityEmbeddings
+		return c == CapabilityChat || c == CapabilityResponses || c == CapabilityEmbeddings || c == CapabilityImages || c == CapabilityAudio
 	case ProviderTypeAnthropic:
 		return c == CapabilityChat || c == CapabilityResponses
 	case ProviderTypeGemini:

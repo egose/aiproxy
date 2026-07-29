@@ -33,7 +33,7 @@ Configuration is written in HCL with an Alloy-like two-label block style.
 - Persistent request queueing
 - Rate limiting and quota accounting
 - Billing and tenant management
-- Embeddings, images, audio, and response-style APIs in the first release
+- Audio APIs and translated-provider image support in the first release
 
 ## Core Design Principle
 
@@ -67,6 +67,8 @@ The initial public API surface is:
 - `POST /v1/chat/completions`
 - `POST /v1/embeddings` for `openai`, `openai-compatible`, and `gemini`
 - `POST /v1/responses` for `openai`, `openai-compatible`, `anthropic`, and `gemini`
+- `POST /v1/images/generations` for `openai` and `openai-compatible`
+- `POST /v1/audio/transcriptions` for `openai` and `openai-compatible`
 
 The MVP supports both:
 
@@ -78,7 +80,6 @@ The MVP supports both:
 The design should leave room for later support of:
 
 - translated-provider embeddings
-- image generation endpoints
 - audio transcription and speech endpoints
 
 These later endpoints should reuse the same provider, model, alias, credential,
@@ -148,11 +149,24 @@ deployments.
 The proxy validates the inbound `Authorization: Bearer ...` token against
 statically configured client credentials from HCL.
 
+### Optional Local Rate Limit
+
+The `auth` block may include a `rate_limit` sub-block:
+
+- `requests_per_minute`
+- optional `burst`, defaulting to `requests_per_minute`
+
+The current implementation is local to a single proxy instance.
+
+- In `bearer_static` mode, the limiter is keyed by authenticated client name.
+- In `none` mode, the limiter applies to a shared anonymous bucket.
+
+Exceeded requests return `429 Too Many Requests` with `Retry-After`.
+
 Deferred auth features:
 
 - token rotation
 - tenant-scoped policy
-- per-client rate limits
 - external auth integration
 
 ## Resolution Model
@@ -647,6 +661,7 @@ Initial `/metrics` coverage includes:
 - provider counts by type and active/disabled state
 - alias counts by algorithm
 - skipped-provider state
+- provider health state
 - readiness state
 - readiness reason state
 - upstream response body size histograms by operation/provider/outcome
@@ -733,7 +748,7 @@ internal/observability/
 
 - anthropic embeddings if a viable provider-native mapping exists
 - image and audio APIs
-- rate limiting and quotas
+- quotas
 - per-client policy
 - broader provider catalog
 
@@ -787,10 +802,21 @@ Planned coverage once the sandbox exists:
 The following are intentionally out of scope for the MVP:
 
 - anthropic embeddings
-- image and audio endpoints
-- rate limiting
+- translated-provider image endpoints
+- translated-provider audio endpoints
+- audio speech generation endpoints
 - billing and tenancy
 - dynamic provider health state shared across instances
+
+## Provider Health
+
+The proxy maintains dynamic provider health state in-process and shares it
+across requests and aliases.
+
+Transient transport failures and upstream `5xx` responses mark a provider
+temporarily unhealthy for alias routing and readiness decisions.
+
+Provider health state is not coordinated across multiple proxy instances.
 
 ## Reload Behavior
 

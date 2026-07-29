@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +20,7 @@ import (
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/provider"
+	"github.com/egose/aiproxy/internal/providerhealth"
 )
 
 type stubAdapter struct {
@@ -94,6 +97,29 @@ func newHandler(t *testing.T, rt *config.Runtime, adapter provider.Adapter) http
 		Metrics:   observability.NewMetrics(),
 		Providers: rt.ProviderByName,
 	})
+}
+
+type denySecondLimiter struct {
+	count int32
+}
+
+type failFirstProviderAdapter struct {
+	calls []string
+}
+
+func (a *failFirstProviderAdapter) Do(ctx context.Context, r provider.Request) (*provider.Result, error) {
+	a.calls = append(a.calls, r.APIKey)
+	if r.APIKey == "bad-key" { // pragma: allowlist secret
+		return nil, errors.New("transport failed")
+	}
+	return &provider.Result{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: []byte(`{"id":"chatcmpl_ok"}`)}, nil
+}
+
+func (l *denySecondLimiter) Allow(string) (bool, time.Duration) {
+	if atomic.AddInt32(&l.count, 1) == 1 {
+		return true, 0
+	}
+	return false, 2 * time.Second
 }
 
 func TestHandlerDirectRoute(t *testing.T) {
@@ -201,6 +227,74 @@ func TestHandlerResponsesRoute(t *testing.T) {
 		t.Fatalf("operation = %v, want OpResponses", stub.got.Operation)
 	}
 	if stub.got.PublicModel != "openai/gpt-4o-mini" {
+		t.Fatalf("public model = %q", stub.got.PublicModel)
+	}
+}
+
+func TestHandlerImagesRoute(t *testing.T) {
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       []byte(`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`),
+	}}
+	rt := newRT()
+	providerCfg := rt.ProviderByName["openai"]
+	providerCfg.ModelByName["gpt-image-1"] = config.Model{Name: "gpt-image-1", UpstreamName: "gpt-image-1", Capabilities: []config.Capability{config.CapabilityImages}}
+	providerCfg.Models = append(providerCfg.Models, config.Model{Name: "gpt-image-1", UpstreamName: "gpt-image-1", Capabilities: []config.Capability{config.CapabilityImages}})
+	rt.ProviderByName["openai"] = providerCfg
+	rt.Providers = []config.Provider{providerCfg}
+	h := newHandler(t, rt, stub)
+
+	body := []byte(`{"model":"openai/gpt-image-1","prompt":"a cat"}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if stub.got.Operation != provider.OpImagesGenerations {
+		t.Fatalf("operation = %v, want OpImagesGenerations", stub.got.Operation)
+	}
+	if stub.got.PublicModel != "openai/gpt-image-1" {
+		t.Fatalf("public model = %q", stub.got.PublicModel)
+	}
+}
+
+func TestHandlerAudioTranscriptionsRoute(t *testing.T) {
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       []byte(`{"text":"hello world"}`),
+	}}
+	rt := newRT()
+	providerCfg := rt.ProviderByName["openai"]
+	providerCfg.ModelByName["gpt-4o-transcribe"] = config.Model{Name: "gpt-4o-transcribe", UpstreamName: "gpt-4o-transcribe", Capabilities: []config.Capability{config.CapabilityAudio}}
+	providerCfg.Models = append(providerCfg.Models, config.Model{Name: "gpt-4o-transcribe", UpstreamName: "gpt-4o-transcribe", Capabilities: []config.Capability{config.CapabilityAudio}})
+	rt.ProviderByName["openai"] = providerCfg
+	rt.Providers = []config.Provider{providerCfg}
+	h := newHandler(t, rt, stub)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormField("model")
+	_, _ = io.WriteString(part, "openai/gpt-4o-transcribe")
+	filePart, _ := writer.CreateFormFile("file", "sample.wav")
+	_, _ = io.WriteString(filePart, "audio-bytes")
+	_ = writer.Close()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", bytes.NewReader(body.Bytes()))
+	r.Header.Set("Content-Type", writer.FormDataContentType())
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if stub.got.Operation != provider.OpAudioTranscriptions {
+		t.Fatalf("operation = %v, want OpAudioTranscriptions", stub.got.Operation)
+	}
+	if stub.got.PublicModel != "openai/gpt-4o-transcribe" {
 		t.Fatalf("public model = %q", stub.got.PublicModel)
 	}
 }
@@ -358,6 +452,51 @@ func TestHandlerRejectsResponsesForChatOnlyModel(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(`{"model":"gemini/gemini-2.5-pro","input":"hello"}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	if resp.Error.Type != "unsupported_operation" {
+		t.Fatalf("error type = %q", resp.Error.Type)
+	}
+}
+
+func TestHandlerRejectsImagesForUnsupportedProvider(t *testing.T) {
+	rt := &config.Runtime{
+		Providers: []config.Provider{{
+			Type:   config.ProviderTypeAnthropic,
+			Name:   "anthropic",
+			APIKey: "sk-ant",
+			Models: []config.Model{{Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"}},
+			ModelByName: map[string]config.Model{
+				"claude-sonnet": {Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"},
+			},
+		}},
+		ProviderByName: map[string]config.Provider{
+			"anthropic": {
+				Type:   config.ProviderTypeAnthropic,
+				Name:   "anthropic",
+				APIKey: "sk-ant",
+				Models: []config.Model{{Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"}},
+				ModelByName: map[string]config.Model{
+					"claude-sonnet": {Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"},
+				},
+			},
+		},
+	}
+	h := newHandler(t, rt, provider.New())
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader([]byte(`{"model":"anthropic/claude-sonnet","prompt":"a cat"}`)))
 	h.ServeHTTP(w, r)
 
 	if w.Code != http.StatusBadRequest {
@@ -553,6 +692,43 @@ func TestHandlerReadyzFailsWithoutProviders(t *testing.T) {
 	}
 }
 
+func TestHandlerReadyzFailsWithoutHealthyProviders(t *testing.T) {
+	rt := newRT()
+	metrics := observability.NewMetrics()
+	metrics.RecordConfig(rt)
+	health := providerhealth.New(metrics)
+	health.SetProviders(rt.ProviderByName)
+	health.MarkFailure("openai")
+	h := NewHandler(Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   &stubAdapter{},
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Metrics:   metrics,
+		Providers: rt.ProviderByName,
+		Health:    health,
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", w.Code)
+	}
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsW := httptest.NewRecorder()
+	h.ServeHTTP(metricsW, metricsReq)
+	body := metricsW.Body.String()
+	for _, want := range []string{
+		"aiproxy_ready 0",
+		`aiproxy_ready_reason_info{reason="active_providers"} 0`,
+		`aiproxy_ready_reason_info{reason="no_healthy_providers"} 1`,
+		`aiproxy_provider_healthy{name="openai"} 0`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics output missing %q\n%s", want, body)
+		}
+	}
+}
+
 func TestHandlerMetricsEndpointAndCounters(t *testing.T) {
 	rt := newRT()
 	metrics := observability.NewMetrics()
@@ -600,6 +776,52 @@ func TestHandlerMetricsEndpointAndCounters(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics output missing %q\n%s", want, body)
 		}
+	}
+}
+
+func TestHandlerAliasSkipsUnhealthyProviderAfterTransientFailure(t *testing.T) {
+	rt := &config.Runtime{
+		Providers: []config.Provider{
+			{Type: config.ProviderTypeOpenAI, Name: "primary", APIKey: "bad-key", BaseURL: "https://x", Models: []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}}, ModelByName: map[string]config.Model{"gpt-4o-mini": {Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}}},
+			{Type: config.ProviderTypeOpenAI, Name: "backup", APIKey: "good-key", BaseURL: "https://x", Models: []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}}, ModelByName: map[string]config.Model{"gpt-4o-mini": {Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}}},
+		},
+		ProviderByName: map[string]config.Provider{},
+		Aliases:        []config.Alias{{Name: "chat_default", Algorithm: config.AlgorithmLeastConnections, Targets: []config.AliasTarget{{Provider: "primary", Model: "gpt-4o-mini"}, {Provider: "backup", Model: "gpt-4o-mini"}}}},
+		AliasByName:    map[string]config.Alias{},
+	}
+	for _, p := range rt.Providers {
+		rt.ProviderByName[p.Name] = p
+	}
+	for _, a := range rt.Aliases {
+		rt.AliasByName[a.Name] = a
+	}
+	metrics := observability.NewMetrics()
+	health := providerhealth.New(metrics)
+	health.SetProviders(rt.ProviderByName)
+	adapter := &failFirstProviderAdapter{}
+	h := NewHandler(Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   adapter,
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:   BuildModelCatalog(rt),
+		Metrics:   metrics,
+		Providers: rt.ProviderByName,
+		Health:    health,
+	})
+
+	for i := 0; i < 2; i++ {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"alias/chat_default","messages":[]}`)))
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("request %d status = %d body=%s", i, w.Code, w.Body.String())
+		}
+	}
+	if len(adapter.calls) != 3 {
+		t.Fatalf("calls = %+v", adapter.calls)
+	}
+	if adapter.calls[0] != "bad-key" || adapter.calls[1] != "good-key" || adapter.calls[2] != "good-key" {
+		t.Fatalf("unexpected call sequence: %+v", adapter.calls)
 	}
 }
 
@@ -702,6 +924,47 @@ func TestHandlerBearerAuthRejects(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestHandlerRateLimitRejectsWithRetryAfter(t *testing.T) {
+	rt := newRT()
+	h := NewHandler(Dependencies{
+		Resolver:    modelresolver.New(rt),
+		Adapter:     &stubAdapter{},
+		Auth:        auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:     BuildModelCatalog(rt),
+		Metrics:     observability.NewMetrics(),
+		Providers:   rt.ProviderByName,
+		RateLimiter: &denySecondLimiter{},
+	})
+
+	firstW := httptest.NewRecorder()
+	firstR := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[]}`)))
+	h.ServeHTTP(firstW, firstR)
+	if firstW.Code != http.StatusOK {
+		t.Fatalf("first status = %d", firstW.Code)
+	}
+
+	secondW := httptest.NewRecorder()
+	secondR := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[]}`)))
+	h.ServeHTTP(secondW, secondR)
+	if secondW.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status = %d, body=%s", secondW.Code, secondW.Body.String())
+	}
+	if secondW.Header().Get("Retry-After") != "2" {
+		t.Fatalf("retry-after = %q", secondW.Header().Get("Retry-After"))
+	}
+	var resp struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(secondW.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	if resp.Error.Type != "rate_limited" {
+		t.Fatalf("error type = %q", resp.Error.Type)
 	}
 }
 

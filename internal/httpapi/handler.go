@@ -6,7 +6,10 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,17 +18,21 @@ import (
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/provider"
+	"github.com/egose/aiproxy/internal/providerhealth"
+	"github.com/egose/aiproxy/internal/ratelimit"
 )
 
 type Dependencies struct {
-	Resolver  *modelresolver.Resolver
-	Adapter   provider.Adapter
-	Auth      auth.Authenticator
-	Client    *http.Client
-	Catalog   []ModelCard
-	Metrics   *observability.Metrics
-	Providers map[string]config.Provider
-	Logger    *slog.Logger
+	Resolver    *modelresolver.Resolver
+	Adapter     provider.Adapter
+	Auth        auth.Authenticator
+	Client      *http.Client
+	Catalog     []ModelCard
+	Metrics     *observability.Metrics
+	Providers   map[string]config.Provider
+	Health      *providerhealth.Tracker
+	RateLimiter ratelimit.Limiter
+	Logger      *slog.Logger
 }
 
 const maxRequestBodyBytes int64 = 8 << 20
@@ -46,6 +53,9 @@ func normalizeDependencies(deps Dependencies) Dependencies {
 	}
 	if deps.Adapter == nil {
 		deps.Adapter = provider.New()
+	}
+	if deps.RateLimiter == nil {
+		deps.RateLimiter = ratelimit.New(config.Auth{})
 	}
 	return deps
 }
@@ -97,9 +107,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := deps.Auth.Authenticate(r); err != nil {
+	principal, err := deps.Auth.Authenticate(r)
+	if err != nil {
 		logger.Warn("auth failed", "error", err)
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusUnauthorized, "auth_failed", err.Error())
+		return
+	}
+	if !h.allowRequest(deps, rw, r, principal) {
 		return
 	}
 
@@ -110,7 +124,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestBytes = len(body)
-	publicModel := extractModel(body)
+	publicModel := extractModelForRequest(r.Header.Get("Content-Type"), body)
 	if publicModel == "" {
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadRequest, "invalid_model", "model field is required")
 		return
@@ -213,14 +227,22 @@ func (h *Handler) handleHealth(deps Dependencies, w http.ResponseWriter, r *http
 	if r.URL.Path == "/readyz" {
 		if len(deps.Providers) == 0 {
 			if deps.Metrics != nil {
-				deps.Metrics.SetReady(false)
+				deps.Metrics.SetReadyWithReason(false, "no_active_providers")
+			}
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("not ready"))
+			return true
+		}
+		if deps.Health != nil && !deps.Health.AnyHealthy(deps.Providers) {
+			if deps.Metrics != nil {
+				deps.Metrics.SetReadyWithReason(false, "no_healthy_providers")
 			}
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte("not ready"))
 			return true
 		}
 		if deps.Metrics != nil {
-			deps.Metrics.SetReady(true)
+			deps.Metrics.SetReadyWithReason(true, "active_providers")
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -245,13 +267,87 @@ func (h *Handler) handleModels(deps Dependencies, w http.ResponseWriter, r *http
 	if r.URL.Path != "/v1/models" || r.Method != http.MethodGet {
 		return false
 	}
-	if _, err := deps.Auth.Authenticate(r); err != nil {
+	principal, err := deps.Auth.Authenticate(r)
+	if err != nil {
 		logger.Warn("auth failed", "error", err)
 		h.writeRequestError(deps.Metrics, w, r, http.StatusUnauthorized, "auth_failed", err.Error())
 		return true
 	}
+	if !h.allowRequest(deps, w, r, principal) {
+		return true
+	}
 	h.writeModels(w, deps.Catalog)
 	return true
+}
+
+func (h *Handler) allowRequest(deps Dependencies, w http.ResponseWriter, r *http.Request, principal *auth.Principal) bool {
+	if deps.RateLimiter == nil {
+		return true
+	}
+	allowed, retryAfter := deps.RateLimiter.Allow(principalRateLimitKey(principal))
+	if allowed {
+		return true
+	}
+	if retryAfter > 0 {
+		seconds := int(retryAfter / time.Second)
+		if retryAfter%time.Second != 0 {
+			seconds++
+		}
+		if seconds < 1 {
+			seconds = 1
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	}
+	h.writeRequestError(deps.Metrics, w, r, http.StatusTooManyRequests, "rate_limited", "rate limit exceeded")
+	return false
+}
+
+func principalRateLimitKey(principal *auth.Principal) string {
+	if principal == nil || principal.Name == "" {
+		return "anonymous"
+	}
+	return principal.Name
+}
+
+func extractModelForRequest(contentType string, body []byte) string {
+	if strings.HasPrefix(contentType, "multipart/form-data;") {
+		boundary := multipartContentBoundary(contentType)
+		if boundary == "" {
+			return ""
+		}
+		reader := multipart.NewReader(bytes.NewReader(body), boundary)
+		for {
+			part, err := reader.NextPart()
+			if err == io.EOF {
+				return ""
+			}
+			if err != nil {
+				return ""
+			}
+			if part.FormName() != "model" {
+				part.Close()
+				continue
+			}
+			data, err := io.ReadAll(part)
+			part.Close()
+			if err != nil {
+				return ""
+			}
+			return strings.TrimSpace(string(data))
+		}
+	}
+	return extractModel(body)
+}
+
+func multipartContentBoundary(contentType string) string {
+	parts := strings.Split(contentType, ";")
+	for _, part := range parts[1:] {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "boundary=") {
+			return strings.Trim(strings.TrimPrefix(part, "boundary="), `"`)
+		}
+	}
+	return ""
 }
 
 func extractModel(body []byte) string {

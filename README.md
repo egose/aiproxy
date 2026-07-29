@@ -15,12 +15,17 @@ OpenAI-compatible responses.
 - `POST /v1/chat/completions` (JSON and SSE streaming)
 - `POST /v1/embeddings` for `openai`, `openai-compatible`, and `gemini` providers
 - `POST /v1/responses` for `openai`, `openai-compatible`, `anthropic`, and `gemini` providers (JSON and SSE streaming)
+- `POST /v1/images/generations` for `openai` and `openai-compatible` providers
+- `POST /v1/audio/transcriptions` for `openai` and `openai-compatible` providers
 
 ### Auth Modes
 
 - `none` – skip inbound authentication (trusted environments only)
 - `bearer_static` – validate inbound `Authorization: Bearer ...` tokens against
   statically configured client credentials
+- optional `rate_limit` on the `auth` block applies a local in-memory request
+  rate limit; in `bearer_static` mode it is enforced per authenticated client,
+  and in `none` mode it is enforced against a shared anonymous bucket
 
 ### Provider Types
 
@@ -40,7 +45,7 @@ OpenAI-compatible responses.
 
 ### Not in MVP
 
-- Rate limiting, quotas, billing, tenancy
+- Audio speech generation endpoints, quotas, billing, tenancy
 
 The server supports live config reload on `SIGHUP` for runtime request-routing
 state such as auth, providers, models, aliases, and metrics-backed inventory.
@@ -215,6 +220,10 @@ provider with `api_key_ref { path = "..." key = "..." }`.
     resolved display name
 - Alias `least_connections` selection is per-process and best-effort; it is not
   coordinated across multiple proxy instances.
+- Provider health state is shared in-process across requests and aliases.
+  Transient transport failures and upstream `5xx` responses temporarily mark a
+  provider unhealthy for routing and readiness decisions, but this state is not
+  coordinated across multiple proxy instances.
 - Direct `<provider>/<model>` requests do not fail over to other targets.
 - Alias requests retry the next target only on transport errors, timeouts, and
   upstream `5xx`; upstream `4xx` responses are returned to the client verbatim.
@@ -225,6 +234,12 @@ provider with `api_key_ref { path = "..." key = "..." }`.
 - `POST /v1/embeddings` is currently implemented for `openai`,
   `openai-compatible`, and `gemini` providers. Requests targeting `anthropic`
   models return a client-visible unsupported-operation error.
+- `POST /v1/images/generations` is currently implemented for `openai` and
+  `openai-compatible` providers. Requests targeting translated providers return
+  a client-visible unsupported-operation error.
+- `POST /v1/audio/transcriptions` is currently implemented for `openai` and
+  `openai-compatible` providers. Requests targeting translated providers return
+  a client-visible unsupported-operation error.
 - `POST /v1/responses` is currently implemented for `openai`,
   `openai-compatible`, `anthropic`, and `gemini` providers. The translated
   provider path supports a conservative request subset for both JSON and
@@ -235,9 +250,9 @@ provider with `api_key_ref { path = "..." key = "..." }`.
   readiness reason gauges, inbound HTTP request counts / latency by method and
   path, request / response body size histograms,
   streaming response counts / duration, proxy-generated HTTP error counts by
-  endpoint and error type, alias in-flight request gauges by target, and
-  upstream request counts / latency / response body size by operation and
-  provider.
+  endpoint and error type, alias in-flight request gauges by target, provider
+  health gauges, and upstream request counts / latency / response body size by
+  operation and provider.
 - API keys and client bearer tokens are never logged.
 
 ## Deferred / Planned
