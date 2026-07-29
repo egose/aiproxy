@@ -81,46 +81,24 @@ func (a *adapter) doAnthropicChat(ctx context.Context, r Request) (*Result, erro
 	if streaming {
 		req.Header.Set("Accept", "text/event-stream")
 	}
-
-	resp, err := clientFor(r).Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("upstream call: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		defer resp.Body.Close()
-		errBody, err := readUpstreamBody(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("read error body: %w", err)
-		}
-		return &Result{
-			StatusCode: resp.StatusCode,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       translateAnthropicError(errBody),
-		}, nil
-	}
-	if streaming {
-		return &Result{
-			StatusCode: resp.StatusCode,
-			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-			StreamBody: translateAnthropicStream(resp.Body, r.PublicModel),
-			Streaming:  true,
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	outBody, err := readUpstreamBody(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read upstream body: %w", err)
-	}
-	translatedBody, err := translateAnthropicResponse(outBody, r.PublicModel)
-	if err != nil {
-		return nil, fmt.Errorf("translate response: %w", err)
-	}
-	return &Result{
-		StatusCode: resp.StatusCode,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       translatedBody,
-	}, nil
+	return executeUpstream(r, req, upstreamResponseHandlers{
+		IsStreaming: func(*http.Response) bool {
+			return streaming
+		},
+		OnStream: func(resp *http.Response) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: translateAnthropicStream(resp.Body, r.PublicModel), Streaming: true}, nil
+		},
+		OnError: func(resp *http.Response, body []byte) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translateAnthropicError(body)}, nil
+		},
+		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
+			translatedBody, err := translateAnthropicResponse(body, r.PublicModel)
+			if err != nil {
+				return nil, fmt.Errorf("translate response: %w", err)
+			}
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody}, nil
+		},
+	})
 }
 
 func (a *adapter) doAnthropicResponses(ctx context.Context, r Request) (*Result, error) {
@@ -151,32 +129,24 @@ func (a *adapter) doAnthropicResponses(ctx context.Context, r Request) (*Result,
 	if streaming {
 		req.Header.Set("Accept", "text/event-stream")
 	}
-
-	resp, err := clientFor(r).Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("upstream call: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		defer resp.Body.Close()
-		errBody, err := readUpstreamBody(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("read error body: %w", err)
-		}
-		return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translateAnthropicError(errBody)}, nil
-	}
-	if streaming {
-		return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: translateAnthropicResponsesStream(resp.Body, r.PublicModel), Streaming: true}, nil
-	}
-	defer resp.Body.Close()
-	outBody, err := readUpstreamBody(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read upstream body: %w", err)
-	}
-	translatedBody, err := translateAnthropicResponsesResponse(outBody, r.PublicModel)
-	if err != nil {
-		return nil, fmt.Errorf("translate response: %w", err)
-	}
-	return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody}, nil
+	return executeUpstream(r, req, upstreamResponseHandlers{
+		IsStreaming: func(*http.Response) bool {
+			return streaming
+		},
+		OnStream: func(resp *http.Response) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: translateAnthropicResponsesStream(resp.Body, r.PublicModel), Streaming: true}, nil
+		},
+		OnError: func(resp *http.Response, body []byte) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translateAnthropicError(body)}, nil
+		},
+		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
+			translatedBody, err := translateAnthropicResponsesResponse(body, r.PublicModel)
+			if err != nil {
+				return nil, fmt.Errorf("translate response: %w", err)
+			}
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody}, nil
+		},
+	})
 }
 
 func translateOpenAIToAnthropic(body []byte, upstreamModel string) ([]byte, bool, error) {

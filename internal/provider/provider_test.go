@@ -187,6 +187,75 @@ func TestAdapterUsesProvidedBodyWithoutReadingInboundBody(t *testing.T) {
 	}
 }
 
+func TestExecuteUpstreamPrefersStreamingWhenConfigured(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("data: boom\n\n"))
+	}))
+	defer upstream.Close()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, upstream.URL, http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	streamCalled := false
+	result, err := executeUpstream(Request{Client: upstream.Client()}, req, upstreamResponseHandlers{
+		PreferStreaming: true,
+		IsStreaming: func(resp *http.Response) bool {
+			return strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream")
+		},
+		OnStream: func(resp *http.Response) (*Result, error) {
+			streamCalled = true
+			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, StreamBody: resp.Body, Streaming: true}, nil
+		},
+		OnError: func(*http.Response, []byte) (*Result, error) {
+			t.Fatal("unexpected error handler call")
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("executeUpstream: %v", err)
+	}
+	if !streamCalled || !result.Streaming {
+		t.Fatalf("expected streaming result, got %+v", result)
+	}
+	defer result.StreamBody.Close()
+}
+
+func TestExecuteUpstreamUsesErrorHandlerForNonStreamingErrors(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":"boom"}`))
+	}))
+	defer upstream.Close()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, upstream.URL, http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	result, err := executeUpstream(Request{Client: upstream.Client()}, req, upstreamResponseHandlers{
+		IsStreaming: func(*http.Response) bool { return false },
+		OnStream: func(*http.Response) (*Result, error) {
+			t.Fatal("unexpected stream handler call")
+			return nil, nil
+		},
+		OnError: func(resp *http.Response, body []byte) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: append([]byte("wrapped:"), body...)}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("executeUpstream: %v", err)
+	}
+	if result.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d", result.StatusCode)
+	}
+	if string(result.Body) != `wrapped:{"error":"boom"}` {
+		t.Fatalf("body = %s", result.Body)
+	}
+}
+
 func TestOpenAIResponsesRewritesModelAndForwards(t *testing.T) {
 	var seenAuth, seenBody, seenPath string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

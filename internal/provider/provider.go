@@ -159,3 +159,45 @@ func requestBody(r Request) ([]byte, error) {
 	r.Body = body
 	return body, nil
 }
+
+type upstreamResponseHandlers struct {
+	PreferStreaming bool
+	IsStreaming     func(*http.Response) bool
+	OnStream        func(*http.Response) (*Result, error)
+	OnError         func(*http.Response, []byte) (*Result, error)
+	OnSuccess       func(*http.Response, []byte) (*Result, error)
+}
+
+func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHandlers) (*Result, error) {
+	resp, err := clientFor(r).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("upstream call: %w", err)
+	}
+	isStreaming := handlers.IsStreaming != nil && handlers.IsStreaming(resp)
+	if handlers.PreferStreaming && isStreaming {
+		return handlers.OnStream(resp)
+	}
+	if resp.StatusCode >= 400 {
+		defer resp.Body.Close()
+		body, err := readUpstreamBody(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("read error body: %w", err)
+		}
+		if handlers.OnError == nil {
+			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil
+		}
+		return handlers.OnError(resp, body)
+	}
+	if isStreaming {
+		return handlers.OnStream(resp)
+	}
+	defer resp.Body.Close()
+	body, err := readUpstreamBody(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read upstream body: %w", err)
+	}
+	if handlers.OnSuccess == nil {
+		return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil
+	}
+	return handlers.OnSuccess(resp, body)
+}
