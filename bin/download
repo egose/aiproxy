@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+tool_name="aiproxy"
+
+github_coordinates="${ASDF_AIPROXY_GITHUB_REPOSITORY:-egose/aiproxy}"
+base_download_url="https://github.com/${github_coordinates}/releases/download"
+
+version="$ASDF_INSTALL_VERSION"
+download_path="$ASDF_DOWNLOAD_PATH"
+
+case "$(uname -s)" in
+  Darwin) os="darwin" ;;
+  Linux)  os="linux"  ;;
+  FreeBSD) os="freebsd" ;;
+  OpenBSD) os="openbsd" ;;
+  NetBSD)  os="netbsd"  ;;
+  *) echo "Unsupported OS: $(uname -s)" >&2; exit 1 ;;
+esac
+
+case "$(uname -m)" in
+  x86_64|amd64) arch="amd64" ;;
+  arm64|aarch64) arch="arm64" ;;
+  i386|i686) arch="386" ;;
+  armv7l|arm) arch="arm" ;;
+  *) echo "Unsupported arch: $(uname -m)" >&2; exit 1 ;;
+esac
+
+filename="${tool_name}-${os}-${arch}.tar.gz"
+
+mkdir -p "$download_path"
+download_url="${base_download_url}/v${version}/${filename}"
+outfile="${download_path}/${filename}"
+
+echo "Attempting to download: $download_url"
+
+if curl -L --fail --connect-timeout 10 --retry 3 "${download_url}" -o "${outfile}"; then
+  echo "Download successful."
+  exit 0
+else
+  echo "Error: Failed to download ${filename} for v${version}." >&2
+  exit 1
+fi
