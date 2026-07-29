@@ -1,4 +1,4 @@
-## 0.0.1 (2026-07-29)
+## 0.0.2 (2026-07-29)
 
 ### Features
 
@@ -6,6 +6,7 @@
 * add audio speech support for openai providers ([6723d58](https://github.com/egose/aiproxy/commit/6723d58bf6576097bb8d894ebddcfaedb7442da4))
 * add billing usage endpoint for aggregated summaries ([e85b0ef](https://github.com/egose/aiproxy/commit/e85b0ef3cac393b160182ebb673d052dcb1a1622))
 * add cli entrypoint with serve, validate, and version commands ([88089ba](https://github.com/egose/aiproxy/commit/88089baf500270c43fee17314407310190d83b8f))
+* add download, install, and release listing scripts ([f548049](https://github.com/egose/aiproxy/commit/f54804943fb3ac306cbe693216546dbdbc1b3435))
 * add explicit audio capability support for OpenAI routes ([c2f8a89](https://github.com/egose/aiproxy/commit/c2f8a89f52cfe690d4574b4a091f6b5d09ea605d))
 * add image generation and audio transcription routing ([2840689](https://github.com/egose/aiproxy/commit/28406897a575a21d37488465d84dfe7812af88a7))
 * add in-process usage accounting and metrics ([cd40ba7](https://github.com/egose/aiproxy/commit/cd40ba7dfa39a6699c6b43a359922f475474a16f))
