@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/modelresolver"
@@ -808,6 +809,7 @@ func TestHandlerMetricsEndpointAndCounters(t *testing.T) {
 		`aiproxy_http_request_duration_seconds_count{method="POST",path="/v1/chat/completions",status="200"} 1`,
 		`aiproxy_http_request_body_bytes_count{method="POST",path="/v1/chat/completions"} 1`,
 		`aiproxy_http_response_body_bytes_count{method="POST",path="/v1/chat/completions",status="200"} 1`,
+		`aiproxy_usage_events_total{client="anonymous",model="openai/gpt-4o-mini",operation="chat_completions",status="200",tenant="anonymous"} 1`,
 		"aiproxy_active_providers 1",
 		"aiproxy_disabled_providers 0",
 		"aiproxy_aliases 1",
@@ -1010,6 +1012,45 @@ func TestHandlerAuthorizerRejectsForbiddenModel(t *testing.T) {
 	}
 	if resp.Error.Type != "forbidden" {
 		t.Fatalf("error type = %q", resp.Error.Type)
+	}
+}
+
+func TestHandlerAccountingRecordsTenantClientModelAndStatus(t *testing.T) {
+	rt := newRT()
+	recorder := &accounting.MemoryRecorder{}
+	h := NewHandler(Dependencies{
+		Resolver: modelresolver.New(rt),
+		Adapter:  &stubAdapter{},
+		Auth: auth.NewAuthenticator(config.Auth{
+			Mode: config.AuthModeBearerStatic,
+			Clients: map[string]config.Client{
+				"ci": {Name: "ci", Token: "tok", Tenant: "team-a", AllowedModels: []string{"openai/gpt-4o-mini"}},
+			},
+		}),
+		Authorizer: auth.NewAuthorizer(config.Auth{
+			Mode: config.AuthModeBearerStatic,
+			Clients: map[string]config.Client{
+				"ci": {Name: "ci", Token: "tok", Tenant: "team-a", AllowedModels: []string{"openai/gpt-4o-mini"}},
+			},
+		}),
+		Catalog:    BuildModelCatalog(rt),
+		Metrics:    observability.NewMetrics(),
+		Providers:  rt.ProviderByName,
+		Accounting: recorder,
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[]}`)))
+	r.Header.Set("Authorization", "Bearer tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	events := recorder.Events()
+	if len(events) != 1 {
+		t.Fatalf("events = %+v", events)
+	}
+	if events[0].Tenant != "team-a" || events[0].Client != "ci" || events[0].Model != "openai/gpt-4o-mini" || events[0].Operation != "chat_completions" || events[0].StatusCode != http.StatusOK {
+		t.Fatalf("event = %+v", events[0])
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/modelresolver"
@@ -33,6 +34,7 @@ type Dependencies struct {
 	Providers   map[string]config.Provider
 	Health      *providerhealth.Tracker
 	RateLimiter ratelimit.Limiter
+	Accounting  accounting.Recorder
 	Logger      *slog.Logger
 }
 
@@ -61,6 +63,13 @@ func normalizeDependencies(deps Dependencies) Dependencies {
 	if deps.RateLimiter == nil {
 		deps.RateLimiter = ratelimit.New(config.Auth{})
 	}
+	if deps.Accounting == nil {
+		if deps.Metrics != nil {
+			deps.Accounting = deps.Metrics
+		} else {
+			deps.Accounting = accounting.NewNoop()
+		}
+	}
 	return deps
 }
 
@@ -83,11 +92,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rw := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
 	start := time.Now()
 	requestBytes := 0
+	var principal *auth.Principal
+	var publicModel string
+	var op provider.Operation
+	opKnown := false
 	defer func() {
 		if deps.Metrics != nil {
 			path := metricsPathLabel(r)
 			deps.Metrics.RecordHTTP(r.Method, path, rw.statusCode, time.Since(start).Seconds())
 			deps.Metrics.RecordHTTPSize(r.Method, path, rw.statusCode, requestBytes, rw.bytesWritten)
+		}
+		if opKnown {
+			deps.Accounting.Record(accounting.Event{
+				Timestamp:  time.Now(),
+				Tenant:     principalTenant(principal),
+				Client:     principalName(principal),
+				Model:      publicModel,
+				Operation:  op.String(),
+				StatusCode: rw.statusCode,
+			})
 		}
 	}()
 
@@ -105,13 +128,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	op, ok := operationFromRequest(r)
+	var ok bool
+	op, ok = operationFromRequest(r)
 	if !ok {
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusNotFound, "not_found", "unknown endpoint")
 		return
 	}
+	opKnown = true
 
-	principal, err := deps.Auth.Authenticate(r)
+	var err error
+	principal, err = deps.Auth.Authenticate(r)
 	if err != nil {
 		logger.Warn("auth failed", "error", err)
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusUnauthorized, "auth_failed", err.Error())
@@ -128,7 +154,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestBytes = len(body)
-	publicModel := extractModelForRequest(r.Header.Get("Content-Type"), body)
+	publicModel = extractModelForRequest(r.Header.Get("Content-Type"), body)
 	if publicModel == "" {
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadRequest, "invalid_model", "model field is required")
 		return
@@ -315,6 +341,20 @@ func principalRateLimitKey(principal *auth.Principal) string {
 		return "anonymous"
 	}
 	return principal.Name
+}
+
+func principalName(principal *auth.Principal) string {
+	if principal == nil {
+		return ""
+	}
+	return principal.Name
+}
+
+func principalTenant(principal *auth.Principal) string {
+	if principal == nil {
+		return ""
+	}
+	return principal.Tenant
 }
 
 func extractModelForRequest(contentType string, body []byte) string {

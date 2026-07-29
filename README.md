@@ -30,6 +30,8 @@ OpenAI-compatible responses.
 - optional `tenant` and `allowed_models` on `auth.client` let you attach client
   identity metadata and enforce a static allow-list of proxy-visible model
   names
+- request accounting is tracked in-process by tenant, client, model, operation,
+  and status; `/metrics` exposes aggregated usage event counters
 
 ### Provider Types
 

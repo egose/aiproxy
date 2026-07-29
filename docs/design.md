@@ -158,6 +158,14 @@ Each static client may also define:
 `allowed_models` applies a static allow-list against the proxy-visible model
 name, including both direct `<provider>/<model>` strings and `alias/<name>`.
 
+The proxy also records in-process accounting events keyed by:
+
+- tenant
+- client
+- model
+- operation
+- status
+
 ### Optional Local Rate Limit
 
 The `auth` block may include a `rate_limit` sub-block:
