@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/observability"
 )
@@ -201,5 +202,48 @@ provider "openai" "openai" {
 	a.Server.Handler.ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("readyz status after failed reload = %d, want 200", w.Code)
+	}
+}
+
+func TestBuildWiresUsageAggregator(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_test","object":"chat.completion","choices":[]}`))
+	}))
+	defer upstream.Close()
+
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" {
+  mode = "bearer_static"
+  client "ci" {
+    token = "tok"
+    tenant = "team-a"
+    allowed_models = ["openai/gpt-4o-mini"]
+  }
+}
+provider "openai" "openai" {
+  base_url = "`+upstream.URL+`"
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test"})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"openai/gpt-4o-mini","messages":[]}`))
+	r.Header.Set("Authorization", "Bearer tok")
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	summaries := a.usage.Summaries()
+	if len(summaries) != 1 {
+		t.Fatalf("summaries = %+v", summaries)
+	}
+	if summaries[0] != (accounting.Summary{Tenant: "team-a", Client: "ci", Model: "openai/gpt-4o-mini", Operation: "chat_completions", StatusCode: 200, Count: 1}) {
+		t.Fatalf("summary = %+v", summaries[0])
 	}
 }

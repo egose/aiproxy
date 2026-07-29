@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/provider"
 	"github.com/prometheus/client_golang/prometheus"
@@ -23,6 +24,7 @@ type Metrics struct {
 	httpStreams        *prometheus.CounterVec
 	httpStreamLatency  *prometheus.HistogramVec
 	httpErrors         *prometheus.CounterVec
+	usageEvents        *prometheus.CounterVec
 	providerSelections *prometheus.CounterVec
 	aliasRetries       *prometheus.CounterVec
 	aliasInflight      *prometheus.GaugeVec
@@ -78,6 +80,10 @@ func NewMetrics() *Metrics {
 			Name: "aiproxy_http_errors_total",
 			Help: "Total number of proxy-generated HTTP error responses by method, path, status, and error type.",
 		}, []string{"method", "path", "status", "error_type"}),
+		usageEvents: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "aiproxy_usage_events_total",
+			Help: "Total number of request accounting events by tenant, client, model, operation, and status.",
+		}, []string{"tenant", "client", "model", "operation", "status"}),
 		providerSelections: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "aiproxy_provider_selections_total",
 			Help: "Total number of provider/model selections made by the proxy.",
@@ -157,6 +163,7 @@ func NewMetrics() *Metrics {
 		m.httpStreams,
 		m.httpStreamLatency,
 		m.httpErrors,
+		m.usageEvents,
 		m.providerSelections,
 		m.aliasRetries,
 		m.aliasInflight,
@@ -302,6 +309,25 @@ func (m *Metrics) RecordHTTPError(method, path string, statusCode int, errType s
 	}
 	status := strconv.Itoa(statusCode)
 	m.httpErrors.WithLabelValues(method, path, status, errType).Inc()
+}
+
+func (m *Metrics) Record(event accounting.Event) {
+	if m == nil || event.Operation == "" {
+		return
+	}
+	tenant := event.Tenant
+	if tenant == "" {
+		tenant = "anonymous"
+	}
+	client := event.Client
+	if client == "" {
+		client = "anonymous"
+	}
+	model := event.Model
+	if model == "" {
+		model = "unknown"
+	}
+	m.usageEvents.WithLabelValues(tenant, client, model, event.Operation, strconv.Itoa(event.StatusCode)).Inc()
 }
 
 func (m *Metrics) SetReady(ready bool) {
