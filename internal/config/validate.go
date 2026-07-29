@@ -100,8 +100,8 @@ func validateProviders(providers []Provider) error {
 			return fmt.Errorf("provider %q: at least one model is required", p.Name)
 		}
 		for _, m := range p.Models {
-			if !isLowercaseName(m.Name) {
-				return fmt.Errorf("provider %q: model %q name must be lowercase, no spaces, no '/'", p.Name, m.Name)
+			if !isLowercaseModelName(m.Name) {
+				return fmt.Errorf("provider %q: model %q name must be lowercase, no spaces, and each '/'-separated segment must start with [a-z0-9]", p.Name, m.Name)
 			}
 			if m.UpstreamName == "" {
 				return fmt.Errorf("provider %q: model %q has empty upstream_name", p.Name, m.Name)

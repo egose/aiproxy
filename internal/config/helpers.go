@@ -120,3 +120,15 @@ func isLowercaseName(name string) bool {
 	}
 	return nameRule.MatchString(name)
 }
+
+func isLowercaseModelName(name string) bool {
+	if strings.ContainsAny(name, " \t\r\n") {
+		return false
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == "" || !nameRule.MatchString(part) {
+			return false
+		}
+	}
+	return true
+}
