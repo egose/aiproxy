@@ -5,6 +5,7 @@ import "time"
 type Runtime struct {
 	Listener          Listener
 	Auth              Auth
+	Logging           Logging
 	ProviderHealth    ProviderHealth
 	Providers         []Provider
 	DisabledProviders []Provider
@@ -25,6 +26,20 @@ type Timeouts struct {
 	ReadHeader time.Duration
 	Idle       time.Duration
 	Write      time.Duration
+}
+
+type LogLevel string
+
+const (
+	LogLevelDebug LogLevel = "debug"
+	LogLevelInfo  LogLevel = "info"
+	LogLevelWarn  LogLevel = "warn"
+	LogLevelError LogLevel = "error"
+)
+
+type Logging struct {
+	Level     LogLevel
+	AccessLog bool
 }
 
 type AuthMode string

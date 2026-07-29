@@ -52,6 +52,7 @@ aiproxy configure provider
 aiproxy configure auth
 aiproxy configure alias
 aiproxy configure listener
+aiproxy configure logging
 aiproxy configure provider-health
 ```
 
@@ -60,7 +61,7 @@ subcommands can also be used directly.
 
 Supported workflows:
 
-- create or update `listener`, `auth`, `provider`, `alias`, and `provider_health`
+- create or update `listener`, `auth`, `provider`, `alias`, `logging`, and `provider_health`
 - update provider secrets when using `api_key_ref`
 - delete existing blocks with `--delete`
 
@@ -194,6 +195,19 @@ Without Redis-backed sharing, each instance tracks transient health independentl
 - API keys and client bearer tokens are never logged
 - prompt and response bodies should be redacted or omitted from standard logs
 - request IDs are emitted for correlation
+
+## Logging
+
+Use the optional `logging` block to control structured log verbosity and request lifecycle access logging.
+
+```hcl
+logging {
+  level      = "info"
+  access_log = true
+}
+```
+
+When `access_log = true`, request logs include events for request receipt, upstream provider/model selection and completion, and the final response or streaming start and end.
 
 ## Secret Handling
 

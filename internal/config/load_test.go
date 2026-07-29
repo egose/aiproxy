@@ -43,6 +43,9 @@ provider "openai" "openai" {
 	if rt.Auth.Mode != AuthModeNone {
 		t.Errorf("auth mode = %q", rt.Auth.Mode)
 	}
+	if rt.Logging.Level != LogLevelInfo || !rt.Logging.AccessLog {
+		t.Fatalf("logging = %+v", rt.Logging)
+	}
 	if len(rt.Providers) != 1 {
 		t.Fatalf("expected 1 provider, got %d", len(rt.Providers))
 	}
@@ -58,6 +61,28 @@ provider "openai" "openai" {
 	}
 	if p.ModelByName["gpt-4o-mini"].UpstreamName != "gpt-4o-mini" {
 		t.Errorf("upstream name default mismatch")
+	}
+}
+
+func TestLoadLoggingConfig(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+logging {
+  level = "warn"
+  access_log = false
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if rt.Logging.Level != LogLevelWarn || rt.Logging.AccessLog {
+		t.Fatalf("logging = %+v", rt.Logging)
 	}
 }
 
@@ -190,6 +215,24 @@ provider "openai" "openai" {
 	}
 	if rt.ProviderHealth.RedisURL != "redis://127.0.0.1:6379" || rt.ProviderHealth.KeyPrefix != "aiproxy:test" || rt.ProviderHealth.Cooldown != 45*time.Second {
 		t.Fatalf("provider_health = %+v", rt.ProviderHealth)
+	}
+}
+
+func TestLoadInvalidLoggingLevel(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+logging {
+  level = "verbose"
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "logging: invalid level") {
+		t.Fatalf("expected invalid logging level error, got %v", err)
 	}
 }
 

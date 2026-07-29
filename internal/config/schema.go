@@ -3,9 +3,15 @@ package config
 type rawFile struct {
 	Listeners      []rawListener      `hcl:"listener,block"`
 	Auth           []rawAuth          `hcl:"auth,block"`
+	Logging        *rawLogging        `hcl:"logging,block"`
 	ProviderHealth *rawProviderHealth `hcl:"provider_health,block"`
 	Providers      []rawProvider      `hcl:"provider,block"`
 	Aliases        []rawAlias         `hcl:"alias,block"`
+}
+
+type rawLogging struct {
+	Level     string `hcl:"level,optional"`
+	AccessLog *bool  `hcl:"access_log,optional"`
 }
 
 type rawListener struct {

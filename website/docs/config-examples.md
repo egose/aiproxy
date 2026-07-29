@@ -21,6 +21,11 @@ auth "main" {
   mode = "none"
 }
 
+logging {
+  level      = "info"
+  access_log = true
+}
+
 provider "openai" "openai" {
   display_name = "OpenAI"
   api_key      = env("OPENAI_API_KEY")

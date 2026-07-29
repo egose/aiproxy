@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -293,6 +294,77 @@ provider "openai" "openai" {
 	a.Server.Handler.ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("billing usage status = %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestBuildHonorsAccessLogSetting(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_test","object":"chat.completion","choices":[]}`))
+	}))
+	defer upstream.Close()
+
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+logging {
+  access_log = false
+}
+provider "openai" "openai" {
+  base_url = "`+upstream.URL+`"
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	var logs bytes.Buffer
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test", LogOutput: &logs})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"openai/gpt-4o-mini","messages":[]}`))
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(logs.String(), "request received") || strings.Contains(logs.String(), "response sent") {
+		t.Fatalf("access logs should be disabled, got logs:\n%s", logs.String())
+	}
+}
+
+func TestBuildHonorsLogLevelSetting(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_test","object":"chat.completion","choices":[]}`))
+	}))
+	defer upstream.Close()
+
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+logging {
+  level = "error"
+  access_log = true
+}
+provider "openai" "openai" {
+  base_url = "`+upstream.URL+`"
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	var logs bytes.Buffer
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test", LogOutput: &logs})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"openai/gpt-4o-mini","messages":[]}`))
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("expected no info logs at error level, got:\n%s", logs.String())
 	}
 }
 

@@ -8,17 +8,19 @@ sidebar_position: 3
 
 - `listener "http" "public"`
 - `auth "main"`
+- `logging`
 - `provider "<type>" "<name>"`
 - `alias "<name>"`
 
 ## Mental Model
 
-Think about the config in four layers:
+Think about the config in five layers:
 
 1. `listener` defines how the proxy accepts traffic.
 2. `auth` defines who may call it.
-3. `provider` blocks define upstream systems and their models.
-4. `alias` blocks define the client-facing virtual models used for routing and failover.
+3. `logging` defines structured log verbosity and request lifecycle access logging.
+4. `provider` blocks define upstream systems and their models.
+5. `alias` blocks define the client-facing virtual models used for routing and failover.
 
 ## Example
 
@@ -46,6 +48,11 @@ auth "main" {
     tenant         = "internal"
     allowed_models = ["alias/chat_default", "openai/gpt-4.1"]
   }
+}
+
+logging {
+  level      = "info"
+  access_log = true
 }
 
 provider "openai" "openai" {
@@ -101,6 +108,18 @@ The listener block configures the inbound HTTP server.
 Listener address and timeout changes still require a restart, even though some runtime state can reload on `SIGHUP`.
 
 For most deployments, one HTTP listener is enough.
+
+## Logging
+
+The optional `logging` block controls structured application logs.
+
+- `level` accepts `debug`, `info`, `warn`, or `error`
+- `access_log` enables or disables request lifecycle logs such as request received, upstream request start and finish, and response sent or stream start and finish
+
+Defaults:
+
+- `level = "info"`
+- `access_log = true`
 
 ## Auth
 

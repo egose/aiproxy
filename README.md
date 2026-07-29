@@ -33,6 +33,8 @@ OpenAI-compatible responses.
   names
 - request accounting is tracked in-process by tenant, client, model, operation,
   and status; `/metrics` exposes aggregated usage event counters
+- optional `logging` config controls structured log level and request lifecycle
+  access logging
 - `GET /v1/billing/usage` returns aggregated in-process usage summaries. In
   `bearer_static` mode it is scoped to the caller's tenant when present,
   otherwise to the caller's client identity.
@@ -111,6 +113,11 @@ auth "main" {
   mode = "none"
 }
 
+logging {
+  level      = "info"
+  access_log = true
+}
+
 provider "openai" "openai" {
   display_name = "OpenAI"
   api_key      = env("OPENAI_API_KEY")
@@ -184,6 +191,7 @@ aiproxy configure
 aiproxy configure provider
 aiproxy configure auth
 aiproxy configure alias
+aiproxy configure logging
 ```
 
 The wizard prompts for the config path first when `--config` is not provided,
@@ -196,6 +204,7 @@ Supported block workflows:
 - `auth`
 - `provider`
 - `alias`
+- `logging`
 - `provider-health`
 
 Block subcommands also support non-interactive scripting with flags:
