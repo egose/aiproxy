@@ -110,8 +110,18 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-sh",
-        children: "aiproxy serve --config /etc/aiproxy/config.hcl\naiproxy validate --config /etc/aiproxy/config.hcl\naiproxy version\n"
+        children: "aiproxy serve\naiproxy validate\naiproxy serve --config /etc/aiproxy/config.hcl\naiproxy validate --config /etc/aiproxy/config.hcl\naiproxy version\n"
       })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Without ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--config"
+      }), ", the CLI reads ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "$XDG_CONFIG_HOME/aiproxy/config.hcl"
+      }), ", falling back to\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "~/.config/aiproxy/config.hcl"
+      }), " when ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "XDG_CONFIG_HOME"
+      }), " is unset."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "When running locally with env-based secrets, load your environment before invoking the binary:"
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
