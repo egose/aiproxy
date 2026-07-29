@@ -139,6 +139,7 @@ func buildDependencies(rt *config.Runtime, logger *slog.Logger, adapter provider
 		Resolver:    modelresolver.New(rt),
 		Adapter:     adapter,
 		Auth:        auth.NewAuthenticator(rt.Auth),
+		Authorizer:  auth.NewAuthorizer(rt.Auth),
 		Client:      httpClient,
 		Catalog:     httpapi.BuildModelCatalog(rt),
 		Metrics:     metrics,

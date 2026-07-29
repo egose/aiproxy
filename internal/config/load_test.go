@@ -101,6 +101,35 @@ provider "openai" "openai" {
 	}
 }
 
+func TestLoadClientTenantAndAllowedModels(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" {
+  mode = "bearer_static"
+  client "ci" {
+    token = "tok"
+    tenant = "team-a"
+    allowed_models = ["openai/gpt-4o-mini", "alias/chat_default"]
+  }
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	client := rt.Auth.Clients["ci"]
+	if client.Tenant != "team-a" {
+		t.Fatalf("tenant = %q", client.Tenant)
+	}
+	if len(client.AllowedModels) != 2 || client.AllowedModels[1] != "alias/chat_default" {
+		t.Fatalf("allowed_models = %+v", client.AllowedModels)
+	}
+}
+
 func TestLoadOpenAICompatibleRequiresBaseURL(t *testing.T) {
 	cfg := `
 listener "http" "public" { address = ":8080" }

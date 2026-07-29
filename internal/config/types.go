@@ -41,8 +41,10 @@ type Auth struct {
 }
 
 type Client struct {
-	Name  string
-	Token string
+	Name          string
+	Token         string
+	Tenant        string
+	AllowedModels []string
 }
 
 type RateLimit struct {

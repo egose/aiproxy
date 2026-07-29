@@ -101,7 +101,9 @@ func buildAuth(rawAuths []rawAuth) (Auth, error) {
 		if _, dup := auth.Clients[c.Name]; dup {
 			return Auth{}, fmt.Errorf("duplicate client %q in auth %q", c.Name, a.Name)
 		}
-		auth.Clients[c.Name] = Client{Name: c.Name, Token: c.Token}
+		client := Client{Name: c.Name, Token: c.Token, Tenant: c.Tenant, AllowedModels: make([]string, 0, len(c.AllowedModels))}
+		client.AllowedModels = append(client.AllowedModels, c.AllowedModels...)
+		auth.Clients[c.Name] = client
 	}
 	return auth, nil
 }

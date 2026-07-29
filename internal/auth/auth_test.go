@@ -23,7 +23,7 @@ func TestBearerStaticAcceptsKnownToken(t *testing.T) {
 	a := NewAuthenticator(config.Auth{
 		Mode: config.AuthModeBearerStatic,
 		Clients: map[string]config.Client{
-			"ci": {Name: "ci", Token: "tok"},
+			"ci": {Name: "ci", Token: "tok", Tenant: "team-a"},
 		},
 	})
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -34,6 +34,9 @@ func TestBearerStaticAcceptsKnownToken(t *testing.T) {
 	}
 	if p.Name != "ci" {
 		t.Errorf("principal = %+v", p)
+	}
+	if p.Tenant != "team-a" {
+		t.Errorf("tenant = %q", p.Tenant)
 	}
 }
 
@@ -59,5 +62,20 @@ func TestBearerStaticRejectsBadToken(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer wrong")
 	if _, err := a.Authenticate(r); err == nil {
 		t.Errorf("expected bad-token error")
+	}
+}
+
+func TestBearerStaticAuthorizerAllowsConfiguredModels(t *testing.T) {
+	a := NewAuthorizer(config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{
+		"ci": {Name: "ci", Token: "tok", AllowedModels: []string{"openai/gpt-4o-mini", "alias/chat_default"}},
+	}})
+	if !a.Allow(&Principal{Name: "ci"}, "openai/gpt-4o-mini") {
+		t.Fatal("expected direct model to be allowed")
+	}
+	if !a.Allow(&Principal{Name: "ci"}, "alias/chat_default") {
+		t.Fatal("expected alias model to be allowed")
+	}
+	if a.Allow(&Principal{Name: "ci"}, "openai/gpt-4.1") {
+		t.Fatal("expected unrelated model to be denied")
 	}
 }

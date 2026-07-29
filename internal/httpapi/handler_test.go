@@ -973,6 +973,46 @@ func TestHandlerBearerAuthRejects(t *testing.T) {
 	}
 }
 
+func TestHandlerAuthorizerRejectsForbiddenModel(t *testing.T) {
+	rt := newRT()
+	h := NewHandler(Dependencies{
+		Resolver: modelresolver.New(rt),
+		Adapter:  &stubAdapter{},
+		Auth: auth.NewAuthenticator(config.Auth{
+			Mode: config.AuthModeBearerStatic,
+			Clients: map[string]config.Client{
+				"ci": {Name: "ci", Token: "tok", AllowedModels: []string{"openai/gpt-4.1"}},
+			},
+		}),
+		Authorizer: auth.NewAuthorizer(config.Auth{
+			Mode: config.AuthModeBearerStatic,
+			Clients: map[string]config.Client{
+				"ci": {Name: "ci", Token: "tok", AllowedModels: []string{"openai/gpt-4.1"}},
+			},
+		}),
+		Metrics:   observability.NewMetrics(),
+		Providers: rt.ProviderByName,
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[]}`)))
+	r.Header.Set("Authorization", "Bearer tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	if resp.Error.Type != "forbidden" {
+		t.Fatalf("error type = %q", resp.Error.Type)
+	}
+}
+
 func TestHandlerRateLimitRejectsWithRetryAfter(t *testing.T) {
 	rt := newRT()
 	h := NewHandler(Dependencies{

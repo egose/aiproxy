@@ -28,8 +28,10 @@ type rawAuth struct {
 }
 
 type rawClient struct {
-	Name  string `hcl:"name,label"`
-	Token string `hcl:"token"`
+	Name          string   `hcl:"name,label"`
+	Token         string   `hcl:"token"`
+	Tenant        string   `hcl:"tenant,optional"`
+	AllowedModels []string `hcl:"allowed_models,optional"`
 }
 
 type rawRateLimit struct {

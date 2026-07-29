@@ -26,6 +26,7 @@ type Dependencies struct {
 	Resolver    *modelresolver.Resolver
 	Adapter     provider.Adapter
 	Auth        auth.Authenticator
+	Authorizer  auth.Authorizer
 	Client      *http.Client
 	Catalog     []ModelCard
 	Metrics     *observability.Metrics
@@ -53,6 +54,9 @@ func normalizeDependencies(deps Dependencies) Dependencies {
 	}
 	if deps.Adapter == nil {
 		deps.Adapter = provider.New()
+	}
+	if deps.Authorizer == nil {
+		deps.Authorizer = auth.AuthorizerFunc(func(*auth.Principal, string) bool { return true })
 	}
 	if deps.RateLimiter == nil {
 		deps.RateLimiter = ratelimit.New(config.Auth{})
@@ -130,6 +134,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logger = logger.With("model", publicModel)
+	if !deps.Authorizer.Allow(principal, publicModel) {
+		h.writeRequestError(deps.Metrics, rw, r, http.StatusForbidden, "forbidden", "client is not allowed to access this model")
+		return
+	}
 
 	resolved, err := deps.Resolver.Resolve(publicModel)
 	if err != nil {

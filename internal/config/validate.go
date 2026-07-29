@@ -45,6 +45,11 @@ func validateAuth(a Auth) error {
 			if c.Token == "" {
 				return fmt.Errorf("auth %q: client %q has empty token", a.Name, c.Name)
 			}
+			for _, model := range c.AllowedModels {
+				if model == "" {
+					return fmt.Errorf("auth %q: client %q has empty allowed_models entry", a.Name, c.Name)
+				}
+			}
 			if existing, dup := tokens[c.Token]; dup {
 				return fmt.Errorf("auth %q: clients %q and %q share the same token", a.Name, existing, c.Name)
 			}
