@@ -44,6 +44,7 @@ func TestEndToEndHealthAndReady(t *testing.T) {
 		`{"id":"resp_1","object":"response","output":[]}`,
 		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
 		`{"text":"hello world"}`,
+		"mp3-bytes",
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -75,6 +76,7 @@ func TestEndToEndDirectChatRouting(t *testing.T) {
 		`{"id":"resp_unused","object":"response","output":[]}`,
 		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
 		`{"text":"hello world"}`,
+		"mp3-bytes",
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -116,6 +118,7 @@ func TestEndToEndAliasRoutingToOpenAICompatible(t *testing.T) {
 		`{"id":"resp_unused","object":"response","output":[]}`,
 		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
 		`{"text":"hello world"}`,
+		"mp3-bytes",
 	)
 	localai := newOpenAIStub(t,
 		`{"id":"chatcmpl_alias","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"from-alias"},"finish_reason":"stop"}]}`,
@@ -123,6 +126,7 @@ func TestEndToEndAliasRoutingToOpenAICompatible(t *testing.T) {
 		`{"id":"resp_unused","object":"response","output":[]}`,
 		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
 		`{"text":"hello world"}`,
+		"mp3-bytes",
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -179,6 +183,7 @@ func TestEndToEndEmbeddingsAndResponses(t *testing.T) {
 		`{"id":"resp_123","object":"response","output":[]}`,
 		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
 		`{"text":"hello world"}`,
+		"mp3-bytes",
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -248,6 +253,7 @@ func TestEndToEndImagesGeneration(t *testing.T) {
 		`{"id":"resp_unused","object":"response","output":[]}`,
 		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
 		`{"text":"hello world"}`,
+		"mp3-bytes",
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -297,6 +303,7 @@ func TestEndToEndAudioTranscriptions(t *testing.T) {
 		`{"id":"resp_unused","object":"response","output":[]}`,
 		`{"created":123,"data":[]}`,
 		`{"text":"hello world"}`,
+		"mp3-bytes",
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -346,6 +353,55 @@ provider "openai" "openai" {
 		t.Fatalf("upstream calls = %+v", calls)
 	}
 	if !strings.Contains(calls[0].Body, "gpt-4o-transcribe") {
+		t.Fatalf("upstream body missing rewritten model: %s", calls[0].Body)
+	}
+}
+
+func TestEndToEndAudioSpeech(t *testing.T) {
+	openai := newOpenAIStub(t,
+		`{"id":"chat_unused","object":"chat.completion","choices":[]}`,
+		`{"object":"list","data":[],"model":"unused"}`,
+		`{"id":"resp_unused","object":"response","output":[]}`,
+		`{"created":123,"data":[]}`,
+		`{"text":"unused"}`,
+		"mp3-bytes",
+	)
+	configPath := writeConfig(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  base_url = "`+openai.URL()+`"
+  api_key  = "sk-openai"
+  model "tts-1" {
+    capabilities = ["audio"]
+  }
+}
+`)
+	server := newTestServer(t, configPath)
+
+	resp, err := server.Client().Post(server.URL+"/v1/audio/speech", "application/json", strings.NewReader(`{"model":"openai/tts-1","input":"hello","voice":"alloy"}`))
+	if err != nil {
+		t.Fatalf("post audio speech: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("audio speech status = %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "audio/mpeg") {
+		t.Fatalf("content-type = %q", ct)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read audio speech: %v", err)
+	}
+	if string(body) != "mp3-bytes" {
+		t.Fatalf("unexpected audio speech body: %q", string(body))
+	}
+	calls := openai.Calls()
+	if len(calls) != 1 || calls[0].Path != "/v1/audio/speech" {
+		t.Fatalf("upstream calls = %+v", calls)
+	}
+	if !strings.Contains(calls[0].Body, `"model":"tts-1"`) {
 		t.Fatalf("upstream body missing rewritten model: %s", calls[0].Body)
 	}
 }

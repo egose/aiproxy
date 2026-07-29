@@ -17,6 +17,7 @@ const (
 	OpResponses
 	OpImagesGenerations
 	OpAudioTranscriptions
+	OpAudioSpeech
 )
 
 type Request struct {
@@ -81,6 +82,8 @@ func (o Operation) String() string {
 		return "images_generations"
 	case OpAudioTranscriptions:
 		return "audio_transcriptions"
+	case OpAudioSpeech:
+		return "audio_speech"
 	default:
 		return "unknown"
 	}

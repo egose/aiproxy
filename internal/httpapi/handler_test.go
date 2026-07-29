@@ -299,6 +299,36 @@ func TestHandlerAudioTranscriptionsRoute(t *testing.T) {
 	}
 }
 
+func TestHandlerAudioSpeechRoute(t *testing.T) {
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"audio/mpeg"}},
+		Body:       []byte("mp3-bytes"),
+	}}
+	rt := newRT()
+	providerCfg := rt.ProviderByName["openai"]
+	providerCfg.ModelByName["tts-1"] = config.Model{Name: "tts-1", UpstreamName: "tts-1", Capabilities: []config.Capability{config.CapabilityAudio}}
+	providerCfg.Models = append(providerCfg.Models, config.Model{Name: "tts-1", UpstreamName: "tts-1", Capabilities: []config.Capability{config.CapabilityAudio}})
+	rt.ProviderByName["openai"] = providerCfg
+	rt.Providers = []config.Provider{providerCfg}
+	h := newHandler(t, rt, stub)
+
+	body := []byte(`{"model":"openai/tts-1","input":"hello","voice":"alloy"}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", bytes.NewReader(body))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if stub.got.Operation != provider.OpAudioSpeech {
+		t.Fatalf("operation = %v, want OpAudioSpeech", stub.got.Operation)
+	}
+	if stub.got.PublicModel != "openai/tts-1" {
+		t.Fatalf("public model = %q", stub.got.PublicModel)
+	}
+}
+
 func TestHandlerRejectsEmbeddingsForChatOnlyModel(t *testing.T) {
 	rt := newRT()
 	providerCfg := rt.ProviderByName["openai"]

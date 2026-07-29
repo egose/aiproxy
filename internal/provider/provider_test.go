@@ -290,6 +290,56 @@ func TestOpenAIAudioTranscriptionsRewriteMultipartModel(t *testing.T) {
 	}
 }
 
+func TestOpenAIAudioSpeechRewritesModelAndForwards(t *testing.T) {
+	var seenAuth, seenBody, seenPath, seenAccept string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("Authorization")
+		seenPath = r.URL.Path
+		seenAccept = r.Header.Get("Accept")
+		b, _ := io.ReadAll(r.Body)
+		seenBody = string(b)
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("mp3-bytes"))
+	}))
+	defer upstream.Close()
+
+	a := New()
+	inbound := httptest.NewRequest(http.MethodPost, "/v1/audio/speech",
+		io.NopCloser(strings.NewReader(`{"model":"openai/tts-1","input":"hello","voice":"alloy"}`)))
+	inbound.Header.Set("Accept", "audio/mpeg")
+	res, err := a.Do(context.Background(), Request{
+		Operation:     OpAudioSpeech,
+		ProviderType:  config.ProviderTypeOpenAI,
+		PublicModel:   "openai/tts-1",
+		BaseURL:       upstream.URL,
+		APIKey:        "sk-test",
+		UpstreamModel: "tts-1-hd",
+		Inbound:       inbound,
+		Client:        upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	if seenPath != "/v1/audio/speech" {
+		t.Fatalf("path = %q", seenPath)
+	}
+	if seenAuth != "Bearer sk-test" {
+		t.Fatalf("auth = %q", seenAuth)
+	}
+	if seenAccept != "audio/mpeg" {
+		t.Fatalf("accept = %q", seenAccept)
+	}
+	if !strings.Contains(seenBody, `"model":"tts-1-hd"`) {
+		t.Fatalf("model was not rewritten: %s", seenBody)
+	}
+	if res.Streaming {
+		t.Fatalf("audio speech should not stream for binary response")
+	}
+	if string(res.Body) != "mp3-bytes" {
+		t.Fatalf("unexpected audio speech body: %q", string(res.Body))
+	}
+}
+
 func TestAnthropicEmbeddingsUnsupported(t *testing.T) {
 	a := New()
 	inbound := httptest.NewRequest(http.MethodPost, "/v1/embeddings",

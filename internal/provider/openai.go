@@ -48,6 +48,7 @@ func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("upstream call: %w", err)
 	}
+	streaming = streaming || strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream")
 	if streaming {
 		return &Result{
 			StatusCode: resp.StatusCode,
@@ -81,6 +82,8 @@ func openAIPathForOperation(op Operation) (string, error) {
 		return "/v1/images/generations", nil
 	case OpAudioTranscriptions:
 		return "/v1/audio/transcriptions", nil
+	case OpAudioSpeech:
+		return "/v1/audio/speech", nil
 	default:
 		return "", ErrUnsupportedOperation{ProviderType: "openai-compatible", Operation: op}
 	}

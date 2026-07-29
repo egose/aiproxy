@@ -23,6 +23,8 @@ func operationFromRequest(r *http.Request) (provider.Operation, bool) {
 		return provider.OpImagesGenerations, true
 	case "/v1/audio/transcriptions":
 		return provider.OpAudioTranscriptions, true
+	case "/v1/audio/speech":
+		return provider.OpAudioSpeech, true
 	default:
 		return 0, false
 	}
@@ -61,6 +63,8 @@ func requiredCapability(op provider.Operation) (config.Capability, bool) {
 	case provider.OpImagesGenerations:
 		return config.CapabilityImages, true
 	case provider.OpAudioTranscriptions:
+		return config.CapabilityAudio, true
+	case provider.OpAudioSpeech:
 		return config.CapabilityAudio, true
 	default:
 		return "", false

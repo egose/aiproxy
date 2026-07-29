@@ -16,24 +16,26 @@ type recordedCall struct {
 }
 
 type openAIStub struct {
-	server    *httptest.Server
-	mu        sync.Mutex
-	chatBody  string
-	embedBody string
-	respBody  string
-	imageBody string
-	audioBody string
-	calls     []recordedCall
+	server     *httptest.Server
+	mu         sync.Mutex
+	chatBody   string
+	embedBody  string
+	respBody   string
+	imageBody  string
+	audioBody  string
+	speechBody string
+	calls      []recordedCall
 }
 
-func newOpenAIStub(t *testing.T, chatBody, embedBody, respBody, imageBody, audioBody string) *openAIStub {
+func newOpenAIStub(t *testing.T, chatBody, embedBody, respBody, imageBody, audioBody, speechBody string) *openAIStub {
 	t.Helper()
 	s := &openAIStub{
-		chatBody:  chatBody,
-		embedBody: embedBody,
-		respBody:  respBody,
-		imageBody: imageBody,
-		audioBody: audioBody,
+		chatBody:   chatBody,
+		embedBody:  embedBody,
+		respBody:   respBody,
+		imageBody:  imageBody,
+		audioBody:  audioBody,
+		speechBody: speechBody,
 	}
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
@@ -49,18 +51,25 @@ func newOpenAIStub(t *testing.T, chatBody, embedBody, respBody, imageBody, audio
 		})
 		s.mu.Unlock()
 
-		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v1/chat/completions":
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(s.chatBody))
 		case "/v1/embeddings":
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(s.embedBody))
 		case "/v1/responses":
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(s.respBody))
 		case "/v1/images/generations":
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(s.imageBody))
 		case "/v1/audio/transcriptions":
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(s.audioBody))
+		case "/v1/audio/speech":
+			w.Header().Set("Content-Type", "audio/mpeg")
+			_, _ = w.Write([]byte(s.speechBody))
 		default:
 			http.NotFound(w, r)
 		}
