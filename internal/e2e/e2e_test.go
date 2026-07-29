@@ -312,7 +312,7 @@ provider "openai" "openai" {
   base_url = "`+openai.URL()+`"
   api_key  = "sk-openai"
   model "gpt-4o-transcribe" {
-    capabilities = ["audio"]
+    capabilities = ["audio_transcriptions"]
   }
 }
 `)
@@ -373,7 +373,7 @@ provider "openai" "openai" {
   base_url = "`+openai.URL()+`"
   api_key  = "sk-openai"
   model "tts-1" {
-    capabilities = ["audio"]
+    capabilities = ["audio_speech"]
   }
 }
 `)

@@ -269,8 +269,8 @@ func TestHandlerAudioTranscriptionsRoute(t *testing.T) {
 	}}
 	rt := newRT()
 	providerCfg := rt.ProviderByName["openai"]
-	providerCfg.ModelByName["gpt-4o-transcribe"] = config.Model{Name: "gpt-4o-transcribe", UpstreamName: "gpt-4o-transcribe", Capabilities: []config.Capability{config.CapabilityAudio}}
-	providerCfg.Models = append(providerCfg.Models, config.Model{Name: "gpt-4o-transcribe", UpstreamName: "gpt-4o-transcribe", Capabilities: []config.Capability{config.CapabilityAudio}})
+	providerCfg.ModelByName["gpt-4o-transcribe"] = config.Model{Name: "gpt-4o-transcribe", UpstreamName: "gpt-4o-transcribe", Capabilities: []config.Capability{config.CapabilityAudioTranscriptions}}
+	providerCfg.Models = append(providerCfg.Models, config.Model{Name: "gpt-4o-transcribe", UpstreamName: "gpt-4o-transcribe", Capabilities: []config.Capability{config.CapabilityAudioTranscriptions}})
 	rt.ProviderByName["openai"] = providerCfg
 	rt.Providers = []config.Provider{providerCfg}
 	h := newHandler(t, rt, stub)
@@ -307,8 +307,8 @@ func TestHandlerAudioSpeechRoute(t *testing.T) {
 	}}
 	rt := newRT()
 	providerCfg := rt.ProviderByName["openai"]
-	providerCfg.ModelByName["tts-1"] = config.Model{Name: "tts-1", UpstreamName: "tts-1", Capabilities: []config.Capability{config.CapabilityAudio}}
-	providerCfg.Models = append(providerCfg.Models, config.Model{Name: "tts-1", UpstreamName: "tts-1", Capabilities: []config.Capability{config.CapabilityAudio}})
+	providerCfg.ModelByName["tts-1"] = config.Model{Name: "tts-1", UpstreamName: "tts-1", Capabilities: []config.Capability{config.CapabilityAudioSpeech}}
+	providerCfg.Models = append(providerCfg.Models, config.Model{Name: "tts-1", UpstreamName: "tts-1", Capabilities: []config.Capability{config.CapabilityAudioSpeech}})
 	rt.ProviderByName["openai"] = providerCfg
 	rt.Providers = []config.Provider{providerCfg}
 	h := newHandler(t, rt, stub)
@@ -326,6 +326,22 @@ func TestHandlerAudioSpeechRoute(t *testing.T) {
 	}
 	if stub.got.PublicModel != "openai/tts-1" {
 		t.Fatalf("public model = %q", stub.got.PublicModel)
+	}
+}
+
+func TestHandlerRejectsImagesForDefaultOpenAIModel(t *testing.T) {
+	stub := &stubAdapter{}
+	h := newHandler(t, newRT(), stub)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","prompt":"a cat"}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if stub.got.Operation != 0 || stub.got.PublicModel != "" {
+		t.Fatalf("adapter should not have been called, got request %+v", stub.got)
 	}
 }
 

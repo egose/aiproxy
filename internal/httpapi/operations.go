@@ -63,9 +63,9 @@ func requiredCapability(op provider.Operation) (config.Capability, bool) {
 	case provider.OpImagesGenerations:
 		return config.CapabilityImages, true
 	case provider.OpAudioTranscriptions:
-		return config.CapabilityAudio, true
+		return config.CapabilityAudioTranscriptions, true
 	case provider.OpAudioSpeech:
-		return config.CapabilityAudio, true
+		return config.CapabilityAudioSpeech, true
 	default:
 		return "", false
 	}

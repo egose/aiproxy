@@ -48,7 +48,7 @@ func HasCapability(caps []Capability, want Capability) bool {
 func defaultCapabilitiesForProvider(providerType ProviderType) []Capability {
 	switch providerType {
 	case ProviderTypeOpenAI, ProviderTypeOpenAICompatible:
-		return []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings, CapabilityImages, CapabilityAudio}
+		return []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings}
 	case ProviderTypeAnthropic:
 		return []Capability{CapabilityChat, CapabilityResponses}
 	case ProviderTypeGemini:

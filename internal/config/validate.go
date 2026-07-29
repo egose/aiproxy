@@ -142,7 +142,7 @@ func isValidCapability(c Capability) bool {
 	switch c {
 	case CapabilityChat, CapabilityResponses, CapabilityEmbeddings:
 		return true
-	case CapabilityImages, CapabilityAudio:
+	case CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech:
 		return true
 	default:
 		return false
@@ -152,7 +152,7 @@ func isValidCapability(c Capability) bool {
 func providerSupportsCapability(t ProviderType, c Capability) bool {
 	switch t {
 	case ProviderTypeOpenAI, ProviderTypeOpenAICompatible:
-		return c == CapabilityChat || c == CapabilityResponses || c == CapabilityEmbeddings || c == CapabilityImages || c == CapabilityAudio
+		return c == CapabilityChat || c == CapabilityResponses || c == CapabilityEmbeddings || c == CapabilityImages || c == CapabilityAudioTranscriptions || c == CapabilityAudioSpeech
 	case ProviderTypeAnthropic:
 		return c == CapabilityChat || c == CapabilityResponses
 	case ProviderTypeGemini:
