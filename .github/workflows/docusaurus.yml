@@ -25,21 +25,11 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-    - name: Setup pnpm
-      uses: pnpm/action-setup@0c17529a66aca453f9227af23103ed11469b1e47
-      with:
-        version: 11.17.0
+    - name: Setup Tools
+      uses: ./.github/actions/setup-tools
 
-    - name: Setup Node.js
-      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-      with:
-        node-version: 20
-        cache: pnpm
-        cache-dependency-path: website/pnpm-lock.yaml
-
-    - name: Install website dependencies
-      run: pnpm install --frozen-lockfile
-      working-directory: website
+    - name: Setup NPM Packages
+      uses: ./.github/actions/setup-npm
 
     - name: Typecheck the website
       run: pnpm typecheck
@@ -58,21 +48,11 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-    - name: Setup pnpm
-      uses: pnpm/action-setup@0c17529a66aca453f9227af23103ed11469b1e47
-      with:
-        version: 11.17.0
+    - name: Setup Tools
+      uses: ./.github/actions/setup-tools
 
-    - name: Setup Node.js
-      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-      with:
-        node-version: 20
-        cache: pnpm
-        cache-dependency-path: website/pnpm-lock.yaml
-
-    - name: Install website dependencies
-      run: pnpm install --frozen-lockfile
-      working-directory: website
+    - name: Setup NPM Packages
+      uses: ./.github/actions/setup-npm
 
     - name: Build the Docusaurus site
       run: pnpm build
