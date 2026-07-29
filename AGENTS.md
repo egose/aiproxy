@@ -13,6 +13,10 @@ Operational guide for AI agents (and humans) working in this repo.
 | `make docker-build`                         | Multi-stage container build as `aiproxy:$(VERSION)`       |
 | `make docker-run CONFIG=path/to/config.hcl` | Run the container image with a mounted config             |
 
+The CLI defaults to `$XDG_CONFIG_HOME/aiproxy/config.hcl`, falling back to
+`~/.config/aiproxy/config.hcl` when `XDG_CONFIG_HOME` is unset. Pass
+`--config` to use a different file.
+
 The HCL config uses `env("VAR")` for secret/placeholder substitution; values
 are textually inlined **before** HCL parsing. Run `set -a; . ./.env; set +a`
 before invoking the binary locally so env vars resolve.

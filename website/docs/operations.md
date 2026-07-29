@@ -19,10 +19,15 @@ make validate CONFIG=path/to/config.hcl
 Direct CLI usage:
 
 ```sh
+aiproxy serve
+aiproxy validate
 aiproxy serve --config /etc/aiproxy/config.hcl
 aiproxy validate --config /etc/aiproxy/config.hcl
 aiproxy version
 ```
+
+Without `--config`, the CLI reads `$XDG_CONFIG_HOME/aiproxy/config.hcl`, falling back to
+`~/.config/aiproxy/config.hcl` when `XDG_CONFIG_HOME` is unset.
 
 When running locally with env-based secrets, load your environment before invoking the binary:
 
