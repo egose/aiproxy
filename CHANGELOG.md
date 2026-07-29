@@ -1,3 +1,9 @@
+## [0.2.0](https://github.com/egose/aiproxy/compare/v0.1.0...v0.2.0) (2026-07-29)
+
+### Features
+
+* **website:** add interactive config wizard and refresh command examples ([3b92ae0](https://github.com/egose/aiproxy/commit/3b92ae0ce151cc60b0f7aa03b6f9c5f93ed13b2e))
+
 ## [0.1.0](https://github.com/egose/aiproxy/compare/v0.0.4...v0.1.0) (2026-07-29)
 
 ### Features
