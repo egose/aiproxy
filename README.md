@@ -89,6 +89,8 @@ Once installed, the `aiproxy` binary is available directly on your `PATH`:
 ```sh
 aiproxy serve
 aiproxy validate
+aiproxy configure
+aiproxy configure provider
 aiproxy serve --config /etc/aiproxy/config.hcl
 aiproxy validate --config /etc/aiproxy/config.hcl
 aiproxy version
@@ -160,9 +162,72 @@ alias "chat_default" {
 ## CLI
 
 ```sh
+aiproxy paths
+aiproxy examples
+aiproxy configure
+aiproxy configure provider
+aiproxy configure provider --config /etc/aiproxy/config.hcl --non-interactive --name backup --type openai-compatible --base-url https://llm.internal/v1 --secrets-key localai --api-key "$LOCALAI_API_KEY" --model qwen3-32b
 aiproxy serve --config /etc/aiproxy/config.hcl
 aiproxy validate --config /etc/aiproxy/config.hcl
 aiproxy version
+```
+
+## Config Wizard
+
+Use the built-in configure wizard to create or update the HCL and secrets file
+without editing blocks by hand.
+
+Interactive flows:
+
+```sh
+aiproxy configure
+aiproxy configure provider
+aiproxy configure auth
+aiproxy configure alias
+```
+
+The wizard prompts for the config path first when `--config` is not provided,
+defaulting to `$XDG_CONFIG_HOME/aiproxy/config.hcl` and falling back to
+`~/.config/aiproxy/config.hcl`.
+
+Supported block workflows:
+
+- `listener`
+- `auth`
+- `provider`
+- `alias`
+- `provider-health`
+
+Block subcommands also support non-interactive scripting with flags:
+
+```sh
+aiproxy configure provider \
+  --config /etc/aiproxy/config.hcl \
+  --non-interactive \
+  --name backup \
+  --type openai-compatible \
+  --display-name "Backup provider" \
+  --base-url https://llm.internal/v1 \
+  --secrets-path /etc/aiproxy/keys.json \
+  --secrets-key localai \
+  --api-key "$LOCALAI_API_KEY" \
+  --model qwen3-32b=qwen/qwen3-32b \
+  --model-capabilities qwen3-32b=chat,responses
+
+aiproxy configure alias \
+  --config /etc/aiproxy/config.hcl \
+  --non-interactive \
+  --name chat_default \
+  --algorithm round_robin \
+  --target primary/gpt-4o-mini \
+  --target backup/qwen3-32b
+```
+
+Delete existing blocks with `--delete`:
+
+```sh
+aiproxy configure provider --config /etc/aiproxy/config.hcl --delete --name backup
+aiproxy configure alias --config /etc/aiproxy/config.hcl --delete --name chat_default
 ```
 
 ## Docker
