@@ -27,14 +27,13 @@ Configuration is written in HCL with an Alloy-like two-label block style.
 
 ## Non-Goals For MVP
 
-- Dynamic config reload
 - Admin API for provider or alias management
 - Provider-specific public APIs exposed directly to clients
 - Global cross-instance balancing state
 - Persistent request queueing
 - Rate limiting and quota accounting
 - Billing and tenant management
-- Embeddings, images, audio, and response-style APIs in the first release
+- Audio APIs and translated-provider image support in the first release
 
 ## Core Design Principle
 
@@ -68,6 +67,9 @@ The initial public API surface is:
 - `POST /v1/chat/completions`
 - `POST /v1/embeddings` for `openai`, `openai-compatible`, and `gemini`
 - `POST /v1/responses` for `openai`, `openai-compatible`, `anthropic`, and `gemini`
+- `POST /v1/images/generations` for `openai` and `openai-compatible`
+- `POST /v1/audio/transcriptions` for `openai` and `openai-compatible`
+- `POST /v1/audio/speech` for `openai` and `openai-compatible`
 
 The MVP supports both:
 
@@ -79,8 +81,7 @@ The MVP supports both:
 The design should leave room for later support of:
 
 - translated-provider embeddings
-- image generation endpoints
-- audio transcription and speech endpoints
+- translated-provider audio transcription and speech endpoints
 
 These later endpoints should reuse the same provider, model, alias, credential,
 and adapter concepts rather than defining a separate config model.
@@ -149,11 +150,31 @@ deployments.
 The proxy validates the inbound `Authorization: Bearer ...` token against
 statically configured client credentials from HCL.
 
+Each static client may also define:
+
+- optional `tenant`
+- optional `allowed_models`
+
+`allowed_models` applies a static allow-list against the proxy-visible model
+name, including both direct `<provider>/<model>` strings and `alias/<name>`.
+
+### Optional Local Rate Limit
+
+The `auth` block may include a `rate_limit` sub-block:
+
+- `requests_per_minute`
+- optional `burst`, defaulting to `requests_per_minute`
+
+The current implementation is local to a single proxy instance.
+
+- In `bearer_static` mode, the limiter is keyed by authenticated client name.
+- In `none` mode, the limiter applies to a shared anonymous bucket.
+
+Exceeded requests return `429 Too Many Requests` with `Retry-After`.
+
 Deferred auth features:
 
 - token rotation
-- tenant-scoped policy
-- per-client rate limits
 - external auth integration
 
 ## Resolution Model
@@ -263,6 +284,9 @@ Capability values:
 - `chat`
 - `responses`
 - `embeddings`
+- `images`
+- `audio_transcriptions`
+- `audio_speech`
 
 Default capability behavior:
 
@@ -633,10 +657,25 @@ Defaults:
 
 Initial `/metrics` coverage includes:
 
+- inbound HTTP request counts by method/path/status
+- inbound HTTP request latency by method/path/status
+- inbound HTTP request body size histograms by method/path
+- outbound HTTP response body size histograms by method/path/status
+- streaming response counts by method/path/status
+- streaming response duration by method/path/status
+- proxy-generated HTTP error counts by method/path/status/error_type
 - provider selection counts
 - alias retry counts
+- alias in-flight request gauges by target
+- auth mode startup state
+- build version info
+- provider counts by type and active/disabled state
+- alias counts by algorithm
 - skipped-provider state
+- provider health state
 - readiness state
+- readiness reason state
+- upstream response body size histograms by operation/provider/outcome
 - upstream request counts by operation/provider/outcome
 - upstream request latency by operation/provider/outcome
 
@@ -720,9 +759,8 @@ internal/observability/
 
 - anthropic embeddings if a viable provider-native mapping exists
 - image and audio APIs
-- rate limiting and quotas
+- quotas
 - per-client policy
-- hot config reload
 - broader provider catalog
 
 ## Testing Strategy
@@ -775,11 +813,38 @@ Planned coverage once the sandbox exists:
 The following are intentionally out of scope for the MVP:
 
 - anthropic embeddings
-- image and audio endpoints
-- rate limiting
-- billing and tenancy
+- translated-provider image endpoints
+- translated-provider audio endpoints
+- billing
 - dynamic provider health state shared across instances
-- live config reload
+
+## Provider Health
+
+The proxy maintains dynamic provider health state in-process and shares it
+across requests and aliases.
+
+Transient transport failures and upstream `5xx` responses mark a provider
+temporarily unhealthy for alias routing and readiness decisions.
+
+Provider health state is not coordinated across multiple proxy instances.
+
+## Reload Behavior
+
+The server supports in-process config reload on `SIGHUP`.
+
+Reload currently rebuilds and swaps:
+
+- inbound auth configuration
+- provider/model catalog
+- alias routing state
+- readiness and startup inventory metrics
+
+Reload does not replace the active listener socket.
+
+The following config changes still require a full restart:
+
+- listener address changes
+- listener timeout changes
 
 ## Appendix: Open Questions And Rejected Alternatives
 

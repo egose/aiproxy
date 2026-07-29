@@ -14,13 +14,22 @@ OpenAI-compatible responses.
 - `GET /metrics`
 - `POST /v1/chat/completions` (JSON and SSE streaming)
 - `POST /v1/embeddings` for `openai`, `openai-compatible`, and `gemini` providers
-- `POST /v1/responses` for `openai`, `openai-compatible`, `anthropic`, and `gemini` providers
+- `POST /v1/responses` for `openai`, `openai-compatible`, `anthropic`, and `gemini` providers (JSON and SSE streaming)
+- `POST /v1/images/generations` for `openai` and `openai-compatible` providers
+- `POST /v1/audio/transcriptions` for `openai` and `openai-compatible` providers
+- `POST /v1/audio/speech` for `openai` and `openai-compatible` providers
 
 ### Auth Modes
 
 - `none` – skip inbound authentication (trusted environments only)
 - `bearer_static` – validate inbound `Authorization: Bearer ...` tokens against
   statically configured client credentials
+- optional `rate_limit` on the `auth` block applies a local in-memory request
+  rate limit; in `bearer_static` mode it is enforced per authenticated client,
+  and in `none` mode it is enforced against a shared anonymous bucket
+- optional `tenant` and `allowed_models` on `auth.client` let you attach client
+  identity metadata and enforce a static allow-list of proxy-visible model
+  names
 
 ### Provider Types
 
@@ -40,8 +49,11 @@ OpenAI-compatible responses.
 
 ### Not in MVP
 
-- Rate limiting, quotas, billing, tenancy
-- Hot config reload
+- Quotas, billing, tenancy
+
+The server supports live config reload on `SIGHUP` for runtime request-routing
+state such as auth, providers, models, aliases, and metrics-backed inventory.
+Listener address and timeout changes still require a restart.
 
 See [docs/design.md](docs/design.md) for the full design document.
 
@@ -202,8 +214,8 @@ provider with `api_key_ref { path = "..." key = "..." }`.
   differ from the exact string sent upstream; it defaults to the model block
   label.
 - `capabilities` (optional on `model` blocks) lets you narrow the effective
-  API surface for a model. Supported values are `chat`, `responses`, and
-  `embeddings`.
+  API surface for a model. Supported values are `chat`, `responses`,
+  `embeddings`, `images`, `audio_transcriptions`, and `audio_speech`.
 - `/v1/models` returns effective capabilities for both direct models and
   aliases. Alias capabilities are the safe intersection of their target models.
 - `/v1/models` also includes richer metadata:
@@ -211,6 +223,10 @@ provider with `api_key_ref { path = "..." key = "..." }`.
   - aliases include `alias_targets` summaries with provider, model, and
     resolved display name
 - Alias `least_connections` selection is per-process and best-effort; it is not
+  coordinated across multiple proxy instances.
+- Provider health state is shared in-process across requests and aliases.
+  Transient transport failures and upstream `5xx` responses temporarily mark a
+  provider unhealthy for routing and readiness decisions, but this state is not
   coordinated across multiple proxy instances.
 - Direct `<provider>/<model>` requests do not fail over to other targets.
 - Alias requests retry the next target only on transport errors, timeouts, and
@@ -222,13 +238,28 @@ provider with `api_key_ref { path = "..." key = "..." }`.
 - `POST /v1/embeddings` is currently implemented for `openai`,
   `openai-compatible`, and `gemini` providers. Requests targeting `anthropic`
   models return a client-visible unsupported-operation error.
+- `POST /v1/images/generations` is currently implemented for `openai` and
+  `openai-compatible` providers. Requests targeting translated providers return
+  a client-visible unsupported-operation error.
+- `POST /v1/audio/transcriptions` is currently implemented for `openai` and
+  `openai-compatible` providers. Requests targeting translated providers return
+  a client-visible unsupported-operation error.
+- `POST /v1/audio/speech` is currently implemented for `openai` and
+  `openai-compatible` providers. Requests targeting translated providers return
+  a client-visible unsupported-operation error.
 - `POST /v1/responses` is currently implemented for `openai`,
   `openai-compatible`, `anthropic`, and `gemini` providers. The translated
-  provider path currently supports a conservative request subset and does not
-  implement streaming responses.
+  provider path supports a conservative request subset for both JSON and
+  streaming responses.
 - `/metrics` exposes Prometheus-format metrics for provider selection, alias
-  retries, skipped providers, readiness state, and upstream request counts /
-  latency by operation and provider.
+  retries, skipped providers, readiness state, startup inventory gauges for
+  build version / auth mode / provider types / alias algorithms, explicit
+  readiness reason gauges, inbound HTTP request counts / latency by method and
+  path, request / response body size histograms,
+  streaming response counts / duration, proxy-generated HTTP error counts by
+  endpoint and error type, alias in-flight request gauges by target, provider
+  health gauges, and upstream request counts / latency / response body size by
+  operation and provider.
 - API keys and client bearer tokens are never logged.
 
 ## Deferred / Planned

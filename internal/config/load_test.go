@@ -101,6 +101,35 @@ provider "openai" "openai" {
 	}
 }
 
+func TestLoadClientTenantAndAllowedModels(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" {
+  mode = "bearer_static"
+  client "ci" {
+    token = "tok"
+    tenant = "team-a"
+    allowed_models = ["openai/gpt-4o-mini", "alias/chat_default"]
+  }
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	client := rt.Auth.Clients["ci"]
+	if client.Tenant != "team-a" {
+		t.Fatalf("tenant = %q", client.Tenant)
+	}
+	if len(client.AllowedModels) != 2 || client.AllowedModels[1] != "alias/chat_default" {
+		t.Fatalf("allowed_models = %+v", client.AllowedModels)
+	}
+}
+
 func TestLoadOpenAICompatibleRequiresBaseURL(t *testing.T) {
 	cfg := `
 listener "http" "public" { address = ":8080" }
@@ -231,6 +260,52 @@ provider "openai" "p" {
 	}
 }
 
+func TestLoadAuthRateLimitDefaultsBurst(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" {
+  mode = "none"
+  rate_limit {
+    requests_per_minute = 120
+  }
+}
+provider "openai" "p" {
+  api_key = "k"
+  model "m" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if rt.Auth.RateLimit == nil {
+		t.Fatal("expected auth rate limit")
+	}
+	if rt.Auth.RateLimit.RequestsPerMinute != 120 || rt.Auth.RateLimit.Burst != 120 {
+		t.Fatalf("rate limit = %+v", rt.Auth.RateLimit)
+	}
+}
+
+func TestLoadRejectsInvalidAuthRateLimit(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" {
+  mode = "none"
+  rate_limit {
+    requests_per_minute = 0
+  }
+}
+provider "openai" "p" {
+  api_key = "k"
+  model "m" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "rate_limit.requests_per_minute") {
+		t.Fatalf("expected rate limit validation error, got %v", err)
+	}
+}
+
 func TestLoadAliasUnknownTarget(t *testing.T) {
 	cfg := `
 listener "http" "public" { address = ":8080" }
@@ -331,7 +406,7 @@ auth "main" { mode = "none" }
 provider "openai" "p" {
   api_key = "k"
   model "m" {
-    capabilities = ["audio"]
+    capabilities = ["vision"]
   }
 }
 `

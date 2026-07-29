@@ -16,16 +16,17 @@ type geminiRecordedCall struct {
 }
 
 type geminiStub struct {
-	server       *httptest.Server
-	mu           sync.Mutex
-	embedBody    string
-	responseBody string
-	calls        []geminiRecordedCall
+	server             *httptest.Server
+	mu                 sync.Mutex
+	embedBody          string
+	responseBody       string
+	responseStreamBody string
+	calls              []geminiRecordedCall
 }
 
-func newGeminiStub(t *testing.T, embedBody, responseBody string) *geminiStub {
+func newGeminiStub(t *testing.T, embedBody, responseBody, responseStreamBody string) *geminiStub {
 	t.Helper()
-	s := &geminiStub{embedBody: embedBody, responseBody: responseBody}
+	s := &geminiStub{embedBody: embedBody, responseBody: responseBody, responseStreamBody: responseStreamBody}
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -40,12 +41,16 @@ func newGeminiStub(t *testing.T, embedBody, responseBody string) *geminiStub {
 		})
 		s.mu.Unlock()
 
-		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v1beta/models/text-embedding-004:embedContent", "/v1beta/models/text-embedding-004:batchEmbedContents":
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(s.embedBody))
 		case "/v1beta/models/gemini-2.5-pro:generateContent":
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(s.responseBody))
+		case "/v1beta/models/gemini-2.5-pro:streamGenerateContent":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte(s.responseStreamBody))
 		default:
 			http.NotFound(w, r)
 		}

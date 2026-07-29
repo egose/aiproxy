@@ -21,14 +21,22 @@ type rawTimeouts struct {
 }
 
 type rawAuth struct {
-	Name    string      `hcl:"name,label"`
-	Mode    string      `hcl:"mode"`
-	Clients []rawClient `hcl:"client,block"`
+	Name      string        `hcl:"name,label"`
+	Mode      string        `hcl:"mode"`
+	Clients   []rawClient   `hcl:"client,block"`
+	RateLimit *rawRateLimit `hcl:"rate_limit,block"`
 }
 
 type rawClient struct {
-	Name  string `hcl:"name,label"`
-	Token string `hcl:"token"`
+	Name          string   `hcl:"name,label"`
+	Token         string   `hcl:"token"`
+	Tenant        string   `hcl:"tenant,optional"`
+	AllowedModels []string `hcl:"allowed_models,optional"`
+}
+
+type rawRateLimit struct {
+	RequestsPerMinute int `hcl:"requests_per_minute"`
+	Burst             int `hcl:"burst,optional"`
 }
 
 type rawProvider struct {

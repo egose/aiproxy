@@ -17,6 +17,10 @@ The HCL config uses `env("VAR")` for secret/placeholder substitution; values
 are textually inlined **before** HCL parsing. Run `set -a; . ./.env; set +a`
 before invoking the binary locally so env vars resolve.
 
+The server supports `SIGHUP`-triggered live config reload for auth, provider,
+model, alias, and metrics-backed inventory state. Listener address or timeout
+changes still require restart.
+
 ## Lint / typecheck / test
 
 | Command          | Effect                                                  |
@@ -47,10 +51,22 @@ repo has sandbox services for stable end-to-end provider coverage.)
 - Direct (`<provider>/<model>`) requests never fail over to a different
   target. Alias requests retry the next target on transport / 5xx only;
   client 4xx errors are returned verbatim.
+- The optional `auth.rate_limit` block applies a local in-memory request rate
+  limit. In `bearer_static` mode it is keyed per authenticated client; in
+  `none` mode it uses a shared anonymous bucket.
+- Static `auth.client` blocks may also define optional `tenant` and
+  `allowed_models` fields. `allowed_models` is enforced against proxy-visible
+  model names.
+- Provider health state is shared in-process across requests and alias routing.
+  Transient transport failures and upstream `5xx` responses temporarily mark a
+  provider unhealthy, but this state is not coordinated across instances.
 - The openai/openai-compatible adapter is pass-through: it only rewrites the
   `model` field to the configured `upstream_name`, injects the upstream
   `Authorization: Bearer` header, and copies the body (including SSE streams)
   back. `anthropic` and `gemini` use built-in request/response translation for
   chat completions. `gemini` also supports embeddings translation, and both
-  translated providers support a conservative non-streaming `/v1/responses`
-  subset. Anthropic embeddings are still deferred.
+  translated providers support a conservative `/v1/responses` subset for both
+  JSON and SSE streaming. `POST /v1/images/generations` and
+  `POST /v1/audio/transcriptions` and `POST /v1/audio/speech` are currently
+  supported only for `openai` and `openai-compatible`. Anthropic embeddings are
+  still deferred.

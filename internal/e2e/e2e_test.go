@@ -1,8 +1,11 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -39,6 +42,9 @@ func TestEndToEndHealthAndReady(t *testing.T) {
 		`{"id":"chatcmpl_1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`,
 		`{"object":"list","data":[],"model":"text-embedding-3-large"}`,
 		`{"id":"resp_1","object":"response","output":[]}`,
+		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
+		`{"text":"hello world"}`,
+		"mp3-bytes",
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -68,6 +74,9 @@ func TestEndToEndDirectChatRouting(t *testing.T) {
 		`{"id":"chatcmpl_direct","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"from-openai"},"finish_reason":"stop"}]}`,
 		`{"object":"list","data":[],"model":"unused"}`,
 		`{"id":"resp_unused","object":"response","output":[]}`,
+		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
+		`{"text":"hello world"}`,
+		"mp3-bytes",
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -107,11 +116,17 @@ func TestEndToEndAliasRoutingToOpenAICompatible(t *testing.T) {
 		`{"id":"chatcmpl_openai","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"from-openai"},"finish_reason":"stop"}]}`,
 		`{"object":"list","data":[],"model":"unused"}`,
 		`{"id":"resp_unused","object":"response","output":[]}`,
+		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
+		`{"text":"hello world"}`,
+		"mp3-bytes",
 	)
 	localai := newOpenAIStub(t,
 		`{"id":"chatcmpl_alias","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"from-alias"},"finish_reason":"stop"}]}`,
 		`{"object":"list","data":[],"model":"unused"}`,
 		`{"id":"resp_unused","object":"response","output":[]}`,
+		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
+		`{"text":"hello world"}`,
+		"mp3-bytes",
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -166,6 +181,9 @@ func TestEndToEndEmbeddingsAndResponses(t *testing.T) {
 		`{"id":"chat_unused","object":"chat.completion","choices":[]}`,
 		`{"object":"list","data":[{"object":"embedding","embedding":[0.1,0.2],"index":0}],"model":"text-embedding-3-large"}`,
 		`{"id":"resp_123","object":"response","output":[]}`,
+		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
+		`{"text":"hello world"}`,
+		"mp3-bytes",
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -228,9 +246,170 @@ provider "openai" "openai" {
 	}
 }
 
+func TestEndToEndImagesGeneration(t *testing.T) {
+	openai := newOpenAIStub(t,
+		`{"id":"chat_unused","object":"chat.completion","choices":[]}`,
+		`{"object":"list","data":[],"model":"unused"}`,
+		`{"id":"resp_unused","object":"response","output":[]}`,
+		`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`,
+		`{"text":"hello world"}`,
+		"mp3-bytes",
+	)
+	configPath := writeConfig(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  base_url = "`+openai.URL()+`"
+  api_key  = "sk-openai"
+  model "gpt-image-1" {
+    capabilities = ["images"]
+  }
+}
+`)
+	server := newTestServer(t, configPath)
+
+	resp, err := server.Client().Post(server.URL+"/v1/images/generations", "application/json", strings.NewReader(`{"model":"openai/gpt-image-1","prompt":"a cat"}`))
+	if err != nil {
+		t.Fatalf("post images: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("images status = %d", resp.StatusCode)
+	}
+	var out struct {
+		Data []struct {
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode images: %v", err)
+	}
+	if len(out.Data) != 1 || out.Data[0].URL != "https://example.com/image.png" {
+		t.Fatalf("unexpected images response: %+v", out)
+	}
+	calls := openai.Calls()
+	if len(calls) != 1 || calls[0].Path != "/v1/images/generations" {
+		t.Fatalf("upstream calls = %+v", calls)
+	}
+	if !strings.Contains(calls[0].Body, `"model":"gpt-image-1"`) {
+		t.Fatalf("upstream body missing rewritten model: %s", calls[0].Body)
+	}
+}
+
+func TestEndToEndAudioTranscriptions(t *testing.T) {
+	openai := newOpenAIStub(t,
+		`{"id":"chat_unused","object":"chat.completion","choices":[]}`,
+		`{"object":"list","data":[],"model":"unused"}`,
+		`{"id":"resp_unused","object":"response","output":[]}`,
+		`{"created":123,"data":[]}`,
+		`{"text":"hello world"}`,
+		"mp3-bytes",
+	)
+	configPath := writeConfig(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  base_url = "`+openai.URL()+`"
+  api_key  = "sk-openai"
+  model "gpt-4o-transcribe" {
+    capabilities = ["audio_transcriptions"]
+  }
+}
+`)
+	server := newTestServer(t, configPath)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormField("model")
+	_, _ = io.WriteString(part, "openai/gpt-4o-transcribe")
+	filePart, _ := writer.CreateFormFile("file", "sample.wav")
+	_, _ = io.WriteString(filePart, "audio-bytes")
+	_ = writer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/audio/transcriptions", bytes.NewReader(body.Bytes()))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("post audio transcriptions: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("audio status = %d", resp.StatusCode)
+	}
+	var out struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode audio: %v", err)
+	}
+	if out.Text != "hello world" {
+		t.Fatalf("unexpected audio response: %+v", out)
+	}
+	calls := openai.Calls()
+	if len(calls) != 1 || calls[0].Path != "/v1/audio/transcriptions" {
+		t.Fatalf("upstream calls = %+v", calls)
+	}
+	if !strings.Contains(calls[0].Body, "gpt-4o-transcribe") {
+		t.Fatalf("upstream body missing rewritten model: %s", calls[0].Body)
+	}
+}
+
+func TestEndToEndAudioSpeech(t *testing.T) {
+	openai := newOpenAIStub(t,
+		`{"id":"chat_unused","object":"chat.completion","choices":[]}`,
+		`{"object":"list","data":[],"model":"unused"}`,
+		`{"id":"resp_unused","object":"response","output":[]}`,
+		`{"created":123,"data":[]}`,
+		`{"text":"unused"}`,
+		"mp3-bytes",
+	)
+	configPath := writeConfig(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  base_url = "`+openai.URL()+`"
+  api_key  = "sk-openai"
+  model "tts-1" {
+    capabilities = ["audio_speech"]
+  }
+}
+`)
+	server := newTestServer(t, configPath)
+
+	resp, err := server.Client().Post(server.URL+"/v1/audio/speech", "application/json", strings.NewReader(`{"model":"openai/tts-1","input":"hello","voice":"alloy"}`))
+	if err != nil {
+		t.Fatalf("post audio speech: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("audio speech status = %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "audio/mpeg") {
+		t.Fatalf("content-type = %q", ct)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read audio speech: %v", err)
+	}
+	if string(body) != "mp3-bytes" {
+		t.Fatalf("unexpected audio speech body: %q", string(body))
+	}
+	calls := openai.Calls()
+	if len(calls) != 1 || calls[0].Path != "/v1/audio/speech" {
+		t.Fatalf("upstream calls = %+v", calls)
+	}
+	if !strings.Contains(calls[0].Body, `"model":"tts-1"`) {
+		t.Fatalf("upstream body missing rewritten model: %s", calls[0].Body)
+	}
+}
+
 func TestEndToEndGeminiEmbeddings(t *testing.T) {
 	gemini := newGeminiStub(t,
 		`{"embedding":{"values":[0.1,0.2,0.3]},"usageMetadata":{"promptTokenCount":4,"totalTokenCount":4}}`,
+		``,
 		``,
 	)
 	configPath := writeConfig(t, `
@@ -285,6 +464,7 @@ provider "gemini" "gemini" {
 func TestEndToEndAnthropicResponses(t *testing.T) {
 	anthropic := newAnthropicStub(t,
 		`{"id":"msg_resp","role":"assistant","content":[{"type":"text","text":"from-anthropic-responses"}],"stop_reason":"end_turn","usage":{"input_tokens":7,"output_tokens":5}}`,
+		``,
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -340,6 +520,7 @@ func TestEndToEndGeminiResponses(t *testing.T) {
 	gemini := newGeminiStub(t,
 		`{"embedding":{"values":[0.1]},"usageMetadata":{"promptTokenCount":1,"totalTokenCount":1}}`,
 		`{"candidates":[{"content":{"role":"model","parts":[{"text":"from-gemini-responses"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":6,"candidatesTokenCount":4,"totalTokenCount":10}}`,
+		``,
 	)
 	configPath := writeConfig(t, `
 listener "http" "public" { address = ":0" }
@@ -385,5 +566,113 @@ provider "gemini" "gemini" {
 	}
 	if !strings.Contains(calls[0].Body, `"systemInstruction"`) {
 		t.Fatalf("gemini request missing instructions: %s", calls[0].Body)
+	}
+}
+
+func TestEndToEndAnthropicResponsesStreaming(t *testing.T) {
+	anthropic := newAnthropicStub(t,
+		`{"id":"msg_unused","role":"assistant","content":[{"type":"text","text":"unused"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`,
+		"event: message_start\n"+
+			"data: {\"message\":{\"id\":\"msg_resp_stream\",\"usage\":{\"input_tokens\":7}}}\n\n"+
+			"event: content_block_delta\n"+
+			"data: {\"delta\":{\"type\":\"text_delta\",\"text\":\"from-anthropic-\"}}\n\n"+
+			"event: content_block_delta\n"+
+			"data: {\"delta\":{\"type\":\"text_delta\",\"text\":\"stream\"}}\n\n"+
+			"event: message_delta\n"+
+			"data: {\"usage\":{\"input_tokens\":7,\"output_tokens\":5}}\n\n"+
+			"event: message_stop\n"+
+			"data: {}\n\n",
+	)
+	configPath := writeConfig(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "anthropic" "anthropic" {
+  base_url = "`+anthropic.URL()+`"
+  api_key  = "sk-ant"
+  model "claude-sonnet" {}
+}
+`)
+	server := newTestServer(t, configPath)
+
+	resp, err := server.Client().Post(server.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"anthropic/claude-sonnet","stream":true,"input":"hello"}`))
+	if err != nil {
+		t.Fatalf("post anthropic streaming responses: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("responses status = %d", resp.StatusCode)
+	}
+	if !strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("content-type = %q", resp.Header.Get("Content-Type"))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read streaming responses: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"type":"response.created"`) || !strings.Contains(text, `"type":"response.completed"`) {
+		t.Fatalf("unexpected stream body: %q", text)
+	}
+	if !strings.Contains(text, `"text":"from-anthropic-stream"`) {
+		t.Fatalf("missing translated final text: %q", text)
+	}
+	if !strings.Contains(text, "data: [DONE]") {
+		t.Fatalf("missing done marker: %q", text)
+	}
+	calls := anthropic.Calls()
+	if len(calls) != 1 || calls[0].Path != "/v1/messages" {
+		t.Fatalf("anthropic calls = %+v", calls)
+	}
+	if !strings.Contains(calls[0].Body, `"stream":true`) {
+		t.Fatalf("anthropic request missing stream flag: %s", calls[0].Body)
+	}
+}
+
+func TestEndToEndGeminiResponsesStreaming(t *testing.T) {
+	gemini := newGeminiStub(t,
+		`{"embedding":{"values":[0.1]},"usageMetadata":{"promptTokenCount":1,"totalTokenCount":1}}`,
+		`{"candidates":[{"content":{"role":"model","parts":[{"text":"unused"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}`,
+		"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"from-gemini-\"}]}}],\"usageMetadata\":{\"promptTokenCount\":6}}\n\n"+
+			"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"stream\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":4,\"totalTokenCount\":10}}\n\n",
+	)
+	configPath := writeConfig(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "gemini" "gemini" {
+  base_url = "`+gemini.URL()+`"
+  api_key  = "gem-key"
+  model "gemini-2.5-pro" {}
+}
+`)
+	server := newTestServer(t, configPath)
+
+	resp, err := server.Client().Post(server.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"gemini/gemini-2.5-pro","stream":true,"input":"hello"}`))
+	if err != nil {
+		t.Fatalf("post gemini streaming responses: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("responses status = %d", resp.StatusCode)
+	}
+	if !strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("content-type = %q", resp.Header.Get("Content-Type"))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read streaming responses: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"type":"response.created"`) || !strings.Contains(text, `"type":"response.completed"`) {
+		t.Fatalf("unexpected stream body: %q", text)
+	}
+	if !strings.Contains(text, `"text":"from-gemini-stream"`) {
+		t.Fatalf("missing translated final text: %q", text)
+	}
+	if !strings.Contains(text, "data: [DONE]") {
+		t.Fatalf("missing done marker: %q", text)
+	}
+	calls := gemini.Calls()
+	if len(calls) != 1 || calls[0].Path != "/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse" {
+		t.Fatalf("gemini calls = %+v", calls)
 	}
 }

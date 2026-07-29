@@ -90,11 +90,20 @@ func buildAuth(rawAuths []rawAuth) (Auth, error) {
 	}
 	a := rawAuths[0]
 	auth := Auth{Name: a.Name, Mode: AuthMode(a.Mode), Clients: make(map[string]Client)}
+	if a.RateLimit != nil {
+		burst := a.RateLimit.Burst
+		if burst <= 0 {
+			burst = a.RateLimit.RequestsPerMinute
+		}
+		auth.RateLimit = &RateLimit{RequestsPerMinute: a.RateLimit.RequestsPerMinute, Burst: burst}
+	}
 	for _, c := range a.Clients {
 		if _, dup := auth.Clients[c.Name]; dup {
 			return Auth{}, fmt.Errorf("duplicate client %q in auth %q", c.Name, a.Name)
 		}
-		auth.Clients[c.Name] = Client{Name: c.Name, Token: c.Token}
+		client := Client{Name: c.Name, Token: c.Token, Tenant: c.Tenant, AllowedModels: make([]string, 0, len(c.AllowedModels))}
+		client.AllowedModels = append(client.AllowedModels, c.AllowedModels...)
+		auth.Clients[c.Name] = client
 	}
 	return auth, nil
 }

@@ -34,14 +34,22 @@ const (
 )
 
 type Auth struct {
-	Name    string
-	Mode    AuthMode
-	Clients map[string]Client
+	Name      string
+	Mode      AuthMode
+	Clients   map[string]Client
+	RateLimit *RateLimit
 }
 
 type Client struct {
-	Name  string
-	Token string
+	Name          string
+	Token         string
+	Tenant        string
+	AllowedModels []string
+}
+
+type RateLimit struct {
+	RequestsPerMinute int
+	Burst             int
 }
 
 type ProviderType string
@@ -56,9 +64,12 @@ const (
 type Capability string
 
 const (
-	CapabilityChat       Capability = "chat"
-	CapabilityResponses  Capability = "responses"
-	CapabilityEmbeddings Capability = "embeddings"
+	CapabilityChat                Capability = "chat"
+	CapabilityResponses           Capability = "responses"
+	CapabilityEmbeddings          Capability = "embeddings"
+	CapabilityImages              Capability = "images"
+	CapabilityAudioTranscriptions Capability = "audio_transcriptions"
+	CapabilityAudioSpeech         Capability = "audio_speech"
 )
 
 type Algorithm string

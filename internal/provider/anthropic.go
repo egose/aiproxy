@@ -135,7 +135,7 @@ func (a *adapter) doAnthropicResponses(ctx context.Context, r Request) (*Result,
 	if err != nil {
 		return nil, ErrInvalidRequest{Message: fmt.Sprintf("translate request: %v", err)}
 	}
-	translated, _, err := translateOpenAIToAnthropic(mustMarshalJSON(chatReq), r.UpstreamModel)
+	translated, streaming, err := translateOpenAIToAnthropic(mustMarshalJSON(chatReq), r.UpstreamModel)
 	if err != nil {
 		return nil, ErrInvalidRequest{Message: fmt.Sprintf("translate request: %v", err)}
 	}
@@ -148,6 +148,9 @@ func (a *adapter) doAnthropicResponses(ctx context.Context, r Request) (*Result,
 	req.Header.Set("x-api-key", r.APIKey)
 	req.Header.Set("anthropic-version", anthropicVersion)
 	req.Header.Set("Content-Type", "application/json")
+	if streaming {
+		req.Header.Set("Accept", "text/event-stream")
+	}
 
 	resp, err := clientFor(r).Do(req)
 	if err != nil {
@@ -160,6 +163,9 @@ func (a *adapter) doAnthropicResponses(ctx context.Context, r Request) (*Result,
 			return nil, fmt.Errorf("read error body: %w", err)
 		}
 		return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translateAnthropicError(errBody)}, nil
+	}
+	if streaming {
+		return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: translateAnthropicResponsesStream(resp.Body, r.PublicModel), Streaming: true}, nil
 	}
 	defer resp.Body.Close()
 	outBody, err := io.ReadAll(resp.Body)
@@ -364,6 +370,73 @@ func translateAnthropicStream(src io.ReadCloser, publicModel string) io.ReadClos
 	return pr
 }
 
+func translateAnthropicResponsesStream(src io.ReadCloser, publicModel string) io.ReadCloser {
+	pr, pw := io.Pipe()
+	go func() {
+		defer src.Close()
+		defer pw.Close()
+
+		reader := bufio.NewReader(src)
+		var eventType string
+		var dataLines []string
+		state := newResponsesStreamState(publicModel, "resp_anthropic")
+
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil && len(line) == 0 {
+				if err != io.EOF {
+					_ = pw.CloseWithError(err)
+					return
+				}
+				if !state.Completed {
+					if err := writeResponsesCompleted(pw, state); err != nil {
+						_ = pw.CloseWithError(err)
+					}
+				}
+				return
+			}
+			trimmed := strings.TrimRight(line, "\r\n")
+			if trimmed == "" {
+				if len(dataLines) > 0 || eventType != "" {
+					done, err := processAnthropicResponsesEvent(pw, eventType, strings.Join(dataLines, "\n"), state)
+					if err != nil {
+						_ = pw.CloseWithError(err)
+						return
+					}
+					if done {
+						return
+					}
+				}
+				eventType = ""
+				dataLines = nil
+			} else if strings.HasPrefix(trimmed, "event:") {
+				eventType = strings.TrimSpace(strings.TrimPrefix(trimmed, "event:"))
+			} else if strings.HasPrefix(trimmed, "data:") {
+				dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(trimmed, "data:")))
+			}
+			if err == io.EOF {
+				if len(dataLines) > 0 || eventType != "" {
+					done, processErr := processAnthropicResponsesEvent(pw, eventType, strings.Join(dataLines, "\n"), state)
+					if processErr != nil {
+						_ = pw.CloseWithError(processErr)
+						return
+					}
+					if done {
+						return
+					}
+				}
+				if !state.Completed {
+					if err := writeResponsesCompleted(pw, state); err != nil {
+						_ = pw.CloseWithError(err)
+					}
+				}
+				return
+			}
+		}
+	}()
+	return pr
+}
+
 func processAnthropicEvent(w io.Writer, eventType, data, publicModel string, streamID *string, finishReason *string) error {
 	switch eventType {
 	case "message_start":
@@ -442,6 +515,62 @@ func processAnthropicEvent(w io.Writer, eventType, data, publicModel string, str
 		return err
 	default:
 		return nil
+	}
+}
+
+func processAnthropicResponsesEvent(w io.Writer, eventType, data string, state *responsesStreamState) (bool, error) {
+	switch eventType {
+	case "message_start":
+		var evt struct {
+			Message struct {
+				ID    string         `json:"id"`
+				Usage anthropicUsage `json:"usage"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(data), &evt); err != nil {
+			return false, err
+		}
+		if evt.Message.ID != "" {
+			state.ResponseID = evt.Message.ID
+			state.ItemID = evt.Message.ID + "_msg"
+		}
+		state.setUsage(openAIUsage{
+			PromptTokens:     evt.Message.Usage.InputTokens,
+			CompletionTokens: evt.Message.Usage.OutputTokens,
+			TotalTokens:      evt.Message.Usage.InputTokens + evt.Message.Usage.OutputTokens,
+		})
+		return false, writeResponsesCreated(w, state)
+	case "content_block_delta":
+		var evt struct {
+			Delta struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"delta"`
+		}
+		if err := json.Unmarshal([]byte(data), &evt); err != nil {
+			return false, err
+		}
+		if evt.Delta.Type != "text_delta" || evt.Delta.Text == "" {
+			return false, nil
+		}
+		return false, writeResponsesDelta(w, state, evt.Delta.Text)
+	case "message_delta":
+		var evt struct {
+			Usage anthropicUsage `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(data), &evt); err != nil {
+			return false, err
+		}
+		state.setUsage(openAIUsage{
+			PromptTokens:     evt.Usage.InputTokens,
+			CompletionTokens: evt.Usage.OutputTokens,
+			TotalTokens:      evt.Usage.InputTokens + evt.Usage.OutputTokens,
+		})
+		return false, nil
+	case "message_stop":
+		return true, writeResponsesCompleted(w, state)
+	default:
+		return false, nil
 	}
 }
 

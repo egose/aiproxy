@@ -26,6 +26,14 @@ func validateListener(l Listener) error {
 }
 
 func validateAuth(a Auth) error {
+	if a.RateLimit != nil {
+		if a.RateLimit.RequestsPerMinute <= 0 {
+			return fmt.Errorf("auth %q: rate_limit.requests_per_minute must be greater than zero", a.Name)
+		}
+		if a.RateLimit.Burst <= 0 {
+			return fmt.Errorf("auth %q: rate_limit.burst must be greater than zero", a.Name)
+		}
+	}
 	switch a.Mode {
 	case AuthModeNone:
 		if len(a.Clients) > 0 {
@@ -36,6 +44,11 @@ func validateAuth(a Auth) error {
 		for _, c := range a.Clients {
 			if c.Token == "" {
 				return fmt.Errorf("auth %q: client %q has empty token", a.Name, c.Name)
+			}
+			for _, model := range c.AllowedModels {
+				if model == "" {
+					return fmt.Errorf("auth %q: client %q has empty allowed_models entry", a.Name, c.Name)
+				}
 			}
 			if existing, dup := tokens[c.Token]; dup {
 				return fmt.Errorf("auth %q: clients %q and %q share the same token", a.Name, existing, c.Name)
@@ -134,6 +147,8 @@ func isValidCapability(c Capability) bool {
 	switch c {
 	case CapabilityChat, CapabilityResponses, CapabilityEmbeddings:
 		return true
+	case CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech:
+		return true
 	default:
 		return false
 	}
@@ -142,7 +157,7 @@ func isValidCapability(c Capability) bool {
 func providerSupportsCapability(t ProviderType, c Capability) bool {
 	switch t {
 	case ProviderTypeOpenAI, ProviderTypeOpenAICompatible:
-		return c == CapabilityChat || c == CapabilityResponses || c == CapabilityEmbeddings
+		return c == CapabilityChat || c == CapabilityResponses || c == CapabilityEmbeddings || c == CapabilityImages || c == CapabilityAudioTranscriptions || c == CapabilityAudioSpeech
 	case ProviderTypeAnthropic:
 		return c == CapabilityChat || c == CapabilityResponses
 	case ProviderTypeGemini:
