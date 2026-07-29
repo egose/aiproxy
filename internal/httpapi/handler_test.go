@@ -1054,6 +1054,52 @@ func TestHandlerAccountingRecordsTenantClientModelAndStatus(t *testing.T) {
 	}
 }
 
+func TestHandlerBillingUsageFiltersToTenant(t *testing.T) {
+	rt := newRT()
+	usage := accounting.NewAggregator()
+	usage.Record(accounting.Event{Tenant: "team-a", Client: "ci", Model: "openai/gpt-4o-mini", Operation: "chat_completions", StatusCode: 200})
+	usage.Record(accounting.Event{Tenant: "team-b", Client: "ops", Model: "openai/gpt-4.1", Operation: "responses", StatusCode: 200})
+	h := NewHandler(Dependencies{
+		Resolver: modelresolver.New(rt),
+		Adapter:  &stubAdapter{},
+		Auth: auth.NewAuthenticator(config.Auth{
+			Mode: config.AuthModeBearerStatic,
+			Clients: map[string]config.Client{
+				"ci": {Name: "ci", Token: "tok", Tenant: "team-a"},
+			},
+		}),
+		Authorizer: auth.NewAuthorizer(config.Auth{
+			Mode: config.AuthModeBearerStatic,
+			Clients: map[string]config.Client{
+				"ci": {Name: "ci", Token: "tok", Tenant: "team-a"},
+			},
+		}),
+		Metrics:   observability.NewMetrics(),
+		Providers: rt.ProviderByName,
+		Usage:     usage,
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/v1/billing/usage", nil)
+	r.Header.Set("Authorization", "Bearer tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Object string               `json:"object"`
+		Data   []accounting.Summary `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal billing usage: %v", err)
+	}
+	if resp.Object != "list" || len(resp.Data) != 1 {
+		t.Fatalf("response = %+v", resp)
+	}
+	if resp.Data[0].Tenant != "team-a" || resp.Data[0].Client != "ci" {
+		t.Fatalf("filtered summary = %+v", resp.Data[0])
+	}
+}
+
 func TestHandlerRateLimitRejectsWithRetryAfter(t *testing.T) {
 	rt := newRT()
 	h := NewHandler(Dependencies{

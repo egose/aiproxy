@@ -151,8 +151,16 @@ func buildDependencies(rt *config.Runtime, logger *slog.Logger, adapter provider
 		Health:      health,
 		RateLimiter: ratelimit.New(rt.Auth),
 		Accounting:  accounting.NewMulti(metrics, usage),
+		Usage:       aOrUsage(usage),
 		Logger:      logger,
 	}
+}
+
+func aOrUsage(usage accounting.Recorder) accounting.Reader {
+	if reader, ok := usage.(accounting.Reader); ok {
+		return reader
+	}
+	return nil
 }
 
 func loadRuntime(path string) (*config.Runtime, error) {

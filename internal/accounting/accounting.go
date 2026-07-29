@@ -19,6 +19,10 @@ type Recorder interface {
 	Record(Event)
 }
 
+type Reader interface {
+	Summaries() []Summary
+}
+
 type Summary struct {
 	Tenant     string
 	Client     string
@@ -146,5 +150,26 @@ func (a *Aggregator) Summaries() []Summary {
 		}
 		return out[i].StatusCode < out[j].StatusCode
 	})
+	return out
+}
+
+func FilterSummaries(summaries []Summary, tenant, client string) []Summary {
+	if tenant == "" && client == "" {
+		out := make([]Summary, len(summaries))
+		copy(out, summaries)
+		return out
+	}
+	out := make([]Summary, 0, len(summaries))
+	for _, summary := range summaries {
+		if tenant != "" {
+			if summary.Tenant == tenant {
+				out = append(out, summary)
+			}
+			continue
+		}
+		if summary.Client == client {
+			out = append(out, summary)
+		}
+	}
 	return out
 }
