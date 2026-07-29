@@ -62,11 +62,12 @@ const (
 type Capability string
 
 const (
-	CapabilityChat       Capability = "chat"
-	CapabilityResponses  Capability = "responses"
-	CapabilityEmbeddings Capability = "embeddings"
-	CapabilityImages     Capability = "images"
-	CapabilityAudio      Capability = "audio"
+	CapabilityChat                Capability = "chat"
+	CapabilityResponses           Capability = "responses"
+	CapabilityEmbeddings          Capability = "embeddings"
+	CapabilityImages              Capability = "images"
+	CapabilityAudioTranscriptions Capability = "audio_transcriptions"
+	CapabilityAudioSpeech         Capability = "audio_speech"
 )
 
 type Algorithm string
