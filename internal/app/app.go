@@ -61,7 +61,7 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	metrics.SetBuildInfo(opts.Version)
 	metrics.RecordConfig(rt)
 	usage := accounting.NewAggregator()
-	health := providerhealth.New(metrics)
+	health := providerhealth.New(metrics, rt.ProviderHealth)
 	health.SetProviders(rt.ProviderByName)
 
 	httpClient := &http.Client{Timeout: 5 * time.Minute}
@@ -128,6 +128,7 @@ func (a *App) Reload() error {
 
 	a.metrics.SetBuildInfo(a.buildOpt.Version)
 	a.metrics.RecordConfig(rt)
+	a.health = providerhealth.New(a.metrics, rt.ProviderHealth)
 	a.health.SetProviders(rt.ProviderByName)
 	a.handler.UpdateDependencies(buildDependencies(rt, a.logger, a.adapter, a.metrics, a.health, a.usage, a.client))
 	a.mu.Lock()

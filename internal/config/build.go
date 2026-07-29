@@ -1,6 +1,9 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 func buildRuntime(raw *rawFile) (*Runtime, error) {
 	rt := &Runtime{
@@ -21,6 +24,13 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		return nil, err
 	}
 	rt.Auth = auth
+	if raw.ProviderHealth != nil {
+		providerHealth, err := buildProviderHealth(raw.ProviderHealth)
+		if err != nil {
+			return nil, err
+		}
+		rt.ProviderHealth = providerHealth
+	}
 
 	for _, p := range raw.Providers {
 		if seenProviderNames[p.Name] {
@@ -57,6 +67,21 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 	}
 
 	return rt, nil
+}
+
+func buildProviderHealth(rawHealth *rawProviderHealth) (ProviderHealth, error) {
+	out := ProviderHealth{RedisURL: rawHealth.RedisURL, KeyPrefix: rawHealth.KeyPrefix}
+	if out.KeyPrefix == "" {
+		out.KeyPrefix = "aiproxy:provider-health"
+	}
+	if rawHealth.Cooldown != "" {
+		d, err := time.ParseDuration(rawHealth.Cooldown)
+		if err != nil {
+			return ProviderHealth{}, fmt.Errorf("provider_health.cooldown: %w", err)
+		}
+		out.Cooldown = d
+	}
+	return out, nil
 }
 
 func buildListener(listeners []rawListener) (Listener, error) {
@@ -117,7 +142,7 @@ func buildProvider(rawProvider rawProvider) (Provider, error) {
 		APIKey:      rawProvider.APIKey,
 		ModelByName: make(map[string]Model),
 	}
-	if rawProvider.APIKeyRef != nil {
+	if rawProvider.APIKeyRef != nil { // pragma: allowlist secret
 		provider.APIKeyRef = &APIKeyRef{Path: rawProvider.APIKeyRef.Path, Key: rawProvider.APIKeyRef.Key}
 		if provider.APIKeyRef.Path == "" {
 			provider.APIKeyRef.Path = defaultKeyFilePath()

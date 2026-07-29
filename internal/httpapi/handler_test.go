@@ -743,7 +743,7 @@ func TestHandlerReadyzFailsWithoutHealthyProviders(t *testing.T) {
 	rt := newRT()
 	metrics := observability.NewMetrics()
 	metrics.RecordConfig(rt)
-	health := providerhealth.New(metrics)
+	health := providerhealth.New(metrics, config.ProviderHealth{})
 	health.SetProviders(rt.ProviderByName)
 	health.MarkFailure("openai")
 	h := NewHandler(Dependencies{
@@ -844,7 +844,7 @@ func TestHandlerAliasSkipsUnhealthyProviderAfterTransientFailure(t *testing.T) {
 		rt.AliasByName[a.Name] = a
 	}
 	metrics := observability.NewMetrics()
-	health := providerhealth.New(metrics)
+	health := providerhealth.New(metrics, config.ProviderHealth{})
 	health.SetProviders(rt.ProviderByName)
 	adapter := &failFirstProviderAdapter{}
 	h := NewHandler(Dependencies{

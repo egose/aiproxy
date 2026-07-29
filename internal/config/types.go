@@ -5,6 +5,7 @@ import "time"
 type Runtime struct {
 	Listener          Listener
 	Auth              Auth
+	ProviderHealth    ProviderHealth
 	Providers         []Provider
 	DisabledProviders []Provider
 	Aliases           []Alias
@@ -50,6 +51,12 @@ type Client struct {
 type RateLimit struct {
 	RequestsPerMinute int
 	Burst             int
+}
+
+type ProviderHealth struct {
+	RedisURL  string
+	KeyPrefix string
+	Cooldown  time.Duration
 }
 
 type ProviderType string

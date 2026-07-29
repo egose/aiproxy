@@ -1,10 +1,11 @@
 package config
 
 type rawFile struct {
-	Listeners []rawListener `hcl:"listener,block"`
-	Auth      []rawAuth     `hcl:"auth,block"`
-	Providers []rawProvider `hcl:"provider,block"`
-	Aliases   []rawAlias    `hcl:"alias,block"`
+	Listeners      []rawListener      `hcl:"listener,block"`
+	Auth           []rawAuth          `hcl:"auth,block"`
+	ProviderHealth *rawProviderHealth `hcl:"provider_health,block"`
+	Providers      []rawProvider      `hcl:"provider,block"`
+	Aliases        []rawAlias         `hcl:"alias,block"`
 }
 
 type rawListener struct {
@@ -37,6 +38,12 @@ type rawClient struct {
 type rawRateLimit struct {
 	RequestsPerMinute int `hcl:"requests_per_minute"`
 	Burst             int `hcl:"burst,optional"`
+}
+
+type rawProviderHealth struct {
+	RedisURL  string `hcl:"redis_url,optional"`
+	KeyPrefix string `hcl:"key_prefix,optional"`
+	Cooldown  string `hcl:"cooldown,optional"`
 }
 
 type rawProvider struct {

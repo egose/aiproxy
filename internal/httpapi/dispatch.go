@@ -54,8 +54,10 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 	tried := make(map[string]bool, len(r.Alias.Targets))
 	var unhealthyFallback *modelresolver.ResolveResult
 	for i := 0; i < len(r.Alias.Targets); i++ {
-		t := r.Selector.Select()
-		if key := t.Provider + "/" + t.Model; tried[key] {
+		selected := r.Selector.Select()
+		t := selected
+		if key := selected.Provider + "/" + selected.Model; tried[key] {
+			r.Selector.Release(selected)
 			t = nextUntriedAliasTarget(r.Alias.Targets, tried)
 		}
 		if t.Provider == "" && t.Model == "" {

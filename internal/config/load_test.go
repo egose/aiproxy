@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeTempFile(t *testing.T, name, content string) string {
@@ -127,6 +128,29 @@ provider "openai" "openai" {
 	}
 	if len(client.AllowedModels) != 2 || client.AllowedModels[1] != "alias/chat_default" {
 		t.Fatalf("allowed_models = %+v", client.AllowedModels)
+	}
+}
+
+func TestLoadProviderHealthConfig(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider_health {
+  redis_url = "redis://127.0.0.1:6379"
+  key_prefix = "aiproxy:test"
+  cooldown = "45s"
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if rt.ProviderHealth.RedisURL != "redis://127.0.0.1:6379" || rt.ProviderHealth.KeyPrefix != "aiproxy:test" || rt.ProviderHealth.Cooldown != 45*time.Second {
+		t.Fatalf("provider_health = %+v", rt.ProviderHealth)
 	}
 }
 
