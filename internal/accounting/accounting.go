@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+const defaultRetention = 24 * time.Hour
+
 type Event struct {
 	Timestamp  time.Time
 	Tenant     string
@@ -90,8 +92,15 @@ func (r *MemoryRecorder) Events() []Event {
 }
 
 type Aggregator struct {
-	mu     sync.Mutex
-	counts map[summaryKey]int64
+	mu        sync.Mutex
+	counts    map[summaryKey]aggregateEntry
+	retention time.Duration
+	now       func() time.Time
+}
+
+type aggregateEntry struct {
+	count    int64
+	lastSeen time.Time
 }
 
 type summaryKey struct {
@@ -103,36 +112,43 @@ type summaryKey struct {
 }
 
 func NewAggregator() *Aggregator {
-	return &Aggregator{counts: make(map[summaryKey]int64)}
+	return &Aggregator{counts: make(map[summaryKey]aggregateEntry), retention: defaultRetention, now: time.Now}
 }
 
 func (a *Aggregator) Record(event Event) {
 	a.mu.Lock()
 	if a.counts == nil {
-		a.counts = make(map[summaryKey]int64)
+		a.counts = make(map[summaryKey]aggregateEntry)
 	}
-	a.counts[summaryKey{
+	now := a.nowTime(event.Timestamp)
+	a.pruneLocked(a.nowTime(time.Time{}))
+	key := summaryKey{
 		tenant:     event.Tenant,
 		client:     event.Client,
 		model:      event.Model,
 		operation:  event.Operation,
 		statusCode: event.StatusCode,
-	}]++
+	}
+	entry := a.counts[key]
+	entry.count++
+	entry.lastSeen = now
+	a.counts[key] = entry
 	a.mu.Unlock()
 }
 
 func (a *Aggregator) Summaries() []Summary {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.pruneLocked(a.nowTime(time.Time{}))
 	out := make([]Summary, 0, len(a.counts))
-	for key, count := range a.counts {
+	for key, entry := range a.counts {
 		out = append(out, Summary{
 			Tenant:     key.tenant,
 			Client:     key.client,
 			Model:      key.model,
 			Operation:  key.operation,
 			StatusCode: key.statusCode,
-			Count:      count,
+			Count:      entry.count,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -151,6 +167,28 @@ func (a *Aggregator) Summaries() []Summary {
 		return out[i].StatusCode < out[j].StatusCode
 	})
 	return out
+}
+
+func (a *Aggregator) nowTime(ts time.Time) time.Time {
+	if !ts.IsZero() {
+		return ts
+	}
+	if a.now != nil {
+		return a.now()
+	}
+	return time.Now()
+}
+
+func (a *Aggregator) pruneLocked(now time.Time) {
+	if a.retention <= 0 || a.counts == nil {
+		return
+	}
+	cutoff := now.Add(-a.retention)
+	for key, entry := range a.counts {
+		if entry.lastSeen.Before(cutoff) {
+			delete(a.counts, key)
+		}
+	}
 }
 
 func FilterSummaries(summaries []Summary, tenant, client string) []Summary {

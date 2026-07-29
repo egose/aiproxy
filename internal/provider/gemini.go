@@ -135,46 +135,24 @@ func (a *adapter) doGeminiChat(ctx context.Context, r Request) (*Result, error) 
 	if streaming {
 		req.Header.Set("Accept", "text/event-stream")
 	}
-
-	resp, err := clientFor(r).Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("upstream call: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		defer resp.Body.Close()
-		errBody, err := readUpstreamBody(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("read error body: %w", err)
-		}
-		return &Result{
-			StatusCode: resp.StatusCode,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       translateGeminiError(errBody),
-		}, nil
-	}
-	if streaming {
-		return &Result{
-			StatusCode: resp.StatusCode,
-			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-			StreamBody: translateGeminiStream(resp.Body, r.PublicModel),
-			Streaming:  true,
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	outBody, err := readUpstreamBody(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read upstream body: %w", err)
-	}
-	translatedBody, err := translateGeminiResponse(outBody, r.PublicModel)
-	if err != nil {
-		return nil, fmt.Errorf("translate response: %w", err)
-	}
-	return &Result{
-		StatusCode: resp.StatusCode,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       translatedBody,
-	}, nil
+	return executeUpstream(r, req, upstreamResponseHandlers{
+		IsStreaming: func(*http.Response) bool {
+			return streaming
+		},
+		OnStream: func(resp *http.Response) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: translateGeminiStream(resp.Body, r.PublicModel), Streaming: true}, nil
+		},
+		OnError: func(resp *http.Response, body []byte) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translateGeminiError(body)}, nil
+		},
+		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
+			translatedBody, err := translateGeminiResponse(body, r.PublicModel)
+			if err != nil {
+				return nil, fmt.Errorf("translate response: %w", err)
+			}
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody}, nil
+		},
+	})
 }
 
 func (a *adapter) doGeminiEmbeddings(ctx context.Context, r Request) (*Result, error) {
@@ -201,36 +179,18 @@ func (a *adapter) doGeminiEmbeddings(ctx context.Context, r Request) (*Result, e
 	req.Header.Set("x-goog-api-key", r.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := clientFor(r).Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("upstream call: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		defer resp.Body.Close()
-		errBody, err := readUpstreamBody(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("read error body: %w", err)
-		}
-		return &Result{
-			StatusCode: resp.StatusCode,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       translateGeminiError(errBody),
-		}, nil
-	}
-	defer resp.Body.Close()
-	outBody, err := readUpstreamBody(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read upstream body: %w", err)
-	}
-	translatedBody, err := translateGeminiEmbeddingResponse(outBody, r.PublicModel, batch)
-	if err != nil {
-		return nil, fmt.Errorf("translate response: %w", err)
-	}
-	return &Result{
-		StatusCode: resp.StatusCode,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       translatedBody,
-	}, nil
+	return executeUpstream(r, req, upstreamResponseHandlers{
+		OnError: func(resp *http.Response, body []byte) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translateGeminiError(body)}, nil
+		},
+		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
+			translatedBody, err := translateGeminiEmbeddingResponse(body, r.PublicModel, batch)
+			if err != nil {
+				return nil, fmt.Errorf("translate response: %w", err)
+			}
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody}, nil
+		},
+	})
 }
 
 func (a *adapter) doGeminiResponses(ctx context.Context, r Request) (*Result, error) {
@@ -263,32 +223,24 @@ func (a *adapter) doGeminiResponses(ctx context.Context, r Request) (*Result, er
 	if streaming {
 		req.Header.Set("Accept", "text/event-stream")
 	}
-
-	resp, err := clientFor(r).Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("upstream call: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		defer resp.Body.Close()
-		errBody, err := readUpstreamBody(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("read error body: %w", err)
-		}
-		return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translateGeminiError(errBody)}, nil
-	}
-	if streaming {
-		return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: translateGeminiResponsesStream(resp.Body, r.PublicModel), Streaming: true}, nil
-	}
-	defer resp.Body.Close()
-	outBody, err := readUpstreamBody(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read upstream body: %w", err)
-	}
-	translatedBody, err := translateGeminiResponsesResponse(outBody, r.PublicModel)
-	if err != nil {
-		return nil, fmt.Errorf("translate response: %w", err)
-	}
-	return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody}, nil
+	return executeUpstream(r, req, upstreamResponseHandlers{
+		IsStreaming: func(*http.Response) bool {
+			return streaming
+		},
+		OnStream: func(resp *http.Response) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: translateGeminiResponsesStream(resp.Body, r.PublicModel), Streaming: true}, nil
+		},
+		OnError: func(resp *http.Response, body []byte) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translateGeminiError(body)}, nil
+		},
+		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
+			translatedBody, err := translateGeminiResponsesResponse(body, r.PublicModel)
+			if err != nil {
+				return nil, fmt.Errorf("translate response: %w", err)
+			}
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody}, nil
+		},
+	})
 }
 
 func translateOpenAIToGemini(body []byte) ([]byte, bool, error) {

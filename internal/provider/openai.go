@@ -44,30 +44,21 @@ func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
 	}
 
 	streaming := (r.Operation == OpChatCompletions || r.Operation == OpResponses) && isStream(body)
-	resp, err := clientFor(r).Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("upstream call: %w", err)
-	}
-	streaming = streaming || strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream")
-	if streaming {
-		return &Result{
-			StatusCode: resp.StatusCode,
-			Header:     resp.Header,
-			StreamBody: resp.Body,
-			Streaming:  true,
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	outBody, err := readUpstreamBody(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read upstream body: %w", err)
-	}
-	return &Result{
-		StatusCode: resp.StatusCode,
-		Header:     resp.Header,
-		Body:       outBody,
-	}, nil
+	return executeUpstream(r, req, upstreamResponseHandlers{
+		PreferStreaming: true,
+		IsStreaming: func(resp *http.Response) bool {
+			return streaming || strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream")
+		},
+		OnStream: func(resp *http.Response) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, StreamBody: resp.Body, Streaming: true}, nil
+		},
+		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil
+		},
+		OnError: func(resp *http.Response, body []byte) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil
+		},
+	})
 }
 
 func openAIPathForOperation(op Operation) (string, error) {
@@ -120,16 +111,14 @@ func (a *adapter) doOpenAIAudioTranscriptions(ctx context.Context, r Request) (*
 	if accept := r.Inbound.Header.Get("Accept"); accept != "" {
 		req.Header.Set("Accept", accept)
 	}
-	resp, err := clientFor(r).Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("upstream call: %w", err)
-	}
-	defer resp.Body.Close()
-	outBody, err := readUpstreamBody(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read upstream body: %w", err)
-	}
-	return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: outBody}, nil
+	return executeUpstream(r, req, upstreamResponseHandlers{
+		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil
+		},
+		OnError: func(resp *http.Response, body []byte) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil
+		},
+	})
 }
 
 func multipartBoundary(contentType string) string {
