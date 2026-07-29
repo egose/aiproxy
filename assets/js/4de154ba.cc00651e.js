@@ -70,6 +70,10 @@ const toc = [{
   "id": "security-defaults",
   "level": 2
 }, {
+  "value": "Logging",
+  "id": "logging",
+  "level": 2
+}, {
   "value": "Secret Handling",
   "id": "secret-handling",
   "level": 2
@@ -145,7 +149,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-sh",
-        children: "aiproxy configure\naiproxy configure provider\naiproxy configure auth\naiproxy configure alias\naiproxy configure listener\naiproxy configure provider-health\n"
+        children: "aiproxy configure\naiproxy configure provider\naiproxy configure auth\naiproxy configure alias\naiproxy configure listener\naiproxy configure logging\naiproxy configure provider-health\n"
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["The root ", (0,jsx_runtime.jsx)(_components.code, {
@@ -163,6 +167,8 @@ function _createMdxContent(props) {
           children: "provider"
         }), ", ", (0,jsx_runtime.jsx)(_components.code, {
           children: "alias"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "logging"
         }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
           children: "provider_health"
         })]
@@ -322,6 +328,22 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "request IDs are emitted for correlation"
       }), "\n"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "logging",
+      children: "Logging"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Use the optional ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "logging"
+      }), " block to control structured log verbosity and request lifecycle access logging."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "logging {\n  level      = \"info\"\n  access_log = true\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["When ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "access_log = true"
+      }), ", request logs include events for request receipt, upstream provider/model selection and completion, and the final response or streaming start and end."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "secret-handling",
       children: "Secret Handling"

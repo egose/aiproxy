@@ -50,6 +50,10 @@ const toc = [{
   "id": "listener",
   "level": 2
 }, {
+  "value": "Logging",
+  "id": "logging",
+  "level": 2
+}, {
   "value": "Auth",
   "id": "auth",
   "level": 2
@@ -113,6 +117,10 @@ function _createMdxContent(props) {
         })
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: (0,jsx_runtime.jsx)(_components.code, {
+          children: "logging"
+        })
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: (0,jsx_runtime.jsx)(_components.code, {
           children: "provider \"<type>\" \"<name>\""
         })
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
@@ -124,7 +132,7 @@ function _createMdxContent(props) {
       id: "mental-model",
       children: "Mental Model"
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
-      children: "Think about the config in four layers:"
+      children: "Think about the config in five layers:"
     }), "\n", (0,jsx_runtime.jsxs)(_components.ol, {
       children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
@@ -134,6 +142,10 @@ function _createMdxContent(props) {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "auth"
         }), " defines who may call it."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "logging"
+        }), " defines structured log verbosity and request lifecycle access logging."]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "provider"
@@ -149,7 +161,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
-        children: "listener \"http\" \"public\" {\n  address = \":8080\"\n\n  timeouts {\n    read_header = \"10s\"\n    idle        = \"60s\"\n    write       = \"0s\"\n  }\n}\n\nauth \"main\" {\n  mode = \"bearer_static\"\n\n  rate_limit {\n    requests_per_minute = 120\n    burst               = 120\n  }\n\n  client \"internal-app\" {\n    token          = env(\"AIPROXY_CLIENT_TOKEN\")\n    tenant         = \"internal\"\n    allowed_models = [\"alias/chat_default\", \"openai/gpt-4.1\"]\n  }\n}\n\nprovider \"openai\" \"openai\" {\n  display_name = \"OpenAI\"\n  api_key      = env(\"OPENAI_API_KEY\")\n\n  model \"gpt-4.1\" {\n    display_name = \"GPT-4.1\"\n    capabilities = [\"chat\", \"responses\"]\n  }\n\n  model \"text-embedding-3-large\" {\n    display_name = \"text-embedding-3-large\"\n    capabilities = [\"embeddings\"]\n  }\n}\n\nprovider \"openai-compatible\" \"localai\" {\n  display_name = \"LocalAI\"\n  base_url     = \"https://llm.internal/v1\"\n\n  api_key_ref {\n    key = \"localai\"\n  }\n\n  model \"qwen3-32b\" {\n    display_name = \"Qwen 3 32B\"\n  }\n}\n\nalias \"chat_default\" {\n  algorithm = \"round_robin\"\n\n  target {\n    provider = \"openai\"\n    model    = \"gpt-4.1\"\n  }\n\n  target {\n    provider = \"localai\"\n    model    = \"qwen3-32b\"\n  }\n}\n"
+        children: "listener \"http\" \"public\" {\n  address = \":8080\"\n\n  timeouts {\n    read_header = \"10s\"\n    idle        = \"60s\"\n    write       = \"0s\"\n  }\n}\n\nauth \"main\" {\n  mode = \"bearer_static\"\n\n  rate_limit {\n    requests_per_minute = 120\n    burst               = 120\n  }\n\n  client \"internal-app\" {\n    token          = env(\"AIPROXY_CLIENT_TOKEN\")\n    tenant         = \"internal\"\n    allowed_models = [\"alias/chat_default\", \"openai/gpt-4.1\"]\n  }\n}\n\nlogging {\n  level      = \"info\"\n  access_log = true\n}\n\nprovider \"openai\" \"openai\" {\n  display_name = \"OpenAI\"\n  api_key      = env(\"OPENAI_API_KEY\")\n\n  model \"gpt-4.1\" {\n    display_name = \"GPT-4.1\"\n    capabilities = [\"chat\", \"responses\"]\n  }\n\n  model \"text-embedding-3-large\" {\n    display_name = \"text-embedding-3-large\"\n    capabilities = [\"embeddings\"]\n  }\n}\n\nprovider \"openai-compatible\" \"localai\" {\n  display_name = \"LocalAI\"\n  base_url     = \"https://llm.internal/v1\"\n\n  api_key_ref {\n    key = \"localai\"\n  }\n\n  model \"qwen3-32b\" {\n    display_name = \"Qwen 3 32B\"\n  }\n}\n\nalias \"chat_default\" {\n  algorithm = \"round_robin\"\n\n  target {\n    provider = \"openai\"\n    model    = \"gpt-4.1\"\n  }\n\n  target {\n    provider = \"localai\"\n    model    = \"qwen3-32b\"\n  }\n}\n"
       })
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "listener",
@@ -174,6 +186,43 @@ function _createMdxContent(props) {
       }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "For most deployments, one HTTP listener is enough."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "logging",
+      children: "Logging"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The optional ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "logging"
+      }), " block controls structured application logs."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "level"
+        }), " accepts ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "debug"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "info"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "warn"
+        }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "error"
+        })]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "access_log"
+        }), " enables or disables request lifecycle logs such as request received, upstream request start and finish, and response sent or stream start and finish"]
+      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Defaults:"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: (0,jsx_runtime.jsx)(_components.code, {
+          children: "level = \"info\""
+        })
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: (0,jsx_runtime.jsx)(_components.code, {
+          children: "access_log = true"
+        })
+      }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "auth",
       children: "Auth"

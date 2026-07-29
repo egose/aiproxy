@@ -95,7 +95,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
-        children: "listener \"http\" \"public\" {\n  address = \":8080\"\n}\n\nauth \"main\" {\n  mode = \"none\"\n}\n\nprovider \"openai\" \"openai\" {\n  display_name = \"OpenAI\"\n  api_key      = env(\"OPENAI_API_KEY\")\n\n  model \"gpt-4o-mini\" {\n    display_name = \"GPT-4o mini\"\n    capabilities = [\"chat\", \"responses\"]\n  }\n}\n"
+        children: "listener \"http\" \"public\" {\n  address = \":8080\"\n}\n\nauth \"main\" {\n  mode = \"none\"\n}\n\nlogging {\n  level      = \"info\"\n  access_log = true\n}\n\nprovider \"openai\" \"openai\" {\n  display_name = \"OpenAI\"\n  api_key      = env(\"OPENAI_API_KEY\")\n\n  model \"gpt-4o-mini\" {\n    display_name = \"GPT-4o mini\"\n    capabilities = [\"chat\", \"responses\"]\n  }\n}\n"
       })
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Use this when:"
