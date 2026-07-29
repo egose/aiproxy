@@ -63,6 +63,7 @@ The proxy must:
 The initial public API surface is:
 
 - `GET /v1/models`
+- `GET /v1/billing/usage`
 - `GET /metrics`
 - `POST /v1/chat/completions`
 - `POST /v1/embeddings` for `openai`, `openai-compatible`, and `gemini`
@@ -168,6 +169,10 @@ The proxy also records in-process accounting events keyed by:
 
 These events are also aggregated in-process by the same key dimensions to form
 the first billing/accounting scaffold.
+
+`GET /v1/billing/usage` exposes those aggregated summaries. In static bearer
+auth mode, responses are scoped to the caller's tenant when present, otherwise
+to the caller's client identity.
 
 ### Optional Local Rate Limit
 

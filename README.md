@@ -11,6 +11,7 @@ OpenAI-compatible responses.
 ### Supported Public API
 
 - `GET /v1/models`
+- `GET /v1/billing/usage`
 - `GET /metrics`
 - `POST /v1/chat/completions` (JSON and SSE streaming)
 - `POST /v1/embeddings` for `openai`, `openai-compatible`, and `gemini` providers
@@ -32,6 +33,9 @@ OpenAI-compatible responses.
   names
 - request accounting is tracked in-process by tenant, client, model, operation,
   and status; `/metrics` exposes aggregated usage event counters
+- `GET /v1/billing/usage` returns aggregated in-process usage summaries. In
+  `bearer_static` mode it is scoped to the caller's tenant when present,
+  otherwise to the caller's client identity.
 - optional `provider_health` config can use Redis to share transient provider
   health state across instances; without it, health remains in-process only
 

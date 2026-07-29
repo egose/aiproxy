@@ -57,6 +57,9 @@ repo has sandbox services for stable end-to-end provider coverage.)
 - Static `auth.client` blocks may also define optional `tenant` and
   `allowed_models` fields. `allowed_models` is enforced against proxy-visible
   model names.
+- `GET /v1/billing/usage` exposes aggregated in-process usage summaries,
+  filtered to the caller's tenant when present, otherwise to the caller's
+  client identity.
 - Provider health state is shared in-process across requests and alias routing.
   Transient transport failures and upstream `5xx` responses temporarily mark a
   provider unhealthy. An optional `provider_health` Redis config can share that
