@@ -1,3 +1,9 @@
+## [0.4.0](https://github.com/egose/aiproxy/compare/v0.3.0...v0.4.0) (2026-07-29)
+
+### Features
+
+* **website:** add configurable logging and access logs ([b161f87](https://github.com/egose/aiproxy/commit/b161f87e5c431d5792d56e1d93103953eb0b6348))
+
 ## [0.3.0](https://github.com/egose/aiproxy/compare/v0.2.0...v0.3.0) (2026-07-29)
 
 ### Features
