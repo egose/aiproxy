@@ -169,6 +169,38 @@ provider "openai-compatible" "local" {
 	}
 }
 
+func TestLoadRejectsNegativeListenerTimeouts(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		field   string
+		message string
+	}{
+		{name: "read_header", field: `read_header = "-1s"`, message: "invalid read_header timeout"},
+		{name: "idle", field: `idle = "-1s"`, message: "invalid idle timeout"},
+		{name: "write", field: `write = "-1s"`, message: "invalid write timeout"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := `
+listener "http" "public" {
+  address = ":8080"
+  timeouts {
+    ` + tc.field + `
+  }
+}
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+			_, err := Load([]byte(cfg), "test.hcl")
+			if err == nil || !strings.Contains(err.Error(), tc.message) {
+				t.Fatalf("expected %q error, got %v", tc.message, err)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsBothAPIKeyAndRef(t *testing.T) {
 	keyFile := writeTempFile(t, "keys.json", `{"k":"v"}`)
 	cfg := `

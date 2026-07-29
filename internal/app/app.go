@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"sync"
@@ -25,6 +26,7 @@ import (
 const (
 	defaultReadTimeout    = 30 * time.Second
 	defaultMaxHeaderBytes = 1 << 20
+	upstreamHeaderTimeout = 60 * time.Second
 )
 
 type BuildOptions struct {
@@ -64,7 +66,7 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	health := providerhealth.New(metrics, rt.ProviderHealth)
 	health.SetProviders(rt.ProviderByName)
 
-	httpClient := &http.Client{Timeout: 5 * time.Minute}
+	httpClient := newHTTPClient()
 
 	handler := httpapi.NewHandler(buildDependencies(rt, logger, adapter, metrics, health, usage, httpClient))
 
@@ -128,7 +130,7 @@ func (a *App) Reload() error {
 
 	a.metrics.SetBuildInfo(a.buildOpt.Version)
 	a.metrics.RecordConfig(rt)
-	a.health = providerhealth.New(a.metrics, rt.ProviderHealth)
+	a.health = reloadHealthTracker(a.health, a.metrics, current, rt)
 	a.health.SetProviders(rt.ProviderByName)
 	a.handler.UpdateDependencies(buildDependencies(rt, a.logger, a.adapter, a.metrics, a.health, a.usage, a.client))
 	a.mu.Lock()
@@ -165,6 +167,22 @@ func aOrUsage(usage accounting.Recorder) accounting.Reader {
 
 func loadRuntime(path string) (*config.Runtime, error) {
 	return config.LoadFile(path)
+}
+
+func newHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = func(r *http.Request) (*url.URL, error) {
+		return http.ProxyFromEnvironment(r)
+	}
+	transport.ResponseHeaderTimeout = upstreamHeaderTimeout
+	return &http.Client{Transport: transport}
+}
+
+func reloadHealthTracker(existing *providerhealth.Tracker, metrics *observability.Metrics, current, next *config.Runtime) *providerhealth.Tracker {
+	if existing != nil && current != nil && current.ProviderHealth == next.ProviderHealth {
+		return existing
+	}
+	return providerhealth.New(metrics, next.ProviderHealth)
 }
 
 func applyServerConfig(server *http.Server, listener config.Listener) {

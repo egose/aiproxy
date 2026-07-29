@@ -19,7 +19,7 @@ func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
 	if r.Operation == OpAudioTranscriptions {
 		return a.doOpenAIAudioTranscriptions(ctx, r)
 	}
-	body, err := io.ReadAll(r.Inbound.Body)
+	body, err := requestBody(r)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
@@ -59,7 +59,7 @@ func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
 	}
 	defer resp.Body.Close()
 
-	outBody, err := io.ReadAll(resp.Body)
+	outBody, err := readUpstreamBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}
@@ -98,7 +98,7 @@ func (a *adapter) doOpenAIAudioTranscriptions(ctx context.Context, r Request) (*
 	if boundary == "" {
 		return nil, ErrInvalidRequest{Message: "multipart boundary is required"}
 	}
-	body, err := io.ReadAll(r.Inbound.Body)
+	body, err := requestBody(r)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
@@ -125,7 +125,7 @@ func (a *adapter) doOpenAIAudioTranscriptions(ctx context.Context, r Request) (*
 		return nil, fmt.Errorf("upstream call: %w", err)
 	}
 	defer resp.Body.Close()
-	outBody, err := io.ReadAll(resp.Body)
+	outBody, err := readUpstreamBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}

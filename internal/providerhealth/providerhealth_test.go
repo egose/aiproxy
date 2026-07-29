@@ -1,6 +1,8 @@
 package providerhealth
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -8,6 +10,33 @@ import (
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/observability"
 )
+
+type stubBackend struct {
+	markSuccess func(context.Context, string) error
+	markFailure func(context.Context, string, time.Duration) error
+	isHealthy   func(context.Context, string) (bool, error)
+}
+
+func (b stubBackend) MarkSuccess(ctx context.Context, name string) error {
+	if b.markSuccess != nil {
+		return b.markSuccess(ctx, name)
+	}
+	return nil
+}
+
+func (b stubBackend) MarkFailure(ctx context.Context, name string, cooldown time.Duration) error {
+	if b.markFailure != nil {
+		return b.markFailure(ctx, name, cooldown)
+	}
+	return nil
+}
+
+func (b stubBackend) IsHealthy(ctx context.Context, name string) (bool, error) {
+	if b.isHealthy != nil {
+		return b.isHealthy(ctx, name)
+	}
+	return true, nil
+}
 
 func TestTrackerFailureCooldownAndRecovery(t *testing.T) {
 	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -55,5 +84,44 @@ func TestRedisBackendSharesHealthAcrossTrackers(t *testing.T) {
 	right.MarkSuccess("openai")
 	if !left.IsHealthy("openai") {
 		t.Fatal("expected redis-backed recovery to be shared")
+	}
+}
+
+func TestRedisBackendRespectsCancelledContext(t *testing.T) {
+	server, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	defer server.Close()
+	backend := newRedisBackend("redis://"+server.Addr(), "test")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := backend.MarkFailure(ctx, "openai", 30*time.Second); !errors.Is(err, context.Canceled) {
+		t.Fatalf("mark failure error = %v", err)
+	}
+	if healthy, err := backend.IsHealthy(context.Background(), "openai"); err != nil || !healthy {
+		t.Fatalf("healthy=%v err=%v", healthy, err)
+	}
+}
+
+func TestTrackerUsesContextAwareHealthMethods(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	called := false
+	tracker := &Tracker{backend: stubBackend{isHealthy: func(got context.Context, name string) (bool, error) {
+		called = true
+		if got.Err() == nil {
+			t.Fatalf("expected cancelled context")
+		}
+		if name != "openai" {
+			t.Fatalf("name = %q", name)
+		}
+		return true, got.Err()
+	}}}
+	if !tracker.IsHealthyContext(ctx, "openai") {
+		t.Fatal("tracker should fail open on backend error")
+	}
+	if !called {
+		t.Fatal("backend was not called")
 	}
 }

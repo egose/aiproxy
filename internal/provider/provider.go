@@ -27,6 +27,7 @@ type Request struct {
 	BaseURL       string
 	APIKey        string
 	UpstreamModel string
+	Body          []byte
 	Inbound       *http.Request
 	Client        *http.Client
 }
@@ -95,6 +96,7 @@ const (
 	defaultGeminiBaseURL    = "https://generativelanguage.googleapis.com"
 	anthropicVersion        = "2023-06-01"
 	defaultMaxTokens        = 1024
+	maxUpstreamBodyBytes    = 32 << 20
 )
 
 func (a *adapter) Do(ctx context.Context, r Request) (*Result, error) {
@@ -129,4 +131,31 @@ func stringPtr(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func readUpstreamBody(r io.Reader) ([]byte, error) {
+	limited := &io.LimitedReader{R: r, N: maxUpstreamBodyBytes + 1}
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxUpstreamBodyBytes {
+		return nil, fmt.Errorf("upstream response body exceeds %d bytes", maxUpstreamBodyBytes)
+	}
+	return body, nil
+}
+
+func requestBody(r Request) ([]byte, error) {
+	if r.Body != nil {
+		return r.Body, nil
+	}
+	if r.Inbound == nil || r.Inbound.Body == nil {
+		return nil, nil
+	}
+	body, err := io.ReadAll(r.Inbound.Body)
+	if err != nil {
+		return nil, err
+	}
+	r.Body = body
+	return body, nil
 }
