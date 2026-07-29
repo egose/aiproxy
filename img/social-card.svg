@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">aiproxy social card</title>
+  <desc id="desc">A social preview card for the aiproxy documentation site.</desc>
+  <defs>
+    <linearGradient id="bg" x1="100" y1="40" x2="1100" y2="590" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#eff6ff" />
+      <stop offset="1" stop-color="#dbeafe" />
+    </linearGradient>
+    <linearGradient id="panel" x1="120" y1="96" x2="420" y2="456" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#60a5fa" />
+      <stop offset="1" stop-color="#1d4ed8" />
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)" />
+  <rect x="72" y="72" width="1056" height="486" rx="36" fill="#ffffff" stroke="#bfdbfe" stroke-width="2" />
+
+  <rect x="132" y="132" width="292" height="292" rx="56" fill="url(#panel)" />
+  <rect x="190" y="176" width="100" height="150" rx="18" fill="#eff6ff" />
+  <path d="M280 176h30l44 44v96a18 18 0 0 1-18 18h-46V220a44 44 0 0 0-10-28Z" fill="#dbeafe" />
+  <path d="M310 176v26a10 10 0 0 0 10 10h34" fill="#bfdbfe" />
+  <circle cx="228" cy="236" r="12" fill="#2563eb" />
+  <circle cx="228" cy="292" r="12" fill="#2563eb" />
+  <circle cx="286" cy="264" r="12" fill="#2563eb" />
+  <path d="M238 242 274 259" fill="none" stroke="#2563eb" stroke-linecap="round" stroke-width="10" />
+  <path d="M238 286 274 269" fill="none" stroke="#2563eb" stroke-linecap="round" stroke-width="10" />
+
+  <text x="484" y="220" fill="#2563eb" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="800" letter-spacing="4">DOCUMENTATION</text>
+  <text x="484" y="314" fill="#0f172a" font-family="Inter, Arial, sans-serif" font-size="82" font-weight="800">aiproxy</text>
+  <text x="484" y="380" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="500">OpenAI-compatible proxy for multiple AI providers</text>
+
+  <g fill="#1d4ed8" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="700">
+    <text x="484" y="468">chat completions</text>
+    <text x="764" y="468">responses</text>
+    <text x="484" y="514">embeddings</text>
+    <text x="678" y="514">alias routing</text>
+    <text x="900" y="514">metrics</text>
+    <text x="484" y="560">deployment docs</text>
+  </g>
+</svg>
