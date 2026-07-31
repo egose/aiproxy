@@ -530,3 +530,95 @@ func executeRootCommand(input string, args ...string) (string, string, error) {
 	err := cmd.Execute()
 	return stdout.String(), stderr.String(), err
 }
+
+func TestParseMultiChoiceValueAcceptsNamesAndNumbers(t *testing.T) {
+	got, err := parseMultiChoiceValue("Capabilities", []string{"chat", "responses", "embeddings"}, "2,chat,2")
+	if err != nil {
+		t.Fatalf("parseMultiChoiceValue(): %v", err)
+	}
+	want := []string{"responses", "chat"}
+	if len(got) != len(want) {
+		t.Fatalf("len(got) = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d] = %q, want %q (%v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestSupportedCapabilitiesIncludeOpenAIExtendedOptions(t *testing.T) {
+	got := supportedCapabilities("openai")
+	want := []string{"chat", "responses", "embeddings", "images", "audio_transcriptions", "audio_speech"}
+	if len(got) != len(want) {
+		t.Fatalf("len(got) = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d] = %q, want %q (%v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestAliasTargetSpecsRoundTrip(t *testing.T) {
+	input := []aliasTargetInput{{Provider: "primary", Model: "gpt-4o-mini"}, {Provider: "backup", Model: "qwen3-32b"}}
+	specs := aliasTargetSpecs(input)
+	got, err := buildAliasTargetsFromOptions(specs)
+	if err != nil {
+		t.Fatalf("buildAliasTargetsFromOptions(): %v", err)
+	}
+	if len(got) != len(input) {
+		t.Fatalf("len(got) = %d, want %d (%v)", len(got), len(input), got)
+	}
+	for i := range input {
+		if got[i] != input[i] {
+			t.Fatalf("got[%d] = %+v, want %+v", i, got[i], input[i])
+		}
+	}
+}
+
+func TestAvailablePublicModelsIncludesDirectAndAliasNames(t *testing.T) {
+	blocks := []topLevelBlock{
+		{Type: "provider", Labels: []string{"openai", "primary"}, Text: "provider \"openai\" \"primary\" {\n  model \"gpt-4o-mini\" {}\n  model \"text-embedding-3-large\" {}\n}\n"},
+		{Type: "alias", Labels: []string{"chat_default"}},
+	}
+	got := availablePublicModels(blocks)
+	want := []string{"alias/chat_default", "primary/gpt-4o-mini", "primary/text-embedding-3-large"}
+	if len(got) != len(want) {
+		t.Fatalf("len(got) = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d] = %q, want %q (%v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestUpsertProviderModelReplacesInPlace(t *testing.T) {
+	models := []providerModelInput{{Name: "first"}, {Name: "second"}}
+	got, err := upsertProviderModel(models, providerModelInput{Name: "renamed"}, "second")
+	if err != nil {
+		t.Fatalf("upsertProviderModel(): %v", err)
+	}
+	if len(got) != 2 || got[0].Name != "first" || got[1].Name != "renamed" {
+		t.Fatalf("got = %+v", got)
+	}
+}
+
+func TestUpsertAuthClientRejectsDuplicateName(t *testing.T) {
+	clients := []authClientInput{{Name: "ci"}, {Name: "internal"}}
+	_, err := upsertAuthClient(clients, authClientInput{Name: "ci"}, "internal")
+	if err == nil || !strings.Contains(err.Error(), `client "ci" already exists`) {
+		t.Fatalf("expected duplicate-name error, got %v", err)
+	}
+}
+
+func TestBuildReviewSummaryIncludesMetadataAndPreview(t *testing.T) {
+	got := buildReviewSummary([]string{"Config path: /tmp/config.hcl", "Action: update listener block"}, "listener \"http\" \"public\" {}")
+	checks := []string{"Config path: /tmp/config.hcl", "Action: update listener block", `listener "http" "public" {}`}
+	for _, check := range checks {
+		if !strings.Contains(got, check) {
+			t.Fatalf("review summary missing %q:\n%s", check, got)
+		}
+	}
+}
