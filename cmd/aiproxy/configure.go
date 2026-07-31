@@ -14,16 +14,21 @@ import (
 	"strings"
 	"unicode"
 
+	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var envExprPattern = regexp.MustCompile(`^env\("[^"]+"\)$`)
 
 type promptSession struct {
-	in  *bufio.Reader
-	out io.Writer
+	in             *bufio.Reader
+	rawIn          io.Reader
+	out            io.Writer
+	interactiveTUI bool
 }
 
 type topLevelBlock struct {
@@ -176,7 +181,7 @@ func newConfigureCommand() *cobra.Command {
 			"aiproxy configure provider --config /etc/aiproxy/config.hcl --non-interactive --name backup --type openai-compatible --base-url https://llm.internal/v1 --secrets-key localai --api-key \"$LOCALAI_API_KEY\" --model qwen3-32b\n" +
 			"aiproxy configure alias --config /etc/aiproxy/config.hcl --non-interactive --name chat_default --target primary/gpt-4o-mini --target backup/qwen3-32b",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			prompts := promptSession{in: bufio.NewReader(cmd.InOrStdin()), out: cmd.OutOrStdout()}
+			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			choice, err := prompts.askChoice("Block to configure", []string{"provider", "alias", "auth", "listener", "logging", "provider-health"}, "provider")
 			if err != nil {
 				return err
@@ -220,7 +225,7 @@ func newConfigureListenerCommand() *cobra.Command {
 		Example: "aiproxy configure listener\n" +
 			"aiproxy configure listener --config /etc/aiproxy/config.hcl --non-interactive --name public --address :8080 --read-header-timeout 30s",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			prompts := promptSession{in: bufio.NewReader(cmd.InOrStdin()), out: cmd.OutOrStdout()}
+			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureListener(&prompts, inheritedConfigPath(cmd), deleteBlock, options)
 		},
 	}
@@ -243,7 +248,7 @@ func newConfigureAuthCommand() *cobra.Command {
 		Example: "aiproxy configure auth\n" +
 			"aiproxy configure auth --config /etc/aiproxy/config.hcl --non-interactive --name main --mode bearer_static --rate-limit-rpm 120 --client internal-app --client-token-env internal-app=AIPROXY_CLIENT_TOKEN",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			prompts := promptSession{in: bufio.NewReader(cmd.InOrStdin()), out: cmd.OutOrStdout()}
+			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureAuth(&prompts, inheritedConfigPath(cmd), deleteBlock, options)
 		},
 	}
@@ -271,7 +276,7 @@ func newConfigureProviderCommand() *cobra.Command {
 			"aiproxy configure provider --config /etc/aiproxy/config.hcl --non-interactive --name backup --type openai-compatible --base-url https://llm.internal/v1 --secrets-key localai --api-key \"$LOCALAI_API_KEY\" --model qwen3-32b\n" +
 			"aiproxy configure provider --config /etc/aiproxy/config.hcl --delete --name backup",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			prompts := promptSession{in: bufio.NewReader(cmd.InOrStdin()), out: cmd.OutOrStdout()}
+			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureProvider(&prompts, inheritedConfigPath(cmd), deleteBlock, options)
 		},
 	}
@@ -302,7 +307,7 @@ func newConfigureAliasCommand() *cobra.Command {
 			"aiproxy configure alias --config /etc/aiproxy/config.hcl --non-interactive --name chat_default --algorithm round_robin --target primary/gpt-4o-mini --target backup/qwen3-32b\n" +
 			"aiproxy configure alias --config /etc/aiproxy/config.hcl --delete --name chat_default",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			prompts := promptSession{in: bufio.NewReader(cmd.InOrStdin()), out: cmd.OutOrStdout()}
+			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureAlias(&prompts, inheritedConfigPath(cmd), deleteBlock, options)
 		},
 	}
@@ -323,7 +328,7 @@ func newConfigureProviderHealthCommand() *cobra.Command {
 		Example: "aiproxy configure provider-health\n" +
 			"aiproxy configure provider-health --config /etc/aiproxy/config.hcl --non-interactive --redis-url redis://localhost:6379/0 --key-prefix aiproxy:provider-health --cooldown 30s",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			prompts := promptSession{in: bufio.NewReader(cmd.InOrStdin()), out: cmd.OutOrStdout()}
+			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureProviderHealth(&prompts, inheritedConfigPath(cmd), deleteBlock, options)
 		},
 	}
@@ -345,7 +350,7 @@ func newConfigureLoggingCommand() *cobra.Command {
 			"aiproxy configure logging --config /etc/aiproxy/config.hcl --non-interactive --level warn --access-log=false",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.HasAccessLog = cmd.Flags().Changed("access-log")
-			prompts := promptSession{in: bufio.NewReader(cmd.InOrStdin()), out: cmd.OutOrStdout()}
+			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureLogging(&prompts, inheritedConfigPath(cmd), deleteBlock, options)
 		},
 	}
@@ -375,6 +380,9 @@ func runConfigureListener(prompts *promptSession, configPath string, deleteBlock
 		if !removed {
 			return fmt.Errorf("listener block not found in %s", configPath)
 		}
+		if err := prompts.confirmWrite("Delete listener block", buildReviewSummary([]string{"Config path: " + configPath, "Action: delete listener block"}, "")); err != nil {
+			return err
+		}
 		if err := writeConfigFile(configPath, updated); err != nil {
 			return err
 		}
@@ -389,6 +397,9 @@ func runConfigureListener(prompts *promptSession, configPath string, deleteBlock
 		if action == "delete" {
 			updated, _, err := removeBlock(doc.source, func(block topLevelBlock) bool { return block.Type == "listener" })
 			if err != nil {
+				return err
+			}
+			if err := prompts.confirmWrite("Delete listener block", buildReviewSummary([]string{"Config path: " + configPath, "Action: delete listener block"}, "")); err != nil {
 				return err
 			}
 			if err := writeConfigFile(configPath, updated); err != nil {
@@ -408,6 +419,9 @@ func runConfigureListener(prompts *promptSession, configPath string, deleteBlock
 		return block.Type == "listener"
 	})
 	if err != nil {
+		return err
+	}
+	if err := prompts.confirmWrite("Review listener changes", buildReviewSummary([]string{"Config path: " + configPath, "Action: update listener block"}, renderListenerBlock(input))); err != nil {
 		return err
 	}
 
@@ -436,6 +450,9 @@ func runConfigureAuth(prompts *promptSession, configPath string, deleteBlock boo
 		if !removed {
 			return fmt.Errorf("auth block not found in %s", configPath)
 		}
+		if err := prompts.confirmWrite("Delete auth block", buildReviewSummary([]string{"Config path: " + configPath, "Action: delete auth block"}, "")); err != nil {
+			return err
+		}
 		if err := writeConfigFile(configPath, updated); err != nil {
 			return err
 		}
@@ -452,6 +469,9 @@ func runConfigureAuth(prompts *promptSession, configPath string, deleteBlock boo
 			if err != nil {
 				return err
 			}
+			if err := prompts.confirmWrite("Delete auth block", buildReviewSummary([]string{"Config path: " + configPath, "Action: delete auth block"}, "")); err != nil {
+				return err
+			}
 			if err := writeConfigFile(configPath, updated); err != nil {
 				return err
 			}
@@ -460,7 +480,7 @@ func runConfigureAuth(prompts *promptSession, configPath string, deleteBlock boo
 		}
 	}
 
-	input, err := promptAuthInput(prompts, existingAuthInput(doc.blocks), options)
+	input, err := promptAuthInput(prompts, doc.blocks, existingAuthInput(doc.blocks), options)
 	if err != nil {
 		return err
 	}
@@ -469,6 +489,9 @@ func runConfigureAuth(prompts *promptSession, configPath string, deleteBlock boo
 		return block.Type == "auth"
 	})
 	if err != nil {
+		return err
+	}
+	if err := prompts.confirmWrite("Review auth changes", buildReviewSummary([]string{"Config path: " + configPath, "Action: update auth block"}, renderAuthBlock(input))); err != nil {
 		return err
 	}
 
@@ -505,6 +528,9 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 		}
 		if !removed {
 			return fmt.Errorf("provider %q not found in %s", name, configPath)
+		}
+		if err := prompts.confirmWrite("Delete provider", buildReviewSummary([]string{"Config path: " + configPath, "Action: delete provider " + name}, "")); err != nil {
+			return err
 		}
 		if err := writeConfigFile(configPath, updated); err != nil {
 			return err
@@ -544,6 +570,9 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 		if !removed {
 			return fmt.Errorf("provider %q not found in %s", nameForAction, configPath)
 		}
+		if err := prompts.confirmWrite("Delete provider", buildReviewSummary([]string{"Config path: " + configPath, "Action: delete provider " + nameForAction}, "")); err != nil {
+			return err
+		}
 		if err := writeConfigFile(configPath, updated); err != nil {
 			return err
 		}
@@ -560,6 +589,13 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 		return block.Type == "provider" && len(block.Labels) >= 2 && block.Labels[1] == targetProviderName(action, nameForAction, input.Name)
 	})
 	if err != nil {
+		return err
+	}
+	reviewLines := []string{"Config path: " + configPath, "Action: " + action + " provider " + input.Name}
+	if secretsUpdate.path != "" {
+		reviewLines = append(reviewLines, "Secrets update: "+secretsUpdate.path+" key "+secretsUpdate.key)
+	}
+	if err := prompts.confirmWrite("Review provider changes", buildReviewSummary(reviewLines, renderProviderBlock(input))); err != nil {
 		return err
 	}
 
@@ -603,6 +639,9 @@ func runConfigureAlias(prompts *promptSession, configPath string, deleteBlock bo
 		if !removed {
 			return fmt.Errorf("alias %q not found in %s", name, configPath)
 		}
+		if err := prompts.confirmWrite("Delete alias", buildReviewSummary([]string{"Config path: " + configPath, "Action: delete alias " + name}, "")); err != nil {
+			return err
+		}
 		if err := writeConfigFile(configPath, updated); err != nil {
 			return err
 		}
@@ -641,6 +680,9 @@ func runConfigureAlias(prompts *promptSession, configPath string, deleteBlock bo
 		if !removed {
 			return fmt.Errorf("alias %q not found in %s", nameForAction, configPath)
 		}
+		if err := prompts.confirmWrite("Delete alias", buildReviewSummary([]string{"Config path: " + configPath, "Action: delete alias " + nameForAction}, "")); err != nil {
+			return err
+		}
 		if err := writeConfigFile(configPath, updated); err != nil {
 			return err
 		}
@@ -657,6 +699,9 @@ func runConfigureAlias(prompts *promptSession, configPath string, deleteBlock bo
 		return block.Type == "alias" && len(block.Labels) >= 1 && block.Labels[0] == targetAliasName(action, nameForAction, input.Name)
 	})
 	if err != nil {
+		return err
+	}
+	if err := prompts.confirmWrite("Review alias changes", buildReviewSummary([]string{"Config path: " + configPath, "Action: " + action + " alias " + input.Name}, renderAliasBlock(input))); err != nil {
 		return err
 	}
 
@@ -685,6 +730,9 @@ func runConfigureProviderHealth(prompts *promptSession, configPath string, delet
 		if !removed {
 			return fmt.Errorf("provider_health block not found in %s", configPath)
 		}
+		if err := prompts.confirmWrite("Delete provider_health block", buildReviewSummary([]string{"Config path: " + configPath, "Action: delete provider_health block"}, "")); err != nil {
+			return err
+		}
 		if err := writeConfigFile(configPath, updated); err != nil {
 			return err
 		}
@@ -699,6 +747,9 @@ func runConfigureProviderHealth(prompts *promptSession, configPath string, delet
 		if action == "delete" {
 			updated, _, err := removeBlock(doc.source, func(block topLevelBlock) bool { return block.Type == "provider_health" })
 			if err != nil {
+				return err
+			}
+			if err := prompts.confirmWrite("Delete provider_health block", buildReviewSummary([]string{"Config path: " + configPath, "Action: delete provider_health block"}, "")); err != nil {
 				return err
 			}
 			if err := writeConfigFile(configPath, updated); err != nil {
@@ -718,6 +769,9 @@ func runConfigureProviderHealth(prompts *promptSession, configPath string, delet
 		return block.Type == "provider_health"
 	})
 	if err != nil {
+		return err
+	}
+	if err := prompts.confirmWrite("Review provider_health changes", buildReviewSummary([]string{"Config path: " + configPath, "Action: update provider_health block"}, renderProviderHealthBlock(input))); err != nil {
 		return err
 	}
 
@@ -746,6 +800,9 @@ func runConfigureLogging(prompts *promptSession, configPath string, deleteBlock 
 		if !removed {
 			return fmt.Errorf("logging block not found in %s", configPath)
 		}
+		if err := prompts.confirmWrite("Delete logging block", buildReviewSummary([]string{"Config path: " + configPath, "Action: delete logging block"}, "")); err != nil {
+			return err
+		}
 		if err := writeConfigFile(configPath, updated); err != nil {
 			return err
 		}
@@ -760,6 +817,9 @@ func runConfigureLogging(prompts *promptSession, configPath string, deleteBlock 
 		if action == "delete" {
 			updated, _, err := removeBlock(doc.source, func(block topLevelBlock) bool { return block.Type == "logging" })
 			if err != nil {
+				return err
+			}
+			if err := prompts.confirmWrite("Delete logging block", buildReviewSummary([]string{"Config path: " + configPath, "Action: delete logging block"}, "")); err != nil {
 				return err
 			}
 			if err := writeConfigFile(configPath, updated); err != nil {
@@ -779,6 +839,9 @@ func runConfigureLogging(prompts *promptSession, configPath string, deleteBlock 
 		return block.Type == "logging"
 	})
 	if err != nil {
+		return err
+	}
+	if err := prompts.confirmWrite("Review logging changes", buildReviewSummary([]string{"Config path: " + configPath, "Action: update logging block"}, renderLoggingBlock(input))); err != nil {
 		return err
 	}
 
@@ -1188,6 +1251,42 @@ func promptListenerInput(prompts *promptSession, existing *listenerInput, option
 		}
 		return defaults, nil
 	}
+	if prompts.interactiveTUI {
+		name := defaults.Name
+		address := defaults.Address
+		configureTimeouts := defaults.ReadHeader != "" || defaults.Idle != "" || defaults.Write != ""
+		if err := prompts.runHuhForm(
+			huh.NewGroup(
+				huh.NewInput().Title("Listener name").Value(&name).Validate(huh.ValidateNotEmpty()),
+				huh.NewInput().Title("Listener address").Value(&address).Validate(huh.ValidateNotEmpty()),
+				huh.NewConfirm().Title("Configure timeouts").Description(listenerTimeoutsDescription()).Value(&configureTimeouts),
+			).Title("Listener"),
+		); err != nil {
+			return listenerInput{}, err
+		}
+		input := listenerInput{Name: strings.TrimSpace(name), Address: strings.TrimSpace(address)}
+		if configureTimeouts {
+			readHeader := defaults.ReadHeader
+			if readHeader == "" {
+				readHeader = "30s"
+			}
+			idle := defaults.Idle
+			write := defaults.Write
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewInput().Title("Read header timeout").Value(&readHeader),
+					huh.NewInput().Title("Idle timeout").Value(&idle),
+					huh.NewInput().Title("Write timeout").Value(&write),
+				).Title("Listener Timeouts"),
+			); err != nil {
+				return listenerInput{}, err
+			}
+			input.ReadHeader = strings.TrimSpace(readHeader)
+			input.Idle = strings.TrimSpace(idle)
+			input.Write = strings.TrimSpace(write)
+		}
+		return input, nil
+	}
 	name, err := prompts.askRequired("Listener name", defaults.Name)
 	if err != nil {
 		return listenerInput{}, err
@@ -1222,7 +1321,7 @@ func promptListenerInput(prompts *promptSession, existing *listenerInput, option
 	return input, nil
 }
 
-func promptAuthInput(prompts *promptSession, existing *authInput, options authOptions) (authInput, error) {
+func promptAuthInput(prompts *promptSession, blocks []topLevelBlock, existing *authInput, options authOptions) (authInput, error) {
 	defaults := authInput{Name: "main", Mode: "none"}
 	if existing != nil {
 		defaults = *existing
@@ -1264,11 +1363,57 @@ func promptAuthInput(prompts *promptSession, existing *authInput, options authOp
 		}
 		return defaults, nil
 	}
+	availableModels := availablePublicModels(blocks)
+	if prompts.interactiveTUI {
+		name := defaults.Name
+		mode := defaults.Mode
+		configureRateLimit := defaults.RateLimit != nil
+		if err := prompts.runHuhForm(
+			huh.NewGroup(
+				huh.NewInput().Title("Auth name").Value(&name).Validate(huh.ValidateNotEmpty()),
+				huh.NewSelect[string]().Title("Auth mode").Description(authModeDescription()).Options(
+					huh.NewOption("No auth", "none"),
+					huh.NewOption("Static bearer tokens", "bearer_static"),
+				).Value(&mode),
+				huh.NewConfirm().Title("Configure rate limit").Value(&configureRateLimit),
+			).Title("Auth"),
+		); err != nil {
+			return authInput{}, err
+		}
+		input := authInput{Name: strings.TrimSpace(name), Mode: mode}
+		if configureRateLimit {
+			rpm := "120"
+			burst := rpm
+			if defaults.RateLimit != nil {
+				rpm = defaults.RateLimit.RequestsPerMinute
+				if defaults.RateLimit.Burst != "" {
+					burst = defaults.RateLimit.Burst
+				}
+			}
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewInput().Title("Requests per minute").Value(&rpm).Validate(huh.ValidateNotEmpty()),
+					huh.NewInput().Title("Burst").Value(&burst),
+				).Title("Rate Limit"),
+			); err != nil {
+				return authInput{}, err
+			}
+			input.RateLimit = &authRateLimitInput{RequestsPerMinute: strings.TrimSpace(rpm), Burst: strings.TrimSpace(burst)}
+		}
+		if mode == "bearer_static" {
+			clients, err := promptAuthClientsInteractive(prompts, availableModels, defaults.Clients)
+			if err != nil {
+				return authInput{}, err
+			}
+			input.Clients = clients
+		}
+		return input, nil
+	}
 	name, err := prompts.askRequired("Auth block name", defaults.Name)
 	if err != nil {
 		return authInput{}, err
 	}
-	mode, err := prompts.askChoice("Auth mode", []string{"none", "bearer_static"}, defaults.Mode)
+	mode, err := prompts.askChoiceWithDescription("Auth mode", authModeDescription(), []string{"none", "bearer_static"}, defaults.Mode)
 	if err != nil {
 		return authInput{}, err
 	}
@@ -1320,11 +1465,20 @@ func promptAuthInput(prompts *promptSession, existing *authInput, options authOp
 			if err != nil {
 				return authInput{}, err
 			}
-			allowedModels, err := prompts.askCSV("Allowed models (comma-separated)", "")
-			if err != nil {
-				return authInput{}, err
+			allowedModelsDefault := []string(nil)
+			if len(availableModels) > 0 && prompts.interactiveTUI {
+				allowedModels, err := prompts.askMultiChoice("Allowed models", availableModels, allowedModelsDefault)
+				if err != nil {
+					return authInput{}, err
+				}
+				input.Clients = append(input.Clients, authClientInput{Name: clientName, Token: token, Tenant: tenant, AllowedModels: allowedModels})
+			} else {
+				allowedModels, err := prompts.askCSV("Allowed models (comma-separated)", "")
+				if err != nil {
+					return authInput{}, err
+				}
+				input.Clients = append(input.Clients, authClientInput{Name: clientName, Token: token, Tenant: tenant, AllowedModels: allowedModels})
 			}
-			input.Clients = append(input.Clients, authClientInput{Name: clientName, Token: token, Tenant: tenant, AllowedModels: allowedModels})
 			more, err := prompts.askYesNo("Add another client", false)
 			if err != nil {
 				return authInput{}, err
@@ -1379,7 +1533,117 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		}
 		return defaults, providerSecretsUpdate(defaults, options), nil
 	}
-	providerType, err := prompts.askChoice("Provider type", []string{"openai", "openai-compatible", "anthropic", "gemini"}, defaults.ProviderType)
+	if prompts.interactiveTUI {
+		providerType := defaults.ProviderType
+		providerName := defaults.Name
+		displayName := defaults.DisplayName
+		if err := prompts.runHuhForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().Title("Provider type").Description(providerTypeDescription()).Options(
+					huh.NewOption("OpenAI", "openai"),
+					huh.NewOption("OpenAI-compatible", "openai-compatible"),
+					huh.NewOption("Anthropic", "anthropic"),
+					huh.NewOption("Gemini", "gemini"),
+				).Value(&providerType),
+				huh.NewInput().Title("Provider name").Value(&providerName).Validate(huh.ValidateNotEmpty()),
+				huh.NewInput().Title("Display name").Value(&displayName),
+			).Title("Provider"),
+		); err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
+		baseURL := defaults.BaseURL
+		if providerType == "openai-compatible" {
+			if baseURL == "" {
+				baseURL = "https://llm.internal/v1"
+			}
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewInput().Title("Base URL").Value(&baseURL).Validate(huh.ValidateNotEmpty()),
+				).Title("Endpoint"),
+			); err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
+		} else {
+			baseURL = ""
+		}
+		credentialMode := "secrets_file"
+		if defaults.Credential.Mode != "" {
+			credentialMode = defaults.Credential.Mode
+		}
+		if err := prompts.runHuhForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().Title("Credential storage").Description(credentialStorageDescription()).Options(
+					huh.NewOption("Secrets file", "secrets_file"),
+					huh.NewOption(`env("VAR") expression`, "env_expression"),
+					huh.NewOption("Inline value", "inline"),
+				).Value(&credentialMode),
+			).Title("Credentials"),
+		); err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
+		credential := providerCredentialInput{Mode: credentialMode}
+		update := secretsUpdate{}
+		switch credentialMode {
+		case "secrets_file":
+			secretsPath := defaults.Credential.SecretsPath // pragma: allowlist secret
+			if secretsPath == "" {
+				secretsPath = defaultSecretsPath()
+			}
+			secretsKey := defaults.Credential.SecretsKey // pragma: allowlist secret
+			if secretsKey == "" {
+				secretsKey = providerName // pragma: allowlist secret
+			}
+			apiKey := ""
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewInput().Title("Secrets path").Value(&secretsPath).Validate(huh.ValidateNotEmpty()),
+					huh.NewInput().Title("Secrets key").Value(&secretsKey).Validate(huh.ValidateNotEmpty()),
+					huh.NewInput().Title("API key value").Description(apiKeyValueDescription()).Value(&apiKey).Validate(huh.ValidateNotEmpty()),
+				).Title("Secrets File"),
+			); err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
+			credential.SecretsPath = strings.TrimSpace(secretsPath)
+			credential.SecretsKey = strings.TrimSpace(secretsKey)
+			update = secretsUpdate{path: credential.SecretsPath, key: credential.SecretsKey, value: strings.TrimSpace(apiKey)}
+		case "env_expression":
+			envExpr := defaultProviderEnvExpression(providerType)
+			if defaults.Credential.Mode == "env_expression" && defaults.Credential.APIKeyValue != "" {
+				envExpr = defaults.Credential.APIKeyValue
+			}
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewInput().Title(`API key env("VAR") expression`).Description(apiKeyEnvExpressionDescription()).Value(&envExpr).Validate(huh.ValidateNotEmpty()),
+				).Title("Environment Variable"),
+			); err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
+			credential.APIKeyValue = strings.TrimSpace(envExpr)
+		case "inline":
+			apiKey := defaults.Credential.APIKeyValue // pragma: allowlist secret
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewInput().Title("API key value").Description(apiKeyValueDescription()).Value(&apiKey).Validate(huh.ValidateNotEmpty()),
+				).Title("Inline Credential"),
+			); err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
+			credential.APIKeyValue = strings.TrimSpace(apiKey)
+		}
+		models, err := promptProviderModels(prompts, providerType, defaults.Models)
+		if err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
+		return providerInput{
+			ProviderType: providerType,
+			Name:         strings.TrimSpace(providerName),
+			DisplayName:  strings.TrimSpace(displayName),
+			BaseURL:      strings.TrimSpace(baseURL),
+			Credential:   credential,
+			Models:       models,
+		}, update, nil
+	}
+	providerType, err := prompts.askChoiceWithDescription("Provider type", providerTypeDescription(), []string{"openai", "openai-compatible", "anthropic", "gemini"}, defaults.ProviderType)
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
@@ -1407,7 +1671,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if defaults.Credential.Mode != "" {
 		credentialDefault = defaults.Credential.Mode
 	}
-	credentialMode, err := prompts.askChoice("Credential storage", []string{"secrets_file", "env_expression", "inline"}, credentialDefault)
+	credentialMode, err := prompts.askChoiceWithDescription("Credential storage", credentialStorageDescription(), []string{"secrets_file", "env_expression", "inline"}, credentialDefault)
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
@@ -1466,6 +1730,9 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 }
 
 func promptProviderModels(prompts *promptSession, providerType string, existing []providerModelInput) ([]providerModelInput, error) {
+	if prompts.interactiveTUI {
+		return promptProviderModelsInteractive(prompts, providerType, existing)
+	}
 	if len(existing) > 0 {
 		keepModels, err := prompts.askYesNo("Keep existing models", true)
 		if err != nil {
@@ -1490,7 +1757,7 @@ func promptProviderModels(prompts *promptSession, providerType string, existing 
 		if err != nil {
 			return nil, err
 		}
-		capabilities, err := prompts.askCSV("Capabilities (comma-separated)", strings.Join(defaultCaps, ","))
+		capabilities, err := prompts.askMultiChoiceWithDescription("Capabilities", capabilitySelectionDescription(providerType), supportedCapabilities(providerType), defaultCaps)
 		if err != nil {
 			return nil, err
 		}
@@ -1504,6 +1771,187 @@ func promptProviderModels(prompts *promptSession, providerType string, existing 
 		}
 	}
 	return models, nil
+}
+
+func promptProviderModelsInteractive(prompts *promptSession, providerType string, existing []providerModelInput) ([]providerModelInput, error) {
+	models := append([]providerModelInput(nil), existing...)
+	for {
+		actions := []string{"add"}
+		if len(models) > 0 {
+			actions = append(actions, "edit", "delete", "done")
+		} else {
+			actions = append(actions, "done")
+		}
+		defaultAction := "add"
+		if len(models) > 0 {
+			defaultAction = "done"
+		}
+		action, err := prompts.askChoice("Model action", actions, defaultAction)
+		if err != nil {
+			return nil, err
+		}
+		switch action {
+		case "add":
+			model, err := promptProviderModelInteractive(prompts, providerType, nil)
+			if err != nil {
+				return nil, err
+			}
+			models, err = upsertProviderModel(models, model, "")
+			if err != nil {
+				_, _ = fmt.Fprintln(prompts.out, err.Error())
+			}
+		case "edit":
+			selectedName, err := prompts.askChoice("Model to edit", providerModelNames(models), models[0].Name)
+			if err != nil {
+				return nil, err
+			}
+			current := findProviderModel(models, selectedName)
+			model, err := promptProviderModelInteractive(prompts, providerType, current)
+			if err != nil {
+				return nil, err
+			}
+			models, err = upsertProviderModel(models, model, selectedName)
+			if err != nil {
+				_, _ = fmt.Fprintln(prompts.out, err.Error())
+			}
+		case "delete":
+			selectedName, err := prompts.askChoice("Model to delete", providerModelNames(models), models[0].Name)
+			if err != nil {
+				return nil, err
+			}
+			models = removeProviderModel(models, selectedName)
+		case "done":
+			if len(models) == 0 {
+				_, _ = fmt.Fprintln(prompts.out, "Add at least one model.")
+				continue
+			}
+			return models, nil
+		}
+	}
+}
+
+func promptProviderModelInteractive(prompts *promptSession, providerType string, existing *providerModelInput) (providerModelInput, error) {
+	name := ""
+	displayName := ""
+	upstreamName := ""
+	capabilities := defaultCapabilities(providerType)
+	if existing != nil {
+		name = existing.Name
+		displayName = existing.DisplayName
+		upstreamName = existing.UpstreamName
+		capabilities = append([]string(nil), existing.Capabilities...)
+	}
+	if err := prompts.runHuhForm(
+		huh.NewGroup(
+			huh.NewInput().Title("Model name").Value(&name).Validate(huh.ValidateNotEmpty()),
+			huh.NewInput().Title("Model display name").Value(&displayName),
+			huh.NewInput().Title("Upstream model name").Description(upstreamModelDescription()).Value(&upstreamName),
+		).Title("Model"),
+	); err != nil {
+		return providerModelInput{}, err
+	}
+	if strings.TrimSpace(upstreamName) == "" {
+		upstreamName = name
+	}
+	selectedCaps, err := prompts.askMultiChoiceWithDescription("Capabilities", capabilitySelectionDescription(providerType), supportedCapabilities(providerType), capabilities)
+	if err != nil {
+		return providerModelInput{}, err
+	}
+	return providerModelInput{
+		Name:         strings.TrimSpace(name),
+		DisplayName:  strings.TrimSpace(displayName),
+		UpstreamName: strings.TrimSpace(upstreamName),
+		Capabilities: selectedCaps,
+	}, nil
+}
+
+func promptAuthClientsInteractive(prompts *promptSession, availableModels []string, existing []authClientInput) ([]authClientInput, error) {
+	clients := append([]authClientInput(nil), existing...)
+	for {
+		actions := []string{"add"}
+		if len(clients) > 0 {
+			actions = append(actions, "edit", "delete", "done")
+		} else {
+			actions = append(actions, "done")
+		}
+		defaultAction := "add"
+		if len(clients) > 0 {
+			defaultAction = "done"
+		}
+		action, err := prompts.askChoice("Client action", actions, defaultAction)
+		if err != nil {
+			return nil, err
+		}
+		switch action {
+		case "add":
+			client, err := promptAuthClientInteractive(prompts, availableModels, nil)
+			if err != nil {
+				return nil, err
+			}
+			clients, err = upsertAuthClient(clients, client, "")
+			if err != nil {
+				_, _ = fmt.Fprintln(prompts.out, err.Error())
+			}
+		case "edit":
+			selectedName, err := prompts.askChoice("Client to edit", authClientNames(clients), clients[0].Name)
+			if err != nil {
+				return nil, err
+			}
+			current := findAuthClient(clients, selectedName)
+			client, err := promptAuthClientInteractive(prompts, availableModels, current)
+			if err != nil {
+				return nil, err
+			}
+			clients, err = upsertAuthClient(clients, client, selectedName)
+			if err != nil {
+				_, _ = fmt.Fprintln(prompts.out, err.Error())
+			}
+		case "delete":
+			selectedName, err := prompts.askChoice("Client to delete", authClientNames(clients), clients[0].Name)
+			if err != nil {
+				return nil, err
+			}
+			clients = removeAuthClient(clients, selectedName)
+		case "done":
+			if len(clients) == 0 {
+				_, _ = fmt.Fprintln(prompts.out, "Add at least one client.")
+				continue
+			}
+			return clients, nil
+		}
+	}
+}
+
+func promptAuthClientInteractive(prompts *promptSession, availableModels []string, existing *authClientInput) (authClientInput, error) {
+	name := ""
+	token := ""
+	tenant := ""
+	allowedModels := []string(nil)
+	if existing != nil {
+		name = existing.Name
+		token = existing.Token
+		tenant = existing.Tenant
+		allowedModels = append([]string(nil), existing.AllowedModels...)
+	}
+	if err := prompts.runHuhForm(
+		huh.NewGroup(
+			huh.NewInput().Title("Client name").Value(&name).Validate(huh.ValidateNotEmpty()),
+			huh.NewInput().Title(`Client token or env("VAR") expression`).Description(clientTokenDescription()).Value(&token).Validate(huh.ValidateNotEmpty()),
+			huh.NewInput().Title("Client tenant").Value(&tenant),
+		).Title("Client"),
+	); err != nil {
+		return authClientInput{}, err
+	}
+	var err error
+	if len(availableModels) > 0 {
+		allowedModels, err = prompts.askMultiChoiceWithDescription("Allowed models", allowedModelsDescription(), availableModels, allowedModels)
+	} else {
+		allowedModels, err = prompts.askCSV("Allowed models (comma-separated)", strings.Join(allowedModels, ","))
+	}
+	if err != nil {
+		return authClientInput{}, err
+	}
+	return authClientInput{Name: strings.TrimSpace(name), Token: strings.TrimSpace(token), Tenant: strings.TrimSpace(tenant), AllowedModels: allowedModels}, nil
 }
 
 func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *aliasInput, options aliasOptions) (aliasInput, error) {
@@ -1530,11 +1978,65 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 		}
 		return defaults, nil
 	}
-	if available := availableProviderModels(blocks); len(available) > 0 {
+	available := availableProviderModels(blocks)
+	if len(available) > 0 && !prompts.interactiveTUI {
 		_, _ = fmt.Fprintln(prompts.out, "Available provider/model targets:")
 		for _, item := range available {
 			_, _ = fmt.Fprintf(prompts.out, "- %s\n", item)
 		}
+	}
+	if prompts.interactiveTUI {
+		name := defaults.Name
+		algorithm := defaults.Algorithm
+		if err := prompts.runHuhForm(
+			huh.NewGroup(
+				huh.NewInput().Title("Alias name").Value(&name).Validate(huh.ValidateNotEmpty()),
+				huh.NewSelect[string]().Title("Alias algorithm").Description(aliasAlgorithmDescription()).Options(
+					huh.NewOption("Round robin", "round_robin"),
+					huh.NewOption("Least connections", "least_connections"),
+				).Value(&algorithm),
+			).Title("Alias"),
+		); err != nil {
+			return aliasInput{}, err
+		}
+		input := aliasInput{Name: strings.TrimSpace(name), Algorithm: algorithm}
+		if len(available) > 0 {
+			targets, err := prompts.askAliasTargets("Alias targets", available, defaults.Targets)
+			if err != nil {
+				return aliasInput{}, err
+			}
+			input.Targets = targets
+			return input, nil
+		}
+		if len(defaults.Targets) > 0 {
+			keepTargets, err := prompts.askYesNo("Keep existing targets", true)
+			if err != nil {
+				return aliasInput{}, err
+			}
+			if keepTargets {
+				input.Targets = append(input.Targets, defaults.Targets...)
+				return input, nil
+			}
+		}
+		for {
+			providerName, err := prompts.askRequired("Target provider", "")
+			if err != nil {
+				return aliasInput{}, err
+			}
+			modelName, err := prompts.askRequired("Target model", "")
+			if err != nil {
+				return aliasInput{}, err
+			}
+			input.Targets = append(input.Targets, aliasTargetInput{Provider: providerName, Model: modelName})
+			more, err := prompts.askYesNo("Add another target", false)
+			if err != nil {
+				return aliasInput{}, err
+			}
+			if !more {
+				break
+			}
+		}
+		return input, nil
 	}
 	name, err := prompts.askRequired("Alias name", defaults.Name)
 	if err != nil {
@@ -1545,6 +2047,14 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 		return aliasInput{}, err
 	}
 	input := aliasInput{Name: name, Algorithm: algorithm}
+	if len(available) > 0 && prompts.interactiveTUI {
+		targets, err := prompts.askAliasTargets("Alias targets", available, defaults.Targets)
+		if err != nil {
+			return aliasInput{}, err
+		}
+		input.Targets = targets
+		return input, nil
+	}
 	if len(defaults.Targets) > 0 {
 		keepTargets, err := prompts.askYesNo("Keep existing targets", true)
 		if err != nil {
@@ -1593,6 +2103,36 @@ func promptProviderHealthInput(prompts *promptSession, existing *providerHealthI
 	if options.NonInteractive {
 		return defaults, nil
 	}
+	if prompts.interactiveTUI {
+		redisURL := defaults.RedisURL
+		cooldown := defaults.Cooldown
+		if cooldown == "" {
+			cooldown = "30s"
+		}
+		if err := prompts.runHuhForm(
+			huh.NewGroup(
+				huh.NewInput().Title("Redis URL").Description(providerHealthRedisDescription()).Value(&redisURL),
+				huh.NewInput().Title("Cooldown").Description(providerHealthCooldownDescription()).Value(&cooldown),
+			).Title("Provider Health"),
+		); err != nil {
+			return providerHealthInput{}, err
+		}
+		keyPrefix := ""
+		if strings.TrimSpace(redisURL) != "" {
+			keyPrefix = defaults.KeyPrefix
+			if keyPrefix == "" {
+				keyPrefix = "aiproxy:provider-health"
+			}
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewInput().Title("Redis key prefix").Description(providerHealthKeyPrefixDescription()).Value(&keyPrefix),
+				).Title("Redis Key Prefix"),
+			); err != nil {
+				return providerHealthInput{}, err
+			}
+		}
+		return providerHealthInput{RedisURL: strings.TrimSpace(redisURL), KeyPrefix: strings.TrimSpace(keyPrefix), Cooldown: strings.TrimSpace(cooldown)}, nil
+	}
 	redisURL, err := prompts.ask("Redis URL", defaults.RedisURL)
 	if err != nil {
 		return providerHealthInput{}, err
@@ -1633,6 +2173,19 @@ func promptLoggingInput(prompts *promptSession, existing *loggingInput, options 
 	if options.NonInteractive {
 		return defaults, nil
 	}
+	if prompts.interactiveTUI {
+		level := defaults.Level
+		accessLog := defaults.AccessLog
+		if err := prompts.runHuhForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().Title("Log level").Description(loggingLevelDescription()).Options(huh.NewOptions("debug", "info", "warn", "error")...).Value(&level),
+				huh.NewConfirm().Title("Enable access log").Value(&accessLog),
+			).Title("Logging"),
+		); err != nil {
+			return loggingInput{}, err
+		}
+		return loggingInput{Level: level, AccessLog: accessLog}, nil
+	}
 	level, err := prompts.askChoice("Log level", []string{"debug", "info", "warn", "error"}, defaults.Level)
 	if err != nil {
 		return loggingInput{}, err
@@ -1644,7 +2197,188 @@ func promptLoggingInput(prompts *promptSession, existing *loggingInput, options 
 	return loggingInput{Level: level, AccessLog: accessLog}, nil
 }
 
+func newPromptSession(in io.Reader, out io.Writer) promptSession {
+	return promptSession{
+		in:             bufio.NewReader(in),
+		rawIn:          in,
+		out:            out,
+		interactiveTUI: supportsInteractivePrompts(in, out),
+	}
+}
+
+func supportsInteractivePrompts(in io.Reader, out io.Writer) bool {
+	inFile, ok := in.(*os.File)
+	if !ok || !term.IsTerminal(int(inFile.Fd())) {
+		return false
+	}
+	outFile, ok := out.(*os.File)
+	if !ok || !term.IsTerminal(int(outFile.Fd())) {
+		return false
+	}
+	return true
+}
+
+func (p *promptSession) runHuhField(field huh.Field) error {
+	if !p.interactiveTUI {
+		return errors.New("interactive prompt UI unavailable")
+	}
+	return p.runHuhForm(huh.NewGroup(field))
+}
+
+func (p *promptSession) runHuhForm(groups ...*huh.Group) error {
+	if !p.interactiveTUI {
+		return errors.New("interactive prompt UI unavailable")
+	}
+	return huh.NewForm(groups...).WithInput(p.rawIn).WithOutput(p.out).WithShowHelp(false).WithWidth(88).WithTheme(configureFormTheme()).Run()
+}
+
+func (p *promptSession) confirmWrite(title, summary string) error {
+	if !p.interactiveTUI {
+		return nil
+	}
+	confirmed := false
+	return p.runHuhForm(
+		huh.NewGroup(
+			huh.NewNote().Title(title).Description(summary),
+			huh.NewConfirm().Title("Apply these changes").Value(&confirmed).Validate(func(value bool) error {
+				if !value {
+					return errors.New("confirm to continue")
+				}
+				return nil
+			}),
+		).Title("Review"),
+	)
+}
+
+func buildReviewSummary(lines []string, preview string) string {
+	var b strings.Builder
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(line)
+	}
+	trimmedPreview := strings.TrimSpace(preview)
+	if trimmedPreview == "" {
+		return b.String()
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	b.WriteString(trimmedPreview)
+	return b.String()
+}
+
+func configureFormTheme() huh.Theme {
+	return huh.ThemeFunc(func(bool) *huh.Styles {
+		return configureFormStyles()
+	})
+}
+
+func configureFormStyles() *huh.Styles {
+	styles := huh.ThemeCharm(false)
+	styles.Form.Base = styles.Form.Base.Padding(1, 2)
+	styles.Group.Base = styles.Group.Base.PaddingBottom(1)
+	styles.Group.Title = styles.Group.Title.Bold(true).Foreground(lipgloss.Color("#E2E8F0")).Background(lipgloss.Color("#0F172A")).Padding(0, 1)
+	styles.Group.Description = styles.Group.Description.Foreground(lipgloss.Color("#94A3B8"))
+	styles.FieldSeparator = lipgloss.NewStyle().Foreground(lipgloss.Color("#1E293B"))
+	styles.Focused.Title = styles.Focused.Title.Bold(true).Foreground(lipgloss.Color("#38BDF8"))
+	styles.Blurred.Title = styles.Blurred.Title.Foreground(lipgloss.Color("#64748B"))
+	styles.Focused.Description = styles.Focused.Description.Foreground(lipgloss.Color("#CBD5E1"))
+	styles.Blurred.Description = styles.Blurred.Description.Foreground(lipgloss.Color("#64748B"))
+	styles.Focused.Card = styles.Focused.Card.BorderStyle(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#38BDF8")).Padding(0, 1)
+	styles.Blurred.Card = styles.Blurred.Card.BorderStyle(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#334155")).Padding(0, 1)
+	styles.Focused.SelectSelector = styles.Focused.SelectSelector.Foreground(lipgloss.Color("#22D3EE")).Bold(true)
+	styles.Focused.MultiSelectSelector = styles.Focused.MultiSelectSelector.Foreground(lipgloss.Color("#22D3EE")).Bold(true)
+	styles.Focused.SelectedPrefix = styles.Focused.SelectedPrefix.Foreground(lipgloss.Color("#22C55E")).Bold(true)
+	styles.Focused.UnselectedPrefix = styles.Focused.UnselectedPrefix.Foreground(lipgloss.Color("#64748B"))
+	styles.Focused.TextInput.Prompt = styles.Focused.TextInput.Prompt.Foreground(lipgloss.Color("#22D3EE"))
+	styles.Focused.TextInput.Cursor = styles.Focused.TextInput.Cursor.Foreground(lipgloss.Color("#22D3EE"))
+	styles.Focused.TextInput.CursorText = styles.Focused.TextInput.CursorText.Foreground(lipgloss.Color("#E2E8F0"))
+	styles.Focused.TextInput.Placeholder = styles.Focused.TextInput.Placeholder.Foreground(lipgloss.Color("#64748B"))
+	styles.Focused.NoteTitle = styles.Focused.NoteTitle.Bold(true).Foreground(lipgloss.Color("#F8FAFC"))
+	styles.Focused.Next = styles.Focused.Next.Foreground(lipgloss.Color("#22D3EE")).Bold(true)
+	styles.Focused.FocusedButton = styles.Focused.FocusedButton.Foreground(lipgloss.Color("#020617")).Background(lipgloss.Color("#22D3EE")).Bold(true).Padding(0, 1)
+	styles.Focused.BlurredButton = styles.Focused.BlurredButton.Foreground(lipgloss.Color("#CBD5E1")).Background(lipgloss.Color("#1E293B")).Padding(0, 1)
+	return styles
+}
+
+func authModeDescription() string {
+	return "Use 'none' to disable inbound auth, or 'bearer_static' to require configured client tokens."
+}
+
+func listenerTimeoutsDescription() string {
+	return "Optional HTTP server timeouts. Leave them blank to use Go's zero-value defaults except for read header timeout."
+}
+
+func providerTypeDescription() string {
+	return "Choose the upstream adapter type. 'openai-compatible' is for OpenAI-style APIs hosted elsewhere."
+}
+
+func credentialStorageDescription() string {
+	return "Store credentials in the secrets file, reference an env(\"VAR\") expression, or inline the value directly in config."
+}
+
+func capabilitySelectionDescription(providerType string) string {
+	return "Select the proxy-visible operations this model should advertise for the " + providerType + " provider."
+}
+
+func allowedModelsDescription() string {
+	return "Optional. Leave empty to allow all proxy-visible models. Direct entries look like provider/model; aliases look like alias/name."
+}
+
+func aliasTargetsDescription() string {
+	return "Choose the concrete provider/model targets this alias can route to."
+}
+
+func aliasAlgorithmDescription() string {
+	return "Round robin rotates evenly; least connections prefers the currently least-busy target."
+}
+
+func upstreamModelDescription() string {
+	return "Optional. Leave empty to use the same name for the upstream request."
+}
+
+func clientTokenDescription() string {
+	return "Use a literal token or an env(\"VAR\") expression that resolves before HCL parsing."
+}
+
+func apiKeyEnvExpressionDescription() string {
+	return "Example: env(\"OPENAI_API_KEY\"). The expression is inlined before HCL parsing."
+}
+
+func apiKeyValueDescription() string {
+	return "This value will be written as entered. Prefer a secrets file or env expression when possible."
+}
+
+func providerHealthRedisDescription() string {
+	return "Optional. Leave empty to keep provider health state local to this process only."
+}
+
+func providerHealthCooldownDescription() string {
+	return "How long a provider stays marked unhealthy after a transient failure."
+}
+
+func providerHealthKeyPrefixDescription() string {
+	return "Redis key namespace for shared provider health state."
+}
+
+func loggingLevelDescription() string {
+	return "Choose the minimum severity written to the application logs."
+}
+
 func (p *promptSession) ask(label, def string) (string, error) {
+	if p.interactiveTUI {
+		value := def
+		field := huh.NewInput().Title(label).Value(&value)
+		if err := p.runHuhField(field); err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(value), nil
+	}
 	prompt := label
 	if def != "" {
 		prompt += " [" + def + "]"
@@ -1662,6 +2396,14 @@ func (p *promptSession) ask(label, def string) (string, error) {
 }
 
 func (p *promptSession) askRequired(label, def string) (string, error) {
+	if p.interactiveTUI {
+		value := def
+		field := huh.NewInput().Title(label).Value(&value).Validate(huh.ValidateNotEmpty())
+		if err := p.runHuhField(field); err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(value), nil
+	}
 	for {
 		value, err := p.ask(label, def)
 		if err != nil {
@@ -1675,6 +2417,14 @@ func (p *promptSession) askRequired(label, def string) (string, error) {
 }
 
 func (p *promptSession) askYesNo(label string, def bool) (bool, error) {
+	if p.interactiveTUI {
+		value := def
+		field := huh.NewConfirm().Title(label).Value(&value)
+		if err := p.runHuhField(field); err != nil {
+			return false, err
+		}
+		return value, nil
+	}
 	defaultValue := "y/N"
 	if def {
 		defaultValue = "Y/n"
@@ -1699,8 +2449,29 @@ func (p *promptSession) askYesNo(label string, def bool) (bool, error) {
 }
 
 func (p *promptSession) askChoice(label string, options []string, def string) (string, error) {
+	return p.askChoiceWithDescription(label, "", options, def)
+}
+
+func (p *promptSession) askChoiceWithDescription(label, description string, options []string, def string) (string, error) {
 	if len(options) == 0 {
 		return "", fmt.Errorf("%s: no options available", label)
+	}
+	if p.interactiveTUI {
+		value := def
+		if !containsName(options, value) {
+			value = options[0]
+		}
+		field := huh.NewSelect[string]().Title(label).Options(huh.NewOptions(options...)...).Value(&value)
+		if description != "" {
+			field.Description(description)
+		}
+		if len(options) > 7 {
+			field.Filtering(true).Height(8)
+		}
+		if err := p.runHuhField(field); err != nil {
+			return "", err
+		}
+		return value, nil
 	}
 	for i, option := range options {
 		_, _ = fmt.Fprintf(p.out, "%d. %s\n", i+1, option)
@@ -1721,6 +2492,114 @@ func (p *promptSession) askChoice(label string, options []string, def string) (s
 		}
 		_, _ = fmt.Fprintln(p.out, "Choose one of the listed values or numbers.")
 	}
+}
+
+func (p *promptSession) askMultiChoice(label string, options, def []string) ([]string, error) {
+	return p.askMultiChoiceWithDescription(label, "", options, def)
+}
+
+func (p *promptSession) askMultiChoiceWithDescription(label, description string, options, def []string) ([]string, error) {
+	if len(options) == 0 {
+		return nil, fmt.Errorf("%s: no options available", label)
+	}
+	if p.interactiveTUI {
+		selected := append([]string(nil), sanitizeSelectedOptions(options, def)...)
+		promptOptions := make([]huh.Option[string], 0, len(options))
+		selectedSet := make(map[string]bool, len(selected))
+		for _, item := range selected {
+			selectedSet[item] = true
+		}
+		for _, option := range options {
+			promptOptions = append(promptOptions, huh.NewOption(option, option).Selected(selectedSet[option]))
+		}
+		field := huh.NewMultiSelect[string]().Title(label).Options(promptOptions...).Value(&selected)
+		if description != "" {
+			field.Description(description)
+		}
+		if len(options) > 7 {
+			field.Filtering(true).Height(8)
+		}
+		if err := p.runHuhField(field); err != nil {
+			return nil, err
+		}
+		return sanitizeSelectedOptions(options, selected), nil
+	}
+	for i, option := range options {
+		marker := " "
+		if containsName(def, option) {
+			marker = "*"
+		}
+		_, _ = fmt.Fprintf(p.out, "%d. [%s] %s\n", i+1, marker, option)
+	}
+	value, err := p.ask(label+" (comma-separated names or numbers)", strings.Join(def, ","))
+	if err != nil {
+		return nil, err
+	}
+	return parseMultiChoiceValue(label, options, value)
+}
+
+func (p *promptSession) askAliasTargets(label string, options []string, def []aliasTargetInput) ([]aliasTargetInput, error) {
+	if len(options) == 0 {
+		return nil, errors.New("alias targets: no options available")
+	}
+	if p.interactiveTUI {
+		selected := aliasTargetSpecs(def)
+		promptOptions := make([]huh.Option[string], 0, len(options))
+		selectedSet := make(map[string]bool, len(selected))
+		for _, item := range selected {
+			selectedSet[item] = true
+		}
+		for _, option := range options {
+			promptOptions = append(promptOptions, huh.NewOption(option, option).Selected(selectedSet[option]))
+		}
+		field := huh.NewMultiSelect[string]().
+			Title(label).
+			Description(aliasTargetsDescription()).
+			Options(promptOptions...).
+			Value(&selected).
+			Validate(func(value []string) error {
+				if len(value) == 0 {
+					return errors.New("select at least one target")
+				}
+				return nil
+			})
+		if len(options) > 7 {
+			field.Filtering(true).Height(8)
+		}
+		if err := p.runHuhField(field); err != nil {
+			return nil, err
+		}
+		return buildAliasTargetsFromOptions(sanitizeSelectedOptions(options, selected))
+	}
+	if len(def) > 0 {
+		keepTargets, err := p.askYesNo("Keep existing targets", true)
+		if err != nil {
+			return nil, err
+		}
+		if keepTargets {
+			return append([]aliasTargetInput(nil), def...), nil
+		}
+	}
+	var targets []aliasTargetInput
+	for {
+		providerName, err := p.askRequired("Target provider", "")
+		if err != nil {
+			return nil, err
+		}
+		modelName, err := p.askRequired("Target model", "")
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, aliasTargetInput{Provider: providerName, Model: modelName})
+		more, err := p.askYesNo("Add another target", false)
+		if err != nil {
+			return nil, err
+		}
+		if !more {
+			break
+		}
+	}
+	return targets, nil
 }
 
 func (p *promptSession) askCSV(label, def string) ([]string, error) {
@@ -1754,14 +2633,195 @@ func defaultProviderEnvExpression(providerType string) string {
 }
 
 func defaultCapabilities(providerType string) []string {
+	capabilities := supportedCapabilities(providerType)
+	if len(capabilities) == 0 {
+		return nil
+	}
 	switch providerType {
+	case "anthropic":
+		return capabilities[:2]
+	case "gemini":
+		return capabilities
+	default:
+		return capabilities[:2]
+	}
+}
+
+func supportedCapabilities(providerType string) []string {
+	switch providerType {
+	case "openai", "openai-compatible":
+		return []string{"chat", "responses", "embeddings", "images", "audio_transcriptions", "audio_speech"}
 	case "anthropic":
 		return []string{"chat", "responses"}
 	case "gemini":
 		return []string{"chat", "responses", "embeddings"}
 	default:
-		return []string{"chat", "responses"}
+		return nil
 	}
+}
+
+func sanitizeSelectedOptions(options, selected []string) []string {
+	selectedSet := make(map[string]bool, len(selected))
+	for _, item := range selected {
+		selectedSet[item] = true
+	}
+	out := make([]string, 0, len(selectedSet))
+	for _, option := range options {
+		if selectedSet[option] {
+			out = append(out, option)
+		}
+	}
+	return out
+}
+
+func parseMultiChoiceValue(label string, options []string, value string) ([]string, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	allowed := make(map[string]bool, len(options))
+	for _, option := range options {
+		allowed[option] = true
+	}
+	parts := strings.Split(value, ",")
+	selected := make([]string, 0, len(parts))
+	seen := make(map[string]bool)
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if idx, err := strconv.Atoi(part); err == nil {
+			if idx < 1 || idx > len(options) {
+				return nil, fmt.Errorf("%s: option %d is out of range", label, idx)
+			}
+			part = options[idx-1]
+		}
+		if !allowed[part] {
+			return nil, fmt.Errorf("%s: invalid option %q", label, part)
+		}
+		if !seen[part] {
+			selected = append(selected, part)
+			seen[part] = true
+		}
+	}
+	return selected, nil
+}
+
+func aliasTargetSpecs(targets []aliasTargetInput) []string {
+	out := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if target.Provider == "" || target.Model == "" {
+			continue
+		}
+		out = append(out, target.Provider+"/"+target.Model)
+	}
+	return out
+}
+
+func providerModelNames(models []providerModelInput) []string {
+	names := make([]string, 0, len(models))
+	for _, model := range models {
+		names = append(names, model.Name)
+	}
+	return names
+}
+
+func findProviderModel(models []providerModelInput, name string) *providerModelInput {
+	for _, model := range models {
+		if model.Name == name {
+			copyModel := model
+			return &copyModel
+		}
+	}
+	return nil
+}
+
+func upsertProviderModel(models []providerModelInput, model providerModelInput, replaceName string) ([]providerModelInput, error) {
+	if model.Name == "" {
+		return models, errors.New("model name is required")
+	}
+	updated := append([]providerModelInput(nil), models...)
+	replaceIdx := -1
+	for i, item := range updated {
+		if item.Name == replaceName {
+			replaceIdx = i
+		}
+		if item.Name == model.Name && item.Name != replaceName {
+			return models, fmt.Errorf("model %q already exists", model.Name)
+		}
+	}
+	if replaceName == "" {
+		updated = append(updated, model)
+		return updated, nil
+	}
+	if replaceIdx == -1 {
+		return models, fmt.Errorf("model %q not found", replaceName)
+	}
+	updated[replaceIdx] = model
+	return updated, nil
+}
+
+func removeProviderModel(models []providerModelInput, name string) []providerModelInput {
+	updated := make([]providerModelInput, 0, len(models))
+	for _, model := range models {
+		if model.Name != name {
+			updated = append(updated, model)
+		}
+	}
+	return updated
+}
+
+func authClientNames(clients []authClientInput) []string {
+	names := make([]string, 0, len(clients))
+	for _, client := range clients {
+		names = append(names, client.Name)
+	}
+	return names
+}
+
+func findAuthClient(clients []authClientInput, name string) *authClientInput {
+	for _, client := range clients {
+		if client.Name == name {
+			copyClient := client
+			return &copyClient
+		}
+	}
+	return nil
+}
+
+func upsertAuthClient(clients []authClientInput, client authClientInput, replaceName string) ([]authClientInput, error) {
+	if client.Name == "" {
+		return clients, errors.New("client name is required")
+	}
+	updated := append([]authClientInput(nil), clients...)
+	replaceIdx := -1
+	for i, item := range updated {
+		if item.Name == replaceName {
+			replaceIdx = i
+		}
+		if item.Name == client.Name && item.Name != replaceName {
+			return clients, fmt.Errorf("client %q already exists", client.Name)
+		}
+	}
+	if replaceName == "" {
+		updated = append(updated, client)
+		return updated, nil
+	}
+	if replaceIdx == -1 {
+		return clients, fmt.Errorf("client %q not found", replaceName)
+	}
+	updated[replaceIdx] = client
+	return updated, nil
+}
+
+func removeAuthClient(clients []authClientInput, name string) []authClientInput {
+	updated := make([]authClientInput, 0, len(clients))
+	for _, client := range clients {
+		if client.Name != name {
+			updated = append(updated, client)
+		}
+	}
+	return updated
 }
 
 func existingListenerInput(blocks []topLevelBlock) *listenerInput {
@@ -2556,6 +3616,26 @@ func availableProviderModels(blocks []topLevelBlock) []string {
 		providerName := block.Labels[1]
 		for _, modelName := range modelNamesFromProviderBlock(block.Text) {
 			out = append(out, providerName+"/"+modelName)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func availablePublicModels(blocks []topLevelBlock) []string {
+	seen := make(map[string]bool)
+	out := make([]string, 0, len(blocks))
+	for _, item := range availableProviderModels(blocks) {
+		if !seen[item] {
+			out = append(out, item)
+			seen[item] = true
+		}
+	}
+	for _, aliasName := range aliasBlockNames(blocks) {
+		item := "alias/" + aliasName
+		if !seen[item] {
+			out = append(out, item)
+			seen[item] = true
 		}
 	}
 	sort.Strings(out)
