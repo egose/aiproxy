@@ -1,3 +1,9 @@
+## [0.5.0](https://github.com/egose/aiproxy/compare/v0.4.0...v0.5.0) (2026-07-31)
+
+### Features
+
+* expand configuration wizard capabilities and validation ([3e4962e](https://github.com/egose/aiproxy/commit/3e4962e3ccfa8acdf4846b84913fa5209b9e2d59))
+
 ## [0.4.0](https://github.com/egose/aiproxy/compare/v0.3.0...v0.4.0) (2026-07-29)
 
 ### Features
