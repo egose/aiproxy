@@ -94,7 +94,7 @@ func validateAuth(a Auth) error {
 
 func validateProviders(providers []Provider) error {
 	for _, p := range providers {
-		if !isLowercaseName(p.Name) {
+		if !IsLowercaseName(p.Name) {
 			return fmt.Errorf("provider %q: name must be lowercase, no spaces, no '/', and start with [a-z0-9]", p.Name)
 		}
 		switch p.Type {
@@ -112,7 +112,7 @@ func validateProviders(providers []Provider) error {
 			return fmt.Errorf("provider %q: at least one model is required", p.Name)
 		}
 		for _, m := range p.Models {
-			if !isLowercaseModelName(m.Name) {
+			if !IsLowercaseModelName(m.Name) {
 				return fmt.Errorf("provider %q: model %q name must be lowercase, no spaces, and each '/'-separated segment must start with [a-z0-9]", p.Name, m.Name)
 			}
 			if m.UpstreamName == "" {
@@ -138,7 +138,7 @@ func validateProviders(providers []Provider) error {
 
 func validateAliases(aliases []Alias, providers map[string]Provider) error {
 	for _, a := range aliases {
-		if !isLowercaseName(a.Name) {
+		if !IsLowercaseName(a.Name) {
 			return fmt.Errorf("alias %q: name must be lowercase, no spaces, no '/', and start with [a-z0-9]", a.Name)
 		}
 		switch a.Algorithm {

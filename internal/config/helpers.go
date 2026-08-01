@@ -114,14 +114,14 @@ func parseTimeouts(t *rawTimeouts) (Timeouts, error) {
 // nameRule is the shared rule for provider, alias, and model block labels.
 var nameRule = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
-func isLowercaseName(name string) bool {
+func IsLowercaseName(name string) bool {
 	if strings.Contains(name, "/") || strings.ContainsAny(name, " \t\r\n") {
 		return false
 	}
 	return nameRule.MatchString(name)
 }
 
-func isLowercaseModelName(name string) bool {
+func IsLowercaseModelName(name string) bool {
 	if strings.ContainsAny(name, " \t\r\n") {
 		return false
 	}
