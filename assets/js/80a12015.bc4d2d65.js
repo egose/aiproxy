@@ -204,9 +204,25 @@ function _createMdxContent(props) {
         children: ["upstream ", (0,jsx_runtime.jsx)(_components.code, {
           children: "5xx"
         }), " responses"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["upstream ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "4xx"
+        }), " responses whose status code is listed in ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "retry_status_codes"
+        })]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Alias requests do not fail over on upstream ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["By default ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "retry_status_codes"
+      }), " is ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "[\"500\", \"502\", \"503\", \"504\"]"
+      }), ", so only ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "5xx"
+      }), " responses trigger failover. Add codes like ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"429\""
+      }), " to also retry on rate-limited responses."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Alias requests do not fail over on other upstream ", (0,jsx_runtime.jsx)(_components.code, {
         children: "4xx"
       }), " responses. Those are returned to the client as-is."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {

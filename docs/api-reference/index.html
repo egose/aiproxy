@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">API Reference | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/api-reference"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="API Reference | aiproxy"><meta data-rh="true" name="description" content="aiproxy exposes an OpenAI-compatible HTTP API."><meta data-rh="true" property="og:description" content="aiproxy exposes an OpenAI-compatible HTTP API."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/api-reference"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/api-reference" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/api-reference" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"API Reference","item":"https://aiproxy.pages.dev/docs/api-reference"}]}</script><link rel="stylesheet" href="/assets/css/styles.ad7227f1.css">
-<script src="/assets/js/runtime~main.6f991d29.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.b50ae696.js" defer="defer"></script>
 <script src="/assets/js/main.ae08cc16.js" defer="defer"></script>
 </head>
 <body>
@@ -40,8 +40,9 @@
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="error-behavior">Error Behavior<a href="#error-behavior" class="hash-link" aria-label="Direct link to Error Behavior" title="Direct link to Error Behavior" translate="no">​</a></h2>
 <ul>
 <li class="">Direct requests never fail over to another provider</li>
-<li class="">Alias requests retry the next target on transport errors and upstream <code>5xx</code> only</li>
-<li class="">Upstream <code>4xx</code> responses are returned verbatim</li>
+<li class="">Alias requests retry the next target on transport errors and upstream <code>5xx</code></li>
+<li class="">Alias requests also retry on upstream <code>4xx</code> responses listed in <code>retry_status_codes</code> (default: <code>5xx</code> only)</li>
+<li class="">Other upstream <code>4xx</code> responses are returned verbatim</li>
 <li class="">Unsupported operations return client-visible proxy errors</li>
 </ul>
 <p>This behavior is deliberate: direct model requests are explicit, while alias requests are the only place where the proxy is allowed to choose another target.</p>

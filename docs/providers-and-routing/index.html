@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Providers and Routing | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/providers-and-routing"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Providers and Routing | aiproxy"><meta data-rh="true" name="description" content="aiproxy separates the client-facing model name from the concrete upstream target."><meta data-rh="true" property="og:description" content="aiproxy separates the client-facing model name from the concrete upstream target."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/providers-and-routing"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/providers-and-routing" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/providers-and-routing" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Providers and Routing","item":"https://aiproxy.pages.dev/docs/providers-and-routing"}]}</script><link rel="stylesheet" href="/assets/css/styles.ad7227f1.css">
-<script src="/assets/js/runtime~main.6f991d29.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.b50ae696.js" defer="defer"></script>
 <script src="/assets/js/main.ae08cc16.js" defer="defer"></script>
 </head>
 <body>
@@ -56,8 +56,10 @@
 <li class="">transport errors</li>
 <li class="">timeouts</li>
 <li class="">upstream <code>5xx</code> responses</li>
+<li class="">upstream <code>4xx</code> responses whose status code is listed in <code>retry_status_codes</code></li>
 </ul>
-<p>Alias requests do not fail over on upstream <code>4xx</code> responses. Those are returned to the client as-is.</p>
+<p>By default <code>retry_status_codes</code> is <code>[&quot;500&quot;, &quot;502&quot;, &quot;503&quot;, &quot;504&quot;]</code>, so only <code>5xx</code> responses trigger failover. Add codes like <code>&quot;429&quot;</code> to also retry on rate-limited responses.</p>
+<p>Alias requests do not fail over on other upstream <code>4xx</code> responses. Those are returned to the client as-is.</p>
 <p>This avoids masking client-side request problems as routing problems.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="provider-types">Provider Types<a href="#provider-types" class="hash-link" aria-label="Direct link to Provider Types" title="Direct link to Provider Types" translate="no">​</a></h2>
 <table><thead><tr><th>Provider type</th><th>Behavior</th><th>Notes</th></tr></thead><tbody><tr><td><code>openai</code></td><td>Pass-through OpenAI adapter</td><td>Sends OpenAI-style requests upstream</td></tr><tr><td><code>openai-compatible</code></td><td>Pass-through compatible adapter</td><td>Requires <code>base_url</code></td></tr><tr><td><code>anthropic</code></td><td>Translated provider-native adapter</td><td>Supports chat and responses</td></tr><tr><td><code>gemini</code></td><td>Translated provider-native adapter</td><td>Supports chat, responses, and embeddings</td></tr></tbody></table>

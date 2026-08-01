@@ -454,9 +454,17 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["Alias requests retry the next target on transport errors and upstream ", (0,jsx_runtime.jsx)(_components.code, {
           children: "5xx"
-        }), " only"]
+        })]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["Upstream ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ["Alias requests also retry on upstream ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "4xx"
+        }), " responses listed in ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "retry_status_codes"
+        }), " (default: ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "5xx"
+        }), " only)"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Other upstream ", (0,jsx_runtime.jsx)(_components.code, {
           children: "4xx"
         }), " responses are returned verbatim"]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
