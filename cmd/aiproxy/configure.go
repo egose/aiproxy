@@ -1546,8 +1546,8 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 					huh.NewOption("Anthropic", "anthropic"),
 					huh.NewOption("Gemini", "gemini"),
 				).Value(&providerType),
-				huh.NewInput().Title("Provider name").Value(&providerName).Validate(huh.ValidateNotEmpty()),
-				huh.NewInput().Title("Display name").Value(&displayName),
+				huh.NewInput().Title("Provider name").Description(providerNameDescription()).Value(&providerName).Validate(huh.ValidateNotEmpty()),
+				huh.NewInput().Title("Display name").Description(providerDisplayNameDescription()).Value(&displayName),
 			).Title("Provider"),
 		); err != nil {
 			return providerInput{}, secretsUpdate{}, err
@@ -2337,6 +2337,14 @@ func aliasTargetsDescription() string {
 
 func aliasAlgorithmDescription() string {
 	return "Round robin rotates evenly; least connections prefers the currently least-busy target."
+}
+
+func providerNameDescription() string {
+	return "Lowercase identifier used in public model strings like '" + "<provider>/<model>'. No spaces or '/'."
+}
+
+func providerDisplayNameDescription() string {
+	return "Optional. Human-friendly label shown in listings and metrics. Defaults to the provider name."
 }
 
 func upstreamModelDescription() string {
