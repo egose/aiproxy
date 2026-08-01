@@ -1,3 +1,9 @@
+## [0.7.0](https://github.com/egose/aiproxy/compare/v0.6.0...v0.7.0) (2026-08-01)
+
+### Features
+
+* add interactive validation for configure prompts ([4596504](https://github.com/egose/aiproxy/commit/459650470a877a73a3375e0e78b824de851d8195))
+
 ## [0.6.0](https://github.com/egose/aiproxy/compare/v0.5.0...v0.6.0) (2026-08-01)
 
 ### Features
