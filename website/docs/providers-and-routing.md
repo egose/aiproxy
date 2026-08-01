@@ -75,8 +75,11 @@ Alias requests retry the next target only when the selected target fails with:
 - transport errors
 - timeouts
 - upstream `5xx` responses
+- upstream `4xx` responses whose status code is listed in `retry_status_codes`
 
-Alias requests do not fail over on upstream `4xx` responses. Those are returned to the client as-is.
+By default `retry_status_codes` is `["500", "502", "503", "504"]`, so only `5xx` responses trigger failover. Add codes like `"429"` to also retry on rate-limited responses.
+
+Alias requests do not fail over on other upstream `4xx` responses. Those are returned to the client as-is.
 
 This avoids masking client-side request problems as routing problems.
 

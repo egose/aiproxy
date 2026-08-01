@@ -67,8 +67,9 @@ In `bearer_static` mode, individual clients may also be restricted with `allowed
 ## Error Behavior
 
 - Direct requests never fail over to another provider
-- Alias requests retry the next target on transport errors and upstream `5xx` only
-- Upstream `4xx` responses are returned verbatim
+- Alias requests retry the next target on transport errors and upstream `5xx`
+- Alias requests also retry on upstream `4xx` responses listed in `retry_status_codes` (default: `5xx` only)
+- Other upstream `4xx` responses are returned verbatim
 - Unsupported operations return client-visible proxy errors
 
 This behavior is deliberate: direct model requests are explicit, while alias requests are the only place where the proxy is allowed to choose another target.

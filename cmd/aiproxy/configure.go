@@ -90,9 +90,10 @@ type authClientInput struct {
 }
 
 type aliasInput struct {
-	Name      string
-	Algorithm string
-	Targets   []aliasTargetInput
+	Name             string
+	Algorithm        string
+	RetryStatusCodes []string
+	Targets          []aliasTargetInput
 }
 
 type aliasTargetInput struct {
@@ -2948,6 +2949,7 @@ func existingAliasInput(blocks []topLevelBlock, name string) *aliasInput {
 		input.Name = parsed.Labels[0]
 	}
 	input.Algorithm = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "algorithm"))
+	input.RetryStatusCodes = parseQuotedListExpr(attributeExpr(src, parsed.Body, "retry_status_codes"))
 	for _, targetBlock := range findNestedBlocks(parsed.Body, "target") {
 		input.Targets = append(input.Targets, aliasTargetInput{
 			Provider: parseLiteralOrExpression(attributeExpr(src, targetBlock.Body, "provider")),
@@ -3219,6 +3221,11 @@ func renderAliasBlock(input aliasInput) string {
 	b.WriteString("  algorithm = ")
 	b.WriteString(strconv.Quote(input.Algorithm))
 	b.WriteString("\n")
+	if len(input.RetryStatusCodes) > 0 {
+		b.WriteString("  retry_status_codes = ")
+		b.WriteString(renderQuotedList(input.RetryStatusCodes))
+		b.WriteString("\n")
+	}
 	for _, target := range input.Targets {
 		b.WriteString("\n  target {\n")
 		b.WriteString("    provider = ")

@@ -1715,3 +1715,132 @@ func TestCloseResultDefersOnCloseUntilStreamEnds(t *testing.T) {
 		t.Fatalf("OnClose did not fire after stream completion")
 	}
 }
+
+type statusByAPIKeyAdapter struct {
+	calls []string
+	rules map[string]int
+}
+
+func (a *statusByAPIKeyAdapter) Do(ctx context.Context, r provider.Request) (*provider.Result, error) {
+	a.calls = append(a.calls, r.APIKey)
+	status := http.StatusOK
+	if s, ok := a.rules[r.APIKey]; ok {
+		status = s
+	}
+	return &provider.Result{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       []byte(`{"id":"chatcmpl_ok"}`),
+	}, nil
+}
+
+func TestHandlerAliasRetriesOnConfiguredStatusCode(t *testing.T) {
+	rt := &config.Runtime{
+		Providers: []config.Provider{
+			{Type: config.ProviderTypeOpenAI, Name: "p1", APIKey: "key1", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
+			{Type: config.ProviderTypeOpenAI, Name: "p2", APIKey: "key2", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
+		},
+		ProviderByName: map[string]config.Provider{},
+		Aliases: []config.Alias{{
+			Name:             "a",
+			Algorithm:        config.AlgorithmRoundRobin,
+			RetryStatusCodes: []int{429},
+			Targets:          []config.AliasTarget{{Provider: "p1", Model: "m"}, {Provider: "p2", Model: "m"}},
+		}},
+		AliasByName: map[string]config.Alias{},
+	}
+	for _, p := range rt.Providers {
+		rt.ProviderByName[p.Name] = p
+	}
+	for _, a := range rt.Aliases {
+		rt.AliasByName[a.Name] = a
+	}
+	adapter := &statusByAPIKeyAdapter{rules: map[string]int{"key1": http.StatusTooManyRequests}}
+	h := newHandler(t, rt, adapter)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"alias/a","messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (retried to p2)", w.Code)
+	}
+	if len(adapter.calls) != 2 {
+		t.Fatalf("calls = %d, want 2", len(adapter.calls))
+	}
+	if adapter.calls[0] != "key1" || adapter.calls[1] != "key2" {
+		t.Fatalf("unexpected call sequence: %v", adapter.calls)
+	}
+}
+
+func TestHandlerAliasNoRetryOnUnconfiguredStatusCode(t *testing.T) {
+	rt := &config.Runtime{
+		Providers: []config.Provider{
+			{Type: config.ProviderTypeOpenAI, Name: "p1", APIKey: "key1", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
+			{Type: config.ProviderTypeOpenAI, Name: "p2", APIKey: "key2", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
+		},
+		ProviderByName: map[string]config.Provider{},
+		Aliases: []config.Alias{{
+			Name:             "a",
+			Algorithm:        config.AlgorithmRoundRobin,
+			RetryStatusCodes: []int{503},
+			Targets:          []config.AliasTarget{{Provider: "p1", Model: "m"}, {Provider: "p2", Model: "m"}},
+		}},
+		AliasByName: map[string]config.Alias{},
+	}
+	for _, p := range rt.Providers {
+		rt.ProviderByName[p.Name] = p
+	}
+	for _, a := range rt.Aliases {
+		rt.AliasByName[a.Name] = a
+	}
+	adapter := &statusByAPIKeyAdapter{rules: map[string]int{"key1": http.StatusTooManyRequests}}
+	h := newHandler(t, rt, adapter)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"alias/a","messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", w.Code)
+	}
+	if len(adapter.calls) != 1 {
+		t.Fatalf("calls = %d, want 1 (no retry)", len(adapter.calls))
+	}
+}
+
+func TestHandlerAliasRetriesOn5xxByDefault(t *testing.T) {
+	rt := &config.Runtime{
+		Providers: []config.Provider{
+			{Type: config.ProviderTypeOpenAI, Name: "p1", APIKey: "key1", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
+			{Type: config.ProviderTypeOpenAI, Name: "p2", APIKey: "key2", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
+		},
+		ProviderByName: map[string]config.Provider{},
+		Aliases: []config.Alias{{
+			Name:             "a",
+			Algorithm:        config.AlgorithmRoundRobin,
+			RetryStatusCodes: []int{500, 502, 503, 504},
+			Targets:          []config.AliasTarget{{Provider: "p1", Model: "m"}, {Provider: "p2", Model: "m"}},
+		}},
+		AliasByName: map[string]config.Alias{},
+	}
+	for _, p := range rt.Providers {
+		rt.ProviderByName[p.Name] = p
+	}
+	for _, a := range rt.Aliases {
+		rt.AliasByName[a.Name] = a
+	}
+	adapter := &statusByAPIKeyAdapter{rules: map[string]int{"key1": http.StatusBadGateway}}
+	h := newHandler(t, rt, adapter)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"alias/a","messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (retried to p2)", w.Code)
+	}
+	if len(adapter.calls) != 2 {
+		t.Fatalf("calls = %d, want 2", len(adapter.calls))
+	}
+}

@@ -607,3 +607,117 @@ provider "openai" "p" {
 		t.Errorf("api_key = %q", rt.Providers[0].APIKey)
 	}
 }
+
+func TestLoadAliasRetryStatusCodes(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "p" {
+  api_key = "k"
+  model "m" {}
+}
+alias "a" {
+  algorithm          = "round_robin"
+  retry_status_codes = ["429", "503"]
+  target {
+    provider = "p"
+    model    = "m"
+  }
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	a, ok := rt.AliasByName["a"]
+	if !ok {
+		t.Fatal("alias not found")
+	}
+	if len(a.RetryStatusCodes) != 2 {
+		t.Fatalf("retry_status_codes = %v, want 2 entries", a.RetryStatusCodes)
+	}
+	if a.RetryStatusCodes[0] != 429 || a.RetryStatusCodes[1] != 503 {
+		t.Errorf("retry_status_codes = %v, want [429 503]", a.RetryStatusCodes)
+	}
+}
+
+func TestLoadAliasRetryStatusCodesDefault(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "p" {
+  api_key = "k"
+  model "m" {}
+}
+alias "a" {
+  algorithm = "round_robin"
+  target {
+    provider = "p"
+    model    = "m"
+  }
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	a, ok := rt.AliasByName["a"]
+	if !ok {
+		t.Fatal("alias not found")
+	}
+	want := []int{500, 502, 503, 504}
+	if len(a.RetryStatusCodes) != len(want) {
+		t.Fatalf("retry_status_codes = %v, want %v", a.RetryStatusCodes, want)
+	}
+	for i, c := range a.RetryStatusCodes {
+		if c != want[i] {
+			t.Errorf("retry_status_codes[%d] = %d, want %d", i, c, want[i])
+		}
+	}
+}
+
+func TestLoadAliasRetryStatusCodesInvalid(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "p" {
+  api_key = "k"
+  model "m" {}
+}
+alias "a" {
+  algorithm          = "round_robin"
+  retry_status_codes = ["429", "abc"]
+  target {
+    provider = "p"
+    model    = "m"
+  }
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "invalid retry status code") {
+		t.Fatalf("expected invalid retry status code error, got %v", err)
+	}
+}
+
+func TestLoadAliasRetryStatusCodesOutOfRange(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "p" {
+  api_key = "k"
+  model "m" {}
+}
+alias "a" {
+  algorithm          = "round_robin"
+  retry_status_codes = ["429", "999"]
+  target {
+    provider = "p"
+    model    = "m"
+  }
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "must be between 100 and 599") {
+		t.Fatalf("expected out-of-range error, got %v", err)
+	}
+}

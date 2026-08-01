@@ -127,9 +127,10 @@ type Model struct {
 }
 
 type Alias struct {
-	Name      string
-	Algorithm Algorithm
-	Targets   []AliasTarget
+	Name             string
+	Algorithm        Algorithm
+	RetryStatusCodes []int
+	Targets          []AliasTarget
 }
 
 type AliasTarget struct {

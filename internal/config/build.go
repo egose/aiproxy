@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -63,7 +64,11 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		if _, dup := rt.AliasByName[al.Name]; dup {
 			return nil, fmt.Errorf("duplicate alias %q", al.Name)
 		}
-		alias := Alias{Name: al.Name, Algorithm: Algorithm(al.Algorithm)}
+		retryCodes, err := parseRetryStatusCodes(al.RetryStatusCodes)
+		if err != nil {
+			return nil, fmt.Errorf("alias %q: %w", al.Name, err)
+		}
+		alias := Alias{Name: al.Name, Algorithm: Algorithm(al.Algorithm), RetryStatusCodes: retryCodes}
 		for _, t := range al.Targets {
 			if disabledProviderNames[t.Provider] {
 				continue
@@ -189,4 +194,26 @@ func buildProvider(rawProvider rawProvider) (Provider, error) {
 		provider.ModelByName[m.Name] = model
 	}
 	return provider, nil
+}
+
+var defaultRetryStatusCodes = []int{500, 502, 503, 504}
+
+func parseRetryStatusCodes(raw []string) ([]int, error) {
+	if len(raw) == 0 {
+		codes := make([]int, len(defaultRetryStatusCodes))
+		copy(codes, defaultRetryStatusCodes)
+		return codes, nil
+	}
+	codes := make([]int, 0, len(raw))
+	for _, s := range raw {
+		code, err := strconv.Atoi(s)
+		if err != nil {
+			return nil, fmt.Errorf("invalid retry status code %q: expected integer", s)
+		}
+		if code < 100 || code > 599 {
+			return nil, fmt.Errorf("invalid retry status code %q: must be between 100 and 599", s)
+		}
+		codes = append(codes, code)
+	}
+	return codes, nil
 }
