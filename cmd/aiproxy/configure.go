@@ -90,9 +90,10 @@ type authClientInput struct {
 }
 
 type aliasInput struct {
-	Name      string
-	Algorithm string
-	Targets   []aliasTargetInput
+	Name             string
+	Algorithm        string
+	RetryStatusCodes []string
+	Targets          []aliasTargetInput
 }
 
 type aliasTargetInput struct {
@@ -1545,8 +1546,8 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 					huh.NewOption("Anthropic", "anthropic"),
 					huh.NewOption("Gemini", "gemini"),
 				).Value(&providerType),
-				huh.NewInput().Title("Provider name").Value(&providerName).Validate(huh.ValidateNotEmpty()),
-				huh.NewInput().Title("Display name").Value(&displayName),
+				huh.NewInput().Title("Provider name").Description(providerNameDescription()).Value(&providerName).Validate(huh.ValidateNotEmpty()),
+				huh.NewInput().Title("Display name").Description(providerDisplayNameDescription()).Value(&displayName),
 			).Title("Provider"),
 		); err != nil {
 			return providerInput{}, secretsUpdate{}, err
@@ -2338,6 +2339,14 @@ func aliasAlgorithmDescription() string {
 	return "Round robin rotates evenly; least connections prefers the currently least-busy target."
 }
 
+func providerNameDescription() string {
+	return "Lowercase identifier used in public model strings like '" + "<provider>/<model>'. No spaces or '/'."
+}
+
+func providerDisplayNameDescription() string {
+	return "Optional. Human-friendly label shown in listings and metrics. Defaults to the provider name."
+}
+
 func upstreamModelDescription() string {
 	return "Optional. Leave empty to use the same name for the upstream request."
 }
@@ -2948,6 +2957,7 @@ func existingAliasInput(blocks []topLevelBlock, name string) *aliasInput {
 		input.Name = parsed.Labels[0]
 	}
 	input.Algorithm = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "algorithm"))
+	input.RetryStatusCodes = parseQuotedListExpr(attributeExpr(src, parsed.Body, "retry_status_codes"))
 	for _, targetBlock := range findNestedBlocks(parsed.Body, "target") {
 		input.Targets = append(input.Targets, aliasTargetInput{
 			Provider: parseLiteralOrExpression(attributeExpr(src, targetBlock.Body, "provider")),
@@ -3219,6 +3229,11 @@ func renderAliasBlock(input aliasInput) string {
 	b.WriteString("  algorithm = ")
 	b.WriteString(strconv.Quote(input.Algorithm))
 	b.WriteString("\n")
+	if len(input.RetryStatusCodes) > 0 {
+		b.WriteString("  retry_status_codes = ")
+		b.WriteString(renderQuotedList(input.RetryStatusCodes))
+		b.WriteString("\n")
+	}
 	for _, target := range input.Targets {
 		b.WriteString("\n  target {\n")
 		b.WriteString("    provider = ")

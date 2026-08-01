@@ -149,6 +149,11 @@ func validateAliases(aliases []Alias, providers map[string]Provider) error {
 		if len(a.Targets) == 0 {
 			return fmt.Errorf("alias %q: at least one target is required", a.Name)
 		}
+		for _, code := range a.RetryStatusCodes {
+			if code < 100 || code > 599 {
+				return fmt.Errorf("alias %q: invalid retry status code %d: must be between 100 and 599", a.Name, code)
+			}
+		}
 		seen := make(map[string]bool)
 		for _, t := range a.Targets {
 			prov, ok := providers[t.Provider]

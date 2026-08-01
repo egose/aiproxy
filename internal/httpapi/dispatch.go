@@ -66,7 +66,7 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		}
 		logger.Info("upstream request finished", attrs...)
 	}
-	h.recordProviderHealth(deps, ctx, r.Provider.Name, result, err)
+	h.recordProviderHealth(deps, ctx, r.Provider.Name, result, err, nil)
 	h.instrumentUpstreamResponseSize(deps, op, r.Provider.Name, result, err)
 	return result, err
 }
@@ -74,6 +74,10 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provider.Operation, r modelresolver.ResolveResult, inbound *http.Request, body []byte, logger *slog.Logger) (*provider.Result, error) {
 	var lastErr error
 	tried := make(map[string]bool, len(r.Alias.Targets))
+	retryCodes := make(map[int]bool, len(r.Alias.RetryStatusCodes))
+	for _, code := range r.Alias.RetryStatusCodes {
+		retryCodes[code] = true
+	}
 	var unhealthyFallback *modelresolver.ResolveResult
 	for i := 0; i < len(r.Alias.Targets); i++ {
 		selected := r.Selector.Select()
@@ -166,7 +170,7 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			}
 			targetLogger.Info("upstream request finished", attrs...)
 		}
-		h.recordProviderHealth(deps, ctx, t.Provider, result, err)
+		h.recordProviderHealth(deps, ctx, t.Provider, result, err, retryCodes)
 		h.instrumentUpstreamResponseSize(deps, op, t.Provider, result, err)
 		if err != nil {
 			releaseTarget()
@@ -188,19 +192,23 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			}
 			releaseTarget()
 		}
-		if result.StatusCode >= 500 && i+1 < len(r.Alias.Targets) {
+		if retryCodes[result.StatusCode] && i+1 < len(r.Alias.Targets) {
 			closeResult(result)
 			lastErr = fmt.Errorf("upstream returned status %d", result.StatusCode)
 			if deps.Metrics != nil {
-				deps.Metrics.RecordAliasRetry(r.Alias.Name, t.Provider, t.Model, "upstream_5xx")
+				reason := "upstream_status"
+				if result.StatusCode >= 500 {
+					reason = "upstream_5xx"
+				}
+				deps.Metrics.RecordAliasRetry(r.Alias.Name, t.Provider, t.Model, reason)
 			}
-			targetLogger.Warn("alias target returned 5xx, retrying", "status", result.StatusCode)
+			targetLogger.Warn("alias target returned retryable status, retrying", "status", result.StatusCode)
 			continue
 		}
 		return result, nil
 	}
 	if unhealthyFallback != nil {
-		result, err := h.dispatchAliasFallback(deps, ctx, op, r.Alias.Name, *unhealthyFallback, inbound, body, logger)
+		result, err := h.dispatchAliasFallback(deps, ctx, op, r.Alias.Name, *unhealthyFallback, inbound, body, logger, retryCodes)
 		if result != nil || err != nil {
 			return result, err
 		}
@@ -211,7 +219,7 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 	return nil, lastErr
 }
 
-func (h *Handler) dispatchAliasFallback(deps Dependencies, ctx context.Context, op provider.Operation, aliasName string, resolved modelresolver.ResolveResult, inbound *http.Request, body []byte, logger *slog.Logger) (*provider.Result, error) {
+func (h *Handler) dispatchAliasFallback(deps Dependencies, ctx context.Context, op provider.Operation, aliasName string, resolved modelresolver.ResolveResult, inbound *http.Request, body []byte, logger *slog.Logger, retryCodes map[int]bool) (*provider.Result, error) {
 	logger = logger.With("target", resolved.Provider.Name+"/"+resolved.Model.Name)
 	if deps.AccessLog {
 		logger.Info("upstream request started",
@@ -271,7 +279,7 @@ func (h *Handler) dispatchAliasFallback(deps Dependencies, ctx context.Context, 
 		}
 		logger.Info("upstream request finished", attrs...)
 	}
-	h.recordProviderHealth(deps, ctx, resolved.Provider.Name, result, err)
+	h.recordProviderHealth(deps, ctx, resolved.Provider.Name, result, err, retryCodes)
 	h.instrumentUpstreamResponseSize(deps, op, resolved.Provider.Name, result, err)
 	if err != nil {
 		release()
@@ -287,7 +295,7 @@ func (h *Handler) dispatchAliasFallback(deps Dependencies, ctx context.Context, 
 	return result, nil
 }
 
-func (h *Handler) recordProviderHealth(deps Dependencies, ctx context.Context, providerName string, result *provider.Result, err error) {
+func (h *Handler) recordProviderHealth(deps Dependencies, ctx context.Context, providerName string, result *provider.Result, err error, retryCodes map[int]bool) {
 	if deps.Health == nil || providerName == "" {
 		return
 	}
@@ -303,7 +311,7 @@ func (h *Handler) recordProviderHealth(deps Dependencies, ctx context.Context, p
 		deps.Health.MarkFailureContext(ctx, providerName)
 		return
 	}
-	if result != nil && result.StatusCode >= 500 {
+	if result != nil && (result.StatusCode >= 500 || retryCodes[result.StatusCode]) {
 		deps.Health.MarkFailureContext(ctx, providerName)
 		return
 	}

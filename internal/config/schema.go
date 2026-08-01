@@ -75,9 +75,10 @@ type rawModel struct {
 }
 
 type rawAlias struct {
-	Name      string      `hcl:"name,label"`
-	Algorithm string      `hcl:"algorithm"`
-	Targets   []rawTarget `hcl:"target,block"`
+	Name             string      `hcl:"name,label"`
+	Algorithm        string      `hcl:"algorithm"`
+	RetryStatusCodes []string    `hcl:"retry_status_codes,optional"`
+	Targets          []rawTarget `hcl:"target,block"`
 }
 
 type rawTarget struct {
