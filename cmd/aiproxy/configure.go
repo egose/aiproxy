@@ -12,10 +12,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/egose/aiproxy/internal/config"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/spf13/cobra"
@@ -1275,9 +1277,9 @@ func promptListenerInput(prompts *promptSession, existing *listenerInput, option
 			write := defaults.Write
 			if err := prompts.runHuhForm(
 				huh.NewGroup(
-					huh.NewInput().Title("Read header timeout").Value(&readHeader),
-					huh.NewInput().Title("Idle timeout").Value(&idle),
-					huh.NewInput().Title("Write timeout").Value(&write),
+					huh.NewInput().Title("Read header timeout").Description(durationDescription("Read header timeout")).Value(&readHeader).Validate(validateDuration),
+					huh.NewInput().Title("Idle timeout").Description(durationDescription("Idle timeout")).Value(&idle).Validate(validateDuration),
+					huh.NewInput().Title("Write timeout").Description(durationDescription("Write timeout")).Value(&write).Validate(validateDuration),
 				).Title("Listener Timeouts"),
 			); err != nil {
 				return listenerInput{}, err
@@ -1306,15 +1308,15 @@ func promptListenerInput(prompts *promptSession, existing *listenerInput, option
 		if readHeaderDefault == "" {
 			readHeaderDefault = "30s"
 		}
-		input.ReadHeader, err = prompts.ask("read_header timeout", readHeaderDefault)
+		input.ReadHeader, err = prompts.askValidated("read_header timeout", readHeaderDefault, validateDuration)
 		if err != nil {
 			return listenerInput{}, err
 		}
-		input.Idle, err = prompts.ask("idle timeout", defaults.Idle)
+		input.Idle, err = prompts.askValidated("idle timeout", defaults.Idle, validateDuration)
 		if err != nil {
 			return listenerInput{}, err
 		}
-		input.Write, err = prompts.ask("write timeout", defaults.Write)
+		input.Write, err = prompts.askValidated("write timeout", defaults.Write, validateDuration)
 		if err != nil {
 			return listenerInput{}, err
 		}
@@ -1393,8 +1395,8 @@ func promptAuthInput(prompts *promptSession, blocks []topLevelBlock, existing *a
 			}
 			if err := prompts.runHuhForm(
 				huh.NewGroup(
-					huh.NewInput().Title("Requests per minute").Value(&rpm).Validate(huh.ValidateNotEmpty()),
-					huh.NewInput().Title("Burst").Value(&burst),
+					huh.NewInput().Title("Requests per minute").Description(rateLimitRPMDescription()).Value(&rpm).Validate(validateRequiredPositiveInt),
+					huh.NewInput().Title("Burst").Description(rateLimitBurstDescription()).Value(&burst).Validate(validatePositiveInt),
 				).Title("Rate Limit"),
 			); err != nil {
 				return authInput{}, err
@@ -1432,11 +1434,11 @@ func promptAuthInput(prompts *promptSession, blocks []topLevelBlock, existing *a
 				burstDefault = defaults.RateLimit.Burst
 			}
 		}
-		rpm, err := prompts.askRequired("Requests per minute", rpmDefault)
+		rpm, err := prompts.askValidated("Requests per minute", rpmDefault, validateRequiredPositiveInt)
 		if err != nil {
 			return authInput{}, err
 		}
-		burst, err := prompts.ask("Burst", burstDefault)
+		burst, err := prompts.askValidated("Burst", burstDefault, validatePositiveInt)
 		if err != nil {
 			return authInput{}, err
 		}
@@ -1458,7 +1460,7 @@ func promptAuthInput(prompts *promptSession, blocks []topLevelBlock, existing *a
 			if err != nil {
 				return authInput{}, err
 			}
-			token, err := prompts.askRequired("Client token or env(\"VAR\") expression", "")
+			token, err := prompts.askValidated(`Client token or env("VAR") expression`, "", validateEnvOrLiteral)
 			if err != nil {
 				return authInput{}, err
 			}
@@ -1467,6 +1469,12 @@ func promptAuthInput(prompts *promptSession, blocks []topLevelBlock, existing *a
 				return authInput{}, err
 			}
 			allowedModelsDefault := []string(nil)
+			if len(availableModels) > 0 && !prompts.interactiveTUI {
+				_, _ = fmt.Fprintln(prompts.out, "Available proxy-visible models (allowed_models may reference any of these, or other names enforced later at request time):")
+				for _, item := range availableModels {
+					_, _ = fmt.Fprintf(prompts.out, "- %s\n", item)
+				}
+			}
 			if len(availableModels) > 0 && prompts.interactiveTUI {
 				allowedModels, err := prompts.askMultiChoice("Allowed models", availableModels, allowedModelsDefault)
 				if err != nil {
@@ -1546,7 +1554,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 					huh.NewOption("Anthropic", "anthropic"),
 					huh.NewOption("Gemini", "gemini"),
 				).Value(&providerType),
-				huh.NewInput().Title("Provider name").Description(providerNameDescription()).Value(&providerName).Validate(huh.ValidateNotEmpty()),
+				huh.NewInput().Title("Provider name").Description(providerNameDescription()).Value(&providerName).Validate(validateProviderName),
 				huh.NewInput().Title("Display name").Description(providerDisplayNameDescription()).Value(&displayName),
 			).Title("Provider"),
 		); err != nil {
@@ -1614,7 +1622,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			}
 			if err := prompts.runHuhForm(
 				huh.NewGroup(
-					huh.NewInput().Title(`API key env("VAR") expression`).Description(apiKeyEnvExpressionDescription()).Value(&envExpr).Validate(huh.ValidateNotEmpty()),
+					huh.NewInput().Title(`API key env("VAR") expression`).Description(envExpressionShapeDescription()).Value(&envExpr).Validate(validateEnvOrLiteral),
 				).Title("Environment Variable"),
 			); err != nil {
 				return providerInput{}, secretsUpdate{}, err
@@ -1648,7 +1656,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
-	providerName, err := prompts.askRequired("Provider name", defaults.Name)
+	providerName, err := prompts.askValidated("Provider name", defaults.Name, validateProviderName)
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
@@ -1706,7 +1714,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if defaults.Credential.Mode == "env_expression" && defaults.Credential.APIKeyValue != "" {
 			defaultEnv = defaults.Credential.APIKeyValue
 		}
-		credential.APIKeyValue, err = prompts.askRequired("API key env expression", defaultEnv)
+		credential.APIKeyValue, err = prompts.askValidated("API key env expression", defaultEnv, validateEnvOrLiteral)
 		if err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
@@ -1746,7 +1754,7 @@ func promptProviderModels(prompts *promptSession, providerType string, existing 
 	var models []providerModelInput
 	defaultCaps := defaultCapabilities(providerType)
 	for {
-		name, err := prompts.askRequired("Model name", "")
+		name, err := prompts.askValidated("Model name", "", validateModelName)
 		if err != nil {
 			return nil, err
 		}
@@ -1844,7 +1852,7 @@ func promptProviderModelInteractive(prompts *promptSession, providerType string,
 	}
 	if err := prompts.runHuhForm(
 		huh.NewGroup(
-			huh.NewInput().Title("Model name").Value(&name).Validate(huh.ValidateNotEmpty()),
+			huh.NewInput().Title("Model name").Description(modelNameDescription()).Value(&name).Validate(validateModelName),
 			huh.NewInput().Title("Model display name").Value(&displayName),
 			huh.NewInput().Title("Upstream model name").Description(upstreamModelDescription()).Value(&upstreamName),
 		).Title("Model"),
@@ -1937,7 +1945,7 @@ func promptAuthClientInteractive(prompts *promptSession, availableModels []strin
 	if err := prompts.runHuhForm(
 		huh.NewGroup(
 			huh.NewInput().Title("Client name").Value(&name).Validate(huh.ValidateNotEmpty()),
-			huh.NewInput().Title(`Client token or env("VAR") expression`).Description(clientTokenDescription()).Value(&token).Validate(huh.ValidateNotEmpty()),
+			huh.NewInput().Title(`Client token or env("VAR") expression`).Description(envExpressionShapeDescription()).Value(&token).Validate(validateEnvOrLiteral),
 			huh.NewInput().Title("Client tenant").Value(&tenant),
 		).Title("Client"),
 	); err != nil {
@@ -1991,7 +1999,7 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 		algorithm := defaults.Algorithm
 		if err := prompts.runHuhForm(
 			huh.NewGroup(
-				huh.NewInput().Title("Alias name").Value(&name).Validate(huh.ValidateNotEmpty()),
+				huh.NewInput().Title("Alias name").Description(aliasNameDescription()).Value(&name).Validate(validateAliasName),
 				huh.NewSelect[string]().Title("Alias algorithm").Description(aliasAlgorithmDescription()).Options(
 					huh.NewOption("Round robin", "round_robin"),
 					huh.NewOption("Least connections", "least_connections"),
@@ -2039,16 +2047,16 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 		}
 		return input, nil
 	}
-	name, err := prompts.askRequired("Alias name", defaults.Name)
+	name, err := prompts.askValidated("Alias name", defaults.Name, validateAliasName)
 	if err != nil {
 		return aliasInput{}, err
 	}
-	algorithm, err := prompts.askChoice("Alias algorithm", []string{"round_robin", "least_connections"}, defaults.Algorithm)
+	algorithm, err := prompts.askChoiceWithDescription("Alias algorithm", aliasAlgorithmDescription(), []string{"round_robin", "least_connections"}, defaults.Algorithm)
 	if err != nil {
 		return aliasInput{}, err
 	}
 	input := aliasInput{Name: name, Algorithm: algorithm}
-	if len(available) > 0 && prompts.interactiveTUI {
+	if len(available) > 0 {
 		targets, err := prompts.askAliasTargets("Alias targets", available, defaults.Targets)
 		if err != nil {
 			return aliasInput{}, err
@@ -2113,7 +2121,7 @@ func promptProviderHealthInput(prompts *promptSession, existing *providerHealthI
 		if err := prompts.runHuhForm(
 			huh.NewGroup(
 				huh.NewInput().Title("Redis URL").Description(providerHealthRedisDescription()).Value(&redisURL),
-				huh.NewInput().Title("Cooldown").Description(providerHealthCooldownDescription()).Value(&cooldown),
+				huh.NewInput().Title("Cooldown").Description(providerHealthCooldownDescription()).Value(&cooldown).Validate(validateDuration),
 			).Title("Provider Health"),
 		); err != nil {
 			return providerHealthInput{}, err
@@ -2153,7 +2161,7 @@ func promptProviderHealthInput(prompts *promptSession, existing *providerHealthI
 	if cooldownDefault == "" {
 		cooldownDefault = "30s"
 	}
-	cooldown, err := prompts.ask("Cooldown", cooldownDefault)
+	cooldown, err := prompts.askValidated("Cooldown", cooldownDefault, validateDuration)
 	if err != nil {
 		return providerHealthInput{}, err
 	}
@@ -2187,7 +2195,7 @@ func promptLoggingInput(prompts *promptSession, existing *loggingInput, options 
 		}
 		return loggingInput{Level: level, AccessLog: accessLog}, nil
 	}
-	level, err := prompts.askChoice("Log level", []string{"debug", "info", "warn", "error"}, defaults.Level)
+	level, err := prompts.askChoiceWithDescription("Log level", loggingLevelDescription(), []string{"debug", "info", "warn", "error"}, defaults.Level)
 	if err != nil {
 		return loggingInput{}, err
 	}
@@ -2340,11 +2348,110 @@ func aliasAlgorithmDescription() string {
 }
 
 func providerNameDescription() string {
-	return "Lowercase identifier used in public model strings like '" + "<provider>/<model>'. No spaces or '/'."
+	return "Lowercase provider identifier. Starts with [a-z0-9]; remaining chars must be [a-z0-9._-]. No spaces or '/'."
 }
 
 func providerDisplayNameDescription() string {
 	return "Optional. Human-friendly label shown in listings and metrics. Defaults to the provider name."
+}
+
+func validateProviderName(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return errors.New("value is required")
+	}
+	if !config.IsLowercaseName(strings.TrimSpace(value)) {
+		return errors.New("name must start with [a-z0-9]; remaining chars must be [a-z0-9._-]; no spaces or '/'")
+	}
+	return nil
+}
+
+func aliasNameDescription() string {
+	return "Lowercase alias identifier. Starts with [a-z0-9]; remaining chars must be [a-z0-9._-]. No spaces or '/'."
+}
+
+func validateAliasName(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return errors.New("value is required")
+	}
+	if !config.IsLowercaseName(strings.TrimSpace(value)) {
+		return errors.New("name must start with [a-z0-9]; remaining chars must be [a-z0-9._-]; no spaces or '/'")
+	}
+	return nil
+}
+
+func modelNameDescription() string {
+	return "Model identifier as exposed by the proxy. Each '/'-separated segment starts with [a-z0-9]; remaining chars must be [a-z0-9._-]. No spaces."
+}
+
+func validateModelName(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return errors.New("value is required")
+	}
+	if !config.IsLowercaseModelName(strings.TrimSpace(value)) {
+		return errors.New("each '/'-separated segment must start with [a-z0-9]; remaining chars must be [a-z0-9._-]; no spaces")
+	}
+	return nil
+}
+
+func durationDescription(fieldLabel string) string {
+	return fieldLabel + " as a Go duration (e.g. 30s, 2m, 1h). Must not be negative. Leave blank for zero / unset."
+}
+
+func validateDuration(value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(trimmed)
+	if err != nil {
+		return errors.New("invalid duration (use forms like 30s, 2m, 1h)")
+	}
+	if d < 0 {
+		return errors.New("duration must not be negative")
+	}
+	return nil
+}
+
+func rateLimitRPMDescription() string {
+	return "Positive integer requests-per-minute limit applied per authenticated client."
+}
+
+func rateLimitBurstDescription() string {
+	return "Positive integer burst size. Leave blank to default to the requests-per-minute value."
+}
+
+func validatePositiveInt(value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(trimmed)
+	if err != nil || n <= 0 {
+		return errors.New("must be a positive integer")
+	}
+	return nil
+}
+
+func validateRequiredPositiveInt(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return errors.New("value is required")
+	}
+	return validatePositiveInt(value)
+}
+
+func envExpressionShapeDescription() string {
+	return `Use either a literal value or an env("VAR") expression, e.g. env("OPENAI_API_KEY"). The expression is inlined before HCL parsing.`
+}
+
+func validateEnvOrLiteral(value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return errors.New("value is required")
+	}
+	if strings.HasPrefix(trimmed, "env(") && !envExprPattern.MatchString(trimmed) {
+		return errors.New(`env expression must match env("VAR"); literal text is allowed otherwise`)
+	}
+	return nil
 }
 
 func upstreamModelDescription() string {
@@ -2405,9 +2512,20 @@ func (p *promptSession) ask(label, def string) (string, error) {
 }
 
 func (p *promptSession) askRequired(label, def string) (string, error) {
+	return p.askValidated(label, def, validateNonEmpty)
+}
+
+func validateNonEmpty(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return errors.New("value is required")
+	}
+	return nil
+}
+
+func (p *promptSession) askValidated(label, def string, validate func(string) error) (string, error) {
 	if p.interactiveTUI {
 		value := def
-		field := huh.NewInput().Title(label).Value(&value).Validate(huh.ValidateNotEmpty())
+		field := huh.NewInput().Title(label).Value(&value).Validate(validate)
 		if err := p.runHuhField(field); err != nil {
 			return "", err
 		}
@@ -2418,10 +2536,11 @@ func (p *promptSession) askRequired(label, def string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if strings.TrimSpace(value) != "" {
-			return value, nil
+		if err := validate(strings.TrimSpace(value)); err != nil {
+			_, _ = fmt.Fprintln(p.out, strings.ToUpper(err.Error()[:1])+err.Error()[1:]+".")
+			continue
 		}
-		_, _ = fmt.Fprintln(p.out, "Value is required.")
+		return value, nil
 	}
 }
 
@@ -2482,6 +2601,9 @@ func (p *promptSession) askChoiceWithDescription(label, description string, opti
 		}
 		return value, nil
 	}
+	if description != "" {
+		_, _ = fmt.Fprintln(p.out, description)
+	}
 	for i, option := range options {
 		_, _ = fmt.Fprintf(p.out, "%d. %s\n", i+1, option)
 	}
@@ -2533,6 +2655,9 @@ func (p *promptSession) askMultiChoiceWithDescription(label, description string,
 		}
 		return sanitizeSelectedOptions(options, selected), nil
 	}
+	if description != "" {
+		_, _ = fmt.Fprintln(p.out, description)
+	}
 	for i, option := range options {
 		marker := " "
 		if containsName(def, option) {
@@ -2540,11 +2665,18 @@ func (p *promptSession) askMultiChoiceWithDescription(label, description string,
 		}
 		_, _ = fmt.Fprintf(p.out, "%d. [%s] %s\n", i+1, marker, option)
 	}
-	value, err := p.ask(label+" (comma-separated names or numbers)", strings.Join(def, ","))
-	if err != nil {
-		return nil, err
+	for {
+		value, err := p.ask(label+" (comma-separated names or numbers)", strings.Join(def, ","))
+		if err != nil {
+			return nil, err
+		}
+		parsed, perr := parseMultiChoiceValue(label, options, value)
+		if perr != nil {
+			_, _ = fmt.Fprintln(p.out, perr.Error()+".")
+			continue
+		}
+		return parsed, nil
 	}
-	return parseMultiChoiceValue(label, options, value)
 }
 
 func (p *promptSession) askAliasTargets(label string, options []string, def []aliasTargetInput) ([]aliasTargetInput, error) {
@@ -2589,26 +2721,14 @@ func (p *promptSession) askAliasTargets(label string, options []string, def []al
 			return append([]aliasTargetInput(nil), def...), nil
 		}
 	}
-	var targets []aliasTargetInput
-	for {
-		providerName, err := p.askRequired("Target provider", "")
-		if err != nil {
-			return nil, err
-		}
-		modelName, err := p.askRequired("Target model", "")
-		if err != nil {
-			return nil, err
-		}
-		targets = append(targets, aliasTargetInput{Provider: providerName, Model: modelName})
-		more, err := p.askYesNo("Add another target", false)
-		if err != nil {
-			return nil, err
-		}
-		if !more {
-			break
-		}
+	selected, err := p.askMultiChoiceWithDescription(label, aliasTargetsDescription(), options, aliasTargetSpecs(def))
+	if err != nil {
+		return nil, err
 	}
-	return targets, nil
+	if len(selected) == 0 {
+		return nil, errors.New("select at least one target")
+	}
+	return buildAliasTargetsFromOptions(selected)
 }
 
 func (p *promptSession) askCSV(label, def string) ([]string, error) {

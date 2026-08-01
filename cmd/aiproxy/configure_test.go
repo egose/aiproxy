@@ -65,6 +65,47 @@ func TestConfigureProviderCreatesConfigAndSecrets(t *testing.T) {
 	}
 }
 
+func TestConfigureProviderRejectsInvalidProviderName(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	secretsPath := filepath.Join(dir, "keys.json")
+
+	input := strings.Join([]string{
+		configPath,
+		"",
+		"My Provider",    // invalid: uppercase + space -> re-prompt
+		"primary/backup", // invalid: contains '/' -> re-prompt
+		"primary",        // valid
+		"",
+		"",
+		secretsPath,
+		"",
+		"sk-test-primary",
+		"gpt-4o-mini",
+		"",
+		"",
+		"",
+		"n",
+	}, "\n") + "\n"
+
+	stdout, stderr, err := executeRootCommand(input, "configure", "provider")
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	if !strings.Contains(strings.ToLower(stdout), "must start with [a-z0-9]") {
+		t.Fatalf("stdout missing invalid-name feedback:\n%s", stdout)
+	}
+
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	if !strings.Contains(string(configData), `provider "openai" "primary" {`) {
+		t.Fatalf("config did not use the valid provider name:\n%s", string(configData))
+	}
+}
+
 func TestConfigureProviderUpdatesExistingBlock(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.hcl")
@@ -299,9 +340,7 @@ provider "openai" "primary" {
 		configPath,
 		"chat_default",
 		"",
-		"primary",
-		"gpt-4o-mini",
-		"n",
+		"1",
 	}, "\n") + "\n"
 
 	_, stderr, err := executeRootCommand(input, "configure", "alias")
@@ -517,6 +556,104 @@ func TestConfigureRootCommandPromptsForBlockSelection(t *testing.T) {
 	if !strings.Contains(stdout, `updated listener block`) {
 		t.Fatalf("stdout missing listener summary:\n%s", stdout)
 	}
+}
+
+func TestConfigureListenerRejectsInvalidDurationThenAcceptsValid(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	input := strings.Join([]string{
+		configPath,
+		"public",
+		":8080",
+		"y",
+		"30",     // invalid duration (no unit) -> re-prompt
+		"thirty", // invalid duration (non-parseable) -> re-prompt
+		"-5s",    // negative duration -> re-prompt
+		"30s",    // valid read_header timeout
+		"",       // idle timeout blank OK
+		"",       // write timeout blank OK
+	}, "\n") + "\n"
+
+	stdout, stderr, err := executeRootCommand(input, "configure", "listener")
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if !strings.Contains(strings.ToLower(stdout), "invalid duration") {
+		t.Fatalf("stdout missing invalid-duration feedback:\n%s", stdout)
+	}
+	if !strings.Contains(strings.ToLower(stdout), "must not be negative") {
+		t.Fatalf("stdout missing negative feedback:\n%s", stdout)
+	}
+
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	if !strings.Contains(configText, `read_header = "30s"`) {
+		t.Fatalf("config missing valid read_header timeout:\n%s", configText)
+	}
+	if strings.Contains(configText, "idle_timeout") {
+		t.Fatalf("config should omit idle_timeout when blank:\n%s", configText)
+	}
+}
+
+func TestConfigureAuthNonTUIPrintsModeDescription(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	// drive auth with mode 'none' and no rate limit, no clients (so flow ends cleanly)
+	input := strings.Join([]string{
+		configPath,
+		"main",
+		"1", // none
+		"n", // no rate limit
+	}, "\n") + "\n"
+
+	stdout, stderr, err := executeRootCommand(input, "configure", "auth")
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if !strings.Contains(stdout, authModeDescription()) {
+		t.Fatalf("stdout missing auth-mode description echo:\n%s", stdout)
+	}
+}
+
+func TestConfigureProviderEnvExpressionRejectsMalformedThenAccepts(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	secretsPath := filepath.Join(dir, "keys.json")
+
+	input := strings.Join([]string{
+		configPath,
+		"",                      // provider type default openai
+		"primary",               // provider name
+		"",                      // display name
+		"2",                     // credential storage: env_expression
+		`env(FOO)`,              // malformed env expression -> re-prompt
+		`env("OPENAI_API_KEY")`, // valid
+		"gpt-4o-mini",           // model name
+		"",                      // model display name
+		"",                      // upstream model name (defaults to model name)
+		"",                      // capabilities default selection
+		"n",                     // no more models
+	}, "\n") + "\n"
+
+	stdout, stderr, err := executeRootCommand(input, "configure", "provider")
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if !strings.Contains(strings.ToLower(stdout), "must match env") {
+		t.Fatalf("stdout missing env-shape feedback:\n%s", stdout)
+	}
+
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	if !strings.Contains(string(configData), `api_key = env("OPENAI_API_KEY")`) {
+		t.Fatalf("config missing env expression api_key:\n%s", string(configData))
+	}
+	_ = secretsPath // not used in env_expression mode
 }
 
 func executeRootCommand(input string, args ...string) (string, string, error) {
