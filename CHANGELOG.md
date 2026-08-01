@@ -1,3 +1,13 @@
+## [0.6.0](https://github.com/egose/aiproxy/compare/v0.5.0...v0.6.0) (2026-08-01)
+
+### Features
+
+* **website:** add configurable alias retry status codes ([7ed97ec](https://github.com/egose/aiproxy/commit/7ed97eca77e5341abd9146c3355e64b50332a59f))
+
+### Documentation
+
+* clarify provider identity and display name fields ([f11c4f5](https://github.com/egose/aiproxy/commit/f11c4f5015d0f0b4094107088210ea0122dc4bc4))
+
 ## [0.5.0](https://github.com/egose/aiproxy/compare/v0.4.0...v0.5.0) (2026-07-31)
 
 ### Features
