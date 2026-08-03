@@ -9,14 +9,19 @@ import (
 )
 
 type LoggerOptions struct {
-	Level slog.Leveler
+	Level  slog.Leveler
+	Buffer *LogBuffer
 }
 
 func NewLogger(w io.Writer, opts LoggerOptions) *slog.Logger {
 	if w == nil {
 		w = os.Stdout
 	}
-	return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: opts.Level}))
+	handler := slog.Handler(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: opts.Level}))
+	if opts.Buffer != nil {
+		handler = WrapWithBuffer(handler, opts.Buffer)
+	}
+	return slog.New(handler)
 }
 
 func ParseLevel(level string) slog.Level {

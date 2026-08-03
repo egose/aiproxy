@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/providerhealth"
 )
 
@@ -220,5 +222,32 @@ func TestSnapshotRefreshUpdatesProviders(t *testing.T) {
 	mod := mm.(*model)
 	if len(mod.snapshot.Providers) != 1 || mod.snapshot.Providers[0].Name != "claude" {
 		t.Fatalf("snapshot not refreshed: %+v", mod.snapshot.Providers)
+	}
+}
+
+func TestRenderLogsShowsBufferedEntries(t *testing.T) {
+	buf := observability.NewLogBuffer(10)
+	buf.Add(observability.LogEntry{Time: time.Now(), Level: slog.LevelInfo, Message: "server up", Attrs: "addr=:8080"})
+	buf.Add(observability.LogEntry{Time: time.Now(), Level: slog.LevelError, Message: "boom", Attrs: "err=dial"})
+	snap := newSnapshot()
+	snap.Logs = buf
+	m := &model{snapshot: snap, health: map[string]bool{}, now: time.Now(), dirty: true, focus: focusStats, logsHeight: 6}
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	got := mm.View().Content
+	if !strings.Contains(got, "server up") {
+		t.Errorf("missing info log in:\n%s", got)
+	}
+	if !strings.Contains(got, "boom") {
+		t.Errorf("missing error log in:\n%s", got)
+	}
+}
+
+func TestRenderLogsEmptyState(t *testing.T) {
+	snap := newSnapshot() // Logs is nil
+	m := &model{snapshot: snap, health: map[string]bool{}, now: time.Now(), dirty: true, logsHeight: 6}
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	got := mm.View().Content
+	if !strings.Contains(got, "no logs captured") {
+		t.Errorf("expected empty state in:\n%s", got)
 	}
 }

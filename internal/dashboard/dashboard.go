@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/providerhealth"
 )
 
@@ -30,21 +32,32 @@ type RuntimeSnapshot struct {
 	StartTime         time.Time
 	Usage             *accounting.Aggregator
 	Health            *providerhealth.Tracker
+	Logs              *observability.LogBuffer
 }
 
 type snapshotMsg struct {
 	snapshot *RuntimeSnapshot
 }
 
+type focusArea int
+
+const (
+	focusStats focusArea = iota
+	focusLogs
+)
+
 type model struct {
-	snapshot *RuntimeSnapshot
-	health   map[string]bool
-	width    int
-	height   int
-	now      time.Time
-	quit     bool
-	dirty    bool
-	rendered string
+	snapshot    *RuntimeSnapshot
+	health      map[string]bool
+	width       int
+	height      int
+	now         time.Time
+	quit        bool
+	dirty       bool
+	rendered    string
+	focus       focusArea
+	logsHeight  int
+	statsHeight int
 }
 
 type tickMsg time.Time
@@ -55,10 +68,13 @@ func tickCmd() tea.Cmd {
 
 func InitialModel(s *RuntimeSnapshot) tea.Model {
 	return &model{
-		snapshot: s,
-		health:   map[string]bool{},
-		now:      time.Now(),
-		dirty:    true,
+		snapshot:    s,
+		health:      map[string]bool{},
+		now:         time.Now(),
+		dirty:       true,
+		focus:       focusStats,
+		statsHeight: 14,
+		logsHeight:  10,
 	}
 }
 
@@ -71,12 +87,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.relayout()
 		m.dirty = true
 		return m, nil
 	case tea.KeyMsg:
 		if shouldQuit(msg) {
 			m.quit = true
 			return m, tea.Quit
+		}
+		handled := m.handleKey(msg)
+		if handled {
+			m.dirty = true
 		}
 		return m, nil
 	case snapshotMsg:
@@ -107,6 +128,78 @@ func shouldQuit(msg tea.KeyMsg) bool {
 	return false
 }
 
+func (m *model) handleKey(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "tab":
+		if m.focus == focusStats {
+			m.focus = focusLogs
+		} else {
+			m.focus = focusStats
+		}
+		return true
+	case "j", "down":
+		if m.focus == focusLogs {
+			return m.resize(2)
+		}
+		return false
+	case "k", "up":
+		if m.focus == focusLogs {
+			return m.resize(-2)
+		}
+		return false
+	}
+	return false
+}
+
+func (m *model) resize(delta int) bool {
+	newLogs := m.logsHeight + delta
+	const minPanes = 4
+	maxLogs := m.height - 8 - minPanes
+	if newLogs < minPanes {
+		newLogs = minPanes
+	}
+	if newLogs > maxLogs {
+		newLogs = maxLogs
+	}
+	if newLogs == m.logsHeight {
+		return false
+	}
+	m.logsHeight = newLogs
+	m.statsHeight = m.height - 8 - newLogs
+	return true
+}
+
+func (m *model) relayout() {
+	if m.height <= 8 {
+		m.logsHeight = 0
+		m.statsHeight = 0
+		return
+	}
+	available := m.height - 8
+	if available < 8 {
+		m.logsHeight = 0
+		m.statsHeight = available
+		return
+	}
+	if m.logsHeight <= 0 {
+		m.logsHeight = available / 3
+		m.statsHeight = available - m.logsHeight
+		return
+	}
+	if m.statsHeight+m.logsHeight != available {
+		diff := available - (m.statsHeight + m.logsHeight)
+		if diff > 0 {
+			m.statsHeight += diff
+		} else {
+			m.logsHeight += diff
+			if m.logsHeight < 4 {
+				m.statsHeight -= (4 - m.logsHeight)
+				m.logsHeight = 4
+			}
+		}
+	}
+}
+
 func (m *model) View() tea.View {
 	if !m.dirty && m.rendered != "" {
 		return tea.NewView(m.rendered)
@@ -135,15 +228,24 @@ func (m *model) render() string {
 	if usageWidth < 40 {
 		usageWidth = 40
 	}
-	midHeight := m.height - strings.Count(header, "\n") - 1 - 4
-	if midHeight < 6 {
-		midHeight = 6
+	statsHeight := m.statsHeight
+	if statsHeight < 4 {
+		statsHeight = 4
 	}
-	side := renderProviders(m, sideWidth, midHeight)
-	usage := renderUsage(m, usageWidth, midHeight)
+	side := renderProviders(m, sideWidth, statsHeight)
+	usage := renderUsage(m, usageWidth, statsHeight)
 	mid := lipgloss.JoinHorizontal(lipgloss.Top, side, usage)
-	recent := renderRecent(m, m.width, 4)
-	return lipgloss.JoinVertical(lipgloss.Left, header, mid, recent)
+	logs := renderLogs(m, m.width, m.logsHeight)
+	return lipgloss.JoinVertical(lipgloss.Left, header, mid, logs, renderFooter(m))
+}
+
+func renderFooter(m *model) string {
+	focusName := "STATS"
+	if m.focus == focusLogs {
+		focusName = "LOGS"
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Render(
+		fmt.Sprintf("focus: %s  [tab] switch  [j/k] resize  [q/Esc/Ctrl+C] quit", focusName))
 }
 
 func renderHeader(m *model) string {
@@ -156,8 +258,7 @@ func renderHeader(m *model) string {
 		active, disabled, len(snap.Aliases), snap.AuthMode, uptime)
 	leftStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
 	rightStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#94A3B8"))
-	return leftStyle.Render(left) + "  " + rightStyle.Render(right) + "\n" +
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Render("press q / Esc / Ctrl+C to exit; logs continue on stderr")
+	return leftStyle.Render(left) + "  " + rightStyle.Render(right)
 }
 
 func renderProviders(m *model, width, height int) string {
@@ -315,36 +416,60 @@ func tokensCell(s accounting.Summary) string {
 	return fmt.Sprintf("%11d", s.TotalTokens)
 }
 
-func renderRecent(m *model, width, height int) string {
+func renderLogs(m *model, width, height int) string {
 	snap := m.snapshot
-	border := lipgloss.NewStyle().
+	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#334155")).
 		Width(width - 2).
 		Height(height - 2)
-	header := headerRow([]col{{"TIME", 8}, {"MODEL", 22}, {"OP", 14}, {"STATUS", 6}, {"CLIENT", 10}, {"DURATION", 10}, {"TOKENS", 8}})
-	rows := []string{header}
-	recent := snap.Usage.Recent(recentLimit)
-	for i := len(recent) - 1; i >= 0 && len(rows)-1 < height-4; i-- {
-		e := recent[i]
-		tokens := "-"
-		if e.TotalTokens > 0 {
-			tokens = fmt.Sprintf("%d", e.TotalTokens)
+	if m.focus == focusLogs {
+		borderStyle = borderStyle.BorderForeground(lipgloss.Color("#38BDF8"))
+	}
+	title := headerRow([]col{{"LOGS", 8}, {"LEVEL", 6}, {"MESSAGE", width - 8 - 6 - 4 - 12 - 8}, {"ATTRS", 12}})
+	rows := []string{title}
+	if snap.Logs != nil && height > 3 {
+		n := height - 3
+		entries := snap.Logs.Since(n)
+		for _, e := range entries {
+			rows = append(rows, renderLogEntry(width, e))
 		}
-		rows = append(rows, dataRow([]string{
-			e.Timestamp.Format("15:04:05"),
-			truncate(orDash(e.Model), 22),
-			truncate(orDash(e.Operation), 14),
-			fmt.Sprintf("%d", e.StatusCode),
-			truncate(orDash(e.Client), 10),
-			e.Duration.Round(time.Millisecond).String(),
-			tokens,
-		}, []int{8, 22, 14, 6, 10, 10, 8}))
 	}
-	if len(recent) == 0 {
-		rows = append(rows, "no requests yet")
+	if len(rows) == 1 {
+		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("no logs captured"))
 	}
-	return border.Render(strings.Join(rows, "\n"))
+	return borderStyle.Render(strings.Join(rows, "\n"))
+}
+
+func renderLogEntry(width int, e observability.LogEntry) string {
+	levelStyle := levelStyleFor(e.Level)
+	msgWidth := width - 8 - 6 - 4 - 12 - 8
+	if msgWidth < 12 {
+		msgWidth = 12
+	}
+	attrs := e.Attrs
+	if len(attrs) > 12 {
+		attrs = truncate(attrs, 12)
+	}
+	return dataRow([]string{
+		e.Time.Format("15:04:05"),
+		levelStyle.Render(padRight(e.Level.String(), 6)),
+		truncate(e.Message, msgWidth),
+		truncate(orDash(attrs), 12),
+	}, []int{8, 6, msgWidth, 12})
+}
+
+func levelStyleFor(level slog.Level) lipgloss.Style {
+	switch {
+	case level >= slog.LevelError:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Bold(true)
+	case level >= slog.LevelWarn:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FBBF24"))
+	case level >= slog.LevelDebug:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#94A3B8"))
+	default:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#22D3EE"))
+	}
 }
 
 type col struct {
