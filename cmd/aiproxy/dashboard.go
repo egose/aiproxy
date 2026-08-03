@@ -87,7 +87,7 @@ func runDashboard(parentCtx context.Context, cfgPath string, stdout, stderr io.W
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			updated, err := fetchSnapshot(ctx, httpClient, baseURL, rt.Dashboard.Token)
+			updated, err := fetchSnapshot(ctx, httpClient, baseURL, token)
 			if err != nil {
 				if errors.Is(err, errDashboardUnconfigured) || isConnectionRefused(err) {
 					fmt.Fprintln(stderr, "server unreachable; dashboard detached")

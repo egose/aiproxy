@@ -166,10 +166,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					logAttrs = append(logAttrs, "tenant", principal.Tenant)
 				}
 			}
+			logPath := r.URL.Path
+			isDashboard := strings.HasPrefix(logPath, "/_internal/dashboard/")
 			if responseStreaming {
-				logger.Info("response stream finished", logAttrs...)
+				if isDashboard {
+					logger.Debug("response stream finished", logAttrs...)
+				} else {
+					logger.Info("response stream finished", logAttrs...)
+				}
 			} else {
-				logger.Info("response sent", logAttrs...)
+				if isDashboard {
+					logger.Debug("response sent", logAttrs...)
+				} else {
+					logger.Info("response sent", logAttrs...)
+				}
 			}
 		}
 		if deps.Metrics != nil {
