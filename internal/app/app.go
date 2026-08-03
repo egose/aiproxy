@@ -49,6 +49,7 @@ type App struct {
 	client    *http.Client
 	health    *providerhealth.Tracker
 	usage     *accounting.Aggregator
+	logs      *observability.LogBuffer
 	buildOpt  BuildOptions
 	startTime time.Time
 	dash      dashboard.RefreshHook
@@ -59,11 +60,19 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
+	dashboardEnabled := shouldEnableDashboard(opts)
 	logOutput := opts.LogOutput
-	if shouldEnableDashboard(opts) && logOutput == nil {
+	if logOutput == nil && !dashboardEnabled {
 		logOutput = os.Stderr
 	}
-	logger := observability.NewLogger(logOutput, observability.LoggerOptions{Level: observability.ParseLevel(string(rt.Logging.Level))})
+	var logs *observability.LogBuffer
+	if dashboardEnabled {
+		logs = observability.NewLogBuffer(500)
+	}
+	logger := observability.NewLogger(logOutput, observability.LoggerOptions{
+		Level:  observability.ParseLevel(string(rt.Logging.Level)),
+		Buffer: logs,
+	})
 	slog.SetDefault(logger)
 	observability.LogStartup(logger, rt)
 
@@ -84,7 +93,7 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	}
 	applyServerConfig(server, rt.Listener)
 
-	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, client: httpClient, health: health, usage: usage, buildOpt: opts, startTime: time.Now()}, nil
+	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, client: httpClient, health: health, usage: usage, logs: logs, buildOpt: opts, startTime: time.Now()}, nil
 }
 
 func shouldEnableDashboard(opts BuildOptions) bool {
@@ -188,6 +197,7 @@ func (a *App) snapshot() *dashboard.RuntimeSnapshot {
 			Version:   a.buildOpt.Version,
 			Usage:     a.usage,
 			Health:    a.health,
+			Logs:      a.logs,
 			StartTime: a.startTime,
 		}
 	}
@@ -201,6 +211,7 @@ func (a *App) snapshot() *dashboard.RuntimeSnapshot {
 		StartTime:         a.startTime,
 		Usage:             a.usage,
 		Health:            a.health,
+		Logs:              a.logs,
 	}
 }
 
