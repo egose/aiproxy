@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	configPath string
-	version    = "dev"
+	configPath  string
+	noDashboard bool
+	version     = "dev"
 )
 
 func main() {
@@ -47,8 +48,9 @@ func newServeCommand() *cobra.Command {
 		Short: "Run the AI proxy server",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a, err := app.Build(context.Background(), app.BuildOptions{
-				ConfigPath: configPath,
-				Version:    version,
+				ConfigPath:  configPath,
+				Version:     version,
+				NoDashboard: noDashboard,
 			})
 			if err != nil {
 				return err
@@ -61,6 +63,7 @@ func newServeCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&configPath, "config", "c", defaultConfigPath(), "path to config file")
+	cmd.Flags().BoolVar(&noDashboard, "no-dashboard", false, "disable the interactive terminal dashboard even when stdout is a TTY")
 	return cmd
 }
 

@@ -150,7 +150,7 @@ func (a *adapter) doGeminiChat(ctx context.Context, r Request) (*Result, error) 
 			if err != nil {
 				return nil, fmt.Errorf("translate response: %w", err)
 			}
-			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody}, nil
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody, Usage: usageFromBody(body)}, nil
 		},
 	})
 }
@@ -188,7 +188,7 @@ func (a *adapter) doGeminiEmbeddings(ctx context.Context, r Request) (*Result, e
 			if err != nil {
 				return nil, fmt.Errorf("translate response: %w", err)
 			}
-			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody}, nil
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody, Usage: usageFromBody(body)}, nil
 		},
 	})
 }
@@ -238,7 +238,7 @@ func (a *adapter) doGeminiResponses(ctx context.Context, r Request) (*Result, er
 			if err != nil {
 				return nil, fmt.Errorf("translate response: %w", err)
 			}
-			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody}, nil
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody, Usage: usageFromBody(body)}, nil
 		},
 	})
 }

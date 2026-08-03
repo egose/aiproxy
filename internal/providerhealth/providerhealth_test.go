@@ -125,3 +125,31 @@ func TestTrackerUsesContextAwareHealthMethods(t *testing.T) {
 		t.Fatal("backend was not called")
 	}
 }
+
+func TestTrackerSnapshotReportsKnownProviders(t *testing.T) {
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tracker := New(nil, config.ProviderHealth{})
+	backend := tracker.backend.(*memoryBackend)
+	backend.now = func() time.Time { return clock }
+	tracker.SetProviders(map[string]config.Provider{
+		"openai": {Name: "openai"},
+		"backup": {Name: "backup"},
+		"gemini": {Name: "gemini"},
+	})
+	tracker.MarkFailure("backup")
+	if snapshot := tracker.Snapshot(); len(snapshot) != 3 ||
+		!snapshot["openai"] || snapshot["backup"] || !snapshot["gemini"] {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+	clock = clock.Add(31 * time.Second)
+	if snapshot := tracker.Snapshot(); !snapshot["backup"] {
+		t.Fatalf("snapshot after cooldown = %+v", snapshot)
+	}
+}
+
+func TestTrackerSnapshotNilSafe(t *testing.T) {
+	var tracker *Tracker
+	if snap := tracker.Snapshot(); snap != nil {
+		t.Fatalf("nil tracker snapshot = %+v", snap)
+	}
+}

@@ -113,6 +113,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var op provider.Operation
 	opKnown := false
 	responseStreaming := false
+	var result *provider.Result
+	defer func() {
+		if opKnown {
+			usage := provider.Usage{}
+			if result != nil {
+				usage = result.Usage
+			}
+			deps.Accounting.Record(accounting.Event{
+				Timestamp:        time.Now(),
+				Tenant:           principalTenant(principal),
+				Client:           principalName(principal),
+				Model:            accountingModel,
+				Operation:        op.String(),
+				StatusCode:       rw.statusCode,
+				PromptTokens:     usage.PromptTokens,
+				CompletionTokens: usage.CompletionTokens,
+				TotalTokens:      usage.TotalTokens,
+				Duration:         time.Since(start),
+			})
+		}
+	}()
 	defer func() {
 		if deps.AccessLog {
 			logAttrs := []any{
@@ -144,16 +165,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			path := metricsPathLabel(r)
 			deps.Metrics.RecordHTTP(r.Method, path, rw.statusCode, time.Since(start).Seconds())
 			deps.Metrics.RecordHTTPSize(r.Method, path, rw.statusCode, requestBytes, rw.bytesWritten)
-		}
-		if opKnown {
-			deps.Accounting.Record(accounting.Event{
-				Timestamp:  time.Now(),
-				Tenant:     principalTenant(principal),
-				Client:     principalName(principal),
-				Model:      accountingModel,
-				Operation:  op.String(),
-				StatusCode: rw.statusCode,
-			})
 		}
 	}()
 
@@ -229,7 +240,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var result *provider.Result
 	if resolved.Kind == modelresolver.KindDirect {
 		result, err = h.dispatchDirect(deps, r.Context(), op, resolved, r, body, logger)
 	} else {

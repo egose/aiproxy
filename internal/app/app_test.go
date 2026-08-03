@@ -13,6 +13,7 @@ import (
 
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/dashboard"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/providerhealth"
 )
@@ -246,6 +247,57 @@ provider "openai" "openai" {
 	}
 }
 
+type recordingDash struct {
+	snapshots []*dashboard.RuntimeSnapshot
+}
+
+func (r *recordingDash) Refresh(snap *dashboard.RuntimeSnapshot) {
+	r.snapshots = append(r.snapshots, snap)
+}
+
+func TestReloadRefreshesDashboard(t *testing.T) {
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test"})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	rec := &recordingDash{}
+	a.dash = rec
+
+	rewriteConfigFile(t, configPath, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+provider "anthropic" "anthropic" {
+  api_key = "sk-test"
+  model "claude-3-5-sonnet" {}
+}
+`)
+	if err := a.Reload(); err != nil {
+		t.Fatalf("reload app: %v", err)
+	}
+	if len(rec.snapshots) != 1 {
+		t.Fatalf("Refresh not called: %d snapshots", len(rec.snapshots))
+	}
+	snap := rec.snapshots[0]
+	if len(snap.Providers) != 2 {
+		t.Fatalf("snapshot providers = %+v", snap.Providers)
+	}
+	if snap.Providers[1].Name != "anthropic" {
+		t.Fatalf("expected anthropic as second provider, got %+v", snap.Providers[1])
+	}
+}
+
 func TestBuildWiresUsageAggregator(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -392,5 +444,23 @@ func TestReloadHealthTrackerReusesExistingTrackerWhenConfigMatches(t *testing.T)
 	changed := &config.Runtime{ProviderHealth: config.ProviderHealth{Cooldown: 30 * time.Second}}
 	if got := reloadHealthTracker(tracker, observability.NewMetrics(), current, changed); got == tracker {
 		t.Fatal("expected new tracker when config changes")
+	}
+}
+
+func TestShouldEnableDashboardRespectsFlags(t *testing.T) {
+	var buf bytes.Buffer
+	if shouldEnableDashboard(BuildOptions{LogOutput: &buf}) {
+		t.Fatalf("custom LogOutput should disable the dashboard")
+	}
+	if shouldEnableDashboard(BuildOptions{NoDashboard: true}) {
+		t.Fatalf("NoDashboard should disable the dashboard")
+	}
+	t.Setenv("AIPROXY_DASHBOARD", "off")
+	if shouldEnableDashboard(BuildOptions{}) {
+		t.Fatalf("AIPROXY_DASHBOARD=off should disable the dashboard")
+	}
+	t.Setenv("AIPROXY_DASHBOARD", "0")
+	if shouldEnableDashboard(BuildOptions{}) {
+		t.Fatalf("AIPROXY_DASHBOARD=0 should disable the dashboard")
 	}
 }

@@ -39,6 +39,17 @@ type Result struct {
 	StreamBody io.ReadCloser
 	Streaming  bool
 	OnClose    func()
+	Usage      Usage
+}
+
+type Usage struct {
+	PromptTokens     int64
+	CompletionTokens int64
+	TotalTokens      int64
+}
+
+func (u Usage) Has() bool {
+	return u.PromptTokens > 0 || u.CompletionTokens > 0 || u.TotalTokens > 0
 }
 
 type Adapter interface {
