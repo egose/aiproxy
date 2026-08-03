@@ -50,12 +50,12 @@ func validateProviderHealth(h ProviderHealth) error {
 }
 
 func validateDashboard(d Dashboard) error {
-	if d == (Dashboard{}) {
+	if !d.Enabled {
 		return nil
 	}
-	if d.Token == "" {
-		return fmt.Errorf("dashboard: token is required when dashboard block is declared")
-	}
+	// token is optional: an empty token means "auto-generate and persist a
+	// random secret at Build time". The dashboard command reads the persisted
+	// token file when the config did not declare one.
 	return nil
 }
 

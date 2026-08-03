@@ -28,7 +28,7 @@ func newDashboardDeps(rt *config.Runtime, startTime time.Time, usage *accounting
 		Metrics:            observability.NewMetrics(),
 		Health:             health,
 		Usage:              usage,
-		Dashboard:          config.Dashboard{Token: dashboardTestToken},
+		Dashboard:          config.Dashboard{Token: dashboardTestToken, Enabled: true},
 		Logs:               logs,
 		DashboardVersion:   "test",
 		DashboardAddress:   rt.Listener.Address,

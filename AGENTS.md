@@ -27,11 +27,19 @@ The CLI also includes:
   of a backgrounded daemon. They target the PID stored in `aiproxy.pid`; if no
   live PID is present, all three print `no server running` and exit non-zero.
 - `aiproxy dashboard` to attach the interactive TUI to a **running**
-  `aiproxy serve`. It requires a `dashboard { token = "..." }` block in the
-  config; the dashboard command calls `/_internal/dashboard/snapshot` on the
-  server's listener (bearer-token gated) and prints `no server running` if the
-  server is unreachable, or `dashboard not configured` if the block is
-  absent. Self-hosted reload is still `SIGHUP` for the server side.
+  `aiproxy serve`. It requires a `dashboard { ... }` block in the config; the
+  dashboard command calls `/_internal/dashboard/snapshot` on the server's
+  listener (bearer-token gated) and prints `no server running` if the
+  server is unreachable, `dashboard not configured` if the block is
+  absent, or `unauthorized: dashboard token mismatch` if the token in the
+  config does not match the one the server is using.
+  The block's `token` attribute is **optional**: when omitted, `serve` mints a
+  random secret at startup and persists it to
+  `$XDG_CONFIG_HOME/aiproxy/dashboard.token`, and the `dashboard` command
+  reads that file to authenticate. When `token` is declared explicitly, the
+  file is not written and that value is used as-is. The minted token survives
+  `SIGHUP` reloads unchanged. Self-hosted reload is still `SIGHUP` for the
+  server side.
 - `aiproxy paths` to print resolved config and secrets paths
 - `aiproxy examples` for boxed command/config examples
 - `aiproxy configure` for interactive config editing

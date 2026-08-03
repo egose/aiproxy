@@ -2,6 +2,9 @@ package dashrpc
 
 import (
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,5 +69,100 @@ func TestBuildHandlesNilLiveState(t *testing.T) {
 	}
 	if snap.LastSeq != 0 {
 		t.Fatalf("LastSeq = %d, want 0", snap.LastSeq)
+	}
+}
+
+func TestTokenFilePathHonorsXDG(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	want := filepath.Join(xdg, "aiproxy", "dashboard.token")
+	if got := TokenFilePath(); got != want {
+		t.Fatalf("TokenFilePath = %q, want %q", got, want)
+	}
+}
+
+func TestTokenFilePathFallsBackToHome(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	want := filepath.Join(home, ".config", "aiproxy", "dashboard.token")
+	if got := TokenFilePath(); got != want {
+		t.Fatalf("TokenFilePath = %q, want %q", got, want)
+	}
+}
+
+func TestMintTokenProducesHexOfAtLeast32Chars(t *testing.T) {
+	t1, err := MintToken()
+	if err != nil {
+		t.Fatalf("MintToken err = %v", err)
+	}
+	if len(t1) < 32 {
+		t.Fatalf("minted token too short: %q", t1)
+	}
+	for _, c := range t1 {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			t.Fatalf("minted token contains non-hex char %q in %q", c, t1)
+		}
+	}
+	t2, _ := MintToken()
+	if t1 == t2 {
+		t.Fatal("two consecutive MintToken calls should not produce the same value")
+	}
+}
+
+func TestPersistTokenCreatesParentDirAndFile(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	tokenPath := TokenFilePath()
+	if _, err := os.Stat(filepath.Dir(tokenPath)); err == nil {
+		t.Fatalf("expected parent dir to not exist yet, but it does")
+	}
+	if err := PersistToken("abcdef"); err != nil {
+		t.Fatalf("PersistToken err = %v", err)
+	}
+	data, err := os.ReadFile(tokenPath)
+	if err != nil {
+		t.Fatalf("read persisted token: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != "abcdef" {
+		t.Fatalf("persisted contents = %q, want 'abcdef'", string(data))
+	}
+}
+
+func TestLoadTokenRoundTripsThroughPersist(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	if err := PersistToken("roundtrip-secret"); err != nil {
+		t.Fatalf("PersistToken err = %v", err)
+	}
+	got, err := LoadToken()
+	if err != nil {
+		t.Fatalf("LoadToken err = %v", err)
+	}
+	if got != "roundtrip-secret" {
+		t.Fatalf("LoadToken = %q, want 'roundtrip-secret'", got)
+	}
+}
+
+func TestLoadTokenErrorsWhenMissing(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	if _, err := LoadToken(); err == nil {
+		t.Fatal("LoadToken should error when token file is missing")
+	}
+}
+
+func TestLoadTokenErrorsWhenEmpty(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	tokenPath := TokenFilePath()
+	if err := os.MkdirAll(filepath.Dir(tokenPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tokenPath, []byte("   \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadToken(); err == nil {
+		t.Fatal("LoadToken should error when token file contains only whitespace")
 	}
 }

@@ -44,7 +44,7 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		if len(raw.Dashboard) > 1 {
 			return nil, fmt.Errorf("only one dashboard block is supported")
 		}
-		rt.Dashboard = Dashboard{Token: raw.Dashboard[0].Token}
+		rt.Dashboard = Dashboard{Token: raw.Dashboard[0].Token, Enabled: true}
 	}
 
 	for _, p := range raw.Providers {

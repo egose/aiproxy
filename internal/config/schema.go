@@ -11,7 +11,7 @@ type rawFile struct {
 }
 
 type rawDashboard struct {
-	Token string `hcl:"token"`
+	Token string `hcl:"token,optional"`
 }
 
 type rawLogging struct {
