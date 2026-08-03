@@ -19,6 +19,19 @@ The CLI defaults to `$XDG_CONFIG_HOME/aiproxy/config.hcl`, falling back to
 
 The CLI also includes:
 
+- `aiproxy serve -d` (`--daemon`) to background `serve`, redirecting logs to
+  `$XDG_CONFIG_HOME/aiproxy/aiproxy.log` and writing the daemon PID to
+  `aiproxy.pid`. Both files share the `aiproxy/` subdir of `XDG_CONFIG_HOME`
+  (or `~/.config/aiproxy/` when `XDG_CONFIG_HOME` is unset).
+- `aiproxy stop`, `aiproxy status`, `aiproxy restart` for lifecycle control
+  of a backgrounded daemon. They target the PID stored in `aiproxy.pid`; if no
+  live PID is present, all three print `no server running` and exit non-zero.
+- `aiproxy dashboard` to attach the interactive TUI to a **running**
+  `aiproxy serve`. It requires a `dashboard { token = "..." }` block in the
+  config; the dashboard command calls `/_internal/dashboard/snapshot` on the
+  server's listener (bearer-token gated) and prints `no server running` if the
+  server is unreachable, or `dashboard not configured` if the block is
+  absent. Self-hosted reload is still `SIGHUP` for the server side.
 - `aiproxy paths` to print resolved config and secrets paths
 - `aiproxy examples` for boxed command/config examples
 - `aiproxy configure` for interactive config editing

@@ -14,9 +14,9 @@ import (
 )
 
 var (
-	configPath  string
-	noDashboard bool
-	version     = "dev"
+	configPath string
+	daemon     bool
+	version    = "dev"
 )
 
 func main() {
@@ -39,6 +39,10 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newConfigureCommand())
 	rootCmd.AddCommand(newExamplesCommand())
 	rootCmd.AddCommand(newVersionCommand())
+	rootCmd.AddCommand(newDashboardCommand())
+	rootCmd.AddCommand(newStopCommand())
+	rootCmd.AddCommand(newStatusCommand())
+	rootCmd.AddCommand(newRestartCommand())
 	return rootCmd
 }
 
@@ -47,10 +51,12 @@ func newServeCommand() *cobra.Command {
 		Use:   "serve",
 		Short: "Run the AI proxy server",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if daemon {
+				return spawnDaemon(cmd, configPath)
+			}
 			a, err := app.Build(context.Background(), app.BuildOptions{
-				ConfigPath:  configPath,
-				Version:     version,
-				NoDashboard: noDashboard,
+				ConfigPath: configPath,
+				Version:    version,
 			})
 			if err != nil {
 				return err
@@ -63,7 +69,7 @@ func newServeCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&configPath, "config", "c", defaultConfigPath(), "path to config file")
-	cmd.Flags().BoolVar(&noDashboard, "no-dashboard", false, "disable the interactive terminal dashboard even when stdout is a TTY")
+	cmd.Flags().BoolVarP(&daemon, "daemon", "d", false, "run the server in the background")
 	return cmd
 }
 
@@ -207,8 +213,13 @@ func configExamplesText() string {
 
 func commandExamplesText() string {
 	return renderExampleBox("Common commands", `aiproxy serve
-aiproxy validate
+aiproxy serve -d
 aiproxy serve --config /etc/aiproxy/config.hcl
+aiproxy stop
+aiproxy status
+aiproxy restart
+aiproxy dashboard --config /etc/aiproxy/config.hcl
+aiproxy validate
 aiproxy validate --config /etc/aiproxy/config.hcl
 aiproxy paths
 aiproxy configure

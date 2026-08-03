@@ -47,14 +47,21 @@ func TestServeCommandDefaultsConfigFlag(t *testing.T) {
 	}
 }
 
-func TestServeCommandExposesNoDashboardFlag(t *testing.T) {
+func TestServeCommandExposesDaemonFlag(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", home)
+
 	cmd := newServeCommand()
-	flag := cmd.Flags().Lookup("no-dashboard")
-	if flag == nil {
-		t.Fatalf("missing --no-dashboard flag on serve command")
+	dash := cmd.Flags().Lookup("daemon")
+	if dash == nil {
+		t.Fatalf("missing --daemon flag on serve command")
 	}
-	if flag.DefValue != "false" {
-		t.Fatalf("no-dashboard default = %q, want \"false\"", flag.DefValue)
+	if dash.DefValue != "false" {
+		t.Fatalf("daemon default = %q, want \"false\"", dash.DefValue)
+	}
+	if sh := cmd.Flags().ShorthandLookup("d"); sh == nil || sh.Name != "daemon" {
+		t.Fatalf("missing -d shorthand for --daemon")
 	}
 }
 
@@ -165,9 +172,14 @@ func TestExamplesCommandIncludesCommandsAndConfig(t *testing.T) {
 	checks := []string{
 		"+-",
 		"aiproxy serve",
+		"aiproxy serve -d",
 		"aiproxy validate",
 		"aiproxy configure",
 		"aiproxy configure provider",
+		"aiproxy stop",
+		"aiproxy status",
+		"aiproxy restart",
+		"aiproxy dashboard --config /etc/aiproxy/config.hcl",
 		"aiproxy serve --config /etc/aiproxy/config.hcl",
 		"| Common commands",
 		"listener \"http\" \"public\"",
