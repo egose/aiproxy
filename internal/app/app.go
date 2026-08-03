@@ -16,7 +16,6 @@ import (
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
-	"github.com/egose/aiproxy/internal/dashboard"
 	"github.com/egose/aiproxy/internal/httpapi"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
@@ -32,10 +31,9 @@ const (
 )
 
 type BuildOptions struct {
-	ConfigPath  string
-	Version     string
-	LogOutput   io.Writer
-	NoDashboard bool
+	ConfigPath string
+	Version    string
+	LogOutput  io.Writer
 }
 
 type App struct {
@@ -52,7 +50,6 @@ type App struct {
 	logs      *observability.LogBuffer
 	buildOpt  BuildOptions
 	startTime time.Time
-	dash      dashboard.RefreshHook
 }
 
 func Build(ctx context.Context, opts BuildOptions) (*App, error) {
@@ -60,9 +57,9 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	dashboardEnabled := shouldEnableDashboard(opts)
+	dashboardEnabled := rt.Dashboard != (config.Dashboard{})
 	logOutput := opts.LogOutput
-	if logOutput == nil && !dashboardEnabled {
+	if logOutput == nil {
 		logOutput = os.Stderr
 	}
 	var logs *observability.LogBuffer
@@ -86,29 +83,14 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 
 	httpClient := newHTTPClient()
 
-	handler := httpapi.NewHandler(buildDependencies(rt, logger, adapter, metrics, health, usage, httpClient))
-
+	startTime := time.Now()
+	handler := httpapi.NewHandler(buildDependencies(rt, logger, adapter, metrics, health, usage, httpClient, logs, startTime, opts.Version))
 	server := &http.Server{
 		Handler: handler,
 	}
 	applyServerConfig(server, rt.Listener)
 
-	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, client: httpClient, health: health, usage: usage, logs: logs, buildOpt: opts, startTime: time.Now()}, nil
-}
-
-func shouldEnableDashboard(opts BuildOptions) bool {
-	if opts.NoDashboard || opts.LogOutput != nil {
-		return false
-	}
-	if env := os.Getenv("AIPROXY_DASHBOARD"); env == "0" || env == "false" || env == "off" {
-		return false
-	}
-	if stdin, err := os.Stdin.Stat(); err == nil && (stdin.Mode()&os.ModeCharDevice) != 0 {
-		if out, err := os.Stdout.Stat(); err == nil && (out.Mode()&os.ModeCharDevice) != 0 {
-			return true
-		}
-	}
-	return false
+	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, client: httpClient, health: health, usage: usage, logs: logs, buildOpt: opts, startTime: startTime}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -117,18 +99,6 @@ func (a *App) Run(ctx context.Context) error {
 	reloadCh := make(chan os.Signal, 1)
 	signal.Notify(reloadCh, syscall.SIGHUP)
 	defer signal.Stop(reloadCh)
-
-	var dash *dashboard.Program
-	if shouldEnableDashboard(a.buildOpt) {
-		snap := a.snapshot()
-		dash = dashboard.Run(ctx, snap)
-		a.dash = dash
-		defer func() {
-			if dash != nil {
-				dash.Close()
-			}
-		}()
-	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -177,61 +147,40 @@ func (a *App) Reload() error {
 	a.metrics.RecordConfig(rt)
 	a.health = reloadHealthTracker(a.health, a.metrics, current, rt)
 	a.health.SetProviders(rt.ProviderByName)
-	a.handler.UpdateDependencies(buildDependencies(rt, a.logger, a.adapter, a.metrics, a.health, a.usage, a.client))
+	a.handler.UpdateDependencies(buildDependencies(rt, a.logger, a.adapter, a.metrics, a.health, a.usage, a.client, a.logs, a.startTime, a.buildOpt.Version))
 	a.mu.Lock()
 	a.Config = rt
 	a.mu.Unlock()
-	if a.dash != nil {
-		a.dash.Refresh(a.snapshot())
-	}
 	observability.LogStartup(a.logger, rt)
 	return nil
 }
 
-func (a *App) snapshot() *dashboard.RuntimeSnapshot {
-	a.mu.RLock()
-	cfg := a.Config
-	a.mu.RUnlock()
-	if cfg == nil {
-		return &dashboard.RuntimeSnapshot{
-			Version:   a.buildOpt.Version,
-			Usage:     a.usage,
-			Health:    a.health,
-			Logs:      a.logs,
-			StartTime: a.startTime,
-		}
-	}
-	return &dashboard.RuntimeSnapshot{
-		Version:           a.buildOpt.Version,
-		Address:           cfg.Listener.Address,
-		Providers:         cfg.Providers,
-		DisabledProviders: cfg.DisabledProviders,
-		Aliases:           cfg.Aliases,
-		AuthMode:          string(cfg.Auth.Mode),
-		StartTime:         a.startTime,
-		Usage:             a.usage,
-		Health:            a.health,
-		Logs:              a.logs,
-	}
-}
-
-func buildDependencies(rt *config.Runtime, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, usage accounting.Recorder, httpClient *http.Client) httpapi.Dependencies {
+func buildDependencies(rt *config.Runtime, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, usage accounting.Recorder, httpClient *http.Client, logs *observability.LogBuffer, startTime time.Time, version string) httpapi.Dependencies {
 	return httpapi.Dependencies{
-		Resolver:     modelresolver.New(rt),
-		Adapter:      adapter,
-		Auth:         auth.NewAuthenticator(rt.Auth),
-		Authorizer:   auth.NewAuthorizer(rt.Auth),
-		Client:       httpClient,
-		Catalog:      httpapi.BuildModelCatalog(rt),
-		Metrics:      metrics,
-		Providers:    rt.ProviderByName,
-		Health:       health,
-		RateLimiter:  ratelimit.New(rt.Auth),
-		Accounting:   accounting.NewMulti(metrics, usage),
-		Usage:        aOrUsage(usage),
-		AccessLog:    rt.Logging.AccessLog,
-		HasAccessLog: true,
-		Logger:       logger,
+		Resolver:           modelresolver.New(rt),
+		Adapter:            adapter,
+		Auth:               auth.NewAuthenticator(rt.Auth),
+		Authorizer:         auth.NewAuthorizer(rt.Auth),
+		Client:             httpClient,
+		Catalog:            httpapi.BuildModelCatalog(rt),
+		Metrics:            metrics,
+		Providers:          rt.ProviderByName,
+		Health:             health,
+		RateLimiter:        ratelimit.New(rt.Auth),
+		Accounting:         accounting.NewMulti(metrics, usage),
+		Usage:              aOrUsage(usage),
+		AccessLog:          rt.Logging.AccessLog,
+		HasAccessLog:       true,
+		Logger:             logger,
+		Dashboard:          rt.Dashboard,
+		Logs:               logs,
+		DashboardVersion:   version,
+		DashboardAddress:   rt.Listener.Address,
+		DashboardAuthMode:  string(rt.Auth.Mode),
+		DashboardStartTime: startTime,
+		DashboardProviders: rt.Providers,
+		DashboardDisabled:  rt.DisabledProviders,
+		DashboardAliases:   rt.Aliases,
 	}
 }
 

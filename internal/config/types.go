@@ -7,12 +7,17 @@ type Runtime struct {
 	Auth              Auth
 	Logging           Logging
 	ProviderHealth    ProviderHealth
+	Dashboard         Dashboard
 	Providers         []Provider
 	DisabledProviders []Provider
 	Aliases           []Alias
 
 	ProviderByName map[string]Provider
 	AliasByName    map[string]Alias
+}
+
+type Dashboard struct {
+	Token string
 }
 
 type Listener struct {

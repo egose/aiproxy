@@ -39,6 +39,17 @@ type Dependencies struct {
 	AccessLog    bool
 	HasAccessLog bool
 	Logger       *slog.Logger
+	Dashboard    config.Dashboard
+	Logs         *observability.LogBuffer
+
+	// Dashboard surface — only meaningful when Dashboard.Token is set.
+	DashboardVersion   string
+	DashboardAddress   string
+	DashboardAuthMode  string
+	DashboardStartTime time.Time
+	DashboardProviders []config.Provider
+	DashboardDisabled  []config.Provider
+	DashboardAliases   []config.Alias
 }
 
 const maxRequestBodyBytes int64 = 8 << 20
@@ -177,6 +188,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.handleBilling(deps, rw, r, logger) {
 		return
 	}
+	if h.handleDashboard(deps, rw, r) {
+		return
+	}
 	if h.handleModels(deps, rw, r, logger) {
 		return
 	}
@@ -309,6 +323,9 @@ func (w *statusRecorder) Flush() {
 func metricsPathLabel(r *http.Request) string {
 	switch r.URL.Path {
 	case "/healthz", "/readyz", "/metrics", "/v1/models", "/v1/billing/usage":
+		return r.URL.Path
+	}
+	if strings.HasPrefix(r.URL.Path, "/_internal/dashboard") {
 		return r.URL.Path
 	}
 	if _, ok := operationFromRequest(r); ok {

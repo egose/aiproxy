@@ -5,8 +5,13 @@ type rawFile struct {
 	Auth           []rawAuth          `hcl:"auth,block"`
 	Logging        *rawLogging        `hcl:"logging,block"`
 	ProviderHealth *rawProviderHealth `hcl:"provider_health,block"`
+	Dashboard      []*rawDashboard    `hcl:"dashboard,block"`
 	Providers      []rawProvider      `hcl:"provider,block"`
 	Aliases        []rawAlias         `hcl:"alias,block"`
+}
+
+type rawDashboard struct {
+	Token string `hcl:"token"`
 }
 
 type rawLogging struct {

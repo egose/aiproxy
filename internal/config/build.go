@@ -40,6 +40,12 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		}
 		rt.ProviderHealth = providerHealth
 	}
+	if len(raw.Dashboard) > 0 {
+		if len(raw.Dashboard) > 1 {
+			return nil, fmt.Errorf("only one dashboard block is supported")
+		}
+		rt.Dashboard = Dashboard{Token: raw.Dashboard[0].Token}
+	}
 
 	for _, p := range raw.Providers {
 		if seenProviderNames[p.Name] {
