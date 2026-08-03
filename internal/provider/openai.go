@@ -53,7 +53,7 @@ func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
 			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, StreamBody: resp.Body, Streaming: true}, nil
 		},
 		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
-			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil
+			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body, Usage: usageFromBody(body)}, nil
 		},
 		OnError: func(resp *http.Response, body []byte) (*Result, error) {
 			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil

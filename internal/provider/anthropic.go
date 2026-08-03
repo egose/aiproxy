@@ -92,11 +92,11 @@ func (a *adapter) doAnthropicChat(ctx context.Context, r Request) (*Result, erro
 			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translateAnthropicError(body)}, nil
 		},
 		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
-			translatedBody, err := translateAnthropicResponse(body, r.PublicModel)
+			translatedBody, usageTokens, err := translateAnthropicResponse(body, r.PublicModel)
 			if err != nil {
 				return nil, fmt.Errorf("translate response: %w", err)
 			}
-			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody}, nil
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody, Usage: usageTokens}, nil
 		},
 	})
 }
@@ -144,7 +144,8 @@ func (a *adapter) doAnthropicResponses(ctx context.Context, r Request) (*Result,
 			if err != nil {
 				return nil, fmt.Errorf("translate response: %w", err)
 			}
-			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody}, nil
+			usage := usageFromAnthropicBody(body)
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody, Usage: usage}, nil
 		},
 	})
 }
@@ -217,10 +218,15 @@ func parseOpenAIContent(raw json.RawMessage) ([]anthropicContentBlock, string, e
 	return blocks, strings.Join(joined, ""), nil
 }
 
-func translateAnthropicResponse(body []byte, publicModel string) ([]byte, error) {
+func translateAnthropicResponse(body []byte, publicModel string) ([]byte, Usage, error) {
 	var resp anthropicResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
+		return nil, Usage{}, err
+	}
+	usage := Usage{
+		PromptTokens:     int64(resp.Usage.InputTokens),
+		CompletionTokens: int64(resp.Usage.OutputTokens),
+		TotalTokens:      int64(resp.Usage.InputTokens + resp.Usage.OutputTokens),
 	}
 	out := openAIResponse{
 		ID:      resp.ID,
@@ -241,7 +247,23 @@ func translateAnthropicResponse(body []byte, publicModel string) ([]byte, error)
 			TotalTokens:      resp.Usage.InputTokens + resp.Usage.OutputTokens,
 		},
 	}
-	return json.Marshal(out)
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return nil, Usage{}, err
+	}
+	return encoded, usage, nil
+}
+
+func usageFromAnthropicBody(body []byte) Usage {
+	var resp anthropicResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return Usage{}
+	}
+	return Usage{
+		PromptTokens:     int64(resp.Usage.InputTokens),
+		CompletionTokens: int64(resp.Usage.OutputTokens),
+		TotalTokens:      int64(resp.Usage.InputTokens + resp.Usage.OutputTokens),
+	}
 }
 
 func translateAnthropicResponsesResponse(body []byte, publicModel string) ([]byte, error) {

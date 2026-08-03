@@ -1379,6 +1379,49 @@ func TestHandlerAccountingRecordsTenantClientModelAndStatus(t *testing.T) {
 	}
 }
 
+func TestHandlerAccountingRecordsUsageTokens(t *testing.T) {
+	rt := newRT()
+	recorder := &accounting.MemoryRecorder{}
+	h := NewHandler(Dependencies{
+		Resolver: modelresolver.New(rt),
+		Adapter: &stubAdapter{result: &provider.Result{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       []byte(`{"id":"chatcmpl-1","usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20}}`),
+			Usage: provider.Usage{
+				PromptTokens:     12,
+				CompletionTokens: 8,
+				TotalTokens:      20,
+			},
+		}},
+		Auth: auth.NewAuthenticator(config.Auth{
+			Mode: config.AuthModeNone,
+		}),
+		Authorizer: auth.NewAuthorizer(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:    BuildModelCatalog(rt),
+		Metrics:    observability.NewMetrics(),
+		Providers:  rt.ProviderByName,
+		Accounting: recorder,
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[]}`)))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	events := recorder.Events()
+	if len(events) != 1 {
+		t.Fatalf("events = %+v", events)
+	}
+	e := events[0]
+	if e.PromptTokens != 12 || e.CompletionTokens != 8 || e.TotalTokens != 20 {
+		t.Fatalf("event = %+v", e)
+	}
+	if e.Duration <= 0 {
+		t.Fatalf("duration = %v", e.Duration)
+	}
+}
+
 func TestHandlerAccountingCollapsesUnknownModels(t *testing.T) {
 	rt := newRT()
 	usage := accounting.NewAggregator()

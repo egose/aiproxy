@@ -16,6 +16,7 @@ import (
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/dashboard"
 	"github.com/egose/aiproxy/internal/httpapi"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
@@ -31,23 +32,26 @@ const (
 )
 
 type BuildOptions struct {
-	ConfigPath string
-	Version    string
-	LogOutput  io.Writer
+	ConfigPath  string
+	Version     string
+	LogOutput   io.Writer
+	NoDashboard bool
 }
 
 type App struct {
-	mu       sync.RWMutex
-	Config   *config.Runtime
-	Server   *http.Server
-	handler  *httpapi.Handler
-	metrics  *observability.Metrics
-	logger   *slog.Logger
-	adapter  provider.Adapter
-	client   *http.Client
-	health   *providerhealth.Tracker
-	usage    *accounting.Aggregator
-	buildOpt BuildOptions
+	mu        sync.RWMutex
+	Config    *config.Runtime
+	Server    *http.Server
+	handler   *httpapi.Handler
+	metrics   *observability.Metrics
+	logger    *slog.Logger
+	adapter   provider.Adapter
+	client    *http.Client
+	health    *providerhealth.Tracker
+	usage     *accounting.Aggregator
+	buildOpt  BuildOptions
+	startTime time.Time
+	dash      dashboard.RefreshHook
 }
 
 func Build(ctx context.Context, opts BuildOptions) (*App, error) {
@@ -55,7 +59,11 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	logger := observability.NewLogger(opts.LogOutput, observability.LoggerOptions{Level: observability.ParseLevel(string(rt.Logging.Level))})
+	logOutput := opts.LogOutput
+	if shouldEnableDashboard(opts) && logOutput == nil {
+		logOutput = os.Stderr
+	}
+	logger := observability.NewLogger(logOutput, observability.LoggerOptions{Level: observability.ParseLevel(string(rt.Logging.Level))})
 	slog.SetDefault(logger)
 	observability.LogStartup(logger, rt)
 
@@ -76,7 +84,22 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	}
 	applyServerConfig(server, rt.Listener)
 
-	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, client: httpClient, health: health, usage: usage, buildOpt: opts}, nil
+	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, client: httpClient, health: health, usage: usage, buildOpt: opts, startTime: time.Now()}, nil
+}
+
+func shouldEnableDashboard(opts BuildOptions) bool {
+	if opts.NoDashboard || opts.LogOutput != nil {
+		return false
+	}
+	if env := os.Getenv("AIPROXY_DASHBOARD"); env == "0" || env == "false" || env == "off" {
+		return false
+	}
+	if stdin, err := os.Stdin.Stat(); err == nil && (stdin.Mode()&os.ModeCharDevice) != 0 {
+		if out, err := os.Stdout.Stat(); err == nil && (out.Mode()&os.ModeCharDevice) != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -85,6 +108,18 @@ func (a *App) Run(ctx context.Context) error {
 	reloadCh := make(chan os.Signal, 1)
 	signal.Notify(reloadCh, syscall.SIGHUP)
 	defer signal.Stop(reloadCh)
+
+	var dash *dashboard.Program
+	if shouldEnableDashboard(a.buildOpt) {
+		snap := a.snapshot()
+		dash = dashboard.Run(ctx, snap)
+		a.dash = dash
+		defer func() {
+			if dash != nil {
+				dash.Close()
+			}
+		}()
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -137,8 +172,36 @@ func (a *App) Reload() error {
 	a.mu.Lock()
 	a.Config = rt
 	a.mu.Unlock()
+	if a.dash != nil {
+		a.dash.Refresh(a.snapshot())
+	}
 	observability.LogStartup(a.logger, rt)
 	return nil
+}
+
+func (a *App) snapshot() *dashboard.RuntimeSnapshot {
+	a.mu.RLock()
+	cfg := a.Config
+	a.mu.RUnlock()
+	if cfg == nil {
+		return &dashboard.RuntimeSnapshot{
+			Version:   a.buildOpt.Version,
+			Usage:     a.usage,
+			Health:    a.health,
+			StartTime: a.startTime,
+		}
+	}
+	return &dashboard.RuntimeSnapshot{
+		Version:           a.buildOpt.Version,
+		Address:           cfg.Listener.Address,
+		Providers:         cfg.Providers,
+		DisabledProviders: cfg.DisabledProviders,
+		Aliases:           cfg.Aliases,
+		AuthMode:          string(cfg.Auth.Mode),
+		StartTime:         a.startTime,
+		Usage:             a.usage,
+		Health:            a.health,
+	}
 }
 
 func buildDependencies(rt *config.Runtime, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, usage accounting.Recorder, httpClient *http.Client) httpapi.Dependencies {

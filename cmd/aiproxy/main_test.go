@@ -47,6 +47,17 @@ func TestServeCommandDefaultsConfigFlag(t *testing.T) {
 	}
 }
 
+func TestServeCommandExposesNoDashboardFlag(t *testing.T) {
+	cmd := newServeCommand()
+	flag := cmd.Flags().Lookup("no-dashboard")
+	if flag == nil {
+		t.Fatalf("missing --no-dashboard flag on serve command")
+	}
+	if flag.DefValue != "false" {
+		t.Fatalf("no-dashboard default = %q, want \"false\"", flag.DefValue)
+	}
+}
+
 func TestValidateCommandDefaultsConfigFlag(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", "")

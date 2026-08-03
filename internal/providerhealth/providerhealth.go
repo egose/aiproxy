@@ -64,6 +64,23 @@ func (t *Tracker) SetProviders(providers map[string]config.Provider) {
 	t.known = known
 }
 
+func (t *Tracker) Snapshot() map[string]bool {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make(map[string]bool, len(t.known))
+	for name := range t.known {
+		healthy, err := t.backend.IsHealthy(context.Background(), name)
+		if err != nil {
+			healthy = true
+		}
+		out[name] = healthy
+	}
+	return out
+}
+
 func (t *Tracker) MarkSuccess(name string) {
 	t.MarkSuccessContext(context.Background(), name)
 }
