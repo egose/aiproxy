@@ -1,3 +1,9 @@
+## [0.9.0](https://github.com/egose/aiproxy/compare/v0.8.0...v0.9.0) (2026-08-03)
+
+### Features
+
+* add buffered dashboard logs and log viewer ([f835c74](https://github.com/egose/aiproxy/commit/f835c7489474bc6b0bbe280f7c139de6ffa0fe11))
+
 ## [0.8.0](https://github.com/egose/aiproxy/compare/v0.7.0...v0.8.0) (2026-08-03)
 
 ### Features
