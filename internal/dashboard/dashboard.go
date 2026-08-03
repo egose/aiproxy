@@ -14,8 +14,27 @@ import (
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/observability"
-	"github.com/egose/aiproxy/internal/providerhealth"
 )
+
+// UsageViewer is the read-only shape of usage state the dashboard needs. Both
+// the live *accounting.Aggregator in-process and a remote-JSON-backed adapter
+// satisfied by dashrpc adapters implement this interface.
+type UsageViewer interface {
+	Summaries() []accounting.Summary
+	Recent(n int) []accounting.Event
+}
+
+// HealthViewer is the read-only shape of provider-health state.
+type HealthViewer interface {
+	Snapshot() map[string]bool
+}
+
+// LogsViewer is the read-only shape of buffered logs.
+type LogsViewer interface {
+	Since(n int) []observability.LogEntry
+}
+
+var _ UsageViewer = (*accounting.Aggregator)(nil)
 
 const (
 	refreshInterval = 2 * time.Second
@@ -30,9 +49,9 @@ type RuntimeSnapshot struct {
 	Aliases           []config.Alias
 	AuthMode          string
 	StartTime         time.Time
-	Usage             *accounting.Aggregator
-	Health            *providerhealth.Tracker
-	Logs              *observability.LogBuffer
+	Usage             UsageViewer
+	Health            HealthViewer
+	Logs              LogsViewer
 }
 
 type snapshotMsg struct {

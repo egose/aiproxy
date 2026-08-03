@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"strings"
@@ -14,6 +15,24 @@ type LogEntry struct {
 	Level   slog.Level
 	Message string
 	Attrs   string
+
+	Seq uint64 `json:"seq"`
+}
+
+func (e LogEntry) MarshalJSON() ([]byte, error) {
+	return json.Marshal(logEntryJSON{
+		Time:    e.Time.Format(time.RFC3339Nano),
+		Level:   e.Level.String(),
+		Message: e.Message,
+		Attrs:   e.Attrs,
+	})
+}
+
+type logEntryJSON struct {
+	Time    string `json:"time"`
+	Level   string `json:"level"`
+	Message string `json:"message"`
+	Attrs   string `json:"attrs,omitempty"`
 }
 
 type LogBuffer struct {
@@ -22,6 +41,7 @@ type LogBuffer struct {
 	head    int
 	filled  bool
 	cap     int
+	seq     uint64
 	notify  chan struct{}
 }
 
@@ -38,6 +58,8 @@ func NewLogBuffer(capacity int) *LogBuffer {
 
 func (b *LogBuffer) Add(entry LogEntry) {
 	b.mu.Lock()
+	b.seq++
+	entry.Seq = b.seq
 	b.entries[b.head] = entry
 	b.head = (b.head + 1) % b.cap
 	if !b.filled && b.head == 0 {
@@ -76,6 +98,32 @@ func (b *LogBuffer) Since(n int) []LogEntry {
 		out[i] = b.entries[idx]
 	}
 	return out
+}
+
+// SinceSeq returns entries whose sequence number is strictly greater than
+// `seq`, in oldest-first order. Use `seq=0` to get the entire current buffer.
+// Returns the highest sequence number observed by the buffer in `lastSeq`
+// even when no entries match (caller can pass it back on the next call).
+func (b *LogBuffer) SinceSeq(seq uint64) (entries []LogEntry, lastSeq uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	lastSeq = b.seq
+	available := b.head
+	if b.filled {
+		available = b.cap
+	}
+	for i := 0; i < available; i++ {
+		idx := (b.head - available + i) % b.cap
+		if idx < 0 {
+			idx += b.cap
+		}
+		e := b.entries[idx]
+		if e.Seq <= seq {
+			continue
+		}
+		entries = append(entries, e)
+	}
+	return entries, lastSeq
 }
 
 func (b *LogBuffer) Notify() <-chan struct{} {

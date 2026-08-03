@@ -15,6 +15,9 @@ func Validate(rt *Runtime) error {
 	if err := validateProviderHealth(rt.ProviderHealth); err != nil {
 		return err
 	}
+	if err := validateDashboard(rt.Dashboard); err != nil {
+		return err
+	}
 	if err := validateProviders(rt.Providers); err != nil {
 		return err
 	}
@@ -42,6 +45,16 @@ func validateProviderHealth(h ProviderHealth) error {
 	}
 	if h.KeyPrefix == "" {
 		return fmt.Errorf("provider_health: key_prefix must not be empty")
+	}
+	return nil
+}
+
+func validateDashboard(d Dashboard) error {
+	if d == (Dashboard{}) {
+		return nil
+	}
+	if d.Token == "" {
+		return fmt.Errorf("dashboard: token is required when dashboard block is declared")
 	}
 	return nil
 }

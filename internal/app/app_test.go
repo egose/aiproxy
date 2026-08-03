@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
-	"github.com/egose/aiproxy/internal/dashboard"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/providerhealth"
 )
@@ -247,18 +247,13 @@ provider "openai" "openai" {
 	}
 }
 
-type recordingDash struct {
-	snapshots []*dashboard.RuntimeSnapshot
-}
-
-func (r *recordingDash) Refresh(snap *dashboard.RuntimeSnapshot) {
-	r.snapshots = append(r.snapshots, snap)
-}
-
-func TestReloadRefreshesDashboard(t *testing.T) {
+func TestReloadUpdatesDashboardSnapshotEndpoint(t *testing.T) {
 	configPath := writeConfigFile(t, `
 listener "http" "public" { address = ":0" }
 auth "main" { mode = "none" }
+dashboard {
+  token = "sekret"
+}
 provider "openai" "openai" {
   api_key = "sk-test"
   model "gpt-4o-mini" {}
@@ -268,12 +263,21 @@ provider "openai" "openai" {
 	if err != nil {
 		t.Fatalf("build app: %v", err)
 	}
-	rec := &recordingDash{}
-	a.dash = rec
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/_internal/dashboard/snapshot", nil)
+	r.Header.Set("Authorization", "Bearer sekret")
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("snapshot status = %d, body=%s", w.Code, w.Body.String())
+	}
 
 	rewriteConfigFile(t, configPath, `
 listener "http" "public" { address = ":0" }
 auth "main" { mode = "none" }
+dashboard {
+  token = "sekret"
+}
 provider "openai" "openai" {
   api_key = "sk-test"
   model "gpt-4o-mini" {}
@@ -286,16 +290,31 @@ provider "anthropic" "anthropic" {
 	if err := a.Reload(); err != nil {
 		t.Fatalf("reload app: %v", err)
 	}
-	if len(rec.snapshots) != 1 {
-		t.Fatalf("Refresh not called: %d snapshots", len(rec.snapshots))
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/_internal/dashboard/snapshot", nil)
+	r.Header.Set("Authorization", "Bearer sekret")
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("post-reload snapshot status = %d, body=%s", w.Code, w.Body.String())
 	}
-	snap := rec.snapshots[0]
+	var snap dashboardSnapshotJSON
+	if err := json.Unmarshal(w.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
 	if len(snap.Providers) != 2 {
-		t.Fatalf("snapshot providers = %+v", snap.Providers)
+		t.Fatalf("expected 2 providers in reloaded snapshot, got %+v", snap.Providers)
 	}
 	if snap.Providers[1].Name != "anthropic" {
 		t.Fatalf("expected anthropic as second provider, got %+v", snap.Providers[1])
 	}
+}
+
+// dashboardSnapshotJSON is the JSON-shape of dashrpc.Snapshot for test unmarshal.
+type dashboardSnapshotJSON struct {
+	Providers []struct {
+		Name string `json:"name"`
+	} `json:"providers"`
 }
 
 func TestBuildWiresUsageAggregator(t *testing.T) {
@@ -447,20 +466,55 @@ func TestReloadHealthTrackerReusesExistingTrackerWhenConfigMatches(t *testing.T)
 	}
 }
 
-func TestShouldEnableDashboardRespectsFlags(t *testing.T) {
-	var buf bytes.Buffer
-	if shouldEnableDashboard(BuildOptions{LogOutput: &buf}) {
-		t.Fatalf("custom LogOutput should disable the dashboard")
+func TestDashboardEndpointAbsentWithoutDashboardBlock(t *testing.T) {
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test"})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
 	}
-	if shouldEnableDashboard(BuildOptions{NoDashboard: true}) {
-		t.Fatalf("NoDashboard should disable the dashboard")
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/_internal/dashboard/snapshot", nil)
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("snapshot endpoint should be 404 when dashboard block is absent, got %d", w.Code)
 	}
-	t.Setenv("AIPROXY_DASHBOARD", "off")
-	if shouldEnableDashboard(BuildOptions{}) {
-		t.Fatalf("AIPROXY_DASHBOARD=off should disable the dashboard")
+}
+
+func TestDashboardEndpointRejectsMissingToken(t *testing.T) {
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+dashboard {
+  token = "sekret"
+}
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test"})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
 	}
-	t.Setenv("AIPROXY_DASHBOARD", "0")
-	if shouldEnableDashboard(BuildOptions{}) {
-		t.Fatalf("AIPROXY_DASHBOARD=0 should disable the dashboard")
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/_internal/dashboard/snapshot", nil)
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("snapshot endpoint without Authorization should be 401, got %d", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/_internal/dashboard/snapshot", nil)
+	r.Header.Set("Authorization", "Bearer sekret")
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("snapshot endpoint with correct token should be 200, got %d (body=%s)", w.Code, w.Body.String())
 	}
 }
