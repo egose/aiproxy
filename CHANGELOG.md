@@ -1,3 +1,9 @@
+## [0.11.1](https://github.com/egose/aiproxy/compare/v0.11.0...v0.11.1) (2026-08-03)
+
+### Bug Fixes
+
+* use dashboard token for snapshot fetch and lower dashboard response logs ([b01c070](https://github.com/egose/aiproxy/commit/b01c07093a9db55886a6a099e40134b732acb3c8))
+
 ## [0.11.0](https://github.com/egose/aiproxy/compare/v0.10.1...v0.11.0) (2026-08-03)
 
 ### Features
