@@ -1,3 +1,9 @@
+## [0.11.0](https://github.com/egose/aiproxy/compare/v0.10.1...v0.11.0) (2026-08-03)
+
+### Features
+
+* support optional dashboard tokens with persisted fallback ([2ee55cc](https://github.com/egose/aiproxy/commit/2ee55cc27815b29eba9b1469644f10969936e3a7))
+
 ## [0.10.1](https://github.com/egose/aiproxy/compare/v0.10.0...v0.10.1) (2026-08-03)
 
 ## [0.10.0](https://github.com/egose/aiproxy/compare/v0.9.0...v0.10.0) (2026-08-03)
