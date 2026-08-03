@@ -1,3 +1,9 @@
+## [0.8.0](https://github.com/egose/aiproxy/compare/v0.7.0...v0.8.0) (2026-08-03)
+
+### Features
+
+* add interactive dashboard and usage accounting ([f8c6c8b](https://github.com/egose/aiproxy/commit/f8c6c8b111638dab7b0711571ef0915b9429bc6d))
+
 ## [0.7.0](https://github.com/egose/aiproxy/compare/v0.6.0...v0.7.0) (2026-08-01)
 
 ### Features
