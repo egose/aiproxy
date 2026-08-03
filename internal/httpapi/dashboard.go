@@ -17,7 +17,7 @@ const dashboardRecentN = 200
 // the request was handled. When the dashboard block is unconfigured, every
 // path under /_internal/* returns 404 so the surface stays closed.
 func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *http.Request) bool {
-	if deps.Dashboard == (config.Dashboard{}) {
+	if !deps.Dashboard.Enabled {
 		return false
 	}
 	if r.URL.Path == dashrpc.SnapshotPath {

@@ -17,7 +17,8 @@ type Runtime struct {
 }
 
 type Dashboard struct {
-	Token string
+	Token   string
+	Enabled bool
 }
 
 type Listener struct {

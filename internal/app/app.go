@@ -16,6 +16,7 @@ import (
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/dashrpc"
 	"github.com/egose/aiproxy/internal/httpapi"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
@@ -57,7 +58,10 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	dashboardEnabled := rt.Dashboard != (config.Dashboard{})
+	if err := ensureDashboardToken(rt, ""); err != nil {
+		return nil, fmt.Errorf("dashboard token: %w", err)
+	}
+	dashboardEnabled := rt.Dashboard.Enabled
 	logOutput := opts.LogOutput
 	if logOutput == nil {
 		logOutput = os.Stderr
@@ -141,6 +145,9 @@ func (a *App) Reload() error {
 	a.mu.RUnlock()
 	if current != nil && (rt.Listener.Address != current.Listener.Address || rt.Listener.Timeouts != current.Listener.Timeouts) {
 		return fmt.Errorf("listener changes require restart")
+	}
+	if err := ensureDashboardToken(rt, current.Dashboard.Token); err != nil {
+		return fmt.Errorf("dashboard token: %w", err)
 	}
 
 	a.metrics.SetBuildInfo(a.buildOpt.Version)
@@ -227,4 +234,32 @@ func applyServerConfig(server *http.Server, listener config.Listener) {
 	if listener.Timeouts.Write > 0 {
 		server.WriteTimeout = listener.Timeouts.Write
 	}
+}
+
+// ensureDashboardToken makes sure an enabled Dashboard block has a usable
+// token. If the config declares one, it wins. If the config declares the
+// block without a token, ensureDashboardToken reuses `existing` (the live
+// token from a prior Build/Reload, if any) so reloads don't rotate the
+// secret. Otherwise it mints a fresh random token and persists it to
+// dashrpc.TokenFilePath() so the dashboard command can read it.
+func ensureDashboardToken(rt *config.Runtime, existing string) error {
+	if !rt.Dashboard.Enabled {
+		return nil
+	}
+	if rt.Dashboard.Token != "" {
+		return nil
+	}
+	if existing != "" {
+		rt.Dashboard.Token = existing
+		return nil
+	}
+	token, err := dashrpc.MintToken()
+	if err != nil {
+		return err
+	}
+	if err := dashrpc.PersistToken(token); err != nil {
+		return err
+	}
+	rt.Dashboard.Token = token
+	return nil
 }

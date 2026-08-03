@@ -1,7 +1,15 @@
 package dashrpc
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/egose/aiproxy/internal/accounting"
@@ -146,4 +154,61 @@ func NewClient(baseURL, token string) *AuthenticatedClient {
 
 func (c *AuthenticatedClient) authHeader() string {
 	return AuthScheme + c.Token
+}
+
+// TokenFilePath returns the canonical location of the persisted dashboard
+// token. The serve process writes a freshly-minted secret here when the
+// config declares a dashboard block without a token; the dashboard command
+// reads from this path to authenticate to a running server.
+func TokenFilePath() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "aiproxy", "dashboard.token")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join("aiproxy", "dashboard.token")
+	}
+	return filepath.Join(home, ".config", "aiproxy", "dashboard.token")
+}
+
+// MintToken generates a 32-byte random hex token. It is used by the serve
+// process when the dashboard block is declared without a token.
+func MintToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate dashboard token: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+// PersistToken writes the given token to TokenFilePath() so the dashboard
+// command can read it. The parent directory is created if missing.
+func PersistToken(token string) error {
+	path := TokenFilePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create token dir: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
+		return fmt.Errorf("write token file: %w", err)
+	}
+	return nil
+}
+
+// LoadToken reads the persisted dashboard token. Returns os.ErrNotExist-style
+// errors verbatim when the file is missing.
+func LoadToken() (string, error) {
+	data, err := os.ReadFile(TokenFilePath())
+	if err != nil {
+		return "", err
+	}
+	out := strings.TrimRightFunc(string(data), func(r rune) bool {
+		return r == '\n' || r == '\r' || r == ' ' || r == '\t'
+	})
+	out = strings.TrimLeftFunc(out, func(r rune) bool {
+		return r == ' ' || r == '\t'
+	})
+	if out == "" {
+		return "", errors.New("dashboard token file is empty")
+	}
+	return out, nil
 }

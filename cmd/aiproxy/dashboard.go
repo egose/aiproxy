@@ -39,9 +39,17 @@ func runDashboard(parentCtx context.Context, cfgPath string, stdout, stderr io.W
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
-	if rt.Dashboard == (config.Dashboard{}) {
-		fmt.Fprintln(stderr, "dashboard not configured: add a 'dashboard' block with a token to your config")
+	if !rt.Dashboard.Enabled {
+		fmt.Fprintln(stderr, "dashboard not configured: add a 'dashboard' block (with or without a token) to your config")
 		return errors.New("dashboard not configured")
+	}
+	token := rt.Dashboard.Token
+	if token == "" {
+		token, err = dashrpc.LoadToken()
+		if err != nil {
+			fmt.Fprintln(stderr, "dashboard token not declared in config and no persisted token found — start `aiproxy serve` first, or declare token = \"...\" in the dashboard block")
+			return fmt.Errorf("dashboard token: %w", err)
+		}
 	}
 
 	baseURL := normalizeBaseURL(rt.Listener.Address)
@@ -50,14 +58,18 @@ func runDashboard(parentCtx context.Context, cfgPath string, stdout, stderr io.W
 	ctx, stop := signal.NotifyContext(parentCtx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	initial, err := fetchSnapshot(ctx, httpClient, baseURL, rt.Dashboard.Token)
+	initial, err := fetchSnapshot(ctx, httpClient, baseURL, token)
 	if err != nil {
 		if isConnectionRefused(err) {
 			fmt.Fprintln(stderr, "no server running")
 			return errors.New("no server running")
 		}
 		if errors.Is(err, errDashboardUnconfigured) {
-			fmt.Fprintln(stderr, "dashboard not configured on server: add a 'dashboard' block with a token to your config and restart")
+			fmt.Fprintln(stderr, "dashboard not configured on server: add a 'dashboard' block (with or without a token) to your config and restart")
+			return err
+		}
+		if errors.Is(err, errDashboardUnauthorized) {
+			fmt.Fprintln(stderr, "unauthorized: dashboard token mismatch — check the token declared in config vs. the one the server is using")
 			return err
 		}
 		return fmt.Errorf("fetch snapshot: %w", err)
@@ -105,6 +117,7 @@ func normalizeBaseURL(addr string) string {
 }
 
 var errDashboardUnconfigured = errors.New("dashboard not configured")
+var errDashboardUnauthorized = errors.New("dashboard token mismatch")
 
 func fetchSnapshot(ctx context.Context, c *http.Client, baseURL, token string) (dashrpc.Snapshot, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+dashrpc.SnapshotPath, nil)
@@ -121,7 +134,7 @@ func fetchSnapshot(ctx context.Context, c *http.Client, baseURL, token string) (
 		return dashrpc.Snapshot{}, errDashboardUnconfigured
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
-		return dashrpc.Snapshot{}, errors.New("unauthorized: dashboard token mismatch")
+		return dashrpc.Snapshot{}, errDashboardUnauthorized
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
