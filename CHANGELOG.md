@@ -1,3 +1,10 @@
+## [0.10.0](https://github.com/egose/aiproxy/compare/v0.9.0...v0.10.0) (2026-08-03)
+
+### Features
+
+* add daemon and dashboard commands ([dddf201](https://github.com/egose/aiproxy/commit/dddf201abaa2eca4527e99db5fc93f83e24ca2c8))
+* wire dashboard snapshots through server and remote adapters ([50c875b](https://github.com/egose/aiproxy/commit/50c875b0c8c7f3f1a6383fe621f06de5fc9fb315))
+
 ## [0.9.0](https://github.com/egose/aiproxy/compare/v0.8.0...v0.9.0) (2026-08-03)
 
 ### Features
