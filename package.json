@@ -1,6 +1,6 @@
 {
   "name": "aiproxy",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "A Go service that proxies multiple AI providers behind a single OpenAI-compatible HTTP API.",
   "license": "Apache-2.0",
   "author": "",
