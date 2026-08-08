@@ -1,3 +1,9 @@
+## [0.12.0](https://github.com/egose/aiproxy/compare/v0.11.2...v0.12.0) (2026-08-08)
+
+### Features
+
+* increase upstream header timeout ([4660777](https://github.com/egose/aiproxy/commit/466077796cb16d01298a966c97561de068cc1793))
+
 ## [0.11.2](https://github.com/egose/aiproxy/compare/v0.11.1...v0.11.2) (2026-08-08)
 
 ### Bug Fixes
