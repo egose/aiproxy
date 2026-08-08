@@ -28,7 +28,7 @@ import (
 const (
 	defaultReadTimeout    = 30 * time.Second
 	defaultMaxHeaderBytes = 1 << 20
-	upstreamHeaderTimeout = 60 * time.Second
+	upstreamHeaderTimeout = 180 * time.Second
 )
 
 type BuildOptions struct {
