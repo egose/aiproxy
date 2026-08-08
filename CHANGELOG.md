@@ -1,3 +1,13 @@
+## [0.11.2](https://github.com/egose/aiproxy/compare/v0.11.1...v0.11.2) (2026-08-08)
+
+### Bug Fixes
+
+* increase upstream header timeout ([cbe9b48](https://github.com/egose/aiproxy/commit/cbe9b48fac8c4cf19813b87bf2c9f86ffcc59ee5))
+
+### Documentation
+
+* add codebase health remediation plan ([849d9ef](https://github.com/egose/aiproxy/commit/849d9efa412cbe9c59e466455797424e5d0fe9ae))
+
 ## [0.11.1](https://github.com/egose/aiproxy/compare/v0.11.0...v0.11.1) (2026-08-03)
 
 ### Bug Fixes
