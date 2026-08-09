@@ -32,12 +32,14 @@ OpenAI-compatible responses.
   identity metadata and enforce a static allow-list of proxy-visible model
   names
 - request accounting is tracked in-process by tenant, client, model, operation,
-  and status; `/metrics` exposes aggregated usage event counters
+  and status over a rolling 24-hour window; `/metrics` exposes aggregated usage
+  event counters
 - optional `logging` config controls structured log level and request lifecycle
   access logging
 - `GET /v1/billing/usage` returns aggregated in-process usage summaries. In
   `bearer_static` mode it is scoped to the caller's tenant when present,
-  otherwise to the caller's client identity.
+  otherwise to the caller's client identity. Summaries use the same rolling
+  24-hour in-process window as local accounting.
 - optional `provider_health` config can use Redis to share transient provider
   health state across instances; without it, health remains in-process only
 
@@ -47,6 +49,8 @@ OpenAI-compatible responses.
 - `openai-compatible` – any OpenAI-compatible endpoint (requires `base_url`)
 - `anthropic` – chat and responses translation to Anthropic Messages API
 - `gemini` – chat translation to Gemini generateContent API, embeddings translation to Gemini embedContent API, and responses translation through generateContent
+
+Pass-through providers rewrite only the top-level `model` JSON field and preserve other request fields, including unknown extension fields. Translated providers reject unsupported top-level request controls rather than silently dropping them; their supported chat fields are `model`, `messages`, `max_tokens`, `temperature`, `top_p`, and `stream`, their supported responses fields are `model`, `input`, `instructions`, `max_output_tokens`, `temperature`, `top_p`, and `stream`, and Gemini embeddings supports `model`, `input`, and `dimensions`.
 
 ### Routing
 
@@ -63,7 +67,9 @@ OpenAI-compatible responses.
 
 The server supports live config reload on `SIGHUP` for runtime request-routing
 state such as auth, providers, models, aliases, and metrics-backed inventory.
-Listener address and timeout changes still require a restart.
+Listener address, listener timeout, log-level, and dashboard enablement changes
+still require a restart. Unchanged rate-limit settings preserve existing buckets;
+changed rate-limit settings reset limiter state.
 
 See [docs/design.md](docs/design.md) for the full design document.
 
@@ -109,6 +115,8 @@ listener "http" "public" {
   address = ":8080"
 }
 
+upstream_header_timeout = "120s"
+
 auth "main" {
   mode = "none"
 }
@@ -141,6 +149,7 @@ provider "openai" "openai" {
 provider "openai-compatible" "localai" {
   display_name = "LocalAI"
   base_url     = "https://llm.internal/v1"
+  upstream_header_timeout = "180s"
 
   api_key_ref {
     key = "localai"
@@ -191,6 +200,7 @@ aiproxy configure
 aiproxy configure provider
 aiproxy configure auth
 aiproxy configure alias
+aiproxy configure upstream
 aiproxy configure logging
 ```
 
@@ -204,6 +214,7 @@ Supported block workflows:
 - `auth`
 - `provider`
 - `alias`
+- `upstream`
 - `logging`
 - `provider-health`
 
@@ -217,6 +228,7 @@ aiproxy configure provider \
   --type openai-compatible \
   --display-name "Backup provider" \
   --base-url https://llm.internal/v1 \
+  --upstream-header-timeout 180s \
   --secrets-path /etc/aiproxy/keys.json \
   --secrets-key localai \
   --api-key "$LOCALAI_API_KEY" \
@@ -231,6 +243,8 @@ aiproxy configure alias \
   --target primary/gpt-4o-mini \
   --target backup/qwen3-32b
 ```
+
+Use `upstream_header_timeout` to control how long the proxy waits for upstream response headers. Provider values override the root value; otherwise the default is 90 seconds. This timeout does not cap response bodies or SSE streams after headers arrive.
 
 Delete existing blocks with `--delete`:
 
@@ -304,6 +318,13 @@ provider with `api_key_ref { path = "..." key = "..." }`.
 - `capabilities` (optional on `model` blocks) lets you narrow the effective
   API surface for a model. Supported values are `chat`, `responses`,
   `embeddings`, `images`, `audio_transcriptions`, and `audio_speech`.
+- Provider and alias names are lowercase and must not contain spaces or `/`;
+  provider name `alias` is reserved. Model names follow the same lowercase rule
+  and may contain `/` when every slash-separated segment is valid.
+- Provider `base_url` values must be absolute `https` URLs for remote upstreams.
+  Plain `http` is accepted only for loopback development endpoints.
+- A provider with no resolved credential, including an empty `api_key = env("...")`,
+  is disabled before routing; disabled providers are still validated.
 - `/v1/models` returns effective capabilities for both direct models and
   aliases. Alias capabilities are the safe intersection of their target models.
 - `/v1/models` also includes richer metadata:

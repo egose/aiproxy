@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/egose/aiproxy/internal/app"
+	"github.com/egose/aiproxy/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -65,7 +66,7 @@ func newServeCommand() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
-			return a.Run(ctx)
+			return a.RunReady(ctx, notifyDaemonReady)
 		},
 	}
 	cmd.Flags().StringVarP(&configPath, "config", "c", defaultConfigPath(), "path to config file")
@@ -79,14 +80,10 @@ func newValidateCommand() *cobra.Command {
 		Use:   "validate",
 		Short: "Validate the config file without running the server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, err := app.Build(context.Background(), app.BuildOptions{
-				ConfigPath: cfgPath,
-				Version:    version,
-			})
-			if err != nil {
+			if _, err := config.LoadFile(cfgPath); err != nil {
 				return err
 			}
-			fmt.Println("config is valid")
+			fmt.Fprintln(cmd.OutOrStdout(), "config is valid")
 			return nil
 		},
 	}

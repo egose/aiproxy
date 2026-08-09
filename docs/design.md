@@ -107,9 +107,13 @@ Name rules:
 - provider names must be lowercase
 - alias names must be lowercase
 - names must not contain spaces
-- names must not contain `/`
+- provider and alias names must not contain `/`
+- provider name `alias` is reserved for `alias/<alias-name>` routing
+- model names may contain `/` when every slash-separated segment follows the
+  same lowercase name rule
 
-This keeps parsing trivial and prevents ambiguity in public model strings.
+Direct model resolution splits on the first `/`, so slash-containing model names
+remain unambiguous under `<provider-name>/<model-name>`.
 
 ## Request Model
 
@@ -167,8 +171,10 @@ The proxy also records in-process accounting events keyed by:
 - operation
 - status
 
-These events are also aggregated in-process by the same key dimensions to form
-the first billing/accounting scaffold.
+These events are also aggregated in-process by the same key dimensions over a
+rolling 24-hour window to form the first billing/accounting scaffold. The
+window is maintained with bounded one-minute buckets whose start times are in
+the rolling window, rather than lifetime totals or idle-key eviction.
 
 `GET /v1/billing/usage` exposes those aggregated summaries. In static bearer
 auth mode, responses are scoped to the caller's tenant when present, otherwise
@@ -551,6 +557,8 @@ listener "http" "public" {
   }
 }
 
+upstream_header_timeout = "120s"
+
 auth "main" {
   mode = "bearer_static"
 
@@ -587,6 +595,7 @@ provider "anthropic" "anthropic" {
 provider "openai-compatible" "localai" {
   display_name = "LocalAI"
   base_url     = "https://llm.internal/v1"
+  upstream_header_timeout = "180s"
 
   api_key_ref {
     key = "localai"
@@ -630,7 +639,11 @@ alias "chat_fallback" {
 
 - `display_name` is descriptive only
 - `base_url` is required only for `openai-compatible`
+- `base_url` must be an absolute `https` URL for remote upstreams; `http` is
+  allowed only for loopback hosts such as `localhost`, `127.0.0.1`, or `::1`
 - `api_key_ref.path` is optional because it has a secure default
+- `upstream_header_timeout` accepts a positive duration at root or provider scope; provider values override root values, and the default is 90 seconds
+- the upstream header timeout limits only the wait for response headers, not JSON or streaming response bodies after headers arrive
 - aliases reference provider and model names without extra ref prefixes
 
 ## Validation Rules
@@ -643,10 +656,16 @@ The config loader should validate:
 - invalid alias algorithm values
 - provider names that are not lowercase
 - alias names that are not lowercase
-- names containing spaces or `/`
+- provider or alias names containing spaces or `/`
+- provider name `alias`, which is reserved for `alias/<alias-name>` routing
+- model names that are not lowercase, contain spaces, or contain empty `/`
+  segments; slash-containing model names are valid when each segment is valid
 - `openai-compatible` providers missing `base_url`
+- malformed provider `base_url` values, and non-loopback `http` base URLs
 - providers with both `api_key` and `api_key_ref`
-- providers with neither `api_key` nor `api_key_ref`
+- malformed, zero, or negative `upstream_header_timeout` values
+- active providers with no resolved credential; current compatibility behavior
+  disables missing or empty credentials before routing instead
 - `api_key_ref` blocks missing `key`
 - `api_key_ref` JSON files that do not exist or do not contain the requested key
 - providers without any models
@@ -656,6 +675,12 @@ The config loader should validate:
 - alias targets pointing to unknown models
 
 The service should fail startup on invalid config.
+
+Current compatibility behavior treats a provider with no resolved credential,
+including an empty `api_key = env("...")`, as disabled before request routing.
+Disabled providers are still fully validated for structure, URLs, models, and
+capabilities. DEC-02 tracks whether this disable-on-missing-secret behavior will
+be replaced by an explicit enablement flag.
 
 ## Observability And Security
 
@@ -694,6 +719,13 @@ Initial `/metrics` coverage includes:
 - upstream response body size histograms by operation/provider/outcome
 - upstream request counts by operation/provider/outcome
 - upstream request latency by operation/provider/outcome
+
+`GET /metrics` is served before API authentication on the same listener as the
+proxy API. Operators must expose that listener only on trusted networks or place
+network-level access control in front of `/metrics`; metric output can include
+tenant, client, provider, model, and alias labels. HTTP route labels are a
+closed set of stable endpoint names, with unknown dashboard-internal paths
+reported as `/_internal/dashboard/unknown`.
 
 ## CLI Design
 
@@ -927,9 +959,12 @@ The chosen design allows fallback only for alias-based requests.
 - the MVP endpoint is `POST /v1/chat/completions`
 - direct model names use `<provider-name>/<model-name>`
 - alias names use `alias/<alias-name>`
+- provider name `alias` is reserved, and direct model resolution uses the first
+  `/`, so provider model names may contain `/` when each segment is valid
 - HCL uses two-label `provider "<type>" "<name>"` blocks
 - `openai-compatible` requires `base_url`
-- exactly one of `api_key` or `api_key_ref` must be set per provider
+- providers normally declare exactly one of `api_key` or `api_key_ref`; current
+  compatibility behavior disables providers with missing or empty credentials
 - `api_key_ref.path` defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json` and falls back to `~/.config/aiproxy/keys.json`
 - aliases support `round_robin` and `least_connections`
 - alias retry only happens for transient upstream failures
