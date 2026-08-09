@@ -292,6 +292,70 @@ function _createMdxContent(props) {
       }), " and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "openai-compatible"
       }), ", the proxy stays close to pass-through behavior. For translated providers, the proxy maps between the public OpenAI-style contract and the provider-native request and response shape."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Pass-through providers preserve request JSON values and unknown extension fields, rewriting only the top-level ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), " value before forwarding. Malformed JSON, non-object JSON bodies, and duplicate top-level ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), " keys are rejected."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Translated providers intentionally support a conservative OpenAI-style request subset. Unsupported top-level controls such as ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tools"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tool_choice"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "response_format"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "logprobs"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "parallel_tool_calls"
+      }), ", and unknown extension fields are rejected with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "invalid_request"
+      }), " instead of being silently dropped."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Translated chat completions support these top-level request fields: ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "messages"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "max_tokens"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "temperature"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "top_p"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "stream"
+      }), ". Message roles are limited to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "system"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "user"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "assistant"
+      }), ", and content may be text or arrays of text parts."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Translated responses support these top-level request fields: ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "input"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "instructions"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "max_output_tokens"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "temperature"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "top_p"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "stream"
+      }), ". Input may be a string or an array of message items with text content."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Gemini translated embeddings support these top-level request fields: ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "input"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "dimensions"
+      }), ". Input may be a string or an array of strings."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "model-capabilities",
       children: "Model Capabilities"

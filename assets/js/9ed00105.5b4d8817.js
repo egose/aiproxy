@@ -62,6 +62,10 @@ const toc = [{
   "id": "providers",
   "level": 2
 }, {
+  "value": "Upstream Header Timeout",
+  "id": "upstream-header-timeout",
+  "level": 2
+}, {
   "value": "Models",
   "id": "models",
   "level": 2
@@ -161,7 +165,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
-        children: "listener \"http\" \"public\" {\n  address = \":8080\"\n\n  timeouts {\n    read_header = \"10s\"\n    idle        = \"60s\"\n    write       = \"0s\"\n  }\n}\n\nauth \"main\" {\n  mode = \"bearer_static\"\n\n  rate_limit {\n    requests_per_minute = 120\n    burst               = 120\n  }\n\n  client \"internal-app\" {\n    token          = env(\"AIPROXY_CLIENT_TOKEN\")\n    tenant         = \"internal\"\n    allowed_models = [\"alias/chat_default\", \"openai/gpt-4.1\"]\n  }\n}\n\nlogging {\n  level      = \"info\"\n  access_log = true\n}\n\nprovider \"openai\" \"openai\" {\n  display_name = \"OpenAI\"\n  api_key      = env(\"OPENAI_API_KEY\")\n\n  model \"gpt-4.1\" {\n    display_name = \"GPT-4.1\"\n    capabilities = [\"chat\", \"responses\"]\n  }\n\n  model \"text-embedding-3-large\" {\n    display_name = \"text-embedding-3-large\"\n    capabilities = [\"embeddings\"]\n  }\n}\n\nprovider \"openai-compatible\" \"localai\" {\n  display_name = \"LocalAI\"\n  base_url     = \"https://llm.internal/v1\"\n\n  api_key_ref {\n    key = \"localai\"\n  }\n\n  model \"qwen3-32b\" {\n    display_name = \"Qwen 3 32B\"\n  }\n}\n\nalias \"chat_default\" {\n  algorithm = \"round_robin\"\n\n  target {\n    provider = \"openai\"\n    model    = \"gpt-4.1\"\n  }\n\n  target {\n    provider = \"localai\"\n    model    = \"qwen3-32b\"\n  }\n}\n"
+        children: "listener \"http\" \"public\" {\n  address = \":8080\"\n\n  timeouts {\n    read_header = \"10s\"\n    idle        = \"60s\"\n    write       = \"0s\"\n  }\n}\n\nupstream_header_timeout = \"120s\"\n\nauth \"main\" {\n  mode = \"bearer_static\"\n\n  rate_limit {\n    requests_per_minute = 120\n    burst               = 120\n  }\n\n  client \"internal-app\" {\n    token          = env(\"AIPROXY_CLIENT_TOKEN\")\n    tenant         = \"internal\"\n    allowed_models = [\"alias/chat_default\", \"openai/gpt-4.1\"]\n  }\n}\n\nlogging {\n  level      = \"info\"\n  access_log = true\n}\n\nprovider \"openai\" \"openai\" {\n  display_name = \"OpenAI\"\n  api_key      = env(\"OPENAI_API_KEY\")\n\n  model \"gpt-4.1\" {\n    display_name = \"GPT-4.1\"\n    capabilities = [\"chat\", \"responses\"]\n  }\n\n  model \"text-embedding-3-large\" {\n    display_name = \"text-embedding-3-large\"\n    capabilities = [\"embeddings\"]\n  }\n}\n\nprovider \"openai-compatible\" \"localai\" {\n  display_name = \"LocalAI\"\n  base_url     = \"https://llm.internal/v1\"\n  upstream_header_timeout = \"180s\"\n\n  api_key_ref {\n    key = \"localai\"\n  }\n\n  model \"qwen3-32b\" {\n    display_name = \"Qwen 3 32B\"\n  }\n}\n\nalias \"chat_default\" {\n  algorithm = \"round_robin\"\n\n  target {\n    provider = \"openai\"\n    model    = \"gpt-4.1\"\n  }\n\n  target {\n    provider = \"localai\"\n    model    = \"qwen3-32b\"\n  }\n}\n"
       })
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "listener",
@@ -307,19 +311,65 @@ function _createMdxContent(props) {
         children: (0,jsx_runtime.jsx)(_components.code, {
           children: "api_key_ref"
         })
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: (0,jsx_runtime.jsx)(_components.code, {
+          children: "upstream_header_timeout"
+        })
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["nested ", (0,jsx_runtime.jsx)(_components.code, {
           children: "model"
         }), " blocks"]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Exactly one of ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Providers normally declare exactly one of ", (0,jsx_runtime.jsx)(_components.code, {
         children: "api_key"
       }), " or ", (0,jsx_runtime.jsx)(_components.code, {
         children: "api_key_ref"
-      }), " must be set for a provider."]
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["For compatibility, a provider whose credential resolves to empty, including an\nempty ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key = env(\"...\")"
+      }), ", is disabled before request routing. Disabled\nproviders are still validated for structure, URL, models, and capabilities."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Provider ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " values must be absolute ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https"
+      }), " URLs for remote upstreams.\nPlain ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "http"
+      }), " is accepted only for loopback development endpoints such as\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "localhost"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "127.0.0.1"
+      }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "::1"
+      }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Provider names are part of the public model string, so keep them stable and machine-friendly."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "upstream-header-timeout",
+      children: "Upstream Header Timeout"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "upstream_header_timeout"
+      }), " controls how long the proxy waits for upstream response headers. It accepts Go duration strings such as ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "30s"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "2m"
+      }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "1h"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "You can set it globally at the root or override it per provider:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "upstream_header_timeout = \"120s\"\n\nprovider \"openai\" \"openai\" {\n  upstream_header_timeout = \"180s\"\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Precedence is provider value, then root value, then the 90-second default. The timeout applies only until response headers arrive; JSON and streaming response bodies can continue for any duration after headers are received. Root and provider timeout changes apply on a successful ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), " reload."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "models",
       children: "Models"
@@ -454,12 +504,26 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "names must not contain spaces"
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["names must not contain ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ["provider and alias names must not contain ", (0,jsx_runtime.jsx)(_components.code, {
           children: "/"
         })]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["provider name ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "alias"
+        }), " is reserved for ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "alias/<alias-name>"
+        }), " routing"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["model names may contain ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "/"
+        }), " when every slash-separated segment follows the\nsame lowercase name rule"]
       }), "\n"]
-    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
-      children: "These rules keep model parsing simple and unambiguous."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["These rules keep model parsing simple and unambiguous; direct model resolution\nsplits on the first ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/"
+      }), ", so ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "<provider-name>/<model-name>"
+      }), " still works when the\nmodel name contains additional slashes."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "validation-rules",
       children: "Validation Rules"
@@ -471,9 +535,15 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "invalid provider types or alias algorithms"
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["names that are not lowercase or contain spaces or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ["provider or alias names that are not lowercase or contain spaces or ", (0,jsx_runtime.jsx)(_components.code, {
           children: "/"
         })]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["provider name ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "alias"
+        })]
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "model names with invalid slash-separated segments"
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "openai-compatible"
@@ -481,17 +551,19 @@ function _createMdxContent(props) {
           children: "base_url"
         })]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["malformed provider ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "base_url"
+        }), " values, and non-loopback ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "http"
+        }), " base URLs"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["providers with both ", (0,jsx_runtime.jsx)(_components.code, {
           children: "api_key"
         }), " and ", (0,jsx_runtime.jsx)(_components.code, {
           children: "api_key_ref"
         })]
-      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["providers with neither ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "api_key"
-        }), " nor ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "api_key_ref"
-        })]
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "active providers with no resolved credential; current compatibility behavior\ndisables missing or empty credentials before routing instead"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "providers without any models"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {

@@ -436,7 +436,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.code, {
         children: "GET /v1/billing/usage"
-      }), " returns aggregated in-process usage summaries."]
+      }), " returns aggregated in-process usage summaries over the\nproxy's rolling 24-hour accounting window."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
       children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["When the authenticated client has a ", (0,jsx_runtime.jsx)(_components.code, {

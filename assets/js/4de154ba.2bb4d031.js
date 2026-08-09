@@ -149,7 +149,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-sh",
-        children: "aiproxy configure\naiproxy configure provider\naiproxy configure auth\naiproxy configure alias\naiproxy configure listener\naiproxy configure logging\naiproxy configure provider-health\n"
+        children: "aiproxy configure\naiproxy configure provider\naiproxy configure auth\naiproxy configure alias\naiproxy configure listener\naiproxy configure upstream\naiproxy configure logging\naiproxy configure provider-health\n"
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["The root ", (0,jsx_runtime.jsx)(_components.code, {
@@ -161,6 +161,8 @@ function _createMdxContent(props) {
       children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["create or update ", (0,jsx_runtime.jsx)(_components.code, {
           children: "listener"
+        }), ", root ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "upstream_header_timeout"
         }), ", ", (0,jsx_runtime.jsx)(_components.code, {
           children: "auth"
         }), ", ", (0,jsx_runtime.jsx)(_components.code, {
@@ -190,7 +192,14 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-sh",
-        children: "aiproxy configure provider \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name backup \\\n  --type openai-compatible \\\n  --display-name \"Backup provider\" \\\n  --base-url https://llm.internal/v1 \\\n  --secrets-path /etc/aiproxy/keys.json \\\n  --secrets-key localai \\\n  --api-key \"$LOCALAI_API_KEY\" \\\n  --model qwen3-32b=qwen/qwen3-32b \\\n  --model-capabilities qwen3-32b=chat,responses\n"
+        children: "aiproxy configure provider \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name backup \\\n  --type openai-compatible \\\n  --display-name \"Backup provider\" \\\n  --base-url https://llm.internal/v1 \\\n  --upstream-header-timeout 180s \\\n  --secrets-path /etc/aiproxy/keys.json \\\n  --secrets-key localai \\\n  --api-key \"$LOCALAI_API_KEY\" \\\n  --model qwen3-32b=qwen/qwen3-32b \\\n  --model-capabilities qwen3-32b=chat,responses\n"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Root upstream timeout example:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "aiproxy configure upstream \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --upstream-header-timeout 120s\n"
       })
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Alias example:"
@@ -259,10 +268,14 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "provider and model inventory"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "root and provider upstream header timeouts"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "alias routing state"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "metrics-backed inventory state"
       }), "\n"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "If rate-limit settings are unchanged, reload preserves existing limiter buckets.\nChanging rate-limit settings creates a fresh limiter and resets bucket state."
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "These changes still require a restart:"
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
@@ -270,6 +283,10 @@ function _createMdxContent(props) {
         children: "listener address changes"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "listener timeout changes"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "log-level changes"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "enabling the dashboard after startup"
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Use reload for routing and auth changes, not for socket-level listener changes."
