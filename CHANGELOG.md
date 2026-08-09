@@ -1,3 +1,10 @@
+## [0.13.0](https://github.com/egose/aiproxy/compare/v0.12.0...v0.13.0) (2026-08-09)
+
+### Features
+
+* **website:** add per-config daemon state and lifecycle verification ([1b783cb](https://github.com/egose/aiproxy/commit/1b783cb1c3ad9689ec56f3244960e26dc26af21e))
+* **website:** validate upstream settings and preserve request fields ([eba114b](https://github.com/egose/aiproxy/commit/eba114b5a11ecf1ec50f0c251962ad364efb32a7))
+
 ## [0.12.0](https://github.com/egose/aiproxy/compare/v0.11.2...v0.12.0) (2026-08-08)
 
 ### Features
