@@ -3,6 +3,7 @@ package providerhealth
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +16,8 @@ type stubBackend struct {
 	markSuccess func(context.Context, string) error
 	markFailure func(context.Context, string, time.Duration) error
 	isHealthy   func(context.Context, string) (bool, error)
+	snapshot    func(context.Context, []string) (map[string]bool, error)
+	close       func() error
 }
 
 func (b stubBackend) MarkSuccess(ctx context.Context, name string) error {
@@ -36,6 +39,28 @@ func (b stubBackend) IsHealthy(ctx context.Context, name string) (bool, error) {
 		return b.isHealthy(ctx, name)
 	}
 	return true, nil
+}
+
+func (b stubBackend) Snapshot(ctx context.Context, names []string) (map[string]bool, error) {
+	if b.snapshot != nil {
+		return b.snapshot(ctx, names)
+	}
+	out := make(map[string]bool, len(names))
+	for _, name := range names {
+		healthy, err := b.IsHealthy(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = healthy
+	}
+	return out, nil
+}
+
+func (b stubBackend) Close() error {
+	if b.close != nil {
+		return b.close()
+	}
+	return nil
 }
 
 func TestTrackerFailureCooldownAndRecovery(t *testing.T) {
@@ -93,7 +118,10 @@ func TestRedisBackendRespectsCancelledContext(t *testing.T) {
 		t.Fatalf("miniredis: %v", err)
 	}
 	defer server.Close()
-	backend := newRedisBackend("redis://"+server.Addr(), "test")
+	backend, err := newRedisBackend("redis://"+server.Addr(), "test")
+	if err != nil {
+		t.Fatalf("redis backend: %v", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := backend.MarkFailure(ctx, "openai", 30*time.Second); !errors.Is(err, context.Canceled) {
@@ -101,6 +129,44 @@ func TestRedisBackendRespectsCancelledContext(t *testing.T) {
 	}
 	if healthy, err := backend.IsHealthy(context.Background(), "openai"); err != nil || !healthy {
 		t.Fatalf("healthy=%v err=%v", healthy, err)
+	}
+}
+
+func TestRedisBackendRejectsMalformedURL(t *testing.T) {
+	if _, err := newRedisBackend("localhost:6379", "test"); err == nil {
+		t.Fatal("expected malformed Redis URL to be rejected")
+	}
+}
+
+func TestRedisBackendCloseClosesClient(t *testing.T) {
+	server, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	defer server.Close()
+	backend, err := newRedisBackend("redis://"+server.Addr(), "test")
+	if err != nil {
+		t.Fatalf("redis backend: %v", err)
+	}
+	if err := backend.Close(); err != nil {
+		t.Fatalf("close backend: %v", err)
+	}
+	if err := backend.MarkSuccess(context.Background(), "openai"); err == nil {
+		t.Fatal("expected operation after close to fail")
+	}
+}
+
+func TestTrackerCloseClosesBackend(t *testing.T) {
+	closed := false
+	tracker := &Tracker{backend: stubBackend{close: func() error {
+		closed = true
+		return nil
+	}}}
+	if err := tracker.Close(); err != nil {
+		t.Fatalf("close tracker: %v", err)
+	}
+	if !closed {
+		t.Fatal("backend was not closed")
 	}
 }
 
@@ -151,5 +217,62 @@ func TestTrackerSnapshotNilSafe(t *testing.T) {
 	var tracker *Tracker
 	if snap := tracker.Snapshot(); snap != nil {
 		t.Fatalf("nil tracker snapshot = %+v", snap)
+	}
+}
+
+func TestTrackerSnapshotDoesNotHoldProviderLockDuringBackendRead(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	tracker := &Tracker{known: map[string]bool{"openai": true}, backend: stubBackend{snapshot: func(ctx context.Context, names []string) (map[string]bool, error) {
+		close(started)
+		<-release
+		return map[string]bool{"openai": true}, nil
+	}}}
+	done := make(chan struct{})
+	go func() {
+		_ = tracker.Snapshot()
+		close(done)
+	}()
+	<-started
+	setDone := make(chan struct{})
+	go func() {
+		tracker.SetProviders(map[string]config.Provider{"gemini": {Name: "gemini"}})
+		close(setDone)
+	}()
+	select {
+	case <-setDone:
+	case <-time.After(200 * time.Millisecond):
+		close(release)
+		t.Fatal("SetProviders blocked on snapshot backend read")
+	}
+	close(release)
+	<-done
+}
+
+func TestTrackerSnapshotContextCancellationFailsOpen(t *testing.T) {
+	tracker := &Tracker{known: map[string]bool{"openai": true, "gemini": true}, backend: stubBackend{snapshot: func(ctx context.Context, names []string) (map[string]bool, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	snapshot := tracker.SnapshotContext(ctx)
+	if len(snapshot) != 2 || !snapshot["openai"] || !snapshot["gemini"] {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+}
+
+func TestTrackerAnyHealthyUsesOneBackendSnapshot(t *testing.T) {
+	var calls atomic.Int32
+	tracker := &Tracker{backend: stubBackend{snapshot: func(ctx context.Context, names []string) (map[string]bool, error) {
+		calls.Add(1)
+		return map[string]bool{"openai": false, "gemini": true}, nil
+	}}}
+	providers := map[string]config.Provider{"openai": {Name: "openai"}, "gemini": {Name: "gemini"}}
+	if !tracker.AnyHealthyContext(context.Background(), providers) {
+		t.Fatal("expected one healthy provider")
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("backend snapshot calls = %d, want 1", calls.Load())
 	}
 }

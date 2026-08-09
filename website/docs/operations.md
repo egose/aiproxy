@@ -52,6 +52,7 @@ aiproxy configure provider
 aiproxy configure auth
 aiproxy configure alias
 aiproxy configure listener
+aiproxy configure upstream
 aiproxy configure logging
 aiproxy configure provider-health
 ```
@@ -61,7 +62,7 @@ subcommands can also be used directly.
 
 Supported workflows:
 
-- create or update `listener`, `auth`, `provider`, `alias`, `logging`, and `provider_health`
+- create or update `listener`, root `upstream_header_timeout`, `auth`, `provider`, `alias`, `logging`, and `provider_health`
 - update provider secrets when using `api_key_ref`
 - delete existing blocks with `--delete`
 
@@ -77,11 +78,21 @@ aiproxy configure provider \
   --type openai-compatible \
   --display-name "Backup provider" \
   --base-url https://llm.internal/v1 \
+  --upstream-header-timeout 180s \
   --secrets-path /etc/aiproxy/keys.json \
   --secrets-key localai \
   --api-key "$LOCALAI_API_KEY" \
   --model qwen3-32b=qwen/qwen3-32b \
   --model-capabilities qwen3-32b=chat,responses
+```
+
+Root upstream timeout example:
+
+```sh
+aiproxy configure upstream \
+  --config /etc/aiproxy/config.hcl \
+  --non-interactive \
+  --upstream-header-timeout 120s
 ```
 
 Alias example:
@@ -153,13 +164,19 @@ There is no separate typecheck target. A successful Go build is the typecheck.
 
 - auth configuration
 - provider and model inventory
+- root and provider upstream header timeouts
 - alias routing state
 - metrics-backed inventory state
+
+If rate-limit settings are unchanged, reload preserves existing limiter buckets.
+Changing rate-limit settings creates a fresh limiter and resets bucket state.
 
 These changes still require a restart:
 
 - listener address changes
 - listener timeout changes
+- log-level changes
+- enabling the dashboard after startup
 
 Use reload for routing and auth changes, not for socket-level listener changes.
 

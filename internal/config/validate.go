@@ -1,6 +1,13 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"net"
+	"net/url"
+	"strings"
+
+	"github.com/redis/go-redis/v9"
+)
 
 func Validate(rt *Runtime) error {
 	if err := validateListener(rt.Listener); err != nil {
@@ -18,7 +25,10 @@ func Validate(rt *Runtime) error {
 	if err := validateDashboard(rt.Dashboard); err != nil {
 		return err
 	}
-	if err := validateProviders(rt.Providers); err != nil {
+	if err := validateProviders(rt.Providers, true); err != nil {
+		return err
+	}
+	if err := validateProviders(rt.DisabledProviders, false); err != nil {
 		return err
 	}
 	if err := validateAliases(rt.Aliases, rt.ProviderByName); err != nil {
@@ -37,14 +47,17 @@ func validateLogging(l Logging) error {
 }
 
 func validateProviderHealth(h ProviderHealth) error {
-	if h.RedisURL == "" {
-		return nil
-	}
 	if h.Cooldown < 0 {
 		return fmt.Errorf("provider_health: cooldown must not be negative")
 	}
+	if h.RedisURL == "" {
+		return nil
+	}
 	if h.KeyPrefix == "" {
 		return fmt.Errorf("provider_health: key_prefix must not be empty")
+	}
+	if _, err := redis.ParseURL(h.RedisURL); err != nil {
+		return fmt.Errorf("provider_health: redis_url must be a valid Redis URL: %w", err)
 	}
 	return nil
 }
@@ -105,10 +118,13 @@ func validateAuth(a Auth) error {
 	return nil
 }
 
-func validateProviders(providers []Provider) error {
+func validateProviders(providers []Provider, requireCredential bool) error {
 	for _, p := range providers {
 		if !IsLowercaseName(p.Name) {
 			return fmt.Errorf("provider %q: name must be lowercase, no spaces, no '/', and start with [a-z0-9]", p.Name)
+		}
+		if p.Name == "alias" {
+			return fmt.Errorf("provider %q: name is reserved for alias model routing", p.Name)
 		}
 		switch p.Type {
 		case ProviderTypeOpenAI, ProviderTypeOpenAICompatible, ProviderTypeAnthropic, ProviderTypeGemini:
@@ -118,7 +134,10 @@ func validateProviders(providers []Provider) error {
 		if p.Type == ProviderTypeOpenAICompatible && p.BaseURL == "" {
 			return fmt.Errorf("provider %q: base_url is required for openai-compatible", p.Name)
 		}
-		if p.APIKey == "" {
+		if err := validateProviderBaseURL(p); err != nil {
+			return err
+		}
+		if requireCredential && p.APIKey == "" {
 			return fmt.Errorf("provider %q: exactly one of api_key or api_key_ref must be set (no credential resolved)", p.Name)
 		}
 		if len(p.Models) == 0 {
@@ -149,6 +168,38 @@ func validateProviders(providers []Provider) error {
 	return nil
 }
 
+func validateProviderBaseURL(p Provider) error {
+	if p.BaseURL == "" {
+		return nil
+	}
+	u, err := url.Parse(p.BaseURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("provider %q: base_url must be an absolute http or https URL", p.Name)
+	}
+	if u.User != nil {
+		return fmt.Errorf("provider %q: base_url must not include userinfo", p.Name)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if isLoopbackHost(u.Hostname()) {
+			return nil
+		}
+		return fmt.Errorf("provider %q: non-HTTPS base_url is allowed only for loopback hosts", p.Name)
+	default:
+		return fmt.Errorf("provider %q: base_url scheme must be http or https", p.Name)
+	}
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func validateAliases(aliases []Alias, providers map[string]Provider) error {
 	for _, a := range aliases {
 		if !IsLowercaseName(a.Name) {
@@ -163,8 +214,8 @@ func validateAliases(aliases []Alias, providers map[string]Provider) error {
 			return fmt.Errorf("alias %q: at least one target is required", a.Name)
 		}
 		for _, code := range a.RetryStatusCodes {
-			if code < 100 || code > 599 {
-				return fmt.Errorf("alias %q: invalid retry status code %d: must be between 100 and 599", a.Name, code)
+			if !isRetryableStatusCode(code) {
+				return fmt.Errorf("alias %q: invalid retry status code %d: must be between 400 and 599", a.Name, code)
 			}
 		}
 		seen := make(map[string]bool)

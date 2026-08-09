@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -78,6 +79,46 @@ func TestValidateCommandDefaultsConfigFlag(t *testing.T) {
 	want := filepath.Join(home, ".config", "aiproxy", "config.hcl")
 	if got != want {
 		t.Fatalf("validate default config flag = %q, want %q", got, want)
+	}
+}
+
+func TestValidateCommandHasNoDashboardTokenSideEffect(t *testing.T) {
+	xdgRoot := t.TempDir()
+	configDir := filepath.Join(xdgRoot, "aiproxy")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	configPath := filepath.Join(configDir, "config.hcl")
+	if err := os.WriteFile(configPath, []byte(`
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+dashboard {}
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.Chmod(configDir, 0o500); err != nil {
+		t.Fatalf("chmod config dir: %v", err)
+	}
+	defer func() { _ = os.Chmod(configDir, 0o700) }()
+	t.Setenv("XDG_CONFIG_HOME", xdgRoot)
+
+	cmd := newRootCommand()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"validate", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute(): %v", err)
+	}
+	if buf.String() != "config is valid\n" {
+		t.Fatalf("validate output = %q", buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(configDir, "dashboard.token")); !os.IsNotExist(err) {
+		t.Fatalf("validate should not create dashboard token; stat err = %v", err)
 	}
 }
 

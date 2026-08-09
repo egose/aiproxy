@@ -140,16 +140,17 @@ func (r *MemoryRecorder) Recent(n int) []Event {
 }
 
 type Aggregator struct {
-	mu        sync.Mutex
-	counts    map[summaryKey]aggregateEntry
-	recent    *ringBuffer
-	retention time.Duration
-	now       func() time.Time
+	mu             sync.Mutex
+	buckets        map[time.Time]map[summaryKey]aggregateEntry
+	bucketOrder    []time.Time
+	bucketDuration time.Duration
+	recent         *ringBuffer
+	retention      time.Duration
+	now            func() time.Time
 }
 
 type aggregateEntry struct {
 	count            int64
-	lastSeen         time.Time
 	promptTokens     int64
 	completionTokens int64
 	totalTokens      int64
@@ -165,17 +166,18 @@ type summaryKey struct {
 
 func NewAggregator() *Aggregator {
 	return &Aggregator{
-		counts:    make(map[summaryKey]aggregateEntry),
-		recent:    newRingBuffer(defaultRecentN),
-		retention: defaultRetention,
-		now:       time.Now,
+		buckets:        make(map[time.Time]map[summaryKey]aggregateEntry),
+		bucketDuration: time.Minute,
+		recent:         newRingBuffer(defaultRecentN),
+		retention:      defaultRetention,
+		now:            time.Now,
 	}
 }
 
 func (a *Aggregator) Record(event Event) {
 	a.mu.Lock()
-	if a.counts == nil {
-		a.counts = make(map[summaryKey]aggregateEntry)
+	if a.buckets == nil {
+		a.buckets = make(map[time.Time]map[summaryKey]aggregateEntry)
 	}
 	if a.recent == nil {
 		a.recent = newRingBuffer(defaultRecentN)
@@ -189,13 +191,19 @@ func (a *Aggregator) Record(event Event) {
 		operation:  event.Operation,
 		statusCode: event.StatusCode,
 	}
-	entry := a.counts[key]
+	bucketStart := a.bucketStart(now)
+	bucket := a.buckets[bucketStart]
+	if bucket == nil {
+		bucket = make(map[summaryKey]aggregateEntry)
+		a.buckets[bucketStart] = bucket
+		a.bucketOrder = append(a.bucketOrder, bucketStart)
+	}
+	entry := bucket[key]
 	entry.count++
-	entry.lastSeen = now
 	entry.promptTokens += event.PromptTokens
 	entry.completionTokens += event.CompletionTokens
 	entry.totalTokens += event.TotalTokens
-	a.counts[key] = entry
+	bucket[key] = entry
 	ringEntry := event
 	if ringEntry.Timestamp.IsZero() {
 		ringEntry.Timestamp = now
@@ -208,8 +216,19 @@ func (a *Aggregator) Summaries() []Summary {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.pruneLocked(a.nowTime(time.Time{}))
-	out := make([]Summary, 0, len(a.counts))
-	for key, entry := range a.counts {
+	counts := make(map[summaryKey]aggregateEntry)
+	for _, bucket := range a.buckets {
+		for key, entry := range bucket {
+			total := counts[key]
+			total.count += entry.count
+			total.promptTokens += entry.promptTokens
+			total.completionTokens += entry.completionTokens
+			total.totalTokens += entry.totalTokens
+			counts[key] = total
+		}
+	}
+	out := make([]Summary, 0, len(counts))
+	for key, entry := range counts {
 		out = append(out, Summary{
 			Tenant:           key.tenant,
 			Client:           key.client,
@@ -260,15 +279,39 @@ func (a *Aggregator) nowTime(ts time.Time) time.Time {
 }
 
 func (a *Aggregator) pruneLocked(now time.Time) {
-	if a.retention <= 0 || a.counts == nil {
+	if a.retention <= 0 || len(a.bucketOrder) == 0 {
 		return
 	}
 	cutoff := now.Add(-a.retention)
-	for key, entry := range a.counts {
-		if entry.lastSeen.Before(cutoff) {
-			delete(a.counts, key)
+	keep := 0
+	for _, start := range a.bucketOrder {
+		if start.Before(cutoff) {
+			delete(a.buckets, start)
+			continue
 		}
+		a.bucketOrder[keep] = start
+		keep++
 	}
+	clear(a.bucketOrder[keep:])
+	a.bucketOrder = a.bucketOrder[:keep]
+	sort.Slice(a.bucketOrder, func(i, j int) bool { return a.bucketOrder[i].Before(a.bucketOrder[j]) })
+}
+
+func (a *Aggregator) bucketStart(ts time.Time) time.Time {
+	return ts.Truncate(a.effectiveBucketDuration())
+}
+
+func (a *Aggregator) effectiveBucketDuration() time.Duration {
+	if a.bucketDuration > 0 {
+		if a.retention > 0 && a.retention < a.bucketDuration {
+			return a.retention
+		}
+		return a.bucketDuration
+	}
+	if a.retention > 0 && a.retention < time.Minute {
+		return a.retention
+	}
+	return time.Minute
 }
 
 func ByProvider(summaries []Summary) []ProviderSummary {

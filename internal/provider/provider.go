@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 
 	"github.com/egose/aiproxy/internal/config"
 )
@@ -40,6 +41,7 @@ type Result struct {
 	Streaming  bool
 	OnClose    func()
 	Usage      Usage
+	Stream     *StreamCompletion
 }
 
 type Usage struct {
@@ -50,6 +52,67 @@ type Usage struct {
 
 func (u Usage) Has() bool {
 	return u.PromptTokens > 0 || u.CompletionTokens > 0 || u.TotalTokens > 0
+}
+
+type StreamCompletion struct {
+	mu      sync.Mutex
+	done    chan struct{}
+	once    sync.Once
+	outcome StreamOutcome
+}
+
+type StreamOutcome struct {
+	Err                error
+	DownstreamCanceled bool
+	Usage              Usage
+}
+
+func NewStreamCompletion() *StreamCompletion {
+	return &StreamCompletion{done: make(chan struct{})}
+}
+
+func (s *StreamCompletion) SetUsage(usage Usage) {
+	if s == nil || !usage.Has() {
+		return
+	}
+	s.mu.Lock()
+	if usage.PromptTokens > 0 {
+		s.outcome.Usage.PromptTokens = usage.PromptTokens
+	}
+	if usage.CompletionTokens > 0 {
+		s.outcome.Usage.CompletionTokens = usage.CompletionTokens
+	}
+	if usage.TotalTokens > 0 {
+		s.outcome.Usage.TotalTokens = usage.TotalTokens
+	}
+	if total := s.outcome.Usage.PromptTokens + s.outcome.Usage.CompletionTokens; total > s.outcome.Usage.TotalTokens {
+		s.outcome.Usage.TotalTokens = total
+	}
+	s.mu.Unlock()
+}
+
+func (s *StreamCompletion) Complete(err error, downstreamCanceled bool) {
+	if s == nil {
+		return
+	}
+	s.once.Do(func() {
+		s.mu.Lock()
+		s.outcome.Err = err
+		s.outcome.DownstreamCanceled = downstreamCanceled
+		s.mu.Unlock()
+		close(s.done)
+	})
+}
+
+func (s *StreamCompletion) Wait() StreamOutcome {
+	if s == nil {
+		return StreamOutcome{}
+	}
+	<-s.done
+	s.mu.Lock()
+	outcome := s.outcome
+	s.mu.Unlock()
+	return outcome
 }
 
 type Adapter interface {
@@ -173,6 +236,7 @@ func requestBody(r Request) ([]byte, error) {
 
 type upstreamResponseHandlers struct {
 	PreferStreaming bool
+	StreamSuccess   bool
 	IsStreaming     func(*http.Response) bool
 	OnStream        func(*http.Response) (*Result, error)
 	OnError         func(*http.Response, []byte) (*Result, error)
@@ -201,6 +265,9 @@ func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHand
 	}
 	if isStreaming {
 		return handlers.OnStream(resp)
+	}
+	if handlers.StreamSuccess {
+		return &Result{StatusCode: resp.StatusCode, Header: resp.Header, StreamBody: resp.Body, Streaming: true}, nil
 	}
 	defer resp.Body.Close()
 	body, err := readUpstreamBody(resp.Body)

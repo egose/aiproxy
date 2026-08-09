@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
@@ -32,6 +33,7 @@ type Metrics struct {
 	upstreamLatency    *prometheus.HistogramVec
 	upstreamRespBytes  *prometheus.HistogramVec
 	providerHealthy    *prometheus.GaugeVec
+	providerHealthErrs *prometheus.CounterVec
 	skippedProviders   *prometheus.GaugeVec
 	buildInfo          *prometheus.GaugeVec
 	authModeInfo       *prometheus.GaugeVec
@@ -42,6 +44,8 @@ type Metrics struct {
 	aliasCount         prometheus.Gauge
 	readiness          prometheus.Gauge
 	readyReason        *prometheus.GaugeVec
+	configMu           sync.Mutex
+	lastConfig         *config.Runtime
 }
 
 func NewMetrics() *Metrics {
@@ -114,6 +118,10 @@ func NewMetrics() *Metrics {
 			Name: "aiproxy_provider_healthy",
 			Help: "Whether a provider is currently considered healthy for shared routing state (1=yes, 0=no).",
 		}, []string{"name"}),
+		providerHealthErrs: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "aiproxy_provider_health_backend_errors_total",
+			Help: "Total number of provider health backend errors by operation.",
+		}, []string{"operation"}),
 		skippedProviders: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "aiproxy_skipped_provider_info",
 			Help: "Static gauge for providers skipped during startup because they are not active.",
@@ -171,6 +179,7 @@ func NewMetrics() *Metrics {
 		m.upstreamLatency,
 		m.upstreamRespBytes,
 		m.providerHealthy,
+		m.providerHealthErrs,
 		m.skippedProviders,
 		m.buildInfo,
 		m.authModeInfo,
@@ -207,6 +216,9 @@ func (m *Metrics) RecordConfig(rt *config.Runtime) {
 	if m == nil || rt == nil {
 		return
 	}
+	m.configMu.Lock()
+	defer m.configMu.Unlock()
+	m.removeRetiredConfigLabels(rt)
 	m.providerCount.Set(float64(len(rt.Providers)))
 	m.disabledCount.Set(float64(len(rt.DisabledProviders)))
 	m.aliasCount.Set(float64(len(rt.Aliases)))
@@ -256,6 +268,31 @@ func (m *Metrics) RecordConfig(rt *config.Runtime) {
 	} else {
 		m.SetReadyWithReason(false, "no_active_providers")
 	}
+	m.lastConfig = rt
+}
+
+func (m *Metrics) removeRetiredConfigLabels(rt *config.Runtime) {
+	if m.lastConfig == nil {
+		return
+	}
+	activeProviders := make(map[string]bool, len(rt.Providers))
+	for _, p := range rt.Providers {
+		activeProviders[p.Name] = true
+	}
+	for _, p := range m.lastConfig.Providers {
+		if !activeProviders[p.Name] {
+			m.providerHealthy.DeleteLabelValues(p.Name)
+		}
+	}
+	disabledProviders := make(map[string]bool, len(rt.DisabledProviders))
+	for _, p := range rt.DisabledProviders {
+		disabledProviders[p.Name+"\x00"+string(p.Type)] = true
+	}
+	for _, p := range m.lastConfig.DisabledProviders {
+		if !disabledProviders[p.Name+"\x00"+string(p.Type)] {
+			m.skippedProviders.DeleteLabelValues(p.Name, string(p.Type))
+		}
+	}
 }
 
 func (m *Metrics) SetProviderHealthy(name string, healthy bool) {
@@ -274,6 +311,16 @@ func (m *Metrics) RemoveProviderHealthy(name string) {
 		return
 	}
 	m.providerHealthy.DeleteLabelValues(name)
+}
+
+func (m *Metrics) RecordProviderHealthBackendError(operation string) {
+	if m == nil {
+		return
+	}
+	if operation == "" {
+		operation = "unknown"
+	}
+	m.providerHealthErrs.WithLabelValues(operation).Inc()
 }
 
 func (m *Metrics) RecordHTTP(method, path string, statusCode int, seconds float64) {

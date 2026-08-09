@@ -5,10 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/egose/aiproxy/internal/accounting"
-	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/dashrpc"
-	"github.com/egose/aiproxy/internal/observability"
 )
 
 const dashboardRecentN = 200
@@ -17,7 +14,7 @@ const dashboardRecentN = 200
 // the request was handled. When the dashboard block is unconfigured, every
 // path under /_internal/* returns 404 so the surface stays closed.
 func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *http.Request) bool {
-	if !deps.Dashboard.Enabled {
+	if deps.Dashboard == nil || !deps.Dashboard.Enabled() {
 		return false
 	}
 	if r.URL.Path == dashrpc.SnapshotPath {
@@ -30,7 +27,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return true
 		}
-		h.writeDashboardSnapshot(deps, w)
+		h.writeDashboardSnapshot(deps, w, r)
 		return true
 	}
 	if r.URL.Path == dashrpc.LogsPath {
@@ -49,8 +46,8 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 	return false
 }
 
-func dashboardAuthorized(c config.Dashboard, r *http.Request) bool {
-	if c.Token == "" {
+func dashboardAuthorized(source dashrpc.Source, r *http.Request) bool {
+	if source == nil || source.Token() == "" {
 		return false
 	}
 	got := r.Header.Get(dashrpc.AuthHeaderName)
@@ -63,7 +60,7 @@ func dashboardAuthorized(c config.Dashboard, r *http.Request) bool {
 	if got[:len(dashrpc.AuthScheme)] != dashrpc.AuthScheme {
 		return false
 	}
-	return got[len(dashrpc.AuthScheme):] == c.Token
+	return got[len(dashrpc.AuthScheme):] == source.Token()
 }
 
 type snapshotResponse struct {
@@ -71,44 +68,14 @@ type snapshotResponse struct {
 	LastSeq uint64 `json:"last_seq"`
 }
 
-func (h *Handler) writeDashboardSnapshot(deps Dependencies, w http.ResponseWriter) {
-	recentN := dashboardRecentN
-	snap := dashrpc.Build(
-		deps.DashboardVersion, deps.DashboardAddress, deps.DashboardAuthMode,
-		deps.DashboardStartTime,
-		deps.DashboardProviders, deps.DashboardDisabled, deps.DashboardAliases,
-		usageAggregator(deps.Usage), deps.Health, deps.Logs, recentN,
-	)
+func (h *Handler) writeDashboardSnapshot(deps Dependencies, w http.ResponseWriter, r *http.Request) {
+	snap := deps.Dashboard.Snapshot(r.Context(), dashboardRecentN)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(snapshotResponse{Snapshot: snap, LastSeq: snap.LastSeq})
 }
 
-type logsResponse struct {
-	Logs    []observability.LogEntry `json:"logs"`
-	LastSeq uint64                   `json:"last_seq"`
-}
-
 func (h *Handler) writeDashboardLogs(deps Dependencies, w http.ResponseWriter, r *http.Request) {
-	if deps.Logs == nil {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(logsResponse{})
-		return
-	}
 	since, _ := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64)
-	entries, lastSeq := deps.Logs.SinceSeq(since)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(logsResponse{Logs: entries, LastSeq: lastSeq})
-}
-
-// usageAggregator extracts the *accounting.Aggregator backing the Reader
-// interface, if present. The dashboard surfaces recent events (which the
-// Reader interface itself does not expose).
-func usageAggregator(r accounting.Reader) *accounting.Aggregator {
-	if r == nil {
-		return nil
-	}
-	if a, ok := r.(*accounting.Aggregator); ok {
-		return a
-	}
-	return nil
+	_ = json.NewEncoder(w).Encode(deps.Dashboard.Logs(since))
 }

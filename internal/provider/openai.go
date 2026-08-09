@@ -46,11 +46,13 @@ func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
 	streaming := (r.Operation == OpChatCompletions || r.Operation == OpResponses) && isStream(body)
 	return executeUpstream(r, req, upstreamResponseHandlers{
 		PreferStreaming: true,
+		StreamSuccess:   streamsOpaqueSuccess(r.Operation),
 		IsStreaming: func(resp *http.Response) bool {
 			return streaming || strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream")
 		},
 		OnStream: func(resp *http.Response) (*Result, error) {
-			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, StreamBody: resp.Body, Streaming: true}, nil
+			stream := NewStreamCompletion()
+			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, StreamBody: newOpenAIStreamUsageReadCloser(resp.Body, stream), Streaming: true, Stream: stream}, nil
 		},
 		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
 			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body, Usage: usageFromBody(body)}, nil
@@ -59,6 +61,69 @@ func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
 			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil
 		},
 	})
+}
+
+type openAIStreamUsageReadCloser struct {
+	io.ReadCloser
+	stream    *StreamCompletion
+	line      []byte
+	dataLines []string
+}
+
+func newOpenAIStreamUsageReadCloser(src io.ReadCloser, stream *StreamCompletion) io.ReadCloser {
+	return &openAIStreamUsageReadCloser{ReadCloser: src, stream: stream}
+}
+
+func (r *openAIStreamUsageReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if n > 0 {
+		r.observe(p[:n])
+	}
+	return n, err
+}
+
+func (r *openAIStreamUsageReadCloser) observe(chunk []byte) {
+	for _, b := range chunk {
+		if b == '\n' {
+			r.observeLine(string(r.line))
+			r.line = r.line[:0]
+			continue
+		}
+		r.line = append(r.line, b)
+	}
+}
+
+func (r *openAIStreamUsageReadCloser) observeLine(line string) {
+	line = strings.TrimRight(line, "\r")
+	if line == "" {
+		r.observeEvent()
+		return
+	}
+	if strings.HasPrefix(line, ":") {
+		return
+	}
+	field, value, ok := strings.Cut(line, ":")
+	if !ok || field != "data" {
+		return
+	}
+	if strings.HasPrefix(value, " ") {
+		value = value[1:]
+	}
+	r.dataLines = append(r.dataLines, value)
+}
+
+func (r *openAIStreamUsageReadCloser) observeEvent() {
+	if len(r.dataLines) == 0 {
+		return
+	}
+	data := strings.Join(r.dataLines, "\n")
+	r.dataLines = nil
+	if strings.TrimSpace(data) == "[DONE]" {
+		return
+	}
+	if usage := usageFromBody([]byte(data)); usage.Has() {
+		r.stream.SetUsage(usage)
+	}
 }
 
 func openAIPathForOperation(op Operation) (string, error) {
@@ -119,6 +184,15 @@ func (a *adapter) doOpenAIAudioTranscriptions(ctx context.Context, r Request) (*
 			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil
 		},
 	})
+}
+
+func streamsOpaqueSuccess(op Operation) bool {
+	switch op {
+	case OpImagesGenerations, OpAudioSpeech:
+		return true
+	default:
+		return false
+	}
 }
 
 func multipartBoundary(contentType string) string {
@@ -184,12 +258,7 @@ func joinBaseURLAndPath(baseURL, path string) string {
 }
 
 func rewriteModel(body []byte, upstreamModel string) (json.RawMessage, error) {
-	var m map[string]any
-	if err := json.Unmarshal(body, &m); err != nil {
-		return nil, err
-	}
-	m["model"] = upstreamModel
-	return json.Marshal(m)
+	return rewriteTopLevelModel(body, upstreamModel)
 }
 
 func isStream(body []byte) bool {

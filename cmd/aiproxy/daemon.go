@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -8,11 +11,28 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/egose/aiproxy/internal/filestore"
 	"github.com/spf13/cobra"
 )
+
+const (
+	daemonStateVersion = 1
+	daemonReadyEnv     = "AIPROXY_DAEMON_READY_FD"
+	daemonReadyMessage = "ready\n"
+)
+
+type daemonState struct {
+	Version   int    `json:"version"`
+	PID       int    `json:"pid"`
+	Exe       string `json:"exe"`
+	StartTime string `json:"start_time"`
+	Config    string `json:"config"`
+	Created   int64  `json:"created"`
+}
 
 func resolveDaemonPaths() (pidPath, logPath string) {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
@@ -27,16 +47,27 @@ func resolveDaemonPaths() (pidPath, logPath string) {
 		filepath.Join(home, ".config", "aiproxy", "aiproxy.log")
 }
 
-// spawnDaemon forks the current aiproxy serve as a detached background
-// process, recording its PID in a pidfile and redirecting stdio to a log file.
 func spawnDaemon(cmd *cobra.Command, cfgPath string) error {
-	pidPath, logPath := resolveDaemonPaths()
+	statePath, lockPath, logPath, canonicalConfig, err := resolveDaemonFiles(cfgPath)
+	if err != nil {
+		return err
+	}
 
-	if pid, _ := readLivePID(pidPath); pid != 0 {
-		return fmt.Errorf("server already running (pid %d); use `aiproxy stop` first", pid)
+	lockFile, err := acquireDaemonLock(lockPath)
+	if err != nil {
+		return err
+	}
+	defer releaseDaemonLock(lockFile)
+
+	if state, ok := readVerifiedDaemonState(statePath); ok {
+		return fmt.Errorf("server already running (pid %d); use `aiproxy stop --config %s` first", state.PID, canonicalConfig)
 	}
 
 	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+	exe, err = filepath.EvalSymlinks(exe)
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
 	}
@@ -44,42 +75,167 @@ func spawnDaemon(cmd *cobra.Command, cfgPath string) error {
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return fmt.Errorf("create log dir %s: %w", filepath.Dir(logPath), err)
 	}
-	if err := os.MkdirAll(filepath.Dir(pidPath), 0o700); err != nil {
-		return fmt.Errorf("create pid dir %s: %w", filepath.Dir(pidPath), err)
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o700); err != nil {
+		return fmt.Errorf("create state dir %s: %w", filepath.Dir(statePath), err)
 	}
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("open log file %s: %w", logPath, err)
 	}
+	defer logFile.Close()
+
+	readyRead, readyWrite, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("create readiness pipe: %w", err)
+	}
+	defer readyRead.Close()
 
 	child := exec.Command(exe, "serve", "--config", cfgPath)
 	child.Stdin = nil
 	child.Stdout = logFile
 	child.Stderr = logFile
 	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	child.ExtraFiles = []*os.File{readyWrite}
+	child.Env = append(os.Environ(), daemonReadyEnv+"=3")
 	if err := child.Start(); err != nil {
-		logFile.Close()
+		_ = readyWrite.Close()
 		return fmt.Errorf("start daemon: %w", err)
 	}
+	_ = readyWrite.Close()
 
 	pid := child.Process.Pid
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
+	if err := waitForDaemonReady(child, readyRead); err != nil {
 		_ = child.Process.Signal(syscall.SIGTERM)
-		logFile.Close()
-		return fmt.Errorf("write pidfile %s: %w", pidPath, err)
+		_, _ = child.Process.Wait()
+		_ = os.Remove(statePath)
+		return err
 	}
 
+	startTime, err := processStartTime(pid)
+	if err != nil {
+		_ = child.Process.Signal(syscall.SIGTERM)
+		_, _ = child.Process.Wait()
+		_ = os.Remove(statePath)
+		return fmt.Errorf("verify daemon identity: %w", err)
+	}
+	state := daemonState{Version: daemonStateVersion, PID: pid, Exe: exe, StartTime: startTime, Config: canonicalConfig, Created: time.Now().Unix()}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		_ = child.Process.Signal(syscall.SIGTERM)
+		_, _ = child.Process.Wait()
+		_ = os.Remove(statePath)
+		return fmt.Errorf("encode daemon state: %w", err)
+	}
+	data = append(data, '\n')
+	if err := filestore.WriteFile(statePath, data, 0o600, filestore.Options{DirMode: 0o700, Secret: true}); err != nil {
+		_ = child.Process.Signal(syscall.SIGTERM)
+		_, _ = child.Process.Wait()
+		_ = os.Remove(statePath)
+		return fmt.Errorf("write daemon state %s: %w", statePath, err)
+	}
 	if err := child.Process.Release(); err != nil {
-		logFile.Close()
+		_ = child.Process.Signal(syscall.SIGTERM)
+		_, _ = child.Process.Wait()
+		_ = os.Remove(statePath)
 		return fmt.Errorf("release daemon: %w", err)
 	}
-
-	// Close our handle on the log file. The child has its own inherited handle
-	// via Setsid, so writing continues. We only needed it for redirection.
-	_ = logFile.Close()
-
-	fmt.Fprintf(cmd.OutOrStdout(), "started aiproxy in background (pid %d)\nlog: %s\npidfile: %s\n", pid, logPath, pidPath)
+	fmt.Fprintf(cmd.OutOrStdout(), "started aiproxy in background (pid %d)\nlog: %s\nstate: %s\n", pid, logPath, statePath)
 	return nil
+}
+
+func resolveDaemonFiles(cfgPath string) (statePath, lockPath, logPath, canonicalConfig string, err error) {
+	_, logPath = resolveDaemonPaths()
+	canonicalConfig, err = canonicalConfigPath(cfgPath)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	baseDir := filepath.Dir(logPath)
+	sum := sha256.Sum256([]byte(canonicalConfig))
+	name := hex.EncodeToString(sum[:])[:16]
+	statePath = filepath.Join(baseDir, "daemon-"+name+".json")
+	lockPath = filepath.Join(baseDir, "daemon-"+name+".lock")
+	return statePath, lockPath, logPath, canonicalConfig, nil
+}
+
+func canonicalConfigPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve config path: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved, nil
+	}
+	return abs, nil
+}
+
+func acquireDaemonLock(path string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("create lock dir %s: %w", filepath.Dir(path), err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open lifecycle lock %s: %w", path, err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errno, ok := err.(syscall.Errno); ok && (errno == syscall.EWOULDBLOCK || errno == syscall.EAGAIN) {
+			return nil, errors.New("another daemon lifecycle operation is in progress")
+		}
+		return nil, fmt.Errorf("lock lifecycle state: %w", err)
+	}
+	return f, nil
+}
+
+func releaseDaemonLock(f *os.File) {
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	_ = f.Close()
+}
+
+func waitForDaemonReady(child *exec.Cmd, ready *os.File) error {
+	type result struct {
+		data []byte
+		err  error
+	}
+	readCh := make(chan result, 1)
+	go func() {
+		data, err := io.ReadAll(ready)
+		readCh <- result{data: data, err: err}
+	}()
+	timer := time.NewTimer(15 * time.Second)
+	defer timer.Stop()
+	select {
+	case res := <-readCh:
+		if res.err != nil {
+			return fmt.Errorf("read daemon readiness: %w", res.err)
+		}
+		if string(res.data) == daemonReadyMessage {
+			return nil
+		}
+		if err := child.Wait(); err != nil {
+			return fmt.Errorf("daemon exited before startup completed: %w", err)
+		}
+		return errors.New("daemon exited before startup completed")
+	case <-timer.C:
+		return errors.New("daemon startup timed out")
+	}
+}
+
+func notifyDaemonReady() error {
+	fd := os.Getenv(daemonReadyEnv)
+	if fd == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(fd)
+	if err != nil {
+		return fmt.Errorf("invalid readiness fd: %w", err)
+	}
+	f := os.NewFile(uintptr(n), "daemon-ready")
+	if f == nil {
+		return errors.New("open readiness fd")
+	}
+	defer f.Close()
+	_, err = io.WriteString(f, daemonReadyMessage)
+	return err
 }
 
 // readLivePID returns the PID stored in pidPath if the process is still
@@ -132,17 +288,91 @@ func processAlive(pid int) bool {
 		}
 		return false
 	}
-	return true
+	return !processZombie(pid)
 }
 
-// stopServer reads the pidfile and sends SIGTERM, escalating to SIGKILL after
-// a timeout. Returns nil on success.
+func processZombie(pid int) bool {
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return false
+	}
+	s := string(data)
+	end := strings.LastIndex(s, ")")
+	if end < 0 || end+2 > len(s) {
+		return false
+	}
+	fields := strings.Fields(s[end+2:])
+	return len(fields) > 0 && fields[0] == "Z"
+}
+
+func readVerifiedDaemonState(path string) (daemonState, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return daemonState{}, false
+	}
+	var state daemonState
+	if err := json.Unmarshal(data, &state); err != nil || state.Version != daemonStateVersion || state.PID <= 0 || state.Exe == "" || state.StartTime == "" {
+		return daemonState{}, false
+	}
+	if !processAlive(state.PID) {
+		_ = os.Remove(path)
+		return daemonState{}, false
+	}
+	exe, err := processExe(state.PID)
+	if err != nil || exe != state.Exe {
+		return daemonState{}, false
+	}
+	startTime, err := processStartTime(state.PID)
+	if err != nil || startTime != state.StartTime {
+		return daemonState{}, false
+	}
+	return state, true
+}
+
+func processExe(pid int) (string, error) {
+	exe, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "exe"))
+	if err != nil {
+		return "", err
+	}
+	exe = strings.TrimSuffix(exe, " (deleted)")
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return resolved, nil
+	}
+	return exe, nil
+}
+
+func processStartTime(pid int) (string, error) {
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return "", err
+	}
+	s := string(data)
+	end := strings.LastIndex(s, ")")
+	if end < 0 || end+2 > len(s) {
+		return "", errors.New("malformed process stat")
+	}
+	fields := strings.Fields(s[end+2:])
+	if len(fields) <= 19 {
+		return "", errors.New("malformed process stat")
+	}
+	return fields[19], nil
+}
+
 func stopServer(cfgPath string, out io.Writer) error {
-	pidPath, _ := resolveDaemonPaths()
-	pid, err := readLivePID(pidPath)
-	if err != nil || pid == 0 {
+	statePath, lockPath, _, _, err := resolveDaemonFiles(cfgPath)
+	if err != nil {
+		return err
+	}
+	lockFile, err := acquireDaemonLock(lockPath)
+	if err != nil {
+		return err
+	}
+	defer releaseDaemonLock(lockFile)
+	state, ok := readVerifiedDaemonState(statePath)
+	if !ok {
 		return errors.New("no server running")
 	}
+	pid := state.PID
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return fmt.Errorf("find pid %d: %w", pid, err)
@@ -154,7 +384,7 @@ func stopServer(cfgPath string, out io.Writer) error {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if !processAlive(pid) {
-			_ = os.Remove(pidPath)
+			_ = os.Remove(statePath)
 			fmt.Fprintf(out, "stopped aiproxy (pid %d)\n", pid)
 			return nil
 		}
@@ -163,20 +393,27 @@ func stopServer(cfgPath string, out io.Writer) error {
 	if err := proc.Signal(syscall.SIGKILL); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return fmt.Errorf("kill pid %d: %w", pid, err)
 	}
-	_ = os.Remove(pidPath)
+	_ = os.Remove(statePath)
 	fmt.Fprintf(out, "killed aiproxy (pid %d)\n", pid)
 	return nil
 }
 
-// statusServer reports whether the daemon is running.
 func statusServer(cfgPath string, out io.Writer) error {
-	pidPath, _ := resolveDaemonPaths()
-	pid, _ := readLivePID(pidPath)
-	if pid == 0 {
+	statePath, lockPath, _, _, err := resolveDaemonFiles(cfgPath)
+	if err != nil {
+		return err
+	}
+	lockFile, err := acquireDaemonLock(lockPath)
+	if err != nil {
+		return err
+	}
+	defer releaseDaemonLock(lockFile)
+	state, ok := readVerifiedDaemonState(statePath)
+	if !ok {
 		fmt.Fprintln(out, "no server running")
 		return errors.New("not running")
 	}
-	fmt.Fprintf(out, "running (pid %d)\n", pid)
+	fmt.Fprintf(out, "running (pid %d)\n", state.PID)
 	return nil
 }
 

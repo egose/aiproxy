@@ -94,6 +94,16 @@ This avoids masking client-side request problems as routing problems.
 
 For `openai` and `openai-compatible`, the proxy stays close to pass-through behavior. For translated providers, the proxy maps between the public OpenAI-style contract and the provider-native request and response shape.
 
+Pass-through providers preserve request JSON values and unknown extension fields, rewriting only the top-level `model` value before forwarding. Malformed JSON, non-object JSON bodies, and duplicate top-level `model` keys are rejected.
+
+Translated providers intentionally support a conservative OpenAI-style request subset. Unsupported top-level controls such as `tools`, `tool_choice`, `response_format`, `logprobs`, `parallel_tool_calls`, and unknown extension fields are rejected with `invalid_request` instead of being silently dropped.
+
+Translated chat completions support these top-level request fields: `model`, `messages`, `max_tokens`, `temperature`, `top_p`, and `stream`. Message roles are limited to `system`, `user`, and `assistant`, and content may be text or arrays of text parts.
+
+Translated responses support these top-level request fields: `model`, `input`, `instructions`, `max_output_tokens`, `temperature`, `top_p`, and `stream`. Input may be a string or an array of message items with text content.
+
+Gemini translated embeddings support these top-level request fields: `model`, `input`, and `dimensions`. Input may be a string or an array of strings.
+
 ## Model Capabilities
 
 Capabilities describe which proxy operations a model may serve.

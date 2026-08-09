@@ -8,9 +8,10 @@ import (
 
 func buildRuntime(raw *rawFile) (*Runtime, error) {
 	rt := &Runtime{
-		ProviderByName: make(map[string]Provider),
-		AliasByName:    make(map[string]Alias),
-		Logging:        Logging{Level: LogLevelInfo, AccessLog: true},
+		ProviderByName:        make(map[string]Provider),
+		AliasByName:           make(map[string]Alias),
+		Logging:               Logging{Level: LogLevelInfo, AccessLog: true},
+		UpstreamHeaderTimeout: DefaultUpstreamHeaderTimeout,
 	}
 	seenProviderNames := make(map[string]bool)
 	disabledProviderNames := make(map[string]bool)
@@ -40,6 +41,13 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		}
 		rt.ProviderHealth = providerHealth
 	}
+	if raw.UpstreamHeaderTimeout != "" {
+		d, err := parsePositiveDuration("upstream_header_timeout", raw.UpstreamHeaderTimeout)
+		if err != nil {
+			return nil, err
+		}
+		rt.UpstreamHeaderTimeout = d
+	}
 	if len(raw.Dashboard) > 0 {
 		if len(raw.Dashboard) > 1 {
 			return nil, fmt.Errorf("only one dashboard block is supported")
@@ -53,7 +61,7 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		}
 		seenProviderNames[p.Name] = true
 
-		provider, err := buildProvider(p)
+		provider, err := buildProvider(p, rt.UpstreamHeaderTimeout)
 		if err != nil {
 			return nil, fmt.Errorf("provider %q: %w", p.Name, err)
 		}
@@ -166,14 +174,22 @@ func buildAuth(rawAuths []rawAuth) (Auth, error) {
 	return auth, nil
 }
 
-func buildProvider(rawProvider rawProvider) (Provider, error) {
+func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Duration) (Provider, error) {
 	provider := Provider{
-		Type:        ProviderType(rawProvider.Type),
-		Name:        rawProvider.Name,
-		DisplayName: rawProvider.DisplayName,
-		BaseURL:     rawProvider.BaseURL,
-		APIKey:      rawProvider.APIKey,
-		ModelByName: make(map[string]Model),
+		Type:                  ProviderType(rawProvider.Type),
+		Name:                  rawProvider.Name,
+		DisplayName:           rawProvider.DisplayName,
+		BaseURL:               rawProvider.BaseURL,
+		UpstreamHeaderTimeout: rootUpstreamHeaderTimeout,
+		APIKey:                rawProvider.APIKey,
+		ModelByName:           make(map[string]Model),
+	}
+	if rawProvider.UpstreamHeaderTimeout != "" {
+		d, err := parsePositiveDuration("upstream_header_timeout", rawProvider.UpstreamHeaderTimeout)
+		if err != nil {
+			return Provider{}, err
+		}
+		provider.UpstreamHeaderTimeout = d
 	}
 	if rawProvider.APIKeyRef != nil { // pragma: allowlist secret
 		provider.APIKeyRef = &APIKeyRef{Path: rawProvider.APIKeyRef.Path, Key: rawProvider.APIKeyRef.Key}
@@ -216,10 +232,14 @@ func parseRetryStatusCodes(raw []string) ([]int, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid retry status code %q: expected integer", s)
 		}
-		if code < 100 || code > 599 {
-			return nil, fmt.Errorf("invalid retry status code %q: must be between 100 and 599", s)
+		if !isRetryableStatusCode(code) {
+			return nil, fmt.Errorf("invalid retry status code %q: must be between 400 and 599", s)
 		}
 		codes = append(codes, code)
 	}
 	return codes, nil
+}
+
+func isRetryableStatusCode(code int) bool {
+	return code >= 400 && code <= 599
 }

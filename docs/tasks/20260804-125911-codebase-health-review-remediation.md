@@ -51,7 +51,7 @@ Use targeted `go test ./path/to/package` after each task. Use `make vet test` af
 
 ### Task LIFE-01: Make Daemon Identity And Startup Safe
 
-Status: pending
+Status: completed
 
 Priority: P0
 
@@ -96,9 +96,16 @@ Acceptance criteria:
 - Malformed/truncated state and stale processes produce `no server running` without deleting state owned by a verified different process.
 - Focused lifecycle tests and `go test -race ./cmd/aiproxy` pass.
 
+Completion evidence:
+
+- Implemented per-canonical-config daemon state with PID, executable path, and process start identity verification before status/stop signaling.
+- Added per-config lifecycle locking held through startup readiness publication and a parent-child readiness pipe that reports success only after config load and listener bind.
+- Added lifecycle regressions for mismatched live PID identity, malformed state retention, invalid config startup, occupied listener startup, and concurrent daemon starts.
+- Verified with `go test ./cmd/aiproxy` and `go test -race ./cmd/aiproxy` on 2026-08-09.
+
 ### Task OBS-01: Bound HTTP Metric Labels And Clarify Metrics Exposure
 
-Status: pending
+Status: completed
 
 Priority: P0
 
@@ -139,9 +146,16 @@ Acceptance criteria:
 - The selected metrics access policy has positive and negative HTTP tests.
 - `go test ./internal/httpapi ./internal/observability` passes.
 
+Completion evidence:
+
+- Mapped HTTP metric path labels to known route names and collapsed unknown dashboard-internal paths to `/_internal/dashboard/unknown`.
+- Added regressions for stable route labels, dashboard unknown-path cardinality, and the documented pre-auth `/metrics` exposure policy under `auth.none` and `bearer_static`.
+- Documented that `/metrics` is served before API auth on the same listener and must be protected by trusted listener/network controls because output can include tenant/client labels.
+- Verified with `go test ./internal/httpapi ./internal/observability` on 2026-08-09.
+
 ### Task STREAM-01: Add A Shared Bounded SSE Decoder
 
-Status: pending
+Status: completed
 
 Priority: P1
 
@@ -181,11 +195,18 @@ Acceptance criteria:
 - Valid fragmented events and EOF boundaries remain correctly translated for Anthropic and Gemini.
 - Cancellation/leak tests pass under `go test -race ./internal/provider`.
 
+Completion evidence:
+
+- Added a shared bounded SSE decoder with explicit line and assembled-event limits, CRLF/comment/multi-data/EOF handling, and typed overflow errors.
+- Routed Anthropic and Gemini translated chat/responses streams through the shared decoder and made downstream stream close close the upstream body.
+- Added regressions for decoder framing, line/event overflow, EOF-delimited provider events, downstream cancellation, and overflow cleanup.
+- Verified with `go test ./internal/provider` and `go test -race ./internal/provider` on 2026-08-09.
+
 ## Wave 2: Routing And Stream Correctness
 
 ### Task ROUTE-01: Make Alias Selection Lease-Based And Health-Consistent
 
-Status: pending
+Status: completed
 
 Priority: P1
 
@@ -229,9 +250,17 @@ Acceptance criteria:
 - Existing direct-request no-failover behavior remains unchanged.
 - `go test -race ./internal/alias ./internal/httpapi` passes.
 
+Completion evidence:
+
+- Replaced alias selector `Select`/`Release` with exclusion-aware leased acquisition and idempotent release closures.
+- Removed manual target substitution and unhealthy fallback dispatch; all-unhealthy aliases now fail before an upstream call.
+- Split alias retry decisions from provider health mutation so retryable 4xx/429 do not mark providers unhealthy, inbound cancellation is ignored for health, and transport/5xx failures still mark unhealthy.
+- Rejected configured retry statuses outside `400-599` and added regressions for successful-status rejection.
+- Verified with `go test ./internal/alias ./internal/config ./internal/httpapi` and `go test -race ./internal/alias ./internal/httpapi` on 2026-08-09.
+
 ### Task STREAM-02: Finalize Streaming Health, Metrics, And Usage
 
-Status: pending
+Status: completed
 
 Priority: P1
 
@@ -282,9 +311,17 @@ Acceptance criteria:
 - Non-streaming behavior and usage remain unchanged.
 - `go test -race ./internal/provider ./internal/httpapi ./internal/accounting` passes.
 
+Completion evidence:
+
+- Added a concurrency-safe provider stream completion result carrying stream error, downstream cancellation, and final usage.
+- Deferred streaming upstream health, upstream metrics, response-size metrics, access logs, and accounting usage until stream completion while preserving close callbacks and alias lease release.
+- Extracted usage from OpenAI-compatible SSE pass-through and translated Anthropic/Gemini streams when upstream usage is supplied.
+- Added regressions for final stream usage accounting, mid-stream upstream failure health marking, and client-canceled stream health preservation.
+- Verified with `go test ./internal/provider ./internal/httpapi` and `go test -race ./internal/provider ./internal/httpapi ./internal/accounting` on 2026-08-09.
+
 ### Task PROVIDER-01: Preserve Pass-Through JSON And Reject Silent Feature Loss
 
-Status: pending
+Status: completed
 
 Priority: P1
 
@@ -329,11 +366,18 @@ Acceptance criteria:
 - Existing supported translated requests and streams continue to pass.
 - `go test ./internal/provider ./internal/httpapi ./internal/e2e` passes.
 
+Completion evidence:
+
+- Replaced OpenAI pass-through model rewriting with ordered top-level JSON rewriting that preserves raw values and unknown fields while rejecting duplicate `model` keys and non-object/malformed payloads.
+- Added translated-provider top-level field allow-lists for chat, responses, and Gemini embeddings so unsupported controls are rejected with `invalid_request` before upstream dispatch.
+- Documented pass-through preservation and translated-provider conservative request subsets.
+- Verified with `go test ./internal/provider ./internal/httpapi ./internal/e2e` on 2026-08-09.
+
 ## Wave 3: Persistence, Configuration, And Runtime Ownership
 
 ### Task STORE-01: Centralize Secure Atomic File Persistence
 
-Status: pending
+Status: completed
 
 Priority: P1
 
@@ -375,9 +419,16 @@ Acceptance criteria:
 - Concurrent writers do not expose partial file contents.
 - Configure and dashboard token tests pass under `go test -race ./cmd/aiproxy ./internal/dashrpc`.
 
+Completion evidence:
+
+- Added `internal/filestore` for same-directory temp-file persistence with exact mode enforcement, file sync, atomic rename, directory sync, and unsafe symlink/non-regular destination rejection for secret-bearing writes.
+- Routed dashboard token, daemon state, configure config, and configure secrets persistence through the shared primitive; provider config/secrets updates are staged and committed together with rollback on commit failure.
+- Added regressions for mode tightening, symlink refusal, injected write/sync/rename failures, two-file rollback, and concurrent whole-file visibility.
+- Verified with `go test ./internal/filestore ./internal/dashrpc ./cmd/aiproxy` and `go test -race ./cmd/aiproxy ./internal/dashrpc ./internal/filestore` on 2026-08-09.
+
 ### Task CONFIG-01: Validate Declared Configuration Before Activation
 
-Status: pending
+Status: completed
 
 Priority: P1
 
@@ -422,9 +473,17 @@ Acceptance criteria:
 - Missing-secret behavior is explicit, tested, and documented.
 - `go test ./internal/config ./internal/modelresolver` passes.
 
+Completion evidence:
+
+- Validated every declared provider structurally before credential activation while preserving current missing/empty credential disable behavior pending DEC-02.
+- Reserved provider name `alias`, validated provider `base_url` syntax, allowed `http` only for loopback hosts, and validated provider health cooldown even without Redis.
+- Aligned docs around slash-containing model names and direct model resolution.
+- Added regressions for invalid disabled providers, reserved alias namespace, negative in-memory cooldown, malformed and remote cleartext base URLs, missing-secret disable behavior, and slash-containing model resolution.
+- Verified with `go test ./internal/config ./internal/modelresolver` on 2026-08-09.
+
 ### Task APP-01: Separate Pure Validation From Runtime Side Effects
 
-Status: pending
+Status: completed
 
 Priority: P1
 
@@ -464,9 +523,17 @@ Acceptance criteria:
 - Two app instances can be built in one process with isolated loggers.
 - `go test ./cmd/aiproxy ./internal/app ./internal/observability` passes.
 
+Completion evidence:
+
+- Changed `aiproxy validate` to load and validate config directly without building runtime app state.
+- Stopped app construction from replacing `slog.Default` or emitting startup logs; startup summaries now emit during serve/runtime execution.
+- Deferred dashboard token persistence out of validation/build-only paths while preserving runtime persistence for serve and reload.
+- Added regressions for validation against a read-only config directory with `dashboard {}`, no token-file side effects, unchanged `slog.Default`, and isolated per-app loggers.
+- Verified with `go test ./cmd/aiproxy ./internal/app ./internal/observability` on 2026-08-09.
+
 ### Task APP-02: Give Reloaded Resources Explicit Ownership
 
-Status: pending
+Status: completed
 
 Priority: P1
 
@@ -513,11 +580,19 @@ Acceptance criteria:
 - Removed providers and aliases no longer retain stale inventory series.
 - `go test -race ./internal/app ./internal/providerhealth ./internal/ratelimit ./internal/observability` passes.
 
+Completion evidence:
+
+- Added explicit close ownership for provider-health backends and app shutdown, including Redis client close and idle HTTP transport connection close.
+- Reload now publishes a complete dependency set, closes replaced health trackers after publication, preserves rate-limiter buckets when rate-limit settings are unchanged, and resets limiter state when those settings change.
+- Log-level changes and dashboard enablement after startup are rejected with restart-required errors and documented in README/operations docs.
+- Metrics config recording removes retired active-provider and skipped-provider inventory labels while preserving retained provider health state.
+- Verified with `go test ./internal/app ./internal/providerhealth ./internal/ratelimit ./internal/observability` and `go test -race ./internal/app ./internal/providerhealth ./internal/ratelimit ./internal/observability` on 2026-08-09.
+
 ## Wave 4: Performance And Encapsulation
 
 ### Task HEALTH-01: Bound Remote Health Snapshot Latency
 
-Status: pending
+Status: completed
 
 Priority: P2
 
@@ -559,9 +634,17 @@ Acceptance criteria:
 - Malformed Redis configuration fails validation; unavailable-backend behavior matches documented policy.
 - `go test -race ./internal/providerhealth ./internal/dashrpc ./internal/httpapi` passes.
 
+Completion evidence:
+
+- Added bulk provider-health snapshots that copy provider identity under lock, perform Redis reads through one pipelined operation deadline, and use that path for dashboard snapshots and readiness checks.
+- Dashboard snapshot health reads now receive request cancellation, and concurrent provider-set updates are no longer blocked by slow backend reads.
+- Preserved the existing fail-open routing/readiness policy for backend read failures while recording `aiproxy_provider_health_backend_errors_total` by operation.
+- Rejected malformed `provider_health.redis_url` values during config validation and removed the Redis raw-address fallback from the backend constructor.
+- Verified with `go test ./internal/providerhealth ./internal/config ./internal/dashrpc ./internal/httpapi ./internal/observability` and `go test -race ./internal/providerhealth ./internal/dashrpc ./internal/httpapi` on 2026-08-09.
+
 ### Task ACCOUNT-01: Make Usage Retention Semantics Accurate And Efficient
 
-Status: pending
+Status: completed
 
 Priority: P2
 
@@ -598,9 +681,16 @@ Acceptance criteria:
 - Race tests and benchmarks show bounded lock contention at representative cardinality.
 - `go test -race ./internal/accounting ./internal/httpapi` passes.
 
+Completion evidence:
+
+- Selected rolling 24-hour usage retention for DEC-04 and documented that summaries are maintained with bounded one-minute in-process buckets whose start times are in the rolling window, rather than lifetime-until-idle totals.
+- Replaced cumulative per-key totals with bucketed aggregates, so `Record` updates one bucket and expiration drops whole buckets without scanning every summary key per request.
+- Added regressions for continuously active keys excluding expired events and deterministic high-cardinality bucket expiration, plus a high-cardinality record benchmark.
+- Verified with `go test ./internal/accounting ./internal/httpapi` and `go test -race ./internal/accounting ./internal/httpapi` on 2026-08-09.
+
 ### Task HTTP-01: Correct Bounded HTTP Edge Cases And Opaque Responses
 
-Status: pending
+Status: completed
 
 Priority: P2
 
@@ -643,9 +733,17 @@ Acceptance criteria:
 - Cancellation closes upstream and does not leak goroutines.
 - `go test -race ./internal/httpapi ./internal/provider` passes.
 
+Completion evidence:
+
+- Mapped `*http.MaxBytesError` from the 8 MiB request body limiter to a stable `413 request_too_large` response while preserving malformed in-limit JSON as `400`.
+- Restricted `/healthz` and `/readyz` to `GET` and `HEAD`, returning `405` with `Allow: GET, HEAD` for unsupported methods.
+- Added successful opaque-response streaming for OpenAI image generation and audio speech so bodies larger than the 32 MiB buffered-response cap pass through without full proxy buffering; upstream error bodies remain bounded.
+- Added regressions for oversized requests, malformed JSON, health methods, large opaque streaming, bounded opaque errors, and closing upstream bodies on downstream write failure.
+- Verified with `go test ./internal/httpapi ./internal/provider` and `go test -race ./internal/httpapi ./internal/provider` on 2026-08-09.
+
 ### Task ARCH-01: Extract Configuration Editing And Dashboard Snapshot Boundaries
 
-Status: pending
+Status: completed
 
 Priority: P2
 
@@ -690,6 +788,14 @@ Acceptance criteria:
 - No import cycle or mutable shared snapshot is introduced.
 - `make vet test` passes.
 
+Completion evidence:
+
+- Added `internal/configedit` for non-interactive config document parsing, block mutation/rendering, generated-config validation, secrets JSON updates, and secure config/secrets persistence orchestration.
+- Kept Cobra and interactive prompt adaptation in `cmd/aiproxy` through thin wrappers/type aliases while existing configure CLI behavior tests continue to pass.
+- Added `dashrpc.Source`/`RuntimeSource` and changed `httpapi.Dependencies` to carry one dashboard snapshot/log source instead of app-internal dashboard metadata slices and log buffers.
+- Added package-level config edit tests for HCL block round trips and config/secrets persistence.
+- Verified with `go test ./internal/configedit ./cmd/aiproxy ./internal/dashrpc ./internal/httpapi ./internal/app` and `make vet test` on 2026-08-09.
+
 ## Deferred Decisions Requiring Maintainer Input
 
 ### DEC-01: Metrics Security Boundary
@@ -724,13 +830,13 @@ Define whether Redis health read failures are fail-open, fail-closed, or use bou
 
 ### DEC-04: Accounting Retention Meaning
 
-Status: blocked
+Status: completed
 
 Owner: maintainer/product
 
-Decision needed:
+Decision:
 
-Define whether the configured retention means a rolling usage window or idle-key eviction. Current cumulative summaries implement idle-key eviction while presenting a nominal retention duration.
+Usage retention is a rolling in-process window. Aggregated billing summaries are maintained with bounded one-minute buckets whose start times are in the default 24-hour retention window, not lifetime totals retained until an idle key ages out.
 
 ### DEC-05: Dashboard Transport Security
 

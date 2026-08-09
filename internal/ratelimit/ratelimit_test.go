@@ -42,3 +42,18 @@ func TestTokenBucketLimiterRefillsPerKey(t *testing.T) {
 		t.Fatal("bucket should refill after time passes")
 	}
 }
+
+func TestConfigEqualComparesRateLimitOnly(t *testing.T) {
+	a := config.Auth{Mode: config.AuthModeNone, RateLimit: &config.RateLimit{RequestsPerMinute: 60, Burst: 1}}
+	b := config.Auth{Mode: config.AuthModeBearerStatic, RateLimit: &config.RateLimit{RequestsPerMinute: 60, Burst: 1}}
+	if !ConfigEqual(a, b) {
+		t.Fatal("same rate limit settings should match")
+	}
+	b.RateLimit.Burst = 2
+	if ConfigEqual(a, b) {
+		t.Fatal("different rate limit settings should not match")
+	}
+	if ConfigEqual(config.Auth{}, b) {
+		t.Fatal("nil and non-nil rate limit settings should not match")
+	}
+}

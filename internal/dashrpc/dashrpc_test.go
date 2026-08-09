@@ -144,6 +144,56 @@ func TestLoadTokenRoundTripsThroughPersist(t *testing.T) {
 	}
 }
 
+func TestPersistTokenTightensModeAndRejectsSymlink(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	tokenPath := TokenFilePath()
+	if err := os.MkdirAll(filepath.Dir(tokenPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tokenPath, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := PersistToken("new-secret"); err != nil {
+		t.Fatalf("PersistToken err = %v", err)
+	}
+	info, err := os.Stat(tokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("mode = %o, want 600", got)
+	}
+	got, err := LoadToken()
+	if err != nil {
+		t.Fatalf("LoadToken err = %v", err)
+	}
+	if got != "new-secret" {
+		t.Fatalf("LoadToken = %q, want new-secret", got)
+	}
+
+	target := filepath.Join(xdg, "target")
+	if err := os.WriteFile(target, []byte("target\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(tokenPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, tokenPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := PersistToken("bad-secret"); err == nil {
+		t.Fatal("PersistToken succeeded for symlink token path")
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "target\n" {
+		t.Fatalf("symlink target overwritten: %q", data)
+	}
+}
+
 func TestLoadTokenErrorsWhenMissing(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)

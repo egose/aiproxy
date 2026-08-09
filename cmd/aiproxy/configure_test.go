@@ -19,6 +19,7 @@ func TestConfigureProviderCreatesConfigAndSecrets(t *testing.T) {
 		"primary",
 		"",
 		"",
+		"",
 		secretsPath,
 		"",
 		"sk-test-primary",
@@ -78,6 +79,7 @@ func TestConfigureProviderRejectsInvalidProviderName(t *testing.T) {
 		"primary",        // valid
 		"",
 		"",
+		"",
 		secretsPath,
 		"",
 		"sk-test-primary",
@@ -133,6 +135,7 @@ provider "openai" "primary" {
 		"2",
 		"primary",
 		"Backup provider",
+		"",
 		"https://llm.internal/v1",
 		"2",
 		`env("LOCALAI_API_KEY")`,
@@ -221,6 +224,7 @@ func TestConfigureProviderNonInteractiveFlags(t *testing.T) {
 		"--name", "backup",
 		"--display-name", "Backup provider",
 		"--base-url", "https://llm.internal/v1",
+		"--upstream-header-timeout", "180s",
 		"--secrets-path", secretsPath,
 		"--secrets-key", "localai",
 		"--api-key", "secret-value",
@@ -240,6 +244,7 @@ func TestConfigureProviderNonInteractiveFlags(t *testing.T) {
 		"provider \"openai-compatible\" \"backup\" {",
 		"display_name = \"Backup provider\"",
 		"base_url = \"https://llm.internal/v1\"",
+		"upstream_header_timeout = \"180s\"",
 		"api_key_ref {",
 		"path = \"" + secretsPath + "\"",
 		"key  = \"localai\"",
@@ -257,6 +262,42 @@ func TestConfigureProviderNonInteractiveFlags(t *testing.T) {
 	}
 	if !strings.Contains(string(secretsData), `"localai": "secret-value"`) {
 		t.Fatalf("secrets output missing expected value:\n%s", string(secretsData))
+	}
+}
+
+func TestConfigureUpstreamNonInteractiveSetsRootTimeout(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := strings.TrimSpace(`listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "primary" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}`) + "\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+
+	stdout, stderr, err := executeRootCommand(
+		"",
+		"configure", "upstream",
+		"--config", configPath,
+		"--non-interactive",
+		"--upstream-header-timeout", "120s",
+	)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	if !strings.HasPrefix(configText, "upstream_header_timeout = \"120s\"") {
+		t.Fatalf("config missing root upstream timeout prefix:\n%s", configText)
+	}
+	if !strings.Contains(stdout, "updated upstream settings") {
+		t.Fatalf("stdout missing upstream summary:\n%s", stdout)
 	}
 }
 
@@ -628,6 +669,7 @@ func TestConfigureProviderEnvExpressionRejectsMalformedThenAccepts(t *testing.T)
 		"",                      // provider type default openai
 		"primary",               // provider name
 		"",                      // display name
+		"",                      // upstream header timeout
 		"2",                     // credential storage: env_expression
 		`env(FOO)`,              // malformed env expression -> re-prompt
 		`env("OPENAI_API_KEY")`, // valid

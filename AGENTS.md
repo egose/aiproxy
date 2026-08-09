@@ -20,12 +20,15 @@ The CLI defaults to `$XDG_CONFIG_HOME/aiproxy/config.hcl`, falling back to
 The CLI also includes:
 
 - `aiproxy serve -d` (`--daemon`) to background `serve`, redirecting logs to
-  `$XDG_CONFIG_HOME/aiproxy/aiproxy.log` and writing the daemon PID to
-  `aiproxy.pid`. Both files share the `aiproxy/` subdir of `XDG_CONFIG_HOME`
-  (or `~/.config/aiproxy/` when `XDG_CONFIG_HOME` is unset).
+  `$XDG_CONFIG_HOME/aiproxy/aiproxy.log` and writing a per-config daemon state
+  record under the same `aiproxy/` subdir of `XDG_CONFIG_HOME` (or
+  `~/.config/aiproxy/` when `XDG_CONFIG_HOME` is unset). Daemon state is scoped
+  by the canonical config path, so lifecycle commands should use the same
+  `--config` value that started the background server.
 - `aiproxy stop`, `aiproxy status`, `aiproxy restart` for lifecycle control
-  of a backgrounded daemon. They target the PID stored in `aiproxy.pid`; if no
-  live PID is present, all three print `no server running` and exit non-zero.
+  of a backgrounded daemon. They verify the recorded executable and process
+  start identity before signaling; if no matching live daemon is present, all
+  three print `no server running` and exit non-zero.
 - `aiproxy dashboard` to attach the interactive TUI to a **running**
   `aiproxy serve`. It requires a `dashboard { ... }` block in the config; the
   dashboard command calls `/_internal/dashboard/snapshot` on the server's
@@ -75,11 +78,14 @@ repo has sandbox services for stable end-to-end provider coverage.)
   otherwise — the design doc at `docs/design.md` holds the rationale.
 - Module path: `github.com/egose/aiproxy`.
 - All HCL blocks use two-label syntax: `provider "openai" "openai" {}`.
-- Provider/alias/model names are lowercase, no spaces, no `/`.
+- Provider/alias names are lowercase, no spaces, no `/`; provider name `alias`
+  is reserved. Model names are lowercase, no spaces, and may contain `/` when
+  every slash-separated segment follows the same lowercase name rule.
 - Public model strings: `<provider-name>/<model-name>` or `alias/<alias-name>`.
-- Exactly one of `api_key` or `api_key_ref` per provider; `api_key_ref.path`
-  defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json`, falling back to
-  `~/.config/aiproxy/keys.json`.
+- Providers normally declare exactly one of `api_key` or `api_key_ref`;
+  unresolved empty credentials disable the provider pending DEC-02.
+  `api_key_ref.path` defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json`, falling
+  back to `~/.config/aiproxy/keys.json`.
 - Direct (`<provider>/<model>`) requests never fail over to a different
   target. Alias requests retry the next target on transport / 5xx only;
   client 4xx errors are returned verbatim.

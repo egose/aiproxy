@@ -8,6 +8,9 @@ import (
 )
 
 func translateOpenAIResponsesInput(body []byte) (openAIChatRequest, error) {
+	if err := rejectUnsupportedTopLevelFields(body, openAIResponsesRequestFields); err != nil {
+		return openAIChatRequest{}, err
+	}
 	var req openAIResponsesRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		return openAIChatRequest{}, err

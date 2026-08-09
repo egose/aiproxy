@@ -1,13 +1,14 @@
 package config
 
 type rawFile struct {
-	Listeners      []rawListener      `hcl:"listener,block"`
-	Auth           []rawAuth          `hcl:"auth,block"`
-	Logging        *rawLogging        `hcl:"logging,block"`
-	ProviderHealth *rawProviderHealth `hcl:"provider_health,block"`
-	Dashboard      []*rawDashboard    `hcl:"dashboard,block"`
-	Providers      []rawProvider      `hcl:"provider,block"`
-	Aliases        []rawAlias         `hcl:"alias,block"`
+	UpstreamHeaderTimeout string             `hcl:"upstream_header_timeout,optional"`
+	Listeners             []rawListener      `hcl:"listener,block"`
+	Auth                  []rawAuth          `hcl:"auth,block"`
+	Logging               *rawLogging        `hcl:"logging,block"`
+	ProviderHealth        *rawProviderHealth `hcl:"provider_health,block"`
+	Dashboard             []*rawDashboard    `hcl:"dashboard,block"`
+	Providers             []rawProvider      `hcl:"provider,block"`
+	Aliases               []rawAlias         `hcl:"alias,block"`
 }
 
 type rawDashboard struct {
@@ -58,13 +59,14 @@ type rawProviderHealth struct {
 }
 
 type rawProvider struct {
-	Type        string        `hcl:"type,label"`
-	Name        string        `hcl:"name,label"`
-	DisplayName string        `hcl:"display_name,optional"`
-	BaseURL     string        `hcl:"base_url,optional"`
-	APIKey      string        `hcl:"api_key,optional"`
-	APIKeyRef   *rawAPIKeyRef `hcl:"api_key_ref,block"`
-	Models      []rawModel    `hcl:"model,block"`
+	Type                  string        `hcl:"type,label"`
+	Name                  string        `hcl:"name,label"`
+	DisplayName           string        `hcl:"display_name,optional"`
+	BaseURL               string        `hcl:"base_url,optional"`
+	UpstreamHeaderTimeout string        `hcl:"upstream_header_timeout,optional"`
+	APIKey                string        `hcl:"api_key,optional"`
+	APIKeyRef             *rawAPIKeyRef `hcl:"api_key_ref,block"`
+	Models                []rawModel    `hcl:"model,block"`
 }
 
 type rawAPIKeyRef struct {

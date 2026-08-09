@@ -59,7 +59,8 @@ In `bearer_static` mode, individual clients may also be restricted with `allowed
 
 ## Usage And Scope
 
-`GET /v1/billing/usage` returns aggregated in-process usage summaries.
+`GET /v1/billing/usage` returns aggregated in-process usage summaries over the
+proxy's rolling 24-hour accounting window.
 
 - When the authenticated client has a `tenant`, results are scoped to that tenant
 - Otherwise, results are scoped to the caller's client identity

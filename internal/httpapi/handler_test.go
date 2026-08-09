@@ -11,7 +11,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -31,6 +33,57 @@ type stubAdapter struct {
 	err    error
 }
 
+type clientCaptureAdapter struct {
+	mu      sync.Mutex
+	clients []*http.Client
+}
+
+type errorAfterReader struct {
+	data []byte
+	err  error
+}
+
+type trackingReadCloser struct {
+	reader io.Reader
+	closed atomic.Bool
+}
+
+func (r *errorAfterReader) Read(p []byte) (int, error) {
+	if len(r.data) > 0 {
+		n := copy(p, r.data)
+		r.data = r.data[n:]
+		return n, nil
+	}
+	return 0, r.err
+}
+
+func (r *errorAfterReader) Close() error { return nil }
+
+func (r *trackingReadCloser) Read(p []byte) (int, error) { return r.reader.Read(p) }
+
+func (r *trackingReadCloser) Close() error {
+	r.closed.Store(true)
+	return nil
+}
+
+type failingResponseWriter struct {
+	header http.Header
+	status int
+}
+
+func (w *failingResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *failingResponseWriter) Write([]byte) (int, error) { return 0, context.Canceled }
+
+func (w *failingResponseWriter) WriteHeader(status int) { w.status = status }
+
+func (w *failingResponseWriter) Flush() {}
+
 func (s *stubAdapter) Do(ctx context.Context, r provider.Request) (*provider.Result, error) {
 	s.got = r
 	if s.err != nil {
@@ -44,6 +97,21 @@ func (s *stubAdapter) Do(ctx context.Context, r provider.Request) (*provider.Res
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       []byte(`{"id":"chatcmpl-stub"}`),
 	}, nil
+}
+
+func (a *clientCaptureAdapter) Do(ctx context.Context, r provider.Request) (*provider.Result, error) {
+	a.mu.Lock()
+	a.clients = append(a.clients, r.Client)
+	a.mu.Unlock()
+	return &provider.Result{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: []byte(`{}`)}, nil
+}
+
+func (a *clientCaptureAdapter) snapshot() []*http.Client {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]*http.Client, len(a.clients))
+	copy(out, a.clients)
+	return out
 }
 
 func newRT() *config.Runtime {
@@ -114,6 +182,86 @@ func newLoggedHandler(t *testing.T, rt *config.Runtime, adapter provider.Adapter
 		Providers: rt.ProviderByName,
 		Logger:    logger,
 	}), &logs
+}
+
+func TestDirectDispatchUsesProviderClient(t *testing.T) {
+	rt := newRT()
+	providerConfig := rt.ProviderByName["openai"]
+	providerConfig.UpstreamHeaderTimeout = 120 * time.Second
+	rt.Providers[0] = providerConfig
+	rt.ProviderByName["openai"] = providerConfig
+	wantClient := &http.Client{}
+	adapter := &clientCaptureAdapter{}
+	h := NewHandler(Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   adapter,
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:   BuildModelCatalog(rt),
+		Providers: rt.ProviderByName,
+		ClientForProvider: func(p config.Provider) *http.Client {
+			if p.UpstreamHeaderTimeout != 120*time.Second {
+				t.Fatalf("provider timeout = %v", p.UpstreamHeaderTimeout)
+			}
+			return wantClient
+		},
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"openai/gpt-4o-mini","messages":[]}`))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	clients := adapter.snapshot()
+	if len(clients) != 1 || clients[0] != wantClient {
+		t.Fatalf("clients = %+v, want provider client", clients)
+	}
+}
+
+func TestAliasDispatchUsesEachProviderClient(t *testing.T) {
+	client1 := &http.Client{}
+	client2 := &http.Client{}
+	rt := newRT()
+	p1 := rt.ProviderByName["openai"]
+	p1.Name = "primary"
+	p1.APIKey = "key1"
+	p1.UpstreamHeaderTimeout = 10 * time.Millisecond
+	p2 := p1
+	p2.Name = "backup"
+	p2.APIKey = "key2"
+	p2.UpstreamHeaderTimeout = 200 * time.Millisecond
+	rt.Providers = []config.Provider{p1, p2}
+	rt.ProviderByName = map[string]config.Provider{"primary": p1, "backup": p2}
+	rt.Aliases = []config.Alias{{Name: "chat_default", Algorithm: config.AlgorithmRoundRobin, RetryStatusCodes: []int{500}, Targets: []config.AliasTarget{{Provider: "primary", Model: "gpt-4o-mini"}, {Provider: "backup", Model: "gpt-4o-mini"}}}}
+	rt.AliasByName = map[string]config.Alias{"chat_default": rt.Aliases[0]}
+	adapter := &statusByAPIKeyAdapter{rules: map[string]int{"key1": http.StatusInternalServerError}}
+	h := NewHandler(Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   adapter,
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:   BuildModelCatalog(rt),
+		Providers: rt.ProviderByName,
+		ClientForProvider: func(p config.Provider) *http.Client {
+			switch p.Name {
+			case "primary":
+				return client1
+			case "backup":
+				return client2
+			default:
+				t.Fatalf("unexpected provider %q", p.Name)
+				return nil
+			}
+		},
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias/chat_default","messages":[]}`))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	clients := adapter.Clients()
+	if len(clients) != 2 || clients[0] != client1 || clients[1] != client2 {
+		t.Fatalf("clients = %+v, want primary then backup clients", clients)
+	}
 }
 
 func parseLogEntries(t *testing.T, logs *bytes.Buffer) []map[string]any {
@@ -829,6 +977,126 @@ func TestHandlerListModelsFiltersUnauthorizedModels(t *testing.T) {
 	}
 }
 
+func TestMetricsPathLabelUsesClosedRouteSet(t *testing.T) {
+	tests := []struct {
+		method string
+		path   string
+		want   string
+	}{
+		{http.MethodGet, "/healthz", "/healthz"},
+		{http.MethodGet, "/readyz", "/readyz"},
+		{http.MethodGet, "/metrics", "/metrics"},
+		{http.MethodGet, "/v1/models", "/v1/models"},
+		{http.MethodGet, "/v1/billing/usage", "/v1/billing/usage"},
+		{http.MethodGet, "/_internal/dashboard/snapshot", "/_internal/dashboard/snapshot"},
+		{http.MethodGet, "/_internal/dashboard/logs", "/_internal/dashboard/logs"},
+		{http.MethodGet, "/_internal/dashboard/anything/user-controlled", metricsDashboardUnknownPath},
+		{http.MethodPost, "/v1/chat/completions", "/v1/chat/completions"},
+		{http.MethodPost, "/v1/embeddings", "/v1/embeddings"},
+		{http.MethodPost, "/v1/responses", "/v1/responses"},
+		{http.MethodPost, "/v1/images/generations", "/v1/images/generations"},
+		{http.MethodPost, "/v1/audio/transcriptions", "/v1/audio/transcriptions"},
+		{http.MethodPost, "/v1/audio/speech", "/v1/audio/speech"},
+		{http.MethodGet, "/unrecognized", "unknown"},
+	}
+
+	for _, tc := range tests {
+		r := httptest.NewRequest(tc.method, tc.path, nil)
+		if got := metricsPathLabel(r); got != tc.want {
+			t.Fatalf("metricsPathLabel(%s %s) = %q, want %q", tc.method, tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestHandlerHTTPMetricDashboardUnknownCardinalityIsBounded(t *testing.T) {
+	rt := newRT()
+	metrics := observability.NewMetrics()
+	h := NewHandler(Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   &stubAdapter{},
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:   BuildModelCatalog(rt),
+		Metrics:   metrics,
+		Providers: rt.ProviderByName,
+	})
+
+	for i := 0; i < 50; i++ {
+		path := "/_internal/dashboard/unknown-" + strconv.Itoa(i)
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, body=%s", path, w.Code, w.Body.String())
+		}
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metrics.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d, body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	want := `aiproxy_http_requests_total{method="GET",path="/_internal/dashboard/unknown",status="404"} 50`
+	if !strings.Contains(body, want) {
+		t.Fatalf("metrics output missing %q\n%s", want, body)
+	}
+	if strings.Contains(body, "/_internal/dashboard/unknown-0") || strings.Contains(body, "/_internal/dashboard/unknown-49") {
+		t.Fatalf("metrics output contains request-controlled dashboard path\n%s", body)
+	}
+}
+
+func TestHandlerMetricsExposurePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		auth config.Auth
+	}{
+		{name: "auth none", auth: config.Auth{Mode: config.AuthModeNone}},
+		{name: "bearer static", auth: config.Auth{
+			Mode: config.AuthModeBearerStatic,
+			Clients: map[string]config.Client{
+				"ci": {Name: "ci", Token: "tok"},
+			},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := newRT()
+			h := NewHandler(Dependencies{
+				Resolver:   modelresolver.New(rt),
+				Adapter:    &stubAdapter{},
+				Auth:       auth.NewAuthenticator(tc.auth),
+				Authorizer: auth.NewAuthorizer(tc.auth),
+				Catalog:    BuildModelCatalog(rt),
+				Metrics:    observability.NewMetrics(),
+				Providers:  rt.ProviderByName,
+			})
+
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+			h.ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("GET /metrics status = %d, body=%s", w.Code, w.Body.String())
+			}
+
+			w = httptest.NewRecorder()
+			r = httptest.NewRequest(http.MethodPost, "/metrics", nil)
+			h.ServeHTTP(w, r)
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("POST /metrics status = %d, body=%s", w.Code, w.Body.String())
+			}
+
+			if tc.auth.Mode == config.AuthModeBearerStatic {
+				w = httptest.NewRecorder()
+				r = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+				h.ServeHTTP(w, r)
+				if w.Code != http.StatusUnauthorized {
+					t.Fatalf("unauthenticated GET /v1/models status = %d, body=%s", w.Code, w.Body.String())
+				}
+			}
+		})
+	}
+}
+
 func TestHandlerStripsHopByHopHeaders(t *testing.T) {
 	stub := &stubAdapter{result: &provider.Result{
 		StatusCode: http.StatusOK,
@@ -951,6 +1219,110 @@ func TestHandlerNormalizesStreamingPlainTextUpstreamErrors(t *testing.T) {
 	}
 	if resp.Error.Message != "404 page not found" {
 		t.Fatalf("error message = %q", resp.Error.Message)
+	}
+}
+
+func TestHandlerRecordsFinalStreamingUsage(t *testing.T) {
+	stream := provider.NewStreamCompletion()
+	stream.SetUsage(provider.Usage{PromptTokens: 3, CompletionTokens: 5, TotalTokens: 8})
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		StreamBody: io.NopCloser(strings.NewReader("data: {}\n\ndata: [DONE]\n\n")),
+		Streaming:  true,
+		Stream:     stream,
+	}}
+	var got accounting.Event
+	h := NewHandler(Dependencies{
+		Resolver:     modelresolver.New(newRT()),
+		Adapter:      stub,
+		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:      BuildModelCatalog(newRT()),
+		Metrics:      observability.NewMetrics(),
+		Providers:    newRT().ProviderByName,
+		Accounting:   accounting.RecorderFunc(func(event accounting.Event) { got = event }),
+		AccessLog:    false,
+		HasAccessLog: true,
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","stream":true,"messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if got.PromptTokens != 3 || got.CompletionTokens != 5 || got.TotalTokens != 8 {
+		t.Fatalf("usage = %+v", got)
+	}
+}
+
+func TestHandlerMarksMidStreamUpstreamErrorUnhealthy(t *testing.T) {
+	stream := provider.NewStreamCompletion()
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		StreamBody: &errorAfterReader{data: []byte("data: partial\n\n"), err: io.ErrUnexpectedEOF},
+		Streaming:  true,
+		Stream:     stream,
+	}}
+	metrics := observability.NewMetrics()
+	health := providerhealth.New(metrics, config.ProviderHealth{})
+	health.SetProviders(map[string]config.Provider{"openai": {Name: "openai"}})
+	rt := newRT()
+	h := NewHandler(Dependencies{
+		Resolver:     modelresolver.New(rt),
+		Adapter:      stub,
+		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:      BuildModelCatalog(rt),
+		Metrics:      metrics,
+		Providers:    rt.ProviderByName,
+		Health:       health,
+		AccessLog:    false,
+		HasAccessLog: true,
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","stream":true,"messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	if health.IsHealthy("openai") {
+		t.Fatalf("mid-stream upstream error did not mark provider unhealthy")
+	}
+}
+
+func TestHandlerDoesNotMarkClientCanceledStreamUnhealthy(t *testing.T) {
+	stream := provider.NewStreamCompletion()
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		StreamBody: io.NopCloser(strings.NewReader("data: partial\n\n")),
+		Streaming:  true,
+		Stream:     stream,
+	}}
+	metrics := observability.NewMetrics()
+	health := providerhealth.New(metrics, config.ProviderHealth{})
+	health.SetProviders(map[string]config.Provider{"openai": {Name: "openai"}})
+	rt := newRT()
+	h := NewHandler(Dependencies{
+		Resolver:     modelresolver.New(rt),
+		Adapter:      stub,
+		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:      BuildModelCatalog(rt),
+		Metrics:      metrics,
+		Providers:    rt.ProviderByName,
+		Health:       health,
+		AccessLog:    false,
+		HasAccessLog: true,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","stream":true,"messages":[]}`))).WithContext(ctx)
+
+	h.ServeHTTP(&failingResponseWriter{}, r)
+
+	if !health.IsHealthy("openai") {
+		t.Fatalf("client-canceled stream marked provider unhealthy")
 	}
 }
 
@@ -1242,6 +1614,27 @@ func TestHandlerMetricsIncludeStreamingResponses(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics output missing %q\n%s", want, body)
 		}
+	}
+}
+
+func TestWriteResultStreamingDownstreamErrorClosesUpstream(t *testing.T) {
+	body := &trackingReadCloser{reader: strings.NewReader("binary-data")}
+	result := &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"audio/mpeg"}},
+		StreamBody: body,
+		Streaming:  true,
+		Stream:     provider.NewStreamCompletion(),
+	}
+	h := NewHandler(Dependencies{})
+	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", nil)
+	outcome := h.writeResult(&failingResponseWriter{}, req, result)
+
+	if outcome.Err == nil {
+		t.Fatal("expected downstream write error")
+	}
+	if !body.closed.Load() {
+		t.Fatal("upstream body was not closed")
 	}
 }
 
@@ -1760,12 +2153,17 @@ func TestCloseResultDefersOnCloseUntilStreamEnds(t *testing.T) {
 }
 
 type statusByAPIKeyAdapter struct {
-	calls []string
-	rules map[string]int
+	mu      sync.Mutex
+	calls   []string
+	clients []*http.Client
+	rules   map[string]int
 }
 
 func (a *statusByAPIKeyAdapter) Do(ctx context.Context, r provider.Request) (*provider.Result, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.calls = append(a.calls, r.APIKey)
+	a.clients = append(a.clients, r.Client)
 	status := http.StatusOK
 	if s, ok := a.rules[r.APIKey]; ok {
 		status = s
@@ -1775,6 +2173,22 @@ func (a *statusByAPIKeyAdapter) Do(ctx context.Context, r provider.Request) (*pr
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       []byte(`{"id":"chatcmpl_ok"}`),
 	}, nil
+}
+
+func (a *statusByAPIKeyAdapter) Clients() []*http.Client {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]*http.Client, len(a.clients))
+	copy(out, a.clients)
+	return out
+}
+
+func (a *statusByAPIKeyAdapter) Calls() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]string, len(a.calls))
+	copy(out, a.calls)
+	return out
 }
 
 func TestHandlerAliasRetriesOnConfiguredStatusCode(t *testing.T) {
@@ -1885,5 +2299,129 @@ func TestHandlerAliasRetriesOn5xxByDefault(t *testing.T) {
 	}
 	if len(adapter.calls) != 2 {
 		t.Fatalf("calls = %d, want 2", len(adapter.calls))
+	}
+}
+
+func TestHandlerAliasAllTargetsUnhealthyDoesNotDispatch(t *testing.T) {
+	rt := &config.Runtime{
+		Providers: []config.Provider{
+			{Type: config.ProviderTypeOpenAI, Name: "p1", APIKey: "key1", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
+			{Type: config.ProviderTypeOpenAI, Name: "p2", APIKey: "key2", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
+		},
+		ProviderByName: map[string]config.Provider{},
+		Aliases: []config.Alias{{
+			Name:             "a",
+			Algorithm:        config.AlgorithmLeastConnections,
+			RetryStatusCodes: []int{500, 502, 503, 504},
+			Targets:          []config.AliasTarget{{Provider: "p1", Model: "m"}, {Provider: "p2", Model: "m"}},
+		}},
+		AliasByName: map[string]config.Alias{},
+	}
+	for _, p := range rt.Providers {
+		rt.ProviderByName[p.Name] = p
+	}
+	for _, a := range rt.Aliases {
+		rt.AliasByName[a.Name] = a
+	}
+	metrics := observability.NewMetrics()
+	health := providerhealth.New(metrics, config.ProviderHealth{})
+	health.SetProviders(rt.ProviderByName)
+	health.MarkFailure("p1")
+	health.MarkFailure("p2")
+	adapter := &statusByAPIKeyAdapter{}
+	h := NewHandler(Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   adapter,
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:   BuildModelCatalog(rt),
+		Metrics:   metrics,
+		Providers: rt.ProviderByName,
+		Health:    health,
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"alias/a","messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if calls := adapter.Calls(); len(calls) != 0 {
+		t.Fatalf("adapter calls = %v, want none", calls)
+	}
+}
+
+func TestHandlerAliasRetryStatusDoesNotMarkProviderUnhealthy(t *testing.T) {
+	rt := &config.Runtime{
+		Providers: []config.Provider{
+			{Type: config.ProviderTypeOpenAI, Name: "p1", APIKey: "key1", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
+			{Type: config.ProviderTypeOpenAI, Name: "p2", APIKey: "key2", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
+		},
+		ProviderByName: map[string]config.Provider{},
+		Aliases: []config.Alias{{
+			Name:             "a",
+			Algorithm:        config.AlgorithmRoundRobin,
+			RetryStatusCodes: []int{429},
+			Targets:          []config.AliasTarget{{Provider: "p1", Model: "m"}, {Provider: "p2", Model: "m"}},
+		}},
+		AliasByName: map[string]config.Alias{},
+	}
+	for _, p := range rt.Providers {
+		rt.ProviderByName[p.Name] = p
+	}
+	for _, a := range rt.Aliases {
+		rt.AliasByName[a.Name] = a
+	}
+	metrics := observability.NewMetrics()
+	health := providerhealth.New(metrics, config.ProviderHealth{})
+	health.SetProviders(rt.ProviderByName)
+	adapter := &statusByAPIKeyAdapter{rules: map[string]int{"key1": http.StatusTooManyRequests}}
+	h := NewHandler(Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   adapter,
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:   BuildModelCatalog(rt),
+		Metrics:   metrics,
+		Providers: rt.ProviderByName,
+		Health:    health,
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"alias/a","messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if !health.IsHealthy("p1") {
+		t.Fatalf("429 retry status marked provider unhealthy")
+	}
+}
+
+func TestRecordProviderHealthSkipsInboundCancellation(t *testing.T) {
+	metrics := observability.NewMetrics()
+	health := providerhealth.New(metrics, config.ProviderHealth{})
+	health.SetProviders(map[string]config.Provider{"p": {Name: "p"}})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var h Handler
+	h.recordProviderHealth(Dependencies{Health: health}, ctx, "p", nil, context.Canceled, false)
+
+	if !health.IsHealthy("p") {
+		t.Fatalf("context cancellation marked provider unhealthy")
+	}
+}
+
+func TestRecordProviderHealthMarksSelected5xxUnhealthy(t *testing.T) {
+	metrics := observability.NewMetrics()
+	health := providerhealth.New(metrics, config.ProviderHealth{})
+	health.SetProviders(map[string]config.Provider{"p": {Name: "p"}})
+
+	var h Handler
+	h.recordProviderHealth(Dependencies{Health: health}, context.Background(), "p", &provider.Result{StatusCode: http.StatusInternalServerError}, nil, false)
+
+	if health.IsHealthy("p") {
+		t.Fatalf("5xx response did not mark provider unhealthy")
 	}
 }

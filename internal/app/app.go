@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -28,7 +29,6 @@ import (
 const (
 	defaultReadTimeout    = 30 * time.Second
 	defaultMaxHeaderBytes = 1 << 20
-	upstreamHeaderTimeout = 360 * time.Second
 )
 
 type BuildOptions struct {
@@ -38,19 +38,23 @@ type BuildOptions struct {
 }
 
 type App struct {
-	mu        sync.RWMutex
-	Config    *config.Runtime
-	Server    *http.Server
-	handler   *httpapi.Handler
-	metrics   *observability.Metrics
-	logger    *slog.Logger
-	adapter   provider.Adapter
-	client    *http.Client
-	health    *providerhealth.Tracker
-	usage     *accounting.Aggregator
-	logs      *observability.LogBuffer
-	buildOpt  BuildOptions
-	startTime time.Time
+	mu                    sync.RWMutex
+	reloadMu              sync.Mutex
+	Config                *config.Runtime
+	Server                *http.Server
+	handler               *httpapi.Handler
+	metrics               *observability.Metrics
+	logger                *slog.Logger
+	adapter               provider.Adapter
+	clients               *upstreamClientPool
+	health                *providerhealth.Tracker
+	rateLimiter           ratelimit.Limiter
+	usage                 *accounting.Aggregator
+	logs                  *observability.LogBuffer
+	buildOpt              BuildOptions
+	startTime             time.Time
+	dashboardTokenMinted  bool
+	dashboardTokenWritten bool
 }
 
 func Build(ctx context.Context, opts BuildOptions) (*App, error) {
@@ -58,7 +62,8 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	if err := ensureDashboardToken(rt, ""); err != nil {
+	dashboardTokenMinted, err := ensureDashboardToken(rt, "", false)
+	if err != nil {
 		return nil, fmt.Errorf("dashboard token: %w", err)
 	}
 	dashboardEnabled := rt.Dashboard.Enabled
@@ -74,8 +79,6 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 		Level:  observability.ParseLevel(string(rt.Logging.Level)),
 		Buffer: logs,
 	})
-	slog.SetDefault(logger)
-	observability.LogStartup(logger, rt)
 
 	adapter := provider.New()
 	metrics := observability.NewMetrics()
@@ -84,21 +87,41 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	usage := accounting.NewAggregator()
 	health := providerhealth.New(metrics, rt.ProviderHealth)
 	health.SetProviders(rt.ProviderByName)
+	rateLimiter := ratelimit.New(rt.Auth)
 
-	httpClient := newHTTPClient()
+	httpClients := newUpstreamClientPool()
 
 	startTime := time.Now()
-	handler := httpapi.NewHandler(buildDependencies(rt, logger, adapter, metrics, health, usage, httpClient, logs, startTime, opts.Version))
+	handler := httpapi.NewHandler(buildDependencies(rt, logger, adapter, metrics, health, rateLimiter, usage, httpClients, logs, startTime, opts.Version))
 	server := &http.Server{
 		Handler: handler,
 	}
 	applyServerConfig(server, rt.Listener)
 
-	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, client: httpClient, health: health, usage: usage, logs: logs, buildOpt: opts, startTime: startTime}, nil
+	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, clients: httpClients, health: health, rateLimiter: rateLimiter, usage: usage, logs: logs, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
+	return a.RunReady(ctx, nil)
+}
+
+func (a *App) RunReady(ctx context.Context, ready func() error) error {
 	a.logger.Info("starting server", "address", a.Server.Addr)
+	listener, err := net.Listen("tcp", a.Server.Addr)
+	if err != nil {
+		return err
+	}
+	if err := a.persistDashboardTokenIfNeeded(); err != nil {
+		_ = listener.Close()
+		return fmt.Errorf("dashboard token: %w", err)
+	}
+	observability.LogStartup(a.logger, a.Config)
+	if ready != nil {
+		if err := ready(); err != nil {
+			_ = listener.Close()
+			return err
+		}
+	}
 
 	reloadCh := make(chan os.Signal, 1)
 	signal.Notify(reloadCh, syscall.SIGHUP)
@@ -106,7 +129,7 @@ func (a *App) Run(ctx context.Context) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		if err := a.Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := a.Server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 	}()
@@ -128,6 +151,9 @@ func (a *App) Run(ctx context.Context) error {
 			if err := a.Server.Shutdown(shutdownCtx); err != nil {
 				return fmt.Errorf("server shutdown: %w", err)
 			}
+			if err := a.Close(); err != nil {
+				return fmt.Errorf("app close: %w", err)
+			}
 			a.logger.Info("server stopped")
 			return nil
 		}
@@ -135,6 +161,9 @@ func (a *App) Run(ctx context.Context) error {
 }
 
 func (a *App) Reload() error {
+	a.reloadMu.Lock()
+	defer a.reloadMu.Unlock()
+
 	rt, err := loadRuntime(a.buildOpt.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
@@ -146,48 +175,87 @@ func (a *App) Reload() error {
 	if current != nil && (rt.Listener.Address != current.Listener.Address || rt.Listener.Timeouts != current.Listener.Timeouts) {
 		return fmt.Errorf("listener changes require restart")
 	}
-	if err := ensureDashboardToken(rt, current.Dashboard.Token); err != nil {
+	if current != nil && rt.Logging.Level != current.Logging.Level {
+		return fmt.Errorf("logging level changes require restart")
+	}
+	if current != nil && rt.Dashboard.Enabled && !current.Dashboard.Enabled {
+		return fmt.Errorf("enabling dashboard requires restart")
+	}
+	dashboardTokenMinted, err := ensureDashboardToken(rt, current.Dashboard.Token, true)
+	if err != nil {
 		return fmt.Errorf("dashboard token: %w", err)
 	}
 
+	nextHealth := reloadHealthTracker(a.health, a.metrics, current, rt)
+	nextHealth.SetProviders(rt.ProviderByName)
+	nextRateLimiter := a.rateLimiter
+	if current == nil || !ratelimit.ConfigEqual(current.Auth, rt.Auth) {
+		nextRateLimiter = ratelimit.New(rt.Auth)
+	}
 	a.metrics.SetBuildInfo(a.buildOpt.Version)
 	a.metrics.RecordConfig(rt)
-	a.health = reloadHealthTracker(a.health, a.metrics, current, rt)
-	a.health.SetProviders(rt.ProviderByName)
-	a.handler.UpdateDependencies(buildDependencies(rt, a.logger, a.adapter, a.metrics, a.health, a.usage, a.client, a.logs, a.startTime, a.buildOpt.Version))
+	a.handler.UpdateDependencies(buildDependencies(rt, a.logger, a.adapter, a.metrics, nextHealth, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version))
+	oldHealth := a.health
 	a.mu.Lock()
 	a.Config = rt
+	a.health = nextHealth
+	a.rateLimiter = nextRateLimiter
+	a.dashboardTokenMinted = dashboardTokenMinted
+	a.dashboardTokenWritten = a.dashboardTokenWritten || dashboardTokenMinted
 	a.mu.Unlock()
+	if oldHealth != nil && oldHealth != nextHealth {
+		_ = oldHealth.Close()
+	}
 	observability.LogStartup(a.logger, rt)
 	return nil
 }
 
-func buildDependencies(rt *config.Runtime, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, usage accounting.Recorder, httpClient *http.Client, logs *observability.LogBuffer, startTime time.Time, version string) httpapi.Dependencies {
+func (a *App) Close() error {
+	if a == nil {
+		return nil
+	}
+	a.mu.RLock()
+	clients := a.clients
+	health := a.health
+	a.mu.RUnlock()
+	if clients != nil {
+		clients.CloseIdleConnections()
+	}
+	return health.Close()
+}
+
+func (a *App) persistDashboardTokenIfNeeded() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.dashboardTokenMinted || a.dashboardTokenWritten {
+		return nil
+	}
+	if err := dashrpc.PersistToken(a.Config.Dashboard.Token); err != nil {
+		return err
+	}
+	a.dashboardTokenWritten = true
+	return nil
+}
+
+func buildDependencies(rt *config.Runtime, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string) httpapi.Dependencies {
 	return httpapi.Dependencies{
-		Resolver:           modelresolver.New(rt),
-		Adapter:            adapter,
-		Auth:               auth.NewAuthenticator(rt.Auth),
-		Authorizer:         auth.NewAuthorizer(rt.Auth),
-		Client:             httpClient,
-		Catalog:            httpapi.BuildModelCatalog(rt),
-		Metrics:            metrics,
-		Providers:          rt.ProviderByName,
-		Health:             health,
-		RateLimiter:        ratelimit.New(rt.Auth),
-		Accounting:         accounting.NewMulti(metrics, usage),
-		Usage:              aOrUsage(usage),
-		AccessLog:          rt.Logging.AccessLog,
-		HasAccessLog:       true,
-		Logger:             logger,
-		Dashboard:          rt.Dashboard,
-		Logs:               logs,
-		DashboardVersion:   version,
-		DashboardAddress:   rt.Listener.Address,
-		DashboardAuthMode:  string(rt.Auth.Mode),
-		DashboardStartTime: startTime,
-		DashboardProviders: rt.Providers,
-		DashboardDisabled:  rt.DisabledProviders,
-		DashboardAliases:   rt.Aliases,
+		Resolver:          modelresolver.New(rt),
+		Adapter:           adapter,
+		Auth:              auth.NewAuthenticator(rt.Auth),
+		Authorizer:        auth.NewAuthorizer(rt.Auth),
+		Client:            clients.Client(config.DefaultUpstreamHeaderTimeout),
+		ClientForProvider: clients.ClientForProvider,
+		Catalog:           httpapi.BuildModelCatalog(rt),
+		Metrics:           metrics,
+		Providers:         rt.ProviderByName,
+		Health:            health,
+		RateLimiter:       rateLimiter,
+		Accounting:        accounting.NewMulti(metrics, usage),
+		Usage:             aOrUsage(usage),
+		AccessLog:         rt.Logging.AccessLog,
+		HasAccessLog:      true,
+		Logger:            logger,
+		Dashboard:         dashrpc.NewRuntimeSource(rt.Dashboard, version, rt.Listener.Address, string(rt.Auth.Mode), startTime, rt.Providers, rt.DisabledProviders, rt.Aliases, aOrAggregator(usage), health, logs),
 	}
 }
 
@@ -198,11 +266,55 @@ func aOrUsage(usage accounting.Recorder) accounting.Reader {
 	return nil
 }
 
+func aOrAggregator(usage accounting.Recorder) *accounting.Aggregator {
+	if aggregator, ok := usage.(*accounting.Aggregator); ok {
+		return aggregator
+	}
+	return nil
+}
+
 func loadRuntime(path string) (*config.Runtime, error) {
 	return config.LoadFile(path)
 }
 
-func newHTTPClient() *http.Client {
+type upstreamClientPool struct {
+	mu      sync.Mutex
+	clients map[time.Duration]*http.Client
+}
+
+func newUpstreamClientPool() *upstreamClientPool {
+	return &upstreamClientPool{clients: make(map[time.Duration]*http.Client)}
+}
+
+func (p *upstreamClientPool) ClientForProvider(provider config.Provider) *http.Client {
+	return p.Client(provider.UpstreamHeaderTimeout)
+}
+
+func (p *upstreamClientPool) Client(timeout time.Duration) *http.Client {
+	if timeout <= 0 {
+		timeout = config.DefaultUpstreamHeaderTimeout
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if client := p.clients[timeout]; client != nil {
+		return client
+	}
+	client := newHTTPClient(timeout)
+	p.clients[timeout] = client
+	return client
+}
+
+func (p *upstreamClientPool) CloseIdleConnections() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, client := range p.clients {
+		if transport, ok := client.Transport.(*http.Transport); ok {
+			transport.CloseIdleConnections()
+		}
+	}
+}
+
+func newHTTPClient(upstreamHeaderTimeout time.Duration) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = func(r *http.Request) (*url.URL, error) {
 		return http.ProxyFromEnvironment(r)
@@ -236,30 +348,26 @@ func applyServerConfig(server *http.Server, listener config.Listener) {
 	}
 }
 
-// ensureDashboardToken makes sure an enabled Dashboard block has a usable
-// token. If the config declares one, it wins. If the config declares the
-// block without a token, ensureDashboardToken reuses `existing` (the live
-// token from a prior Build/Reload, if any) so reloads don't rotate the
-// secret. Otherwise it mints a fresh random token and persists it to
-// dashrpc.TokenFilePath() so the dashboard command can read it.
-func ensureDashboardToken(rt *config.Runtime, existing string) error {
+func ensureDashboardToken(rt *config.Runtime, existing string, persist bool) (bool, error) {
 	if !rt.Dashboard.Enabled {
-		return nil
+		return false, nil
 	}
 	if rt.Dashboard.Token != "" {
-		return nil
+		return false, nil
 	}
 	if existing != "" {
 		rt.Dashboard.Token = existing
-		return nil
+		return false, nil
 	}
 	token, err := dashrpc.MintToken()
 	if err != nil {
-		return err
+		return false, err
 	}
-	if err := dashrpc.PersistToken(token); err != nil {
-		return err
+	if persist {
+		if err := dashrpc.PersistToken(token); err != nil {
+			return false, err
+		}
 	}
 	rt.Dashboard.Token = token
-	return nil
+	return true, nil
 }

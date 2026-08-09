@@ -111,6 +111,17 @@ func parseTimeouts(t *rawTimeouts) (Timeouts, error) {
 	return out, nil
 }
 
+func parsePositiveDuration(field, value string) (time.Duration, error) {
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s: %w", field, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("invalid %s: must be greater than zero", field)
+	}
+	return d, nil
+}
+
 // nameRule is the shared rule for provider, alias, and model block labels.
 var nameRule = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 

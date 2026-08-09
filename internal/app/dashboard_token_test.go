@@ -11,10 +11,9 @@ import (
 	"github.com/egose/aiproxy/internal/dashrpc"
 )
 
-func TestBuildMintsDashboardTokenWhenBlockDeclaredWithoutToken(t *testing.T) {
+func TestBuildMintsDashboardTokenWithoutPersisting(t *testing.T) {
 	tokenPath := filepath.Join(t.TempDir(), "aiproxy", "dashboard.token")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Dir(filepath.Dir(tokenPath)))
-	// Remove any pre-existing token file to truly test the mint path.
 	_ = os.Remove(tokenPath)
 
 	configPath := writeConfigFile(t, `
@@ -38,6 +37,12 @@ provider "openai" "openai" {
 	}
 	if len(a.Config.Dashboard.Token) < 32 {
 		t.Fatalf("minted token should be at least 32 hex chars, got %q", a.Config.Dashboard.Token)
+	}
+	if _, err := os.Stat(tokenPath); !os.IsNotExist(err) {
+		t.Fatalf("Build should not persist token; stat err = %v", err)
+	}
+	if err := a.persistDashboardTokenIfNeeded(); err != nil {
+		t.Fatalf("persist token: %v", err)
 	}
 	data, err := os.ReadFile(tokenPath)
 	if err != nil {
@@ -99,9 +104,7 @@ provider "openai" "openai" {
 		t.Fatal("expected minted token after Build")
 	}
 	// Wipe the persistence file so we know Reload is not re-minting from disk.
-	if err := os.Remove(dashrpc.TokenFilePath()); err != nil {
-		t.Fatalf("remove token file: %v", err)
-	}
+	_ = os.Remove(dashrpc.TokenFilePath())
 	if err := a.Reload(); err != nil {
 		t.Fatalf("reload app: %v", err)
 	}
@@ -179,7 +182,7 @@ provider "openai" "openai" {
 
 func TestEnsureDashboardTokenNoopsWhenBlockAbsent(t *testing.T) {
 	rt := &config.Runtime{}
-	if err := ensureDashboardToken(rt, "irrelevant"); err != nil {
+	if minted, err := ensureDashboardToken(rt, "irrelevant", false); err != nil || minted {
 		t.Fatalf("ensureDashboardToken err = %v", err)
 	}
 	if rt.Dashboard.Enabled {
@@ -195,7 +198,7 @@ func TestEnsureDashboardTokenMintsWhenEnabledWithEmptyTokenAndEmptyExisting(t *t
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	rt := &config.Runtime{Dashboard: config.Dashboard{Enabled: true}}
-	if err := ensureDashboardToken(rt, ""); err != nil {
+	if minted, err := ensureDashboardToken(rt, "", true); err != nil || !minted {
 		t.Fatalf("ensureDashboardToken err = %v", err)
 	}
 	if rt.Dashboard.Token == "" {
@@ -211,7 +214,7 @@ func TestEnsureDashboardTokenReusesExistingWhenEnabledWithEmptyToken(t *testing.
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	rt := &config.Runtime{Dashboard: config.Dashboard{Enabled: true}}
-	if err := ensureDashboardToken(rt, "previously-minted"); err != nil {
+	if minted, err := ensureDashboardToken(rt, "previously-minted", true); err != nil || minted {
 		t.Fatalf("ensureDashboardToken err = %v", err)
 	}
 	if rt.Dashboard.Token != "previously-minted" {
@@ -227,7 +230,7 @@ func TestEnsureDashboardTokenUsesConfigToken(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	rt := &config.Runtime{Dashboard: config.Dashboard{Enabled: true, Token: "from-config"}}
-	if err := ensureDashboardToken(rt, "previously-minted"); err != nil {
+	if minted, err := ensureDashboardToken(rt, "previously-minted", true); err != nil || minted {
 		t.Fatalf("ensureDashboardToken err = %v", err)
 	}
 	if rt.Dashboard.Token != "from-config" {
