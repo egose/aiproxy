@@ -62,6 +62,72 @@ provider "openai" "openai" {
 	if p.ModelByName["gpt-4o-mini"].UpstreamName != "gpt-4o-mini" {
 		t.Errorf("upstream name default mismatch")
 	}
+	if p.UpstreamHeaderTimeout != DefaultUpstreamHeaderTimeout {
+		t.Errorf("upstream header timeout = %v", p.UpstreamHeaderTimeout)
+	}
+}
+
+func TestLoadUpstreamHeaderTimeoutPrecedence(t *testing.T) {
+	cfg := `
+upstream_header_timeout = "120s"
+
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "primary" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+provider "openai" "slow" {
+  upstream_header_timeout = "180s"
+  api_key = ""
+  model "gpt-4o" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if rt.UpstreamHeaderTimeout != 120*time.Second {
+		t.Fatalf("root upstream header timeout = %v", rt.UpstreamHeaderTimeout)
+	}
+	if got := rt.ProviderByName["primary"].UpstreamHeaderTimeout; got != 120*time.Second {
+		t.Fatalf("primary timeout = %v", got)
+	}
+	if len(rt.DisabledProviders) != 1 {
+		t.Fatalf("disabled providers = %d", len(rt.DisabledProviders))
+	}
+	if got := rt.DisabledProviders[0].UpstreamHeaderTimeout; got != 180*time.Second {
+		t.Fatalf("disabled provider timeout = %v", got)
+	}
+}
+
+func TestLoadRejectsInvalidUpstreamHeaderTimeouts(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  string
+		want string
+	}{
+		{name: "root malformed", cfg: `upstream_header_timeout = "later"`, want: "invalid upstream_header_timeout"},
+		{name: "root zero", cfg: `upstream_header_timeout = "0s"`, want: "invalid upstream_header_timeout"},
+		{name: "root negative", cfg: `upstream_header_timeout = "-1s"`, want: "invalid upstream_header_timeout"},
+		{name: "provider malformed", cfg: `provider "openai" "openai" { upstream_header_timeout = "later" }`, want: `provider "openai": invalid upstream_header_timeout`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+` + tc.cfg + `
+provider "openai" "fallback" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+			_, err := Load([]byte(cfg), "test.hcl")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
 }
 
 func TestLoadLoggingConfig(t *testing.T) {
@@ -218,6 +284,43 @@ provider "openai" "openai" {
 	}
 }
 
+func TestLoadRejectsNegativeProviderHealthCooldownWithoutRedis(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider_health {
+  cooldown = "-1s"
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "cooldown must not be negative") {
+		t.Fatalf("expected negative cooldown error, got %v", err)
+	}
+}
+
+func TestLoadRejectsMalformedProviderHealthRedisURL(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider_health {
+  redis_url = "localhost:6379"
+  key_prefix = "aiproxy:test"
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "redis_url must be a valid Redis URL") {
+		t.Fatalf("expected malformed redis_url error, got %v", err)
+	}
+}
+
 func TestLoadInvalidLoggingLevel(t *testing.T) {
 	cfg := `
 listener "http" "public" { address = ":8080" }
@@ -248,6 +351,53 @@ provider "openai-compatible" "local" {
 	_, err := Load([]byte(cfg), "test.hcl")
 	if err == nil || !strings.Contains(err.Error(), "base_url is required") {
 		t.Fatalf("expected base_url error, got %v", err)
+	}
+}
+
+func TestLoadRejectsMalformedProviderBaseURL(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai-compatible" "local" {
+  base_url = "not-a-url"
+  api_key = "k"
+  model "m" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "base_url must be an absolute") {
+		t.Fatalf("expected malformed base_url error, got %v", err)
+	}
+}
+
+func TestLoadRejectsRemoteHTTPProviderBaseURL(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai-compatible" "local" {
+  base_url = "http://example.com/v1"
+  api_key = "k"
+  model "m" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "non-HTTPS base_url") {
+		t.Fatalf("expected remote http base_url error, got %v", err)
+	}
+}
+
+func TestLoadAllowsLoopbackHTTPProviderBaseURL(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai-compatible" "local" {
+  base_url = "http://127.0.0.1:11434/v1"
+  api_key = "k"
+  model "m" {}
+}
+`
+	if _, err := Load([]byte(cfg), "test.hcl"); err != nil {
+		t.Fatalf("load: %v", err)
 	}
 }
 
@@ -361,6 +511,61 @@ provider "openai" "backup" {
 	}
 	if _, ok := rt.ProviderByName["openai"]; ok {
 		t.Fatalf("disabled provider unexpectedly present in ProviderByName")
+	}
+}
+
+func TestLoadSkipsProviderWithMissingCredential(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  model "gpt-4o-mini" {}
+}
+provider "openai" "backup" {
+  api_key = "sk-backup"
+  model "gpt-4o-mini" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(rt.DisabledProviders) != 1 || rt.DisabledProviders[0].Name != "openai" {
+		t.Fatalf("disabled providers = %+v", rt.DisabledProviders)
+	}
+}
+
+func TestLoadRejectsInvalidDisabledProviderStructure(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "bogus" "bad" {
+  api_key = ""
+  model "m" {}
+}
+provider "openai" "backup" {
+  api_key = "sk-backup"
+  model "gpt-4o-mini" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "unsupported type") {
+		t.Fatalf("expected disabled provider structure error, got %v", err)
+	}
+}
+
+func TestLoadRejectsReservedAliasProviderName(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "alias" {
+  api_key = "k"
+  model "m" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "reserved for alias model routing") {
+		t.Fatalf("expected reserved alias provider error, got %v", err)
 	}
 }
 
@@ -717,7 +922,30 @@ alias "a" {
 }
 `
 	_, err := Load([]byte(cfg), "test.hcl")
-	if err == nil || !strings.Contains(err.Error(), "must be between 100 and 599") {
+	if err == nil || !strings.Contains(err.Error(), "must be between 400 and 599") {
 		t.Fatalf("expected out-of-range error, got %v", err)
+	}
+}
+
+func TestLoadAliasRetryStatusCodesRejectsSuccessfulStatus(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "p" {
+  api_key = "k"
+  model "m" {}
+}
+alias "a" {
+  algorithm          = "round_robin"
+  retry_status_codes = ["200"]
+  target {
+    provider = "p"
+    model    = "m"
+  }
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "must be between 400 and 599") {
+		t.Fatalf("expected successful retry status error, got %v", err)
 	}
 }

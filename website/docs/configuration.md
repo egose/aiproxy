@@ -35,6 +35,8 @@ listener "http" "public" {
   }
 }
 
+upstream_header_timeout = "120s"
+
 auth "main" {
   mode = "bearer_static"
 
@@ -73,6 +75,7 @@ provider "openai" "openai" {
 provider "openai-compatible" "localai" {
   display_name = "LocalAI"
   base_url     = "https://llm.internal/v1"
+  upstream_header_timeout = "180s"
 
   api_key_ref {
     key = "localai"
@@ -156,11 +159,36 @@ Common attributes:
 - `base_url` for `openai-compatible`
 - `api_key`
 - `api_key_ref`
+- `upstream_header_timeout`
 - nested `model` blocks
 
-Exactly one of `api_key` or `api_key_ref` must be set for a provider.
+Providers normally declare exactly one of `api_key` or `api_key_ref`.
+
+For compatibility, a provider whose credential resolves to empty, including an
+empty `api_key = env("...")`, is disabled before request routing. Disabled
+providers are still validated for structure, URL, models, and capabilities.
+
+Provider `base_url` values must be absolute `https` URLs for remote upstreams.
+Plain `http` is accepted only for loopback development endpoints such as
+`localhost`, `127.0.0.1`, or `::1`.
 
 Provider names are part of the public model string, so keep them stable and machine-friendly.
+
+## Upstream Header Timeout
+
+`upstream_header_timeout` controls how long the proxy waits for upstream response headers. It accepts Go duration strings such as `30s`, `2m`, or `1h`.
+
+You can set it globally at the root or override it per provider:
+
+```hcl
+upstream_header_timeout = "120s"
+
+provider "openai" "openai" {
+  upstream_header_timeout = "180s"
+}
+```
+
+Precedence is provider value, then root value, then the 90-second default. The timeout applies only until response headers arrive; JSON and streaming response bodies can continue for any duration after headers are received. Root and provider timeout changes apply on a successful `SIGHUP` reload.
 
 ## Models
 
@@ -236,9 +264,14 @@ Use `api_key_ref` when you want provider secrets stored outside the main HCL fil
 - provider names are lowercase
 - alias names are lowercase
 - names must not contain spaces
-- names must not contain `/`
+- provider and alias names must not contain `/`
+- provider name `alias` is reserved for `alias/<alias-name>` routing
+- model names may contain `/` when every slash-separated segment follows the
+  same lowercase name rule
 
-These rules keep model parsing simple and unambiguous.
+These rules keep model parsing simple and unambiguous; direct model resolution
+splits on the first `/`, so `<provider-name>/<model-name>` still works when the
+model name contains additional slashes.
 
 ## Validation Rules
 
@@ -246,10 +279,14 @@ Startup fails on invalid configuration. Important checks include:
 
 - duplicate provider or alias names
 - invalid provider types or alias algorithms
-- names that are not lowercase or contain spaces or `/`
+- provider or alias names that are not lowercase or contain spaces or `/`
+- provider name `alias`
+- model names with invalid slash-separated segments
 - `openai-compatible` providers missing `base_url`
+- malformed provider `base_url` values, and non-loopback `http` base URLs
 - providers with both `api_key` and `api_key_ref`
-- providers with neither `api_key` nor `api_key_ref`
+- active providers with no resolved credential; current compatibility behavior
+  disables missing or empty credentials before routing instead
 - providers without any models
 - aliases without any targets
 - alias targets that reference unknown providers or models

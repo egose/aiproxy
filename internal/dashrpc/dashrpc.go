@@ -1,6 +1,7 @@
 package dashrpc
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/filestore"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/providerhealth"
 )
@@ -64,10 +66,116 @@ type AliasTarget struct {
 type Usage = accounting.Summary
 type Recent = accounting.Event
 
+type Logs struct {
+	Logs    []observability.LogEntry `json:"logs"`
+	LastSeq uint64                   `json:"last_seq"`
+}
+
+type Source interface {
+	Enabled() bool
+	Token() string
+	Snapshot(context.Context, int) Snapshot
+	Logs(uint64) Logs
+}
+
+type RuntimeSource struct {
+	dashboard         config.Dashboard
+	version           string
+	address           string
+	authMode          string
+	startTime         time.Time
+	providers         []config.Provider
+	disabledProviders []config.Provider
+	aliases           []config.Alias
+	usage             *accounting.Aggregator
+	health            *providerhealth.Tracker
+	logs              *observability.LogBuffer
+}
+
+func NewRuntimeSource(dashboard config.Dashboard, version, address, authMode string, startTime time.Time, providers, disabledProviders []config.Provider, aliases []config.Alias, usage *accounting.Aggregator, health *providerhealth.Tracker, logs *observability.LogBuffer) *RuntimeSource {
+	return &RuntimeSource{
+		dashboard:         dashboard,
+		version:           version,
+		address:           address,
+		authMode:          authMode,
+		startTime:         startTime,
+		providers:         cloneConfigProviders(providers),
+		disabledProviders: cloneConfigProviders(disabledProviders),
+		aliases:           cloneConfigAliases(aliases),
+		usage:             usage,
+		health:            health,
+		logs:              logs,
+	}
+}
+
+func cloneConfigProviders(in []config.Provider) []config.Provider {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]config.Provider, len(in))
+	for i, provider := range in {
+		out[i] = provider
+		out[i].APIKey = ""
+		out[i].APIKeyRef = nil // pragma: allowlist secret
+		out[i].Models = append([]config.Model(nil), provider.Models...)
+		for j, model := range out[i].Models {
+			out[i].Models[j].Capabilities = append([]config.Capability(nil), model.Capabilities...)
+		}
+		out[i].ModelByName = nil
+	}
+	return out
+}
+
+func cloneConfigAliases(in []config.Alias) []config.Alias {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]config.Alias, len(in))
+	for i, alias := range in {
+		out[i] = alias
+		out[i].RetryStatusCodes = append([]int(nil), alias.RetryStatusCodes...)
+		out[i].Targets = append([]config.AliasTarget(nil), alias.Targets...)
+	}
+	return out
+}
+
+func (s *RuntimeSource) Enabled() bool {
+	return s != nil && s.dashboard.Enabled
+}
+
+func (s *RuntimeSource) Token() string {
+	if s == nil {
+		return ""
+	}
+	return s.dashboard.Token
+}
+
+func (s *RuntimeSource) Snapshot(ctx context.Context, recentN int) Snapshot {
+	if s == nil {
+		return Snapshot{}
+	}
+	return BuildContext(ctx, s.version, s.address, s.authMode, s.startTime, s.providers, s.disabledProviders, s.aliases, s.usage, s.health, s.logs, recentN)
+}
+
+func (s *RuntimeSource) Logs(since uint64) Logs {
+	if s == nil || s.logs == nil {
+		return Logs{}
+	}
+	entries, lastSeq := s.logs.SinceSeq(since)
+	return Logs{Logs: entries, LastSeq: lastSeq}
+}
+
 // Build constructs a transport snapshot from live in-process state. It must
 // copy data out of shared trackers under their locks; callers must not retain
 // the live pointers after Build returns.
 func Build(version, address, authMode string, startTime time.Time,
+	providers, disabledProviders []config.Provider, aliases []config.Alias,
+	usage *accounting.Aggregator, health *providerhealth.Tracker,
+	logs *observability.LogBuffer, recentN int) Snapshot {
+	return BuildContext(context.Background(), version, address, authMode, startTime, providers, disabledProviders, aliases, usage, health, logs, recentN)
+}
+
+func BuildContext(ctx context.Context, version, address, authMode string, startTime time.Time,
 	providers, disabledProviders []config.Provider, aliases []config.Alias,
 	usage *accounting.Aggregator, health *providerhealth.Tracker,
 	logs *observability.LogBuffer, recentN int) Snapshot {
@@ -83,7 +191,7 @@ func Build(version, address, authMode string, startTime time.Time,
 		Aliases:           toAliases(aliases),
 	}
 	if health != nil {
-		snap.Health = health.Snapshot()
+		snap.Health = health.SnapshotContext(ctx)
 	}
 	if usage != nil {
 		snap.Usage = usage.Summaries()
@@ -185,10 +293,7 @@ func MintToken() (string, error) {
 // command can read it. The parent directory is created if missing.
 func PersistToken(token string) error {
 	path := TokenFilePath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create token dir: %w", err)
-	}
-	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
+	if err := filestore.WriteFile(path, []byte(token+"\n"), 0o600, filestore.Options{DirMode: 0o700, Secret: true}); err != nil {
 		return fmt.Errorf("write token file: %w", err)
 	}
 	return nil

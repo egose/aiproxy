@@ -2,22 +2,19 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/configedit"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/spf13/cobra"
@@ -33,86 +30,18 @@ type promptSession struct {
 	interactiveTUI bool
 }
 
-type topLevelBlock struct {
-	Type   string
-	Labels []string
-	Start  int
-	End    int
-	Text   string
-}
-
-type providerInput struct {
-	ProviderType string
-	Name         string
-	DisplayName  string
-	BaseURL      string
-	Credential   providerCredentialInput
-	Models       []providerModelInput
-}
-
-type providerCredentialInput struct {
-	Mode        string
-	APIKeyValue string
-	SecretsPath string
-	SecretsKey  string
-}
-
-type providerModelInput struct {
-	Name         string
-	DisplayName  string
-	UpstreamName string
-	Capabilities []string
-}
-
-type listenerInput struct {
-	Name       string
-	Address    string
-	ReadHeader string
-	Idle       string
-	Write      string
-}
-
-type authInput struct {
-	Name      string
-	Mode      string
-	RateLimit *authRateLimitInput
-	Clients   []authClientInput
-}
-
-type authRateLimitInput struct {
-	RequestsPerMinute string
-	Burst             string
-}
-
-type authClientInput struct {
-	Name          string
-	Token         string
-	Tenant        string
-	AllowedModels []string
-}
-
-type aliasInput struct {
-	Name             string
-	Algorithm        string
-	RetryStatusCodes []string
-	Targets          []aliasTargetInput
-}
-
-type aliasTargetInput struct {
-	Provider string
-	Model    string
-}
-
-type providerHealthInput struct {
-	RedisURL  string
-	KeyPrefix string
-	Cooldown  string
-}
-
-type loggingInput struct {
-	Level     string
-	AccessLog bool
-}
+type topLevelBlock = configedit.TopLevelBlock
+type providerInput = configedit.ProviderInput
+type providerCredentialInput = configedit.ProviderCredentialInput
+type providerModelInput = configedit.ProviderModelInput
+type listenerInput = configedit.ListenerInput
+type authInput = configedit.AuthInput
+type authRateLimitInput = configedit.AuthRateLimitInput
+type authClientInput = configedit.AuthClientInput
+type aliasInput = configedit.AliasInput
+type aliasTargetInput = configedit.AliasTargetInput
+type providerHealthInput = configedit.ProviderHealthInput
+type loggingInput = configedit.LoggingInput
 
 type listenerOptions struct {
 	Name           string
@@ -137,19 +66,20 @@ type authOptions struct {
 }
 
 type providerOptions struct {
-	ProviderType     string
-	Name             string
-	DisplayName      string
-	BaseURL          string
-	APIKey           string
-	APIKeyEnv        string
-	SecretsPath      string
-	SecretsKey       string
-	Models           []string
-	ModelUpstreams   []string
-	ModelDisplayName []string
-	ModelCaps        []string
-	NonInteractive   bool
+	ProviderType          string
+	Name                  string
+	DisplayName           string
+	BaseURL               string
+	UpstreamHeaderTimeout string
+	APIKey                string
+	APIKeyEnv             string
+	SecretsPath           string
+	SecretsKey            string
+	Models                []string
+	ModelUpstreams        []string
+	ModelDisplayName      []string
+	ModelCaps             []string
+	NonInteractive        bool
 }
 
 type aliasOptions struct {
@@ -173,6 +103,11 @@ type loggingOptions struct {
 	NonInteractive bool
 }
 
+type upstreamOptions struct {
+	UpstreamHeaderTimeout string
+	NonInteractive        bool
+}
+
 func newConfigureCommand() *cobra.Command {
 	var cfgPath string
 	cmd := &cobra.Command{
@@ -185,7 +120,7 @@ func newConfigureCommand() *cobra.Command {
 			"aiproxy configure alias --config /etc/aiproxy/config.hcl --non-interactive --name chat_default --target primary/gpt-4o-mini --target backup/qwen3-32b",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
-			choice, err := prompts.askChoice("Block to configure", []string{"provider", "alias", "auth", "listener", "logging", "provider-health"}, "provider")
+			choice, err := prompts.askChoice("Block to configure", []string{"provider", "alias", "auth", "listener", "upstream", "logging", "provider-health"}, "provider")
 			if err != nil {
 				return err
 			}
@@ -196,6 +131,8 @@ func newConfigureCommand() *cobra.Command {
 			switch choice {
 			case "listener":
 				return runConfigureListener(&prompts, resolvedConfigPath, false, listenerOptions{})
+			case "upstream":
+				return runConfigureUpstream(&prompts, resolvedConfigPath, upstreamOptions{})
 			case "auth":
 				return runConfigureAuth(&prompts, resolvedConfigPath, false, authOptions{})
 			case "alias":
@@ -211,11 +148,29 @@ func newConfigureCommand() *cobra.Command {
 	}
 	cmd.PersistentFlags().StringVar(&cfgPath, "config", "", "path to config file")
 	cmd.AddCommand(newConfigureListenerCommand())
+	cmd.AddCommand(newConfigureUpstreamCommand())
 	cmd.AddCommand(newConfigureAuthCommand())
 	cmd.AddCommand(newConfigureProviderCommand())
 	cmd.AddCommand(newConfigureAliasCommand())
 	cmd.AddCommand(newConfigureLoggingCommand())
 	cmd.AddCommand(newConfigureProviderHealthCommand())
+	return cmd
+}
+
+func newConfigureUpstreamCommand() *cobra.Command {
+	var options upstreamOptions
+	cmd := &cobra.Command{
+		Use:   "upstream",
+		Short: "Configure top-level upstream settings",
+		Example: "aiproxy configure upstream\n" +
+			"aiproxy configure upstream --config /etc/aiproxy/config.hcl --non-interactive --upstream-header-timeout 120s",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
+			return runConfigureUpstream(&prompts, inheritedConfigPath(cmd), options)
+		},
+	}
+	cmd.Flags().StringVar(&options.UpstreamHeaderTimeout, "upstream-header-timeout", "", "root upstream_header_timeout")
+	cmd.Flags().BoolVar(&options.NonInteractive, "non-interactive", false, "fail instead of prompting for missing values")
 	return cmd
 }
 
@@ -288,6 +243,7 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().StringVar(&options.ProviderType, "type", "", "provider type")
 	cmd.Flags().StringVar(&options.DisplayName, "display-name", "", "provider display_name")
 	cmd.Flags().StringVar(&options.BaseURL, "base-url", "", "provider base_url")
+	cmd.Flags().StringVar(&options.UpstreamHeaderTimeout, "upstream-header-timeout", "", "provider upstream_header_timeout")
 	cmd.Flags().StringVar(&options.APIKey, "api-key", "", "provider API key or secret value")
 	cmd.Flags().StringVar(&options.APIKeyEnv, "api-key-env", "", "provider API key environment variable name")
 	cmd.Flags().StringVar(&options.SecretsPath, "secrets-path", "", "secrets file path for api_key_ref")
@@ -432,6 +388,48 @@ func runConfigureListener(prompts *promptSession, configPath string, deleteBlock
 		return err
 	}
 	_, _ = fmt.Fprintf(prompts.out, "updated listener block in %s\n", configPath)
+	return nil
+}
+
+func runConfigureUpstream(prompts *promptSession, configPath string, options upstreamOptions) error {
+	var err error
+	configPath, err = resolveConfigPath(prompts, configPath)
+	if err != nil {
+		return err
+	}
+	doc, err := loadConfigDocument(configPath)
+	if err != nil {
+		return err
+	}
+	timeout := options.UpstreamHeaderTimeout
+	if timeout == "" {
+		timeout = configedit.TopLevelStringAttribute(doc.source, "upstream_header_timeout")
+	}
+	if options.NonInteractive {
+		if timeout == "" {
+			return fmt.Errorf("upstream requires --upstream-header-timeout in non-interactive mode")
+		}
+		if err := validateOptionalPositiveDuration(timeout); err != nil {
+			return fmt.Errorf("invalid upstream-header-timeout: %w", err)
+		}
+	} else {
+		timeout, err = prompts.askValidated("Root upstream header timeout", timeout, validateOptionalPositiveDuration)
+		if err != nil {
+			return err
+		}
+		if timeout == "" {
+			return fmt.Errorf("root upstream header timeout is required")
+		}
+	}
+	updated := configedit.UpsertTopLevelStringAttribute(doc.source, "upstream_header_timeout", timeout)
+	preview := "upstream_header_timeout = " + strconv.Quote(timeout) + "\n"
+	if err := prompts.confirmWrite("Review upstream changes", buildReviewSummary([]string{"Config path: " + configPath, "Action: update upstream settings"}, preview)); err != nil {
+		return err
+	}
+	if err := writeConfigFile(configPath, updated); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(prompts.out, "updated upstream settings in %s\n", configPath)
 	return nil
 }
 
@@ -602,10 +600,7 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 		return err
 	}
 
-	if err := writeSecretsUpdate(secretsUpdate); err != nil {
-		return err
-	}
-	if err := writeConfigFile(configPath, updated); err != nil {
+	if err := writeProviderFiles(configPath, updated, secretsUpdate); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(prompts.out, "updated provider %q in %s\n", input.Name, configPath)
@@ -876,37 +871,19 @@ func resolveConfigPath(prompts *promptSession, configured string) (string, error
 }
 
 func loadConfigDocument(path string) (*configDocument, error) {
-	src, err := os.ReadFile(path)
+	source, blocks, err := configedit.LoadDocument(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return &configDocument{}, nil
-		}
-		return nil, fmt.Errorf("read config %s: %w", path, err)
+		return nil, err
 	}
-	blocks, err := parseTopLevelBlocks(string(src))
-	if err != nil {
-		return nil, fmt.Errorf("parse config %s: %w", path, err)
-	}
-	return &configDocument{source: string(src), blocks: blocks}, nil
+	return &configDocument{source: source, blocks: blocks}, nil
 }
 
 func hasBlockType(blocks []topLevelBlock, blockType string) bool {
-	for _, block := range blocks {
-		if block.Type == blockType {
-			return true
-		}
-	}
-	return false
+	return configedit.HasBlockType(blocks, blockType)
 }
 
 func findBlock(blocks []topLevelBlock, match func(topLevelBlock) bool) *topLevelBlock {
-	for _, block := range blocks {
-		if match(block) {
-			copyBlock := block
-			return &copyBlock
-		}
-	}
-	return nil
+	return configedit.FindBlock(blocks, match)
 }
 
 func selectNamedBlock(prompts *promptSession, label string, names []string, selectedName string) (string, error) {
@@ -1194,38 +1171,15 @@ type secretsUpdate struct {
 }
 
 func writeSecretsUpdate(update secretsUpdate) error {
-	if update.path == "" {
-		return nil
-	}
-	secrets, err := readSecretsFile(update.path)
-	if err != nil {
-		return err
-	}
-	secrets[update.key] = update.value
-	body, err := json.MarshalIndent(secrets, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal secrets %s: %w", update.path, err)
-	}
-	body = append(body, '\n')
-	return writeFile(update.path, body, 0o600)
+	return configedit.WriteSecretsUpdate(configedit.SecretsUpdate{Path: update.path, Key: update.key, Value: update.value})
+}
+
+func buildSecretsUpdate(update secretsUpdate) ([]byte, error) {
+	return configedit.BuildSecretsUpdate(configedit.SecretsUpdate{Path: update.path, Key: update.key, Value: update.value})
 }
 
 func readSecretsFile(path string) (map[string]string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return map[string]string{}, nil
-		}
-		return nil, fmt.Errorf("read secrets %s: %w", path, err)
-	}
-	var out map[string]string
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("parse secrets %s: %w", path, err)
-	}
-	if out == nil {
-		out = map[string]string{}
-	}
-	return out, nil
+	return configedit.ReadSecretsFile(path)
 }
 
 func promptListenerInput(prompts *promptSession, existing *listenerInput, options listenerOptions) (listenerInput, error) {
@@ -1517,6 +1471,12 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if options.BaseURL != "" {
 		defaults.BaseURL = options.BaseURL
 	}
+	if options.UpstreamHeaderTimeout != "" {
+		if err := validateOptionalPositiveDuration(options.UpstreamHeaderTimeout); err != nil {
+			return providerInput{}, secretsUpdate{}, fmt.Errorf("invalid upstream-header-timeout: %w", err)
+		}
+		defaults.UpstreamHeaderTimeout = options.UpstreamHeaderTimeout
+	}
 	if err := applyProviderCredentialOptions(&defaults, options); err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
@@ -1546,6 +1506,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		providerType := defaults.ProviderType
 		providerName := defaults.Name
 		displayName := defaults.DisplayName
+		upstreamHeaderTimeout := defaults.UpstreamHeaderTimeout
 		if err := prompts.runHuhForm(
 			huh.NewGroup(
 				huh.NewSelect[string]().Title("Provider type").Description(providerTypeDescription()).Options(
@@ -1557,6 +1518,13 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 				huh.NewInput().Title("Provider name").Description(providerNameDescription()).Value(&providerName).Validate(validateProviderName),
 				huh.NewInput().Title("Display name").Description(providerDisplayNameDescription()).Value(&displayName),
 			).Title("Provider"),
+		); err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
+		if err := prompts.runHuhForm(
+			huh.NewGroup(
+				huh.NewInput().Title("Upstream header timeout").Description(upstreamHeaderTimeoutDescription()).Value(&upstreamHeaderTimeout).Validate(validateOptionalPositiveDuration),
+			).Title("Upstream Timeout"),
 		); err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
@@ -1644,12 +1612,13 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			return providerInput{}, secretsUpdate{}, err
 		}
 		return providerInput{
-			ProviderType: providerType,
-			Name:         strings.TrimSpace(providerName),
-			DisplayName:  strings.TrimSpace(displayName),
-			BaseURL:      strings.TrimSpace(baseURL),
-			Credential:   credential,
-			Models:       models,
+			ProviderType:          providerType,
+			Name:                  strings.TrimSpace(providerName),
+			DisplayName:           strings.TrimSpace(displayName),
+			BaseURL:               strings.TrimSpace(baseURL),
+			UpstreamHeaderTimeout: strings.TrimSpace(upstreamHeaderTimeout),
+			Credential:            credential,
+			Models:                models,
 		}, update, nil
 	}
 	providerType, err := prompts.askChoiceWithDescription("Provider type", providerTypeDescription(), []string{"openai", "openai-compatible", "anthropic", "gemini"}, defaults.ProviderType)
@@ -1661,6 +1630,10 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		return providerInput{}, secretsUpdate{}, err
 	}
 	displayName, err := prompts.ask("Display name", defaults.DisplayName)
+	if err != nil {
+		return providerInput{}, secretsUpdate{}, err
+	}
+	upstreamHeaderTimeout, err := prompts.askValidated("Upstream header timeout", defaults.UpstreamHeaderTimeout, validateOptionalPositiveDuration)
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
@@ -1729,12 +1702,13 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		return providerInput{}, secretsUpdate{}, err
 	}
 	return providerInput{
-		ProviderType: providerType,
-		Name:         providerName,
-		DisplayName:  displayName,
-		BaseURL:      baseURL,
-		Credential:   credential,
-		Models:       models,
+		ProviderType:          providerType,
+		Name:                  providerName,
+		DisplayName:           displayName,
+		BaseURL:               baseURL,
+		UpstreamHeaderTimeout: upstreamHeaderTimeout,
+		Credential:            credential,
+		Models:                models,
 	}, update, nil
 }
 
@@ -2412,6 +2386,25 @@ func validateDuration(value string) error {
 	return nil
 }
 
+func validateOptionalPositiveDuration(value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(trimmed)
+	if err != nil {
+		return errors.New("invalid duration (use forms like 30s, 2m, 1h)")
+	}
+	if d <= 0 {
+		return errors.New("duration must be greater than zero")
+	}
+	return nil
+}
+
+func upstreamHeaderTimeoutDescription() string {
+	return "Optional Go duration for waiting on upstream response headers. Leave blank to inherit the root value or 90s default. Does not limit streaming bodies after headers arrive."
+}
+
 func rateLimitRPMDescription() string {
 	return "Positive integer requests-per-minute limit applied per authenticated client."
 }
@@ -3029,6 +3022,7 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 	}
 	input.DisplayName = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "display_name"))
 	input.BaseURL = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "base_url"))
+	input.UpstreamHeaderTimeout = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "upstream_header_timeout"))
 	if apiKeyRef := findNestedBlock(parsed.Body, "api_key_ref"); apiKeyRef != nil {
 		input.Credential.Mode = "secrets_file"
 		input.Credential.SecretsPath = parseLiteralOrExpression(attributeExpr(src, apiKeyRef.Body, "path"))
@@ -3208,581 +3202,83 @@ func parseQuotedListExpr(expr string) []string {
 }
 
 func renderListenerBlock(input listenerInput) string {
-	var b strings.Builder
-	b.WriteString("listener \"http\" ")
-	b.WriteString(strconv.Quote(input.Name))
-	b.WriteString(" {\n")
-	b.WriteString("  address = ")
-	b.WriteString(strconv.Quote(input.Address))
-	b.WriteString("\n")
-	if input.ReadHeader != "" || input.Idle != "" || input.Write != "" {
-		b.WriteString("\n  timeouts {\n")
-		if input.ReadHeader != "" {
-			b.WriteString("    read_header = ")
-			b.WriteString(strconv.Quote(input.ReadHeader))
-			b.WriteString("\n")
-		}
-		if input.Idle != "" {
-			b.WriteString("    idle = ")
-			b.WriteString(strconv.Quote(input.Idle))
-			b.WriteString("\n")
-		}
-		if input.Write != "" {
-			b.WriteString("    write = ")
-			b.WriteString(strconv.Quote(input.Write))
-			b.WriteString("\n")
-		}
-		b.WriteString("  }\n")
-	}
-	b.WriteString("}\n")
-	return b.String()
+	return configedit.RenderListenerBlock(input)
 }
 
 func renderAuthBlock(input authInput) string {
-	var b strings.Builder
-	b.WriteString("auth ")
-	b.WriteString(strconv.Quote(input.Name))
-	b.WriteString(" {\n")
-	b.WriteString("  mode = ")
-	b.WriteString(strconv.Quote(input.Mode))
-	b.WriteString("\n")
-	if input.RateLimit != nil {
-		b.WriteString("\n  rate_limit {\n")
-		b.WriteString("    requests_per_minute = ")
-		b.WriteString(input.RateLimit.RequestsPerMinute)
-		b.WriteString("\n")
-		if input.RateLimit.Burst != "" {
-			b.WriteString("    burst               = ")
-			b.WriteString(input.RateLimit.Burst)
-			b.WriteString("\n")
-		}
-		b.WriteString("  }\n")
-	}
-	for _, client := range input.Clients {
-		b.WriteString("\n  client ")
-		b.WriteString(strconv.Quote(client.Name))
-		b.WriteString(" {\n")
-		b.WriteString("    token = ")
-		b.WriteString(renderStringOrExpression(client.Token))
-		b.WriteString("\n")
-		if client.Tenant != "" {
-			b.WriteString("    tenant = ")
-			b.WriteString(strconv.Quote(client.Tenant))
-			b.WriteString("\n")
-		}
-		if len(client.AllowedModels) > 0 {
-			b.WriteString("    allowed_models = ")
-			b.WriteString(renderQuotedList(client.AllowedModels))
-			b.WriteString("\n")
-		}
-		b.WriteString("  }\n")
-	}
-	b.WriteString("}\n")
-	return b.String()
+	return configedit.RenderAuthBlock(input)
 }
 
 func renderProviderBlock(input providerInput) string {
-	var b strings.Builder
-	b.WriteString("provider ")
-	b.WriteString(strconv.Quote(input.ProviderType))
-	b.WriteString(" ")
-	b.WriteString(strconv.Quote(input.Name))
-	b.WriteString(" {\n")
-	if input.DisplayName != "" {
-		b.WriteString("  display_name = ")
-		b.WriteString(strconv.Quote(input.DisplayName))
-		b.WriteString("\n")
-	}
-	if input.BaseURL != "" {
-		b.WriteString("  base_url = ")
-		b.WriteString(strconv.Quote(input.BaseURL))
-		b.WriteString("\n")
-	}
-	b.WriteString("\n")
-	switch input.Credential.Mode {
-	case "secrets_file":
-		b.WriteString("  api_key_ref {\n")
-		if input.Credential.SecretsPath != defaultSecretsPath() {
-			b.WriteString("    path = ")
-			b.WriteString(strconv.Quote(input.Credential.SecretsPath))
-			b.WriteString("\n")
-		}
-		b.WriteString("    key  = ")
-		b.WriteString(strconv.Quote(input.Credential.SecretsKey))
-		b.WriteString("\n")
-		b.WriteString("  }\n")
-	default:
-		b.WriteString("  api_key = ")
-		b.WriteString(renderStringOrExpression(input.Credential.APIKeyValue))
-		b.WriteString("\n")
-	}
-	for _, model := range input.Models {
-		b.WriteString("\n  model ")
-		b.WriteString(strconv.Quote(model.Name))
-		b.WriteString(" {\n")
-		if model.DisplayName != "" {
-			b.WriteString("    display_name = ")
-			b.WriteString(strconv.Quote(model.DisplayName))
-			b.WriteString("\n")
-		}
-		if model.UpstreamName != "" && model.UpstreamName != model.Name {
-			b.WriteString("    upstream_name = ")
-			b.WriteString(strconv.Quote(model.UpstreamName))
-			b.WriteString("\n")
-		}
-		if len(model.Capabilities) > 0 {
-			b.WriteString("    capabilities = ")
-			b.WriteString(renderQuotedList(model.Capabilities))
-			b.WriteString("\n")
-		}
-		b.WriteString("  }\n")
-	}
-	b.WriteString("}\n")
-	return b.String()
+	return configedit.RenderProviderBlock(input, defaultSecretsPath())
 }
 
 func renderAliasBlock(input aliasInput) string {
-	var b strings.Builder
-	b.WriteString("alias ")
-	b.WriteString(strconv.Quote(input.Name))
-	b.WriteString(" {\n")
-	b.WriteString("  algorithm = ")
-	b.WriteString(strconv.Quote(input.Algorithm))
-	b.WriteString("\n")
-	if len(input.RetryStatusCodes) > 0 {
-		b.WriteString("  retry_status_codes = ")
-		b.WriteString(renderQuotedList(input.RetryStatusCodes))
-		b.WriteString("\n")
-	}
-	for _, target := range input.Targets {
-		b.WriteString("\n  target {\n")
-		b.WriteString("    provider = ")
-		b.WriteString(strconv.Quote(target.Provider))
-		b.WriteString("\n")
-		b.WriteString("    model    = ")
-		b.WriteString(strconv.Quote(target.Model))
-		b.WriteString("\n")
-		b.WriteString("  }\n")
-	}
-	b.WriteString("}\n")
-	return b.String()
+	return configedit.RenderAliasBlock(input)
 }
 
 func renderProviderHealthBlock(input providerHealthInput) string {
-	var b strings.Builder
-	b.WriteString("provider_health {\n")
-	if input.RedisURL != "" {
-		b.WriteString("  redis_url = ")
-		b.WriteString(strconv.Quote(input.RedisURL))
-		b.WriteString("\n")
-	}
-	if input.KeyPrefix != "" {
-		b.WriteString("  key_prefix = ")
-		b.WriteString(strconv.Quote(input.KeyPrefix))
-		b.WriteString("\n")
-	}
-	if input.Cooldown != "" {
-		b.WriteString("  cooldown = ")
-		b.WriteString(strconv.Quote(input.Cooldown))
-		b.WriteString("\n")
-	}
-	b.WriteString("}\n")
-	return b.String()
+	return configedit.RenderProviderHealthBlock(input)
 }
 
 func renderLoggingBlock(input loggingInput) string {
-	var b strings.Builder
-	b.WriteString("logging {\n")
-	b.WriteString("  level = ")
-	b.WriteString(strconv.Quote(input.Level))
-	b.WriteString("\n")
-	b.WriteString("  access_log = ")
-	b.WriteString(strconv.FormatBool(input.AccessLog))
-	b.WriteString("\n")
-	b.WriteString("}\n")
-	return b.String()
+	return configedit.RenderLoggingBlock(input)
 }
 
 func renderStringOrExpression(value string) string {
-	if envExprPattern.MatchString(value) {
-		return value
-	}
-	return strconv.Quote(value)
+	return configedit.RenderStringOrExpression(value)
 }
 
 func renderQuotedList(values []string) string {
-	parts := make([]string, 0, len(values))
-	for _, value := range values {
-		parts = append(parts, strconv.Quote(value))
-	}
-	return "[" + strings.Join(parts, ", ") + "]"
+	return configedit.RenderQuotedList(values)
 }
 
 func writeConfigFile(path, source string) error {
-	if err := validateGeneratedConfig([]byte(source), path); err != nil {
-		return err
-	}
-	if err := writeFile(path, []byte(source), 0o600); err != nil {
-		return err
-	}
-	return nil
+	return configedit.WriteConfigFile(path, source)
+}
+
+func writeProviderFiles(configPath, source string, update secretsUpdate) error {
+	return configedit.WriteProviderFiles(configPath, source, configedit.SecretsUpdate{Path: update.path, Key: update.key, Value: update.value})
 }
 
 func writeFile(path string, body []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create parent directory for %s: %w", path, err)
-	}
-	if err := os.WriteFile(path, body, mode); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
+	return configedit.WriteFile(path, body, mode)
 }
 
 func validateGeneratedConfig(source []byte, filename string) error {
-	_, diags := hclsyntax.ParseConfig(source, filename, hcl.Pos{Line: 1, Column: 1})
-	if diags.HasErrors() {
-		return fmt.Errorf("parse config %s: %s", filename, diags.Error())
-	}
-	return nil
+	return configedit.ValidateGeneratedConfig(source, filename)
 }
 
 func upsertBlock(source, blockText string, match func(topLevelBlock) bool) (string, error) {
-	if strings.TrimSpace(source) == "" {
-		return strings.TrimRight(blockText, "\n") + "\n", nil
-	}
-	blocks, err := parseTopLevelBlocks(source)
-	if err != nil {
-		return "", err
-	}
-	for _, block := range blocks {
-		if match(block) {
-			return strings.TrimRight(source[:block.Start], "\n") + "\n\n" + strings.TrimRight(blockText, "\n") + "\n" + strings.TrimLeft(source[block.End:], "\n"), nil
-		}
-	}
-	trimmed := strings.TrimRight(source, "\n")
-	if trimmed == "" {
-		return strings.TrimRight(blockText, "\n") + "\n", nil
-	}
-	return trimmed + "\n\n" + strings.TrimRight(blockText, "\n") + "\n", nil
+	return configedit.UpsertBlock(source, blockText, match)
 }
 
 func removeBlock(source string, match func(topLevelBlock) bool) (string, bool, error) {
-	if strings.TrimSpace(source) == "" {
-		return source, false, nil
-	}
-	blocks, err := parseTopLevelBlocks(source)
-	if err != nil {
-		return "", false, err
-	}
-	for _, block := range blocks {
-		if match(block) {
-			prefix := strings.TrimRight(source[:block.Start], "\n")
-			suffix := strings.TrimLeft(source[block.End:], "\n")
-			switch {
-			case prefix == "" && suffix == "":
-				return "", true, nil
-			case prefix == "":
-				return suffix, true, nil
-			case suffix == "":
-				return prefix + "\n", true, nil
-			default:
-				return prefix + "\n\n" + suffix, true, nil
-			}
-		}
-	}
-	return source, false, nil
+	return configedit.RemoveBlock(source, match)
 }
 
 func parseTopLevelBlocks(source string) ([]topLevelBlock, error) {
-	var blocks []topLevelBlock
-	for i := 0; i < len(source); {
-		next, err := skipSpaceAndComments(source, i)
-		if err != nil {
-			return nil, err
-		}
-		i = next
-		if i >= len(source) {
-			break
-		}
-		if !isIdentStart(rune(source[i])) {
-			return nil, fmt.Errorf("unexpected character %q at offset %d", source[i], i)
-		}
-		start := i
-		typ, next := readIdentifier(source, i)
-		i = next
-		var labels []string
-		for {
-			next, err = skipInlineSpace(source, i)
-			if err != nil {
-				return nil, err
-			}
-			i = next
-			if i >= len(source) {
-				return nil, fmt.Errorf("unexpected end of input after block header %q", typ)
-			}
-			if source[i] == '{' {
-				break
-			}
-			if source[i] != '"' {
-				return nil, fmt.Errorf("invalid block header for %q at offset %d", typ, i)
-			}
-			label, end, err := readQuotedString(source, i)
-			if err != nil {
-				return nil, err
-			}
-			labels = append(labels, label)
-			i = end
-		}
-		end, err := scanBlockEnd(source, i)
-		if err != nil {
-			return nil, err
-		}
-		blocks = append(blocks, topLevelBlock{Type: typ, Labels: labels, Start: start, End: end, Text: source[start:end]})
-		i = end
-	}
-	return blocks, nil
-}
-
-func skipSpaceAndComments(source string, i int) (int, error) {
-	for i < len(source) {
-		switch source[i] {
-		case ' ', '\t', '\r', '\n':
-			i++
-		case '#':
-			for i < len(source) && source[i] != '\n' {
-				i++
-			}
-		case '/':
-			if i+1 >= len(source) {
-				return i, nil
-			}
-			switch source[i+1] {
-			case '/':
-				i += 2
-				for i < len(source) && source[i] != '\n' {
-					i++
-				}
-			case '*':
-				end := strings.Index(source[i+2:], "*/")
-				if end < 0 {
-					return 0, fmt.Errorf("unterminated block comment at offset %d", i)
-				}
-				i += end + 4
-			default:
-				return i, nil
-			}
-		default:
-			return i, nil
-		}
-	}
-	return i, nil
-}
-
-func skipInlineSpace(source string, i int) (int, error) {
-	for i < len(source) {
-		switch source[i] {
-		case ' ', '\t', '\r', '\n':
-			i++
-		case '#':
-			for i < len(source) && source[i] != '\n' {
-				i++
-			}
-		case '/':
-			if i+1 >= len(source) {
-				return i, nil
-			}
-			switch source[i+1] {
-			case '/':
-				i += 2
-				for i < len(source) && source[i] != '\n' {
-					i++
-				}
-			case '*':
-				end := strings.Index(source[i+2:], "*/")
-				if end < 0 {
-					return 0, fmt.Errorf("unterminated block comment at offset %d", i)
-				}
-				i += end + 4
-			default:
-				return i, nil
-			}
-		default:
-			return i, nil
-		}
-	}
-	return i, nil
-}
-
-func readIdentifier(source string, start int) (string, int) {
-	i := start
-	for i < len(source) && isIdentPart(rune(source[i])) {
-		i++
-	}
-	return source[start:i], i
-}
-
-func readQuotedString(source string, start int) (string, int, error) {
-	i := start + 1
-	escaped := false
-	for i < len(source) {
-		if escaped {
-			escaped = false
-			i++
-			continue
-		}
-		switch source[i] {
-		case '\\':
-			escaped = true
-		case '"':
-			value, err := strconv.Unquote(source[start : i+1])
-			if err != nil {
-				return "", 0, err
-			}
-			return value, i + 1, nil
-		}
-		i++
-	}
-	return "", 0, fmt.Errorf("unterminated string at offset %d", start)
-}
-
-func scanBlockEnd(source string, openBrace int) (int, error) {
-	depth := 0
-	inString := false
-	escaped := false
-	inLineComment := false
-	inBlockComment := false
-	for i := openBrace; i < len(source); i++ {
-		ch := source[i]
-		if inLineComment {
-			if ch == '\n' {
-				inLineComment = false
-			}
-			continue
-		}
-		if inBlockComment {
-			if ch == '*' && i+1 < len(source) && source[i+1] == '/' {
-				inBlockComment = false
-				i++
-			}
-			continue
-		}
-		if inString {
-			if escaped {
-				escaped = false
-				continue
-			}
-			switch ch {
-			case '\\':
-				escaped = true
-			case '"':
-				inString = false
-			}
-			continue
-		}
-		if ch == '"' {
-			inString = true
-			continue
-		}
-		if ch == '#' {
-			inLineComment = true
-			continue
-		}
-		if ch == '/' && i+1 < len(source) {
-			switch source[i+1] {
-			case '/':
-				inLineComment = true
-				i++
-				continue
-			case '*':
-				inBlockComment = true
-				i++
-				continue
-			}
-		}
-		switch ch {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return i + 1, nil
-			}
-		}
-	}
-	return 0, fmt.Errorf("unterminated block starting at offset %d", openBrace)
-}
-
-func isIdentStart(r rune) bool {
-	return unicode.IsLetter(r) || r == '_'
-}
-
-func isIdentPart(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-'
+	return configedit.ParseTopLevelBlocks(source)
 }
 
 func providerBlockNames(blocks []topLevelBlock) []string {
-	var names []string
-	for _, block := range blocks {
-		if block.Type == "provider" && len(block.Labels) >= 2 {
-			names = append(names, block.Labels[1])
-		}
-	}
-	sort.Strings(names)
-	return names
+	return configedit.ProviderBlockNames(blocks)
 }
 
 func aliasBlockNames(blocks []topLevelBlock) []string {
-	var names []string
-	for _, block := range blocks {
-		if block.Type == "alias" && len(block.Labels) >= 1 {
-			names = append(names, block.Labels[0])
-		}
-	}
-	sort.Strings(names)
-	return names
+	return configedit.AliasBlockNames(blocks)
 }
 
 func availableProviderModels(blocks []topLevelBlock) []string {
-	var out []string
-	for _, block := range blocks {
-		if block.Type != "provider" || len(block.Labels) < 2 {
-			continue
-		}
-		providerName := block.Labels[1]
-		for _, modelName := range modelNamesFromProviderBlock(block.Text) {
-			out = append(out, providerName+"/"+modelName)
-		}
-	}
-	sort.Strings(out)
-	return out
+	return configedit.AvailableProviderModels(blocks)
 }
 
 func availablePublicModels(blocks []topLevelBlock) []string {
-	seen := make(map[string]bool)
-	out := make([]string, 0, len(blocks))
-	for _, item := range availableProviderModels(blocks) {
-		if !seen[item] {
-			out = append(out, item)
-			seen[item] = true
-		}
-	}
-	for _, aliasName := range aliasBlockNames(blocks) {
-		item := "alias/" + aliasName
-		if !seen[item] {
-			out = append(out, item)
-			seen[item] = true
-		}
-	}
-	sort.Strings(out)
-	return out
+	return configedit.AvailablePublicModels(blocks)
 }
 
 func modelNamesFromProviderBlock(block string) []string {
-	var names []string
-	for _, match := range regexp.MustCompile(`(?m)^\s*model\s+"([^"]+)"\s*\{`).FindAllStringSubmatch(block, -1) {
-		names = append(names, match[1])
-	}
-	return names
+	return configedit.ModelNamesFromProviderBlock(block)
 }
 
 func targetProviderName(action, existingName, inputName string) string {

@@ -61,6 +61,48 @@ func TestMetricsRecordConfigStartupState(t *testing.T) {
 	}
 }
 
+func TestMetricsRecordConfigRemovesRetiredInventoryLabels(t *testing.T) {
+	m := NewMetrics()
+	m.RecordConfig(&config.Runtime{
+		Providers:         []config.Provider{{Name: "openai", Type: config.ProviderTypeOpenAI}},
+		DisabledProviders: []config.Provider{{Name: "old", Type: config.ProviderTypeGemini}},
+		Aliases:           []config.Alias{{Algorithm: config.AlgorithmRoundRobin}},
+	})
+	m.SetProviderHealthy("openai", false)
+	m.RecordConfig(&config.Runtime{
+		Providers:         []config.Provider{{Name: "anthropic", Type: config.ProviderTypeAnthropic}},
+		DisabledProviders: []config.Provider{{Name: "new", Type: config.ProviderTypeGemini}},
+		Aliases:           []config.Alias{{Algorithm: config.AlgorithmLeastConnections}},
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/metrics", nil)
+	m.Handler().ServeHTTP(w, r)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	body := w.Body.String()
+	for _, retired := range []string{
+		`aiproxy_provider_healthy{name="openai"}`,
+		`aiproxy_skipped_provider_info{name="old",type="gemini"}`,
+	} {
+		if strings.Contains(body, retired) {
+			t.Fatalf("metrics output retained %q\n%s", retired, body)
+		}
+	}
+	for _, retained := range []string{
+		`aiproxy_provider_healthy{name="anthropic"} 1`,
+		`aiproxy_skipped_provider_info{name="new",type="gemini"} 1`,
+		`aiproxy_aliases_by_algorithm{algorithm="round_robin"} 0`,
+		`aiproxy_aliases_by_algorithm{algorithm="least_connections"} 1`,
+	} {
+		if !strings.Contains(body, retained) {
+			t.Fatalf("metrics output missing %q\n%s", retained, body)
+		}
+	}
+}
+
 func TestMetricsSetReadyFalseExportsReason(t *testing.T) {
 	m := NewMetrics()
 	m.SetReady(false)

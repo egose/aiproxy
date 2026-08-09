@@ -42,16 +42,16 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		UpstreamModel: r.Model.UpstreamName,
 		Body:          body,
 		Inbound:       inbound,
-		Client:        deps.Client,
+		Client:        clientForProvider(deps, r.Provider),
 	})
-	if deps.Metrics != nil {
+	if deps.Metrics != nil && (result == nil || !result.Streaming) {
 		status := 0
 		if result != nil {
 			status = result.StatusCode
 		}
 		deps.Metrics.RecordUpstream(op, r.Provider.Name, status, err, time.Since(start).Seconds())
 	}
-	if deps.AccessLog && logger != nil {
+	if deps.AccessLog && logger != nil && (result == nil || !result.Streaming) {
 		attrs := []any{
 			"provider", r.Provider.Name,
 			"provider_type", r.Provider.Type,
@@ -66,49 +66,47 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		}
 		logger.Info("upstream request finished", attrs...)
 	}
-	h.recordProviderHealth(deps, ctx, r.Provider.Name, result, err, nil)
+	if result != nil && result.Streaming && err == nil {
+		h.attachStreamFinalizers(deps, ctx, op, r.Provider.Name, result, start, logger, []any{
+			"provider", r.Provider.Name,
+			"provider_type", r.Provider.Type,
+			"upstream_model", r.Model.UpstreamName,
+		})
+		h.instrumentUpstreamResponseSize(deps, op, r.Provider.Name, result, err)
+		return result, nil
+	}
+	h.recordProviderHealth(deps, ctx, r.Provider.Name, result, err, false)
 	h.instrumentUpstreamResponseSize(deps, op, r.Provider.Name, result, err)
 	return result, err
 }
 
 func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provider.Operation, r modelresolver.ResolveResult, inbound *http.Request, body []byte, logger *slog.Logger) (*provider.Result, error) {
 	var lastErr error
-	tried := make(map[string]bool, len(r.Alias.Targets))
+	tried := make(map[alias.Target]bool, len(r.Alias.Targets))
 	retryCodes := make(map[int]bool, len(r.Alias.RetryStatusCodes))
 	for _, code := range r.Alias.RetryStatusCodes {
 		retryCodes[code] = true
 	}
-	var unhealthyFallback *modelresolver.ResolveResult
 	for i := 0; i < len(r.Alias.Targets); i++ {
-		selected := r.Selector.Select()
-		t := selected
-		if key := selected.Provider + "/" + selected.Model; tried[key] {
-			r.Selector.Release(selected)
-			t = nextUntriedAliasTarget(r.Alias.Targets, tried)
-		}
+		t, releaseLease := r.Selector.Acquire(tried)
 		if t.Provider == "" && t.Model == "" {
 			continue
 		}
-		key := t.Provider + "/" + t.Model
-		tried[key] = true
+		tried[t] = true
 		prov, ok := deps.Resolver.Provider(t.Provider)
 		if !ok {
 			lastErr = fmt.Errorf("alias target provider %q not found", t.Provider)
-			r.Selector.Release(t)
+			releaseLease()
 			continue
 		}
 		model, ok := prov.ModelByName[t.Model]
 		if !ok {
 			lastErr = fmt.Errorf("alias target model %q not found on provider %q", t.Model, t.Provider)
-			r.Selector.Release(t)
+			releaseLease()
 			continue
 		}
 		if deps.Health != nil && !deps.Health.IsHealthyContext(ctx, t.Provider) {
-			r.Selector.Release(t)
-			if unhealthyFallback == nil {
-				copy := modelresolver.ResolveResult{Provider: prov, Model: model}
-				unhealthyFallback = &copy
-			}
+			releaseLease()
 			lastErr = fmt.Errorf("alias has no healthy targets")
 			continue
 		}
@@ -128,7 +126,7 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 		var releaseOnce sync.Once
 		releaseTarget := func() {
 			releaseOnce.Do(func() {
-				r.Selector.Release(t)
+				releaseLease()
 				if deps.Metrics != nil {
 					deps.Metrics.AddAliasInFlight(r.Alias.Name, t.Provider, t.Model, -1)
 				}
@@ -145,7 +143,7 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			UpstreamModel: model.UpstreamName,
 			Body:          body,
 			Inbound:       req,
-			Client:        deps.Client,
+			Client:        clientForProvider(deps, prov),
 		})
 		if deps.Metrics != nil {
 			status := 0
@@ -154,7 +152,7 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			}
 			deps.Metrics.RecordUpstream(op, t.Provider, status, err, time.Since(start).Seconds())
 		}
-		if deps.AccessLog {
+		if deps.AccessLog && (result == nil || !result.Streaming) {
 			attrs := []any{
 				"alias", r.Alias.Name,
 				"provider", t.Provider,
@@ -170,7 +168,16 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			}
 			targetLogger.Info("upstream request finished", attrs...)
 		}
-		h.recordProviderHealth(deps, ctx, t.Provider, result, err, retryCodes)
+		if result != nil && result.Streaming && err == nil {
+			h.attachStreamFinalizers(deps, ctx, op, t.Provider, result, start, targetLogger, []any{
+				"alias", r.Alias.Name,
+				"provider", t.Provider,
+				"provider_type", prov.Type,
+				"upstream_model", model.UpstreamName,
+			})
+		} else {
+			h.recordProviderHealth(deps, ctx, t.Provider, result, err, false)
+		}
 		h.instrumentUpstreamResponseSize(deps, op, t.Provider, result, err)
 		if err != nil {
 			releaseTarget()
@@ -207,96 +214,27 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 		}
 		return result, nil
 	}
-	if unhealthyFallback != nil {
-		result, err := h.dispatchAliasFallback(deps, ctx, op, r.Alias.Name, *unhealthyFallback, inbound, body, logger, retryCodes)
-		if result != nil || err != nil {
-			return result, err
-		}
-	}
 	if lastErr == nil {
 		lastErr = errors.New("alias has no healthy targets")
 	}
 	return nil, lastErr
 }
 
-func (h *Handler) dispatchAliasFallback(deps Dependencies, ctx context.Context, op provider.Operation, aliasName string, resolved modelresolver.ResolveResult, inbound *http.Request, body []byte, logger *slog.Logger, retryCodes map[int]bool) (*provider.Result, error) {
-	logger = logger.With("target", resolved.Provider.Name+"/"+resolved.Model.Name)
-	if deps.AccessLog {
-		logger.Info("upstream request started",
-			"alias", aliasName,
-			"provider", resolved.Provider.Name,
-			"provider_type", resolved.Provider.Type,
-			"upstream_model", resolved.Model.UpstreamName,
-		)
+func clientForProvider(deps Dependencies, provider config.Provider) *http.Client {
+	if deps.ClientForProvider != nil {
+		return deps.ClientForProvider(provider)
 	}
-	if deps.Metrics != nil {
-		deps.Metrics.RecordProviderSelection(op, "alias/"+aliasName, resolved.Provider.Name, resolved.Model.Name)
-		deps.Metrics.AddAliasInFlight(aliasName, resolved.Provider.Name, resolved.Model.Name, 1)
-	}
-	released := false
-	release := func() {
-		if released {
-			return
-		}
-		released = true
-		if deps.Metrics != nil {
-			deps.Metrics.AddAliasInFlight(aliasName, resolved.Provider.Name, resolved.Model.Name, -1)
-		}
-	}
-	req := cloneRequestWithBody(ctx, inbound, body)
-	start := time.Now()
-	result, err := deps.Adapter.Do(ctx, provider.Request{
-		Operation:     op,
-		ProviderType:  resolved.Provider.Type,
-		PublicModel:   "alias/" + aliasName,
-		BaseURL:       resolved.Provider.BaseURL,
-		APIKey:        resolved.Provider.APIKey,
-		UpstreamModel: resolved.Model.UpstreamName,
-		Body:          body,
-		Inbound:       req,
-		Client:        deps.Client,
-	})
-	if deps.Metrics != nil {
-		status := 0
-		if result != nil {
-			status = result.StatusCode
-		}
-		deps.Metrics.RecordUpstream(op, resolved.Provider.Name, status, err, time.Since(start).Seconds())
-	}
-	if deps.AccessLog {
-		attrs := []any{
-			"alias", aliasName,
-			"provider", resolved.Provider.Name,
-			"provider_type", resolved.Provider.Type,
-			"upstream_model", resolved.Model.UpstreamName,
-			"duration_ms", time.Since(start).Milliseconds(),
-		}
-		if result != nil {
-			attrs = append(attrs, "status", result.StatusCode)
-		}
-		if err != nil {
-			attrs = append(attrs, "error", err)
-		}
-		logger.Info("upstream request finished", attrs...)
-	}
-	h.recordProviderHealth(deps, ctx, resolved.Provider.Name, result, err, retryCodes)
-	h.instrumentUpstreamResponseSize(deps, op, resolved.Provider.Name, result, err)
-	if err != nil {
-		release()
-		return nil, err
-	}
-	existingClose := result.OnClose
-	result.OnClose = func() {
-		if existingClose != nil {
-			existingClose()
-		}
-		release()
-	}
-	return result, nil
+	return deps.Client
 }
 
-func (h *Handler) recordProviderHealth(deps Dependencies, ctx context.Context, providerName string, result *provider.Result, err error, retryCodes map[int]bool) {
+func (h *Handler) recordProviderHealth(deps Dependencies, ctx context.Context, providerName string, result *provider.Result, err error, downstreamCanceled bool) {
 	if deps.Health == nil || providerName == "" {
+		return
+	}
+	if downstreamCanceled {
+		return
+	}
+	if ctx != nil && ctx.Err() != nil {
 		return
 	}
 	if err != nil {
@@ -311,22 +249,44 @@ func (h *Handler) recordProviderHealth(deps Dependencies, ctx context.Context, p
 		deps.Health.MarkFailureContext(ctx, providerName)
 		return
 	}
-	if result != nil && (result.StatusCode >= 500 || retryCodes[result.StatusCode]) {
+	if result != nil && result.StatusCode >= 500 {
 		deps.Health.MarkFailureContext(ctx, providerName)
 		return
 	}
 	deps.Health.MarkSuccessContext(ctx, providerName)
 }
 
-func nextUntriedAliasTarget(targets []config.AliasTarget, tried map[string]bool) alias.Target {
-	for _, target := range targets {
-		key := target.Provider + "/" + target.Model
-		if tried[key] {
-			continue
+func (h *Handler) attachStreamFinalizers(deps Dependencies, ctx context.Context, op provider.Operation, providerName string, result *provider.Result, start time.Time, logger *slog.Logger, logAttrs []any) {
+	existingClose := result.OnClose
+	result.OnClose = func() {
+		if existingClose != nil {
+			existingClose()
 		}
-		return alias.Target{Provider: target.Provider, Model: target.Model}
+		outcome := provider.StreamOutcome{}
+		if result.Stream != nil {
+			outcome = result.Stream.Wait()
+			result.Usage = outcome.Usage
+		}
+		streamErr := outcome.Err
+		if outcome.DownstreamCanceled {
+			streamErr = nil
+		}
+		if deps.Metrics != nil {
+			deps.Metrics.RecordUpstream(op, providerName, result.StatusCode, streamErr, time.Since(start).Seconds())
+		}
+		if deps.AccessLog && logger != nil {
+			attrs := append([]any{}, logAttrs...)
+			attrs = append(attrs, "duration_ms", time.Since(start).Milliseconds(), "status", result.StatusCode)
+			if outcome.Err != nil {
+				attrs = append(attrs, "error", outcome.Err)
+			}
+			if outcome.DownstreamCanceled {
+				attrs = append(attrs, "downstream_canceled", true)
+			}
+			logger.Info("upstream request finished", attrs...)
+		}
+		h.recordProviderHealth(deps, ctx, providerName, result, streamErr, outcome.DownstreamCanceled)
 	}
-	return alias.Target{}
 }
 
 func (h *Handler) instrumentUpstreamResponseSize(deps Dependencies, op provider.Operation, providerName string, result *provider.Result, err error) {
@@ -341,7 +301,14 @@ func (h *Handler) instrumentUpstreamResponseSize(deps Dependencies, op provider.
 			if existingClose != nil {
 				existingClose()
 			}
-			deps.Metrics.RecordUpstreamResponseSize(op, providerName, result.StatusCode, nil, counter.BytesRead())
+			err := error(nil)
+			if result.Stream != nil {
+				outcome := result.Stream.Wait()
+				if !outcome.DownstreamCanceled {
+					err = outcome.Err
+				}
+			}
+			deps.Metrics.RecordUpstreamResponseSize(op, providerName, result.StatusCode, err, counter.BytesRead())
 		}
 		return
 	}

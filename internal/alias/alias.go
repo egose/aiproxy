@@ -2,7 +2,6 @@ package alias
 
 import (
 	"sync"
-	"sync/atomic"
 
 	"github.com/egose/aiproxy/internal/config"
 )
@@ -16,8 +15,7 @@ type Target struct {
 // Selector chooses one target from an alias's pool, possibly tracking state
 // across calls. Selectors are safe for concurrent use.
 type Selector interface {
-	Select() Target
-	Release(t Target)
+	Acquire(exclude map[Target]bool) (Target, func())
 }
 
 // NewSelector returns a stateful selector for the given algorithm. Unknown
@@ -42,56 +40,61 @@ type roundRobin struct {
 	cursor  uint64
 }
 
-func (r *roundRobin) Select() Target {
+func (r *roundRobin) Acquire(exclude map[Target]bool) (Target, func()) {
 	if len(r.targets) == 0 {
-		return Target{}
+		return Target{}, nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	i := r.cursor % uint64(len(r.targets))
-	r.cursor++
-	return r.targets[i]
+	for i := 0; i < len(r.targets); i++ {
+		idx := (r.cursor + uint64(i)) % uint64(len(r.targets))
+		t := r.targets[idx]
+		if exclude[t] {
+			continue
+		}
+		r.cursor = idx + 1
+		return t, func() {}
+	}
+	return Target{}, nil
 }
-
-func (r *roundRobin) Release(Target) {}
 
 type leastConnections struct {
 	mu      sync.Mutex
 	targets []Target
-	counts  []int64
+	counts  []int
 }
 
-func (l *leastConnections) Select() Target {
+func (l *leastConnections) Acquire(exclude map[Target]bool) (Target, func()) {
 	if len(l.targets) == 0 {
-		return Target{}
+		return Target{}, nil
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.counts == nil {
-		l.counts = make([]int64, len(l.targets))
+		l.counts = make([]int, len(l.targets))
 	}
-	idx := 0
-	for i := 1; i < len(l.targets); i++ {
-		if atomic.LoadInt64(&l.counts[i]) < atomic.LoadInt64(&l.counts[idx]) {
+	idx := -1
+	for i, t := range l.targets {
+		if exclude[t] {
+			continue
+		}
+		if idx == -1 || l.counts[i] < l.counts[idx] {
 			idx = i
 		}
 	}
-	atomic.AddInt64(&l.counts[idx], 1)
-	return l.targets[idx]
-}
-
-func (l *leastConnections) Release(t Target) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.counts == nil {
-		return
+	if idx == -1 {
+		return Target{}, nil
 	}
-	for i, tgt := range l.targets {
-		if tgt == t {
-			if c := atomic.AddInt64(&l.counts[i], -1); c < 0 {
-				atomic.StoreInt64(&l.counts[i], 0)
+	l.counts[idx]++
+	var once sync.Once
+	return l.targets[idx], func() {
+		once.Do(func() {
+			l.mu.Lock()
+			defer l.mu.Unlock()
+			if l.counts == nil || l.counts[idx] == 0 {
+				return
 			}
-			return
-		}
+			l.counts[idx]--
+		})
 	}
 }

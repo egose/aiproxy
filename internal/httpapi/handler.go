@@ -16,6 +16,7 @@ import (
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/dashrpc"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/provider"
@@ -24,32 +25,23 @@ import (
 )
 
 type Dependencies struct {
-	Resolver     *modelresolver.Resolver
-	Adapter      provider.Adapter
-	Auth         auth.Authenticator
-	Authorizer   auth.Authorizer
-	Client       *http.Client
-	Catalog      []ModelCard
-	Metrics      *observability.Metrics
-	Providers    map[string]config.Provider
-	Health       *providerhealth.Tracker
-	RateLimiter  ratelimit.Limiter
-	Accounting   accounting.Recorder
-	Usage        accounting.Reader
-	AccessLog    bool
-	HasAccessLog bool
-	Logger       *slog.Logger
-	Dashboard    config.Dashboard
-	Logs         *observability.LogBuffer
-
-	// Dashboard surface — only meaningful when Dashboard.Token is set.
-	DashboardVersion   string
-	DashboardAddress   string
-	DashboardAuthMode  string
-	DashboardStartTime time.Time
-	DashboardProviders []config.Provider
-	DashboardDisabled  []config.Provider
-	DashboardAliases   []config.Alias
+	Resolver          *modelresolver.Resolver
+	Adapter           provider.Adapter
+	Auth              auth.Authenticator
+	Authorizer        auth.Authorizer
+	Client            *http.Client
+	ClientForProvider func(config.Provider) *http.Client
+	Catalog           []ModelCard
+	Metrics           *observability.Metrics
+	Providers         map[string]config.Provider
+	Health            *providerhealth.Tracker
+	RateLimiter       ratelimit.Limiter
+	Accounting        accounting.Recorder
+	Usage             accounting.Reader
+	AccessLog         bool
+	HasAccessLog      bool
+	Logger            *slog.Logger
+	Dashboard         dashrpc.Source
 }
 
 const maxRequestBodyBytes int64 = 8 << 20
@@ -59,6 +51,8 @@ const (
 	accountingModelForbidden   = "_forbidden_model"
 	accountingModelNotFound    = "_unresolved_model"
 )
+
+const metricsDashboardUnknownPath = "/_internal/dashboard/unknown"
 
 func NewHandler(deps Dependencies) *Handler {
 	deps = normalizeDependencies(deps)
@@ -228,6 +222,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(rw, r.Body, maxRequestBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			h.writeRequestError(deps.Metrics, rw, r, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds 8 MiB limit")
+			return
+		}
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadRequest, "invalid_body", err.Error())
 		return
 	}
@@ -295,13 +294,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if deps.AccessLog {
 			logger.Info("response stream started", "status", result.StatusCode)
 		}
-		h.writeResult(rw, result)
+		h.writeResult(rw, r, result)
 		if deps.Metrics != nil {
 			deps.Metrics.RecordHTTPStream(r.Method, metricsPathLabel(r), rw.statusCode, time.Since(streamStart).Seconds())
 		}
 		return
 	}
-	h.writeResult(rw, result)
+	h.writeResult(rw, r, result)
 }
 
 type statusRecorder struct {
@@ -334,9 +333,11 @@ func metricsPathLabel(r *http.Request) string {
 	switch r.URL.Path {
 	case "/healthz", "/readyz", "/metrics", "/v1/models", "/v1/billing/usage":
 		return r.URL.Path
+	case dashrpc.SnapshotPath, dashrpc.LogsPath:
+		return r.URL.Path
 	}
 	if strings.HasPrefix(r.URL.Path, "/_internal/dashboard") {
-		return r.URL.Path
+		return metricsDashboardUnknownPath
 	}
 	if _, ok := operationFromRequest(r); ok {
 		return r.URL.Path
@@ -346,17 +347,27 @@ func metricsPathLabel(r *http.Request) string {
 
 func (h *Handler) handleHealth(deps Dependencies, w http.ResponseWriter, r *http.Request) bool {
 	if r.URL.Path == "/healthz" {
+		if !allowHealthMethod(w, r) {
+			return true
+		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
+		if r.Method != http.MethodHead {
+			_, _ = w.Write([]byte("ok"))
+		}
 		return true
 	}
 	if r.URL.Path == "/readyz" {
+		if !allowHealthMethod(w, r) {
+			return true
+		}
 		if len(deps.Providers) == 0 {
 			if deps.Metrics != nil {
 				deps.Metrics.SetReadyWithReason(false, "no_active_providers")
 			}
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte("not ready"))
+			if r.Method != http.MethodHead {
+				_, _ = w.Write([]byte("not ready"))
+			}
 			return true
 		}
 		if deps.Health != nil && !deps.Health.AnyHealthyContext(r.Context(), deps.Providers) {
@@ -364,16 +375,29 @@ func (h *Handler) handleHealth(deps Dependencies, w http.ResponseWriter, r *http
 				deps.Metrics.SetReadyWithReason(false, "no_healthy_providers")
 			}
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte("not ready"))
+			if r.Method != http.MethodHead {
+				_, _ = w.Write([]byte("not ready"))
+			}
 			return true
 		}
 		if deps.Metrics != nil {
 			deps.Metrics.SetReadyWithReason(true, "active_providers")
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
+		if r.Method != http.MethodHead {
+			_, _ = w.Write([]byte("ok"))
+		}
 		return true
 	}
+	return false
+}
+
+func allowHealthMethod(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return true
+	}
+	w.Header().Set("Allow", "GET, HEAD")
+	w.WriteHeader(http.StatusMethodNotAllowed)
 	return false
 }
 

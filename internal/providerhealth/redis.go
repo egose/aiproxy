@@ -2,6 +2,7 @@ package providerhealth
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -14,15 +15,23 @@ type redisBackend struct {
 	keyPrefix string
 }
 
-func newRedisBackend(redisURL, keyPrefix string) *redisBackend {
-	opts, err := redis.ParseURL(redisURL)
+func newRedisBackend(redisURL, keyPrefix string) (*redisBackend, error) {
+	opts, err := parseRedisOptions(redisURL)
 	if err != nil {
-		opts = &redis.Options{Addr: redisURL}
+		return nil, err
 	}
 	if keyPrefix == "" {
 		keyPrefix = "aiproxy:provider-health"
 	}
-	return &redisBackend{client: redis.NewClient(opts), keyPrefix: keyPrefix}
+	return &redisBackend{client: redis.NewClient(opts), keyPrefix: keyPrefix}, nil
+}
+
+func parseRedisOptions(redisURL string) (*redis.Options, error) {
+	opts, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse redis_url: %w", err)
+	}
+	return opts, nil
 }
 
 func (b *redisBackend) key(name string) string {
@@ -49,6 +58,32 @@ func (b *redisBackend) IsHealthy(ctx context.Context, name string) (bool, error)
 		return true, err
 	}
 	return count == 0, nil
+}
+
+func (b *redisBackend) Snapshot(ctx context.Context, names []string) (map[string]bool, error) {
+	ctx, cancel := redisOperationContext(ctx)
+	defer cancel()
+	pipe := b.client.Pipeline()
+	cmds := make(map[string]*redis.IntCmd, len(names))
+	for _, name := range names {
+		cmds[name] = pipe.Exists(ctx, b.key(name))
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(names))
+	for _, name := range names {
+		count, err := cmds[name].Result()
+		if err != nil {
+			return nil, err
+		}
+		out[name] = count == 0
+	}
+	return out, nil
+}
+
+func (b *redisBackend) Close() error {
+	return b.client.Close()
 }
 
 func redisOperationContext(ctx context.Context) (context.Context, context.CancelFunc) {

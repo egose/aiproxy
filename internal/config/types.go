@@ -2,15 +2,18 @@ package config
 
 import "time"
 
+const DefaultUpstreamHeaderTimeout = 90 * time.Second
+
 type Runtime struct {
-	Listener          Listener
-	Auth              Auth
-	Logging           Logging
-	ProviderHealth    ProviderHealth
-	Dashboard         Dashboard
-	Providers         []Provider
-	DisabledProviders []Provider
-	Aliases           []Alias
+	Listener              Listener
+	Auth                  Auth
+	Logging               Logging
+	ProviderHealth        ProviderHealth
+	Dashboard             Dashboard
+	UpstreamHeaderTimeout time.Duration
+	Providers             []Provider
+	DisabledProviders     []Provider
+	Aliases               []Alias
 
 	ProviderByName map[string]Provider
 	AliasByName    map[string]Alias
@@ -108,13 +111,14 @@ const (
 )
 
 type Provider struct {
-	Type        ProviderType
-	Name        string
-	DisplayName string
-	BaseURL     string
-	APIKey      string
-	APIKeyRef   *APIKeyRef
-	Models      []Model
+	Type                  ProviderType
+	Name                  string
+	DisplayName           string
+	BaseURL               string
+	UpstreamHeaderTimeout time.Duration
+	APIKey                string
+	APIKeyRef             *APIKeyRef
+	Models                []Model
 
 	ModelByName map[string]Model
 }

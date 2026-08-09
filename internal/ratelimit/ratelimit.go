@@ -25,6 +25,13 @@ func New(cfg config.Auth) Limiter {
 	}
 }
 
+func ConfigEqual(a, b config.Auth) bool {
+	if a.RateLimit == nil || b.RateLimit == nil {
+		return a.RateLimit == nil && b.RateLimit == nil
+	}
+	return *a.RateLimit == *b.RateLimit
+}
+
 func (noopLimiter) Allow(string) (bool, time.Duration) {
 	return true, 0
 }

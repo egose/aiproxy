@@ -48,6 +48,21 @@ func TestResolveDirectProviderModel(t *testing.T) {
 	}
 }
 
+func TestResolveDirectProviderModelWithSlashInModelName(t *testing.T) {
+	rt := buildRT()
+	p := rt.ProviderByName["openai"]
+	p.ModelByName["vendor/model-a"] = config.Model{Name: "vendor/model-a", UpstreamName: "vendor/model-a"}
+	rt.ProviderByName["openai"] = p
+	r := New(rt)
+	res, err := r.Resolve("openai/vendor/model-a")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if res.Kind != KindDirect || res.Model.Name != "vendor/model-a" {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
 func TestResolveAlias(t *testing.T) {
 	r := New(buildRT())
 	res, err := r.Resolve("alias/chat_default")

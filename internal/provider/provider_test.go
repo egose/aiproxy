@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/egose/aiproxy/internal/config"
 )
@@ -49,6 +51,122 @@ func TestAdapterRewritesModelAndForwards(t *testing.T) {
 	}
 	if !strings.Contains(seenBody, "\"model\":\"gpt-4o-2024-08-06\"") {
 		t.Errorf("upstream body did not get model rewritten: %s", seenBody)
+	}
+}
+
+func TestOpenAIPassThroughPreservesRawJSONValues(t *testing.T) {
+	var seenBody []byte
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		seenBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-1"}`))
+	}))
+	defer upstream.Close()
+
+	a := New()
+	body := `{"model":"openai/gpt-4o-mini","messages":[],"seed":9007199254740993,"metadata":{"trace_id":12345678901234567890},"x-unknown":{"nested":[1,2,9007199254740995]}}`
+	_, err := a.Do(context.Background(), Request{
+		Operation:     OpChatCompletions,
+		ProviderType:  config.ProviderTypeOpenAI,
+		BaseURL:       upstream.URL,
+		APIKey:        "sk-test",
+		UpstreamModel: "gpt-4o-2024-08-06",
+		Inbound:       httptest.NewRequest(http.MethodPost, "/v1/chat/completions", io.NopCloser(strings.NewReader(body))),
+		Client:        upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	text := string(seenBody)
+	for _, want := range []string{
+		`"model":"gpt-4o-2024-08-06"`,
+		`"seed":9007199254740993`,
+		`"trace_id":12345678901234567890`,
+		`"x-unknown":{"nested":[1,2,9007199254740995]}`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("forwarded body missing %s: %s", want, text)
+		}
+	}
+}
+
+func TestOpenAIPassThroughRejectsDuplicateModelAndNonObject(t *testing.T) {
+	if _, err := rewriteModel([]byte(`{"model":"a","model":"b","messages":[]}`), "upstream"); err == nil || !strings.Contains(err.Error(), "duplicate model") {
+		t.Fatalf("duplicate model err = %v", err)
+	}
+	if _, err := rewriteModel([]byte(`[]`), "upstream"); err == nil || !strings.Contains(err.Error(), "JSON object") {
+		t.Fatalf("non-object err = %v", err)
+	}
+}
+
+func TestTranslatedProvidersRejectUnsupportedTopLevelFieldsBeforeUpstream(t *testing.T) {
+	upstreamCalled := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalled = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	tests := []struct {
+		name         string
+		operation    Operation
+		providerType config.ProviderType
+		body         string
+	}{
+		{
+			name:         "anthropic chat tools",
+			operation:    OpChatCompletions,
+			providerType: config.ProviderTypeAnthropic,
+			body:         `{"model":"anthropic/claude","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function"}]}`,
+		},
+		{
+			name:         "gemini chat response_format",
+			operation:    OpChatCompletions,
+			providerType: config.ProviderTypeGemini,
+			body:         `{"model":"gemini/gemini-2.5-pro","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_object"}}`,
+		},
+		{
+			name:         "gemini embeddings encoding_format",
+			operation:    OpEmbeddings,
+			providerType: config.ProviderTypeGemini,
+			body:         `{"model":"gemini/text-embedding-004","input":"hi","encoding_format":"base64"}`,
+		},
+		{
+			name:         "anthropic responses tools",
+			operation:    OpResponses,
+			providerType: config.ProviderTypeAnthropic,
+			body:         `{"model":"anthropic/claude","input":"hi","tools":[{"type":"function"}]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstreamCalled = false
+			_, err := New().Do(context.Background(), Request{
+				Operation:     tt.operation,
+				ProviderType:  tt.providerType,
+				PublicModel:   "alias/test",
+				BaseURL:       upstream.URL,
+				APIKey:        "key",
+				UpstreamModel: "upstream",
+				Inbound:       httptest.NewRequest(http.MethodPost, "/", io.NopCloser(strings.NewReader(tt.body))),
+				Client:        upstream.Client(),
+			})
+			if err == nil {
+				t.Fatal("expected invalid request")
+			}
+			var invalid ErrInvalidRequest
+			if !errors.As(err, &invalid) || !strings.Contains(invalid.Message, "unsupported field") {
+				t.Fatalf("expected unsupported field invalid request, got %T: %v", err, err)
+			}
+			if upstreamCalled {
+				t.Fatal("upstream was called for unsupported request")
+			}
+		})
 	}
 }
 
@@ -156,6 +274,41 @@ func TestReadUpstreamBodyRejectsOversizeResponses(t *testing.T) {
 	}
 }
 
+func TestSSEDecoderHandlesFramingBoundaries(t *testing.T) {
+	decoder := newSSEDecoder(strings.NewReader(": ignored\r\nevent: content_block_delta\r\ndata: {\"delta\":\r\ndata: {\"type\":\"text_delta\",\"text\":\"hi\"}}\r\nretry: 10\r\nmalformed\r\n"))
+	event, err := decoder.Next()
+	if err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	if event.Type != "content_block_delta" {
+		t.Fatalf("event type = %q", event.Type)
+	}
+	if event.Data != "{\"delta\":\n{\"type\":\"text_delta\",\"text\":\"hi\"}}" {
+		t.Fatalf("event data = %q", event.Data)
+	}
+	_, err = decoder.Next()
+	if err != io.EOF {
+		t.Fatalf("final err = %v", err)
+	}
+}
+
+func TestSSEDecoderRejectsOversizeLineAndEvent(t *testing.T) {
+	lineDecoder := newSSEDecoder(strings.NewReader("data: 123456789\n\n"))
+	lineDecoder.maxLine = 8
+	_, err := lineDecoder.Next()
+	var overflow ErrSSEOverflow
+	if !errors.As(err, &overflow) || overflow.Kind != "line" {
+		t.Fatalf("expected line overflow, got %T: %v", err, err)
+	}
+
+	eventDecoder := newSSEDecoder(strings.NewReader("data: 12345\ndata: 67890\n\n"))
+	eventDecoder.maxEvent = 10
+	_, err = eventDecoder.Next()
+	if !errors.As(err, &overflow) || overflow.Kind != "event" {
+		t.Fatalf("expected event overflow, got %T: %v", err, err)
+	}
+}
+
 func TestAdapterUsesProvidedBodyWithoutReadingInboundBody(t *testing.T) {
 	var seenBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -256,6 +409,53 @@ func TestExecuteUpstreamUsesErrorHandlerForNonStreamingErrors(t *testing.T) {
 	}
 }
 
+func TestExecuteUpstreamStreamsSuccessfulOpaqueResponse(t *testing.T) {
+	large := strings.Repeat("a", maxUpstreamBodyBytes+1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = io.WriteString(w, large)
+	}))
+	defer upstream.Close()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, upstream.URL, http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	result, err := executeUpstream(Request{Client: upstream.Client()}, req, upstreamResponseHandlers{StreamSuccess: true})
+	if err != nil {
+		t.Fatalf("executeUpstream: %v", err)
+	}
+	if !result.Streaming || result.StreamBody == nil {
+		t.Fatalf("expected streaming result, got %+v", result)
+	}
+	defer result.StreamBody.Close()
+	body, err := io.ReadAll(result.StreamBody)
+	if err != nil {
+		t.Fatalf("read stream body: %v", err)
+	}
+	if len(body) != len(large) {
+		t.Fatalf("body len = %d, want %d", len(body), len(large))
+	}
+}
+
+func TestExecuteUpstreamStillBoundsOpaqueErrorResponse(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, strings.Repeat("a", maxUpstreamBodyBytes+1))
+	}))
+	defer upstream.Close()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, upstream.URL, http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	_, err = executeUpstream(Request{Client: upstream.Client()}, req, upstreamResponseHandlers{StreamSuccess: true})
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestOpenAIResponsesRewritesModelAndForwards(t *testing.T) {
 	var seenAuth, seenBody, seenPath string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -338,11 +538,16 @@ func TestOpenAIImagesRewritesModelAndForwards(t *testing.T) {
 	if !strings.Contains(seenBody, `"model":"gpt-image-1"`) {
 		t.Fatalf("model was not rewritten: %s", seenBody)
 	}
-	if res.Streaming {
-		t.Fatalf("images should not stream")
+	if !res.Streaming || res.StreamBody == nil {
+		t.Fatalf("images should stream successful opaque responses")
 	}
-	if !strings.Contains(string(res.Body), `"url":"https://example.com/image.png"`) {
-		t.Fatalf("unexpected images payload: %s", string(res.Body))
+	defer res.StreamBody.Close()
+	body, err := io.ReadAll(res.StreamBody)
+	if err != nil {
+		t.Fatalf("read images stream: %v", err)
+	}
+	if !strings.Contains(string(body), `"url":"https://example.com/image.png"`) {
+		t.Fatalf("unexpected images payload: %s", string(body))
 	}
 }
 
@@ -442,11 +647,16 @@ func TestOpenAIAudioSpeechRewritesModelAndForwards(t *testing.T) {
 	if !strings.Contains(seenBody, `"model":"tts-1-hd"`) {
 		t.Fatalf("model was not rewritten: %s", seenBody)
 	}
-	if res.Streaming {
-		t.Fatalf("audio speech should not stream for binary response")
+	if !res.Streaming || res.StreamBody == nil {
+		t.Fatalf("audio speech should stream successful opaque responses")
 	}
-	if string(res.Body) != "mp3-bytes" {
-		t.Fatalf("unexpected audio speech body: %q", string(res.Body))
+	defer res.StreamBody.Close()
+	body, err := io.ReadAll(res.StreamBody)
+	if err != nil {
+		t.Fatalf("read audio speech stream: %v", err)
+	}
+	if string(body) != "mp3-bytes" {
+		t.Fatalf("unexpected audio speech body: %q", string(body))
 	}
 }
 
@@ -943,6 +1153,47 @@ func TestAnthropicAdapterStreamingTranslation(t *testing.T) {
 	}
 }
 
+func TestAnthropicStreamTranslatesFragmentedEOFEvent(t *testing.T) {
+	src := io.NopCloser(strings.NewReader("event: message_start\n" +
+		"data: {\"message\":\n" +
+		"data: {\"id\":\"msg_stream\"}}\n" +
+		"\n" +
+		"event: content_block_delta\n" +
+		"data: {\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}"))
+	stream := translateAnthropicStream(src, "anthropic/claude", NewStreamCompletion())
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"id":"msg_stream"`) || !strings.Contains(text, `"content":"Hello"`) {
+		t.Fatalf("missing translated fragmented EOF event: %q", text)
+	}
+}
+
+func TestAnthropicStreamRecordsUsage(t *testing.T) {
+	completion := NewStreamCompletion()
+	src := io.NopCloser(strings.NewReader("event: message_start\n" +
+		"data: {\"message\":{\"id\":\"msg_stream\",\"usage\":{\"input_tokens\":7}}}\n\n" +
+		"event: message_delta\n" +
+		"data: {\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":11}}\n\n" +
+		"event: message_stop\n" +
+		"data: {}\n\n"))
+	stream := translateAnthropicStream(src, "anthropic/claude", completion)
+	defer stream.Close()
+
+	if _, err := io.ReadAll(stream); err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	completion.Complete(nil, false)
+	usage := completion.Wait().Usage
+	if usage.PromptTokens != 7 || usage.CompletionTokens != 11 || usage.TotalTokens != 18 {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
 func TestGeminiAdapterTranslatesRequestAndResponse(t *testing.T) {
 	var seenAuth string
 	var seenBody []byte
@@ -1106,6 +1357,117 @@ func TestGeminiAdapterStreamingTranslation(t *testing.T) {
 	if !strings.Contains(text, "data: [DONE]") {
 		t.Fatalf("expected done marker, got %q", text)
 	}
+}
+
+func TestGeminiStreamTranslatesEOFEvent(t *testing.T) {
+	src := io.NopCloser(strings.NewReader(`data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]},"finishReason":"STOP"}]}`))
+	stream := translateGeminiStream(src, "gemini/model", NewStreamCompletion())
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"content":"Hello"`) || !strings.Contains(text, "data: [DONE]") {
+		t.Fatalf("missing translated EOF event: %q", text)
+	}
+}
+
+func TestOpenAIStreamRecordsUsage(t *testing.T) {
+	completion := NewStreamCompletion()
+	src := io.NopCloser(strings.NewReader("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}\n\n" +
+		"data: [DONE]\n\n"))
+	stream := newOpenAIStreamUsageReadCloser(src, completion)
+	defer stream.Close()
+
+	if _, err := io.ReadAll(stream); err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	completion.Complete(nil, false)
+	usage := completion.Wait().Usage
+	if usage.PromptTokens != 2 || usage.CompletionTokens != 3 || usage.TotalTokens != 5 {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
+func TestGeminiStreamRecordsUsage(t *testing.T) {
+	completion := NewStreamCompletion()
+	src := io.NopCloser(strings.NewReader(`data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":13,"candidatesTokenCount":17,"totalTokenCount":30}}`))
+	stream := translateGeminiStream(src, "gemini/model", completion)
+	defer stream.Close()
+
+	if _, err := io.ReadAll(stream); err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	completion.Complete(nil, false)
+	usage := completion.Wait().Usage
+	if usage.PromptTokens != 13 || usage.CompletionTokens != 17 || usage.TotalTokens != 30 {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
+func TestTranslatedStreamCloseClosesUpstream(t *testing.T) {
+	upstream := newBlockingReadCloser()
+	stream := translateGeminiStream(upstream, "gemini/model", NewStreamCompletion())
+
+	if err := stream.Close(); err != nil && !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("close stream: %v", err)
+	}
+
+	select {
+	case <-upstream.closed:
+	case <-time.After(time.Second):
+		t.Fatal("upstream was not closed")
+	}
+}
+
+func TestTranslatedStreamOverflowClosesUpstream(t *testing.T) {
+	upstream := &observedReadCloser{Reader: strings.NewReader("data: " + strings.Repeat("x", maxSSELineBytes+1) + "\n\n"), closed: make(chan struct{})}
+	stream := translateGeminiStream(upstream, "gemini/model", NewStreamCompletion())
+	defer stream.Close()
+
+	_, err := io.ReadAll(stream)
+	var overflow ErrSSEOverflow
+	if !errors.As(err, &overflow) || overflow.Kind != "line" {
+		t.Fatalf("expected line overflow, got %T: %v", err, err)
+	}
+
+	select {
+	case <-upstream.closed:
+	case <-time.After(time.Second):
+		t.Fatal("upstream was not closed")
+	}
+}
+
+type blockingReadCloser struct {
+	closed chan struct{}
+	once   sync.Once
+}
+
+func newBlockingReadCloser() *blockingReadCloser {
+	return &blockingReadCloser{closed: make(chan struct{})}
+}
+
+func (r *blockingReadCloser) Read([]byte) (int, error) {
+	<-r.closed
+	return 0, io.EOF
+}
+
+func (r *blockingReadCloser) Close() error {
+	r.once.Do(func() { close(r.closed) })
+	return nil
+}
+
+type observedReadCloser struct {
+	*strings.Reader
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (r *observedReadCloser) Close() error {
+	r.once.Do(func() { close(r.closed) })
+	return nil
 }
 
 func TestGeminiAdapterEmbeddingsSingle(t *testing.T) {

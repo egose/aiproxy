@@ -22,21 +22,13 @@ const dashboardTestToken = "sekret"
 
 func newDashboardDeps(rt *config.Runtime, startTime time.Time, usage *accounting.Aggregator, health *providerhealth.Tracker, logs *observability.LogBuffer) Dependencies {
 	return Dependencies{
-		Resolver:           modelresolver.New(rt),
-		Auth:               auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Providers:          rt.ProviderByName,
-		Metrics:            observability.NewMetrics(),
-		Health:             health,
-		Usage:              usage,
-		Dashboard:          config.Dashboard{Token: dashboardTestToken, Enabled: true},
-		Logs:               logs,
-		DashboardVersion:   "test",
-		DashboardAddress:   rt.Listener.Address,
-		DashboardAuthMode:  string(rt.Auth.Mode),
-		DashboardStartTime: startTime,
-		DashboardProviders: rt.Providers,
-		DashboardDisabled:  rt.DisabledProviders,
-		DashboardAliases:   rt.Aliases,
+		Resolver:  modelresolver.New(rt),
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Providers: rt.ProviderByName,
+		Metrics:   observability.NewMetrics(),
+		Health:    health,
+		Usage:     usage,
+		Dashboard: dashrpc.NewRuntimeSource(config.Dashboard{Token: dashboardTestToken, Enabled: true}, "test", rt.Listener.Address, string(rt.Auth.Mode), startTime, rt.Providers, rt.DisabledProviders, rt.Aliases, usage, health, logs),
 	}
 }
 

@@ -15,6 +15,8 @@ type backend interface {
 	MarkSuccess(ctx context.Context, name string) error
 	MarkFailure(ctx context.Context, name string, cooldown time.Duration) error
 	IsHealthy(ctx context.Context, name string) (bool, error)
+	Snapshot(ctx context.Context, names []string) (map[string]bool, error)
+	Close() error
 }
 
 type Tracker struct {
@@ -36,7 +38,13 @@ func New(metrics *observability.Metrics, cfg config.ProviderHealth) *Tracker {
 		metrics:  metrics,
 	}
 	if cfg.RedisURL != "" {
-		t.backend = newRedisBackend(cfg.RedisURL, cfg.KeyPrefix)
+		backend, err := newRedisBackend(cfg.RedisURL, cfg.KeyPrefix)
+		if err != nil {
+			t.backend = newMemoryBackend()
+			t.recordBackendError("configure")
+		} else {
+			t.backend = backend
+		}
 	} else {
 		t.backend = newMemoryBackend()
 	}
@@ -64,21 +72,42 @@ func (t *Tracker) SetProviders(providers map[string]config.Provider) {
 	t.known = known
 }
 
+func (t *Tracker) Close() error {
+	if t == nil || t.backend == nil {
+		return nil
+	}
+	return t.backend.Close()
+}
+
 func (t *Tracker) Snapshot() map[string]bool {
+	return t.SnapshotContext(context.Background())
+}
+
+func (t *Tracker) SnapshotContext(ctx context.Context) map[string]bool {
 	if t == nil {
 		return nil
 	}
+	names := t.providerNames()
+	out, err := t.backend.Snapshot(ctx, names)
+	if err != nil {
+		t.recordBackendError("snapshot")
+		out = make(map[string]bool, len(names))
+		for _, name := range names {
+			out[name] = true
+		}
+	}
+	t.recordHealth(out)
+	return out
+}
+
+func (t *Tracker) providerNames() []string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	out := make(map[string]bool, len(t.known))
+	names := make([]string, 0, len(t.known))
 	for name := range t.known {
-		healthy, err := t.backend.IsHealthy(context.Background(), name)
-		if err != nil {
-			healthy = true
-		}
-		out[name] = healthy
+		names = append(names, name)
 	}
-	return out
+	return names
 }
 
 func (t *Tracker) MarkSuccess(name string) {
@@ -119,6 +148,7 @@ func (t *Tracker) IsHealthyContext(ctx context.Context, name string) bool {
 	}
 	healthy, err := t.backend.IsHealthy(ctx, name)
 	if err != nil {
+		t.recordBackendError("is_healthy")
 		return true
 	}
 	if t.metrics != nil {
@@ -135,12 +165,37 @@ func (t *Tracker) AnyHealthyContext(ctx context.Context, providers map[string]co
 	if len(providers) == 0 {
 		return false
 	}
+	names := make([]string, 0, len(providers))
 	for name := range providers {
-		if t.IsHealthyContext(ctx, name) {
+		names = append(names, name)
+	}
+	health, err := t.backend.Snapshot(ctx, names)
+	if err != nil {
+		t.recordBackendError("any_healthy")
+		return true
+	}
+	t.recordHealth(health)
+	for _, healthy := range health {
+		if healthy {
 			return true
 		}
 	}
 	return false
+}
+
+func (t *Tracker) recordHealth(health map[string]bool) {
+	if t.metrics == nil {
+		return
+	}
+	for name, healthy := range health {
+		t.metrics.SetProviderHealthy(name, healthy)
+	}
+}
+
+func (t *Tracker) recordBackendError(operation string) {
+	if t.metrics != nil {
+		t.metrics.RecordProviderHealthBackendError(operation)
+	}
 }
 
 type memoryBackend struct {
@@ -179,4 +234,25 @@ func (b *memoryBackend) IsHealthy(_ context.Context, name string) (bool, error) 
 		return true, nil
 	}
 	return false, nil
+}
+
+func (b *memoryBackend) Snapshot(ctx context.Context, names []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(names))
+	for _, name := range names {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		healthy, err := b.IsHealthy(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = healthy
+	}
+	return out, nil
+}
+
+func (b *memoryBackend) Close() error {
+	return nil
 }

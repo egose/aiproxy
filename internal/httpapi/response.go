@@ -30,24 +30,36 @@ type billingUsageResponse struct {
 	Data   []accounting.Summary `json:"data"`
 }
 
-func (h *Handler) writeResult(w http.ResponseWriter, r *provider.Result) {
+func (h *Handler) writeResult(w http.ResponseWriter, req *http.Request, r *provider.Result) provider.StreamOutcome {
 	defer closeResult(r)
 	if r.StatusCode >= 400 && !isJSONContentType(r.Header.Get("Content-Type")) {
 		h.writeUpstreamError(w, r)
-		return
+		if r.Stream != nil {
+			r.Stream.Complete(nil, false)
+		}
+		return provider.StreamOutcome{}
 	}
 	copyResponseHeaders(w.Header(), r.Header)
 	w.WriteHeader(r.StatusCode)
 	if r.Streaming && r.StreamBody != nil {
+		var err error
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
-			_, _ = copyAndFlush(w, r.StreamBody, flusher)
-			return
+			_, err = copyAndFlush(w, r.StreamBody, flusher)
+		} else {
+			_, err = io.Copy(w, r.StreamBody)
 		}
-		_, _ = io.Copy(w, r.StreamBody)
-		return
+		downstreamCanceled := req != nil && req.Context().Err() != nil
+		if r.Stream != nil {
+			r.Stream.Complete(err, downstreamCanceled)
+			outcome := r.Stream.Wait()
+			r.Usage = outcome.Usage
+			return outcome
+		}
+		return provider.StreamOutcome{Err: err, DownstreamCanceled: downstreamCanceled}
 	}
 	_, _ = w.Write(r.Body)
+	return provider.StreamOutcome{}
 }
 
 func (h *Handler) writeUpstreamError(w http.ResponseWriter, r *provider.Result) {
@@ -132,6 +144,9 @@ func (h *Handler) writeRequestError(metrics *observability.Metrics, w http.Respo
 func closeResult(r *provider.Result) {
 	if r == nil {
 		return
+	}
+	if r.Streaming && r.Stream != nil {
+		r.Stream.Complete(io.ErrClosedPipe, true)
 	}
 	if r.OnClose != nil {
 		r.OnClose()

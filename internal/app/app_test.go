@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -121,6 +122,58 @@ provider "openai" "openai" {
 	inactiveApp.Server.Handler.ServeHTTP(inactiveW, inactiveR)
 	if inactiveW.Code != http.StatusServiceUnavailable {
 		t.Fatalf("inactive readyz status = %d, want 503", inactiveW.Code)
+	}
+}
+
+func TestBuildDoesNotReplaceDefaultLogger(t *testing.T) {
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	original := slog.Default()
+	if _, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test"}); err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	if slog.Default() != original {
+		t.Fatal("Build should not replace slog.Default")
+	}
+}
+
+func TestBuildInstancesUseIsolatedLoggers(t *testing.T) {
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	var firstLogs bytes.Buffer
+	var secondLogs bytes.Buffer
+	first, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "one", LogOutput: &firstLogs})
+	if err != nil {
+		t.Fatalf("build first app: %v", err)
+	}
+	second, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "two", LogOutput: &secondLogs})
+	if err != nil {
+		t.Fatalf("build second app: %v", err)
+	}
+
+	first.Server.Handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	if firstLogs.Len() == 0 {
+		t.Fatal("first app should write to first logger")
+	}
+	if secondLogs.Len() != 0 {
+		t.Fatalf("first app wrote to second logger:\n%s", secondLogs.String())
+	}
+
+	second.Server.Handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	if secondLogs.Len() == 0 {
+		t.Fatal("second app should write to second logger")
 	}
 }
 
@@ -244,6 +297,154 @@ provider "openai" "openai" {
 	a.Server.Handler.ServeHTTP(w, r)
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("readyz status = %d, want 503", w.Code)
+	}
+}
+
+func TestReloadPreservesRateLimiterWhenConfigIsUnchanged(t *testing.T) {
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" {
+  mode = "none"
+  rate_limit {
+    requests_per_minute = 60
+    burst = 1
+  }
+}
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test"})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	if allowed, _ := a.rateLimiter.Allow("client-a"); !allowed {
+		t.Fatal("first request should pass")
+	}
+	if allowed, _ := a.rateLimiter.Allow("client-a"); allowed {
+		t.Fatal("second request should exhaust bucket")
+	}
+
+	rewriteConfigFile(t, configPath, `
+listener "http" "public" { address = ":0" }
+auth "main" {
+  mode = "none"
+  rate_limit {
+    requests_per_minute = 60
+    burst = 1
+  }
+}
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	if err := a.Reload(); err != nil {
+		t.Fatalf("reload app: %v", err)
+	}
+	if allowed, _ := a.rateLimiter.Allow("client-a"); allowed {
+		t.Fatal("unchanged rate limit config should preserve exhausted bucket")
+	}
+}
+
+func TestReloadResetsRateLimiterWhenConfigChanges(t *testing.T) {
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" {
+  mode = "none"
+  rate_limit {
+    requests_per_minute = 60
+    burst = 1
+  }
+}
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test"})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	if allowed, _ := a.rateLimiter.Allow("client-a"); !allowed {
+		t.Fatal("first request should pass")
+	}
+
+	rewriteConfigFile(t, configPath, `
+listener "http" "public" { address = ":0" }
+auth "main" {
+  mode = "none"
+  rate_limit {
+    requests_per_minute = 120
+    burst = 2
+  }
+}
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	if err := a.Reload(); err != nil {
+		t.Fatalf("reload app: %v", err)
+	}
+	if allowed, _ := a.rateLimiter.Allow("client-a"); !allowed {
+		t.Fatal("changed rate limit config should create a fresh bucket")
+	}
+}
+
+func TestReloadRejectsLogLevelChange(t *testing.T) {
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+logging { level = "info" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test"})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	rewriteConfigFile(t, configPath, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+logging { level = "debug" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	if err := a.Reload(); err == nil || !strings.Contains(err.Error(), "logging level changes require restart") {
+		t.Fatalf("reload error = %v", err)
+	}
+}
+
+func TestReloadRejectsDashboardEnablement(t *testing.T) {
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test"})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	rewriteConfigFile(t, configPath, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+dashboard { token = "sekret" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	if err := a.Reload(); err == nil || !strings.Contains(err.Error(), "enabling dashboard requires restart") {
+		t.Fatalf("reload error = %v", err)
 	}
 }
 
@@ -440,7 +641,7 @@ provider "openai" "openai" {
 }
 
 func TestNewHTTPClientDoesNotSetWholeRequestTimeout(t *testing.T) {
-	client := newHTTPClient()
+	client := newHTTPClient(config.DefaultUpstreamHeaderTimeout)
 	if client.Timeout != 0 {
 		t.Fatalf("timeout = %v", client.Timeout)
 	}
@@ -448,8 +649,24 @@ func TestNewHTTPClientDoesNotSetWholeRequestTimeout(t *testing.T) {
 	if !ok {
 		t.Fatalf("transport type = %T", client.Transport)
 	}
-	if transport.ResponseHeaderTimeout != 60*time.Second {
+	if transport.ResponseHeaderTimeout != 90*time.Second {
 		t.Fatalf("response header timeout = %v", transport.ResponseHeaderTimeout)
+	}
+}
+
+func TestUpstreamClientPoolReusesByTimeout(t *testing.T) {
+	pool := newUpstreamClientPool()
+	c1 := pool.Client(30 * time.Second)
+	c2 := pool.Client(30 * time.Second)
+	c3 := pool.Client(45 * time.Second)
+	if c1 != c2 {
+		t.Fatal("expected same timeout to reuse client")
+	}
+	if c1 == c3 {
+		t.Fatal("expected distinct timeout to use distinct client")
+	}
+	if c1.Timeout != 0 || c3.Timeout != 0 {
+		t.Fatalf("whole request timeout set: %v %v", c1.Timeout, c3.Timeout)
 	}
 }
 
