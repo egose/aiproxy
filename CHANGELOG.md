@@ -1,3 +1,9 @@
+## [0.14.0](https://github.com/egose/aiproxy/compare/v0.13.0...v0.14.0) (2026-08-10)
+
+### Features
+
+* surface upstream stream errors in logs ([06598c4](https://github.com/egose/aiproxy/commit/06598c46c0569532107f66e24be66f6cb6049940))
+
 ## [0.13.0](https://github.com/egose/aiproxy/compare/v0.12.0...v0.13.0) (2026-08-09)
 
 ### Features
