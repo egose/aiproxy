@@ -118,6 +118,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var op provider.Operation
 	opKnown := false
 	responseStreaming := false
+	streamOutcome := provider.StreamOutcome{}
 	var result *provider.Result
 	defer func() {
 		if opKnown {
@@ -163,6 +164,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			logPath := r.URL.Path
 			isDashboard := strings.HasPrefix(logPath, "/_internal/dashboard/")
 			if responseStreaming {
+				if streamOutcome.Err != nil {
+					logAttrs = append(logAttrs, "error", streamOutcome.Err)
+				}
+				if streamOutcome.DownstreamCanceled {
+					logAttrs = append(logAttrs, "downstream_canceled", true)
+				}
 				if isDashboard {
 					logger.Debug("response stream finished", logAttrs...)
 				} else {
@@ -294,7 +301,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if deps.AccessLog {
 			logger.Info("response stream started", "status", result.StatusCode)
 		}
-		h.writeResult(rw, r, result)
+		streamOutcome = h.writeResult(rw, r, result)
 		if deps.Metrics != nil {
 			deps.Metrics.RecordHTTPStream(r.Method, metricsPathLabel(r), rw.statusCode, time.Since(streamStart).Seconds())
 		}

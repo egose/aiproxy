@@ -121,9 +121,43 @@ func (r *openAIStreamUsageReadCloser) observeEvent() {
 	if strings.TrimSpace(data) == "[DONE]" {
 		return
 	}
+	if err := openAIStreamError([]byte(data)); err != nil {
+		r.stream.Complete(err, false)
+		return
+	}
 	if usage := usageFromBody([]byte(data)); usage.Has() {
 		r.stream.SetUsage(usage)
 	}
+}
+
+func openAIStreamError(data []byte) error {
+	var event struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(data, &event) != nil || len(event.Error) == 0 || string(event.Error) == "null" {
+		return nil
+	}
+	var detail struct {
+		Message string          `json:"message"`
+		Type    string          `json:"type"`
+		Code    json.RawMessage `json:"code"`
+	}
+	if json.Unmarshal(event.Error, &detail) == nil {
+		parts := make([]string, 0, 3)
+		if detail.Type != "" {
+			parts = append(parts, detail.Type)
+		}
+		if len(detail.Code) > 0 && string(detail.Code) != "null" {
+			parts = append(parts, strings.Trim(string(detail.Code), `"`))
+		}
+		if detail.Message != "" {
+			parts = append(parts, detail.Message)
+		}
+		if len(parts) > 0 {
+			return fmt.Errorf("upstream stream error: %s", strings.Join(parts, ": "))
+		}
+	}
+	return fmt.Errorf("upstream stream error: %s", strings.TrimSpace(string(event.Error)))
 }
 
 func openAIPathForOperation(op Operation) (string, error) {

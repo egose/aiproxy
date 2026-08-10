@@ -1674,6 +1674,33 @@ func TestHandlerLogsStreamingLifecycle(t *testing.T) {
 	}
 }
 
+func TestHandlerLogsStreamingFailure(t *testing.T) {
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Streaming:  true,
+		StreamBody: &errorAfterReader{data: []byte("data: partial\n\n"), err: io.ErrUnexpectedEOF},
+		Stream:     provider.NewStreamCompletion(),
+	}}
+	h, logs := newLoggedHandler(t, newRT(), stub)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","stream":true,"messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	entries := parseLogEntries(t, logs)
+	streamFinished := findLogEntry(entries, "response stream finished")
+	if streamFinished == nil {
+		t.Fatal("missing response stream finished log")
+	}
+	if streamFinished["status"] != float64(http.StatusOK) {
+		t.Fatalf("response stream finished status = %#v", streamFinished["status"])
+	}
+	if streamFinished["error"] != io.ErrUnexpectedEOF.Error() {
+		t.Fatalf("response stream finished error = %#v", streamFinished["error"])
+	}
+}
+
 func TestHandlerBearerAuthRejects(t *testing.T) {
 	rt := newRT()
 	h := NewHandler(Dependencies{
