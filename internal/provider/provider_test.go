@@ -1391,6 +1391,22 @@ func TestOpenAIStreamRecordsUsage(t *testing.T) {
 	}
 }
 
+func TestOpenAIStreamRecordsErrorEvent(t *testing.T) {
+	completion := NewStreamCompletion()
+	src := io.NopCloser(strings.NewReader("data: {\"error\":{\"message\":\"capacity exhausted\",\"type\":\"server_error\",\"code\":500}}\n\n"))
+	stream := newOpenAIStreamUsageReadCloser(src, completion)
+	defer stream.Close()
+
+	if _, err := io.ReadAll(stream); err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	completion.Complete(nil, false)
+	outcome := completion.Wait()
+	if outcome.Err == nil || !strings.Contains(outcome.Err.Error(), "server_error: 500: capacity exhausted") {
+		t.Fatalf("stream error = %v", outcome.Err)
+	}
+}
+
 func TestGeminiStreamRecordsUsage(t *testing.T) {
 	completion := NewStreamCompletion()
 	src := io.NopCloser(strings.NewReader(`data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":13,"candidatesTokenCount":17,"totalTokenCount":30}}`))
