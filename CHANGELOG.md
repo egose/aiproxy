@@ -1,3 +1,9 @@
+## [0.15.0](https://github.com/egose/aiproxy/compare/v0.14.0...v0.15.0) (2026-08-10)
+
+### Features
+
+* **website:** add metrics token gating, explicit provider disablement, and dashboard transport c... ([f785bb6](https://github.com/egose/aiproxy/commit/f785bb686ae1be618b77058b3ec8d7d381a7dd8d))
+
 ## [0.14.0](https://github.com/egose/aiproxy/compare/v0.13.0...v0.14.0) (2026-08-10)
 
 ### Features
