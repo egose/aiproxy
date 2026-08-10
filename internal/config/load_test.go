@@ -79,6 +79,7 @@ provider "openai" "primary" {
 }
 provider "openai" "slow" {
   upstream_header_timeout = "180s"
+  enabled = false
   api_key = ""
   model "gpt-4o" {}
 }
@@ -269,6 +270,7 @@ provider_health {
   redis_url = "redis://127.0.0.1:6379"
   key_prefix = "aiproxy:test"
   cooldown = "45s"
+  cache_ttl = "60s"
 }
 provider "openai" "openai" {
   api_key = "k"
@@ -279,8 +281,26 @@ provider "openai" "openai" {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if rt.ProviderHealth.RedisURL != "redis://127.0.0.1:6379" || rt.ProviderHealth.KeyPrefix != "aiproxy:test" || rt.ProviderHealth.Cooldown != 45*time.Second {
+	if rt.ProviderHealth.RedisURL != "redis://127.0.0.1:6379" || rt.ProviderHealth.KeyPrefix != "aiproxy:test" || rt.ProviderHealth.Cooldown != 45*time.Second || rt.ProviderHealth.CacheTTL != 60*time.Second {
 		t.Fatalf("provider_health = %+v", rt.ProviderHealth)
+	}
+}
+
+func TestLoadRejectsNonPositiveProviderHealthCacheTTL(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider_health {
+  redis_url = "redis://127.0.0.1:6379"
+  cache_ttl = "0s"
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	if _, err := Load([]byte(cfg), "test.hcl"); err == nil || !strings.Contains(err.Error(), "provider_health.cache_ttl must be positive") {
+		t.Fatalf("expected positive cache_ttl error, got %v", err)
 	}
 }
 
@@ -491,6 +511,7 @@ func TestLoadSkipsProviderWithEmptyAPIKey(t *testing.T) {
 listener "http" "public" { address = ":8080" }
 auth "main" { mode = "none" }
 provider "openai" "openai" {
+  enabled = false
   api_key = ""
   model "gpt-4o-mini" {}
 }
@@ -519,6 +540,7 @@ func TestLoadSkipsProviderWithMissingCredential(t *testing.T) {
 listener "http" "public" { address = ":8080" }
 auth "main" { mode = "none" }
 provider "openai" "openai" {
+  enabled = false
   model "gpt-4o-mini" {}
 }
 provider "openai" "backup" {
@@ -540,6 +562,7 @@ func TestLoadRejectsInvalidDisabledProviderStructure(t *testing.T) {
 listener "http" "public" { address = ":8080" }
 auth "main" { mode = "none" }
 provider "bogus" "bad" {
+  enabled = false
   api_key = ""
   model "m" {}
 }
@@ -551,6 +574,85 @@ provider "openai" "backup" {
 	_, err := Load([]byte(cfg), "test.hcl")
 	if err == nil || !strings.Contains(err.Error(), "unsupported type") {
 		t.Fatalf("expected disabled provider structure error, got %v", err)
+	}
+}
+
+func TestLoadRejectsEnabledProviderWithMissingCredential(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = ""
+  model "gpt-4o-mini" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "enabled providers require a non-empty api_key") {
+		t.Fatalf("expected enabled provider credential error, got %v", err)
+	}
+}
+
+func TestLoadRejectsEnabledProviderWithMissingAPIKeyRef(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  model "gpt-4o-mini" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "enabled providers require a non-empty api_key") {
+		t.Fatalf("expected enabled provider credential error, got %v", err)
+	}
+}
+
+func TestLoadAcceptsDisabledProviderWithoutCredential(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  enabled = false
+  model "gpt-4o-mini" {}
+}
+provider "openai" "backup" {
+  api_key = "sk-backup"
+  model "gpt-4o-mini" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(rt.DisabledProviders) != 1 || rt.DisabledProviders[0].Name != "openai" {
+		t.Fatalf("disabled providers = %+v", rt.DisabledProviders)
+	}
+	if rt.DisabledProviders[0].Enabled {
+		t.Fatalf("disabled provider should preserve Enabled=false")
+	}
+}
+
+func TestLoadDisabledProviderPreservesEnabledFalse(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  enabled = false
+  api_key = "sk-still"
+  model "gpt-4o-mini" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(rt.DisabledProviders) != 1 {
+		t.Fatalf("disabled providers = %+v", rt.DisabledProviders)
+	}
+	if rt.DisabledProviders[0].Enabled {
+		t.Fatalf("Enabled should be false on disabled provider")
+	}
+	if rt.DisabledProviders[0].APIKey != "sk-still" {
+		t.Fatalf("APIKey should be preserved, got %q", rt.DisabledProviders[0].APIKey)
 	}
 }
 
@@ -947,5 +1049,128 @@ alias "a" {
 	_, err := Load([]byte(cfg), "test.hcl")
 	if err == nil || !strings.Contains(err.Error(), "must be between 400 and 599") {
 		t.Fatalf("expected successful retry status error, got %v", err)
+	}
+}
+
+func TestLoadRejectsMetricsBlockWithoutToken(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+metrics {}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "metrics: token is required") {
+		t.Fatalf("expected metrics token required error, got %v", err)
+	}
+}
+
+func TestLoadAcceptsMetricsBlockWithToken(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+metrics {
+  token = "scrape-secret"
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !rt.Metrics.Enabled {
+		t.Fatalf("Metrics.Enabled = false, want true")
+	}
+	if rt.Metrics.Token != "scrape-secret" {
+		t.Fatalf("Metrics.Token = %q, want scrape-secret", rt.Metrics.Token)
+	}
+}
+
+func TestLoadRejectsMultipleMetricsBlocks(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+metrics { token = "a" }
+metrics { token = "b" }
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "only one metrics block is supported") {
+		t.Fatalf("expected single metrics block error, got %v", err)
+	}
+}
+
+func TestLoadRejectsDashboardInsecureRemoteWithMintedToken(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+dashboard {
+  allow_insecure_remote = true
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "allow_insecure_remote = true requires an explicit token") {
+		t.Fatalf("expected insecure remote token error, got %v", err)
+	}
+}
+
+func TestLoadRejectsDashboardInsecureRemoteWithWeakToken(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+dashboard {
+  token = "short"
+  allow_insecure_remote = true
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "requires a strong token") {
+		t.Fatalf("expected strong token error, got %v", err)
+	}
+}
+
+func TestLoadAcceptsDashboardInsecureRemoteWithStrongToken(t *testing.T) {
+	token := strings.Repeat("a", 40)
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+dashboard {
+  token = "` + token + `"
+  allow_insecure_remote = true
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !rt.Dashboard.AllowInsecureRemote {
+		t.Fatalf("AllowInsecureRemote = false, want true")
+	}
+	if !rt.Dashboard.ExplicitAllowInsecure {
+		t.Fatalf("ExplicitAllowInsecure = false, want true")
+	}
+	if !rt.Dashboard.TokenFromConfig {
+		t.Fatalf("TokenFromConfig = false, want true")
 	}
 }

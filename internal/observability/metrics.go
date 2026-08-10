@@ -18,34 +18,35 @@ type Metrics struct {
 	registry *prometheus.Registry
 	handler  http.Handler
 
-	httpRequests       *prometheus.CounterVec
-	httpLatency        *prometheus.HistogramVec
-	httpRequestBytes   *prometheus.HistogramVec
-	httpResponseBytes  *prometheus.HistogramVec
-	httpStreams        *prometheus.CounterVec
-	httpStreamLatency  *prometheus.HistogramVec
-	httpErrors         *prometheus.CounterVec
-	usageEvents        *prometheus.CounterVec
-	providerSelections *prometheus.CounterVec
-	aliasRetries       *prometheus.CounterVec
-	aliasInflight      *prometheus.GaugeVec
-	upstreamRequests   *prometheus.CounterVec
-	upstreamLatency    *prometheus.HistogramVec
-	upstreamRespBytes  *prometheus.HistogramVec
-	providerHealthy    *prometheus.GaugeVec
-	providerHealthErrs *prometheus.CounterVec
-	skippedProviders   *prometheus.GaugeVec
-	buildInfo          *prometheus.GaugeVec
-	authModeInfo       *prometheus.GaugeVec
-	providersByType    *prometheus.GaugeVec
-	aliasesByAlgorithm *prometheus.GaugeVec
-	providerCount      prometheus.Gauge
-	disabledCount      prometheus.Gauge
-	aliasCount         prometheus.Gauge
-	readiness          prometheus.Gauge
-	readyReason        *prometheus.GaugeVec
-	configMu           sync.Mutex
-	lastConfig         *config.Runtime
+	httpRequests           *prometheus.CounterVec
+	httpLatency            *prometheus.HistogramVec
+	httpRequestBytes       *prometheus.HistogramVec
+	httpResponseBytes      *prometheus.HistogramVec
+	httpStreams            *prometheus.CounterVec
+	httpStreamLatency      *prometheus.HistogramVec
+	httpErrors             *prometheus.CounterVec
+	usageEvents            *prometheus.CounterVec
+	providerSelections     *prometheus.CounterVec
+	aliasRetries           *prometheus.CounterVec
+	aliasInflight          *prometheus.GaugeVec
+	upstreamRequests       *prometheus.CounterVec
+	upstreamLatency        *prometheus.HistogramVec
+	upstreamRespBytes      *prometheus.HistogramVec
+	providerHealthy        *prometheus.GaugeVec
+	providerHealthErrs     *prometheus.CounterVec
+	providerHealthFallback *prometheus.CounterVec
+	skippedProviders       *prometheus.GaugeVec
+	buildInfo              *prometheus.GaugeVec
+	authModeInfo           *prometheus.GaugeVec
+	providersByType        *prometheus.GaugeVec
+	aliasesByAlgorithm     *prometheus.GaugeVec
+	providerCount          prometheus.Gauge
+	disabledCount          prometheus.Gauge
+	aliasCount             prometheus.Gauge
+	readiness              prometheus.Gauge
+	readyReason            *prometheus.GaugeVec
+	configMu               sync.Mutex
+	lastConfig             *config.Runtime
 }
 
 func NewMetrics() *Metrics {
@@ -122,6 +123,10 @@ func NewMetrics() *Metrics {
 			Name: "aiproxy_provider_health_backend_errors_total",
 			Help: "Total number of provider health backend errors by operation.",
 		}, []string{"operation"}),
+		providerHealthFallback: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "aiproxy_provider_health_fallbacks_total",
+			Help: "Total number of provider health routing fallbacks by operation and reason (cached=open-while-fresh, open_no_cache=failed open).",
+		}, []string{"operation", "reason"}),
 		skippedProviders: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "aiproxy_skipped_provider_info",
 			Help: "Static gauge for providers skipped during startup because they are not active.",
@@ -180,6 +185,7 @@ func NewMetrics() *Metrics {
 		m.upstreamRespBytes,
 		m.providerHealthy,
 		m.providerHealthErrs,
+		m.providerHealthFallback,
 		m.skippedProviders,
 		m.buildInfo,
 		m.authModeInfo,
@@ -321,6 +327,19 @@ func (m *Metrics) RecordProviderHealthBackendError(operation string) {
 		operation = "unknown"
 	}
 	m.providerHealthErrs.WithLabelValues(operation).Inc()
+}
+
+func (m *Metrics) RecordProviderHealthFallback(operation, reason string) {
+	if m == nil {
+		return
+	}
+	if operation == "" {
+		operation = "unknown"
+	}
+	if reason == "" {
+		reason = "unknown"
+	}
+	m.providerHealthFallback.WithLabelValues(operation, reason).Inc()
 }
 
 func (m *Metrics) RecordHTTP(method, path string, statusCode int, seconds float64) {

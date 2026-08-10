@@ -159,7 +159,13 @@ Keep the proxy-visible auth boundary enabled unless the deployment is fully trus
 - use `bearer_static` auth unless another trusted boundary makes it unnecessary
 - keep secrets out of the HCL file when possible
 - mount config and key files read-only
-- scrape `GET /metrics`
+- declare `metrics { token = env("AIPROXY_METRICS_TOKEN") }` and scrape
+  `GET /metrics` with the configured bearer token (the token is independent of
+  API auth client tokens)
+- for non-loopback `aiproxy dashboard` access, use an HTTPS listener or declare
+  `dashboard { allow_insecure_remote = true token = "<32+ char token>" }`
+- explicitly `enabled = false` any provider you want defined but inactive;
+  enabled providers with missing credentials fail validation
 - use aliases for stable client-facing models and controlled failover
 - use `provider_health` with Redis when you need transient health sharing across instances
 - validate config before rollout with `aiproxy validate --config ...`
@@ -170,5 +176,6 @@ Keep the proxy-visible auth boundary enabled unless the deployment is fully trus
 2. Confirm required environment variables and key files are present.
 3. Start the service and verify `GET /v1/models`.
 4. Test one direct model and one alias-backed model.
-5. Confirm `GET /metrics` is scraped successfully.
+5. Confirm `GET /metrics` returns `200` with the configured bearer token (and
+   `401` without it).
 6. If using reloads, test a `SIGHUP` config reload in a non-production environment first.

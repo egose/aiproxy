@@ -9,6 +9,7 @@ type Runtime struct {
 	Auth                  Auth
 	Logging               Logging
 	ProviderHealth        ProviderHealth
+	Metrics               Metrics
 	Dashboard             Dashboard
 	UpstreamHeaderTimeout time.Duration
 	Providers             []Provider
@@ -19,9 +20,17 @@ type Runtime struct {
 	AliasByName    map[string]Alias
 }
 
-type Dashboard struct {
+type Metrics struct {
 	Token   string
 	Enabled bool
+}
+
+type Dashboard struct {
+	Token                 string
+	AllowInsecureRemote   bool
+	ExplicitAllowInsecure bool
+	TokenFromConfig       bool
+	Enabled               bool
 }
 
 type Listener struct {
@@ -81,6 +90,7 @@ type ProviderHealth struct {
 	RedisURL  string
 	KeyPrefix string
 	Cooldown  time.Duration
+	CacheTTL  time.Duration
 }
 
 type ProviderType string
@@ -118,6 +128,7 @@ type Provider struct {
 	UpstreamHeaderTimeout time.Duration
 	APIKey                string
 	APIKeyRef             *APIKeyRef
+	Enabled               bool
 	Models                []Model
 
 	ModelByName map[string]Model

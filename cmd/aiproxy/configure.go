@@ -79,6 +79,8 @@ type providerOptions struct {
 	ModelUpstreams        []string
 	ModelDisplayName      []string
 	ModelCaps             []string
+	Enabled               bool
+	HasEnabled            bool
 	NonInteractive        bool
 }
 
@@ -93,6 +95,7 @@ type providerHealthOptions struct {
 	RedisURL       string
 	KeyPrefix      string
 	Cooldown       string
+	CacheTTL       string
 	NonInteractive bool
 }
 
@@ -234,6 +237,7 @@ func newConfigureProviderCommand() *cobra.Command {
 			"aiproxy configure provider --config /etc/aiproxy/config.hcl --non-interactive --name backup --type openai-compatible --base-url https://llm.internal/v1 --secrets-key localai --api-key \"$LOCALAI_API_KEY\" --model qwen3-32b\n" +
 			"aiproxy configure provider --config /etc/aiproxy/config.hcl --delete --name backup",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			options.HasEnabled = cmd.Flags().Changed("enabled")
 			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureProvider(&prompts, inheritedConfigPath(cmd), deleteBlock, options)
 		},
@@ -252,6 +256,8 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&options.ModelUpstreams, "model-upstream", nil, "model upstream spec: name=upstream")
 	cmd.Flags().StringArrayVar(&options.ModelDisplayName, "model-display-name", nil, "model display name spec: name=display")
 	cmd.Flags().StringArrayVar(&options.ModelCaps, "model-capabilities", nil, "model capabilities spec: name=cap1,cap2")
+	cmd.Flags().BoolVar(&options.Enabled, "enabled", false, "provider enabled state (use --enabled=false to disable; default preserves existing)")
+	cmd.Flags().Lookup("enabled").NoOptDefVal = "true"
 	cmd.Flags().BoolVar(&options.NonInteractive, "non-interactive", false, "fail instead of prompting for missing values")
 	return cmd
 }
@@ -285,7 +291,7 @@ func newConfigureProviderHealthCommand() *cobra.Command {
 		Use:   "provider-health",
 		Short: "Interactively create or replace the provider_health block",
 		Example: "aiproxy configure provider-health\n" +
-			"aiproxy configure provider-health --config /etc/aiproxy/config.hcl --non-interactive --redis-url redis://localhost:6379/0 --key-prefix aiproxy:provider-health --cooldown 30s",
+			"aiproxy configure provider-health --config /etc/aiproxy/config.hcl --non-interactive --redis-url redis://localhost:6379/0 --key-prefix aiproxy:provider-health --cooldown 30s --cache-ttl 30s",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureProviderHealth(&prompts, inheritedConfigPath(cmd), deleteBlock, options)
@@ -295,6 +301,7 @@ func newConfigureProviderHealthCommand() *cobra.Command {
 	cmd.Flags().StringVar(&options.RedisURL, "redis-url", "", "provider_health.redis_url")
 	cmd.Flags().StringVar(&options.KeyPrefix, "key-prefix", "", "provider_health.key_prefix")
 	cmd.Flags().StringVar(&options.Cooldown, "cooldown", "", "provider_health.cooldown")
+	cmd.Flags().StringVar(&options.CacheTTL, "cache-ttl", "", "provider_health.cache_ttl")
 	cmd.Flags().BoolVar(&options.NonInteractive, "non-interactive", false, "fail instead of prompting for missing values")
 	return cmd
 }
@@ -1480,6 +1487,17 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if err := applyProviderCredentialOptions(&defaults, options); err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
+	if options.HasEnabled && !options.Enabled {
+		if options.APIKey != "" || options.APIKeyEnv != "" || options.SecretsKey != "" || options.SecretsPath != "" {
+			return providerInput{}, secretsUpdate{}, fmt.Errorf("--enabled=false cannot be combined with credential flags")
+		}
+		defaults.Credential = providerCredentialInput{Mode: "disabled"}
+		enabled := false
+		defaults.Enabled = &enabled
+	} else if options.HasEnabled {
+		enabled := true
+		defaults.Enabled = &enabled
+	}
 	if hasProviderModelOptions(options) {
 		models, err := buildProviderModelsFromOptions(defaults.ProviderType, options)
 		if err != nil {
@@ -1490,6 +1508,9 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if options.NonInteractive {
 		if defaults.ProviderType == "" || defaults.Name == "" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider requires type and name in non-interactive mode")
+		}
+		if defaults.IsExplicitlyDisabled() {
+			return defaults, secretsUpdate{}, nil
 		}
 		if defaults.ProviderType == "openai-compatible" && defaults.BaseURL == "" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider type openai-compatible requires --base-url in non-interactive mode")
@@ -1618,6 +1639,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			BaseURL:               strings.TrimSpace(baseURL),
 			UpstreamHeaderTimeout: strings.TrimSpace(upstreamHeaderTimeout),
 			Credential:            credential,
+			Enabled:               defaults.Enabled,
 			Models:                models,
 		}, update, nil
 	}
@@ -1708,6 +1730,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		BaseURL:               baseURL,
 		UpstreamHeaderTimeout: upstreamHeaderTimeout,
 		Credential:            credential,
+		Enabled:               defaults.Enabled,
 		Models:                models,
 	}, update, nil
 }
@@ -2083,6 +2106,9 @@ func promptProviderHealthInput(prompts *promptSession, existing *providerHealthI
 	if options.Cooldown != "" {
 		defaults.Cooldown = options.Cooldown
 	}
+	if options.CacheTTL != "" {
+		defaults.CacheTTL = options.CacheTTL
+	}
 	if options.NonInteractive {
 		return defaults, nil
 	}
@@ -2092,10 +2118,15 @@ func promptProviderHealthInput(prompts *promptSession, existing *providerHealthI
 		if cooldown == "" {
 			cooldown = "30s"
 		}
+		cacheTTL := defaults.CacheTTL
+		if cacheTTL == "" {
+			cacheTTL = "30s"
+		}
 		if err := prompts.runHuhForm(
 			huh.NewGroup(
 				huh.NewInput().Title("Redis URL").Description(providerHealthRedisDescription()).Value(&redisURL),
 				huh.NewInput().Title("Cooldown").Description(providerHealthCooldownDescription()).Value(&cooldown).Validate(validateDuration),
+				huh.NewInput().Title("Cache TTL").Description(providerHealthCacheTTLDescription()).Value(&cacheTTL).Validate(validateDuration),
 			).Title("Provider Health"),
 		); err != nil {
 			return providerHealthInput{}, err
@@ -2114,7 +2145,7 @@ func promptProviderHealthInput(prompts *promptSession, existing *providerHealthI
 				return providerHealthInput{}, err
 			}
 		}
-		return providerHealthInput{RedisURL: strings.TrimSpace(redisURL), KeyPrefix: strings.TrimSpace(keyPrefix), Cooldown: strings.TrimSpace(cooldown)}, nil
+		return providerHealthInput{RedisURL: strings.TrimSpace(redisURL), KeyPrefix: strings.TrimSpace(keyPrefix), Cooldown: strings.TrimSpace(cooldown), CacheTTL: strings.TrimSpace(cacheTTL)}, nil
 	}
 	redisURL, err := prompts.ask("Redis URL", defaults.RedisURL)
 	if err != nil {
@@ -2139,7 +2170,19 @@ func promptProviderHealthInput(prompts *promptSession, existing *providerHealthI
 	if err != nil {
 		return providerHealthInput{}, err
 	}
-	return providerHealthInput{RedisURL: redisURL, KeyPrefix: keyPrefix, Cooldown: cooldown}, nil
+	cacheTTLDefault := defaults.CacheTTL
+	if cacheTTLDefault == "" {
+		cacheTTLDefault = "30s"
+	}
+	cacheTTL, err := prompts.askValidated("Cache TTL", cacheTTLDefault, validateDuration)
+	if err != nil {
+		return providerHealthInput{}, err
+	}
+	return providerHealthInput{RedisURL: redisURL, KeyPrefix: keyPrefix, Cooldown: cooldown, CacheTTL: cacheTTL}, nil
+}
+
+func providerHealthCacheTTLDescription() string {
+	return "How long to use the last known health snapshot when Redis/backend reads fail (default 30s)."
 }
 
 func promptLoggingInput(prompts *promptSession, existing *loggingInput, options loggingOptions) (loggingInput, error) {
@@ -3023,6 +3066,10 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 	input.DisplayName = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "display_name"))
 	input.BaseURL = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "base_url"))
 	input.UpstreamHeaderTimeout = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "upstream_header_timeout"))
+	if enabledExpr := parseLiteralOrExpression(attributeExpr(src, parsed.Body, "enabled")); enabledExpr != "" {
+		boolVal := enabledExpr == "true" || enabledExpr == "1"
+		input.Enabled = &boolVal
+	}
 	if apiKeyRef := findNestedBlock(parsed.Body, "api_key_ref"); apiKeyRef != nil {
 		input.Credential.Mode = "secrets_file"
 		input.Credential.SecretsPath = parseLiteralOrExpression(attributeExpr(src, apiKeyRef.Body, "path"))
@@ -3094,6 +3141,7 @@ func existingProviderHealthInput(blocks []topLevelBlock) *providerHealthInput {
 		RedisURL:  parseLiteralOrExpression(attributeExpr(src, parsed.Body, "redis_url")),
 		KeyPrefix: parseLiteralOrExpression(attributeExpr(src, parsed.Body, "key_prefix")),
 		Cooldown:  parseLiteralOrExpression(attributeExpr(src, parsed.Body, "cooldown")),
+		CacheTTL:  parseLiteralOrExpression(attributeExpr(src, parsed.Body, "cache_ttl")),
 	}
 }
 

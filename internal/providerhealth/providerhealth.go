@@ -2,6 +2,7 @@ package providerhealth
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -9,7 +10,10 @@ import (
 	"github.com/egose/aiproxy/internal/observability"
 )
 
-const defaultCooldown = 30 * time.Second
+const (
+	defaultCooldown = 30 * time.Second
+	defaultCacheTTL = 30 * time.Second
+)
 
 type backend interface {
 	MarkSuccess(ctx context.Context, name string) error
@@ -19,22 +23,43 @@ type backend interface {
 	Close() error
 }
 
+type cachedHealth struct {
+	healthy   bool
+	expiresAt time.Time
+}
+
 type Tracker struct {
 	mu       sync.Mutex
 	known    map[string]bool
+	cache    map[string]cachedHealth
 	cooldown time.Duration
+	cacheTTL time.Duration
+	now      func() time.Time
+	logger   *slog.Logger
 	backend  backend
 	metrics  *observability.Metrics
 }
 
 func New(metrics *observability.Metrics, cfg config.ProviderHealth) *Tracker {
+	return newTracker(metrics, cfg, nil)
+}
+
+func newTracker(metrics *observability.Metrics, cfg config.ProviderHealth, logger *slog.Logger) *Tracker {
 	cooldown := cfg.Cooldown
 	if cooldown <= 0 {
 		cooldown = defaultCooldown
 	}
+	cacheTTL := cfg.CacheTTL
+	if cacheTTL <= 0 {
+		cacheTTL = defaultCacheTTL
+	}
 	t := &Tracker{
 		known:    make(map[string]bool),
+		cache:    make(map[string]cachedHealth),
 		cooldown: cooldown,
+		cacheTTL: cacheTTL,
+		now:      time.Now,
+		logger:   logger,
 		metrics:  metrics,
 	}
 	if cfg.RedisURL != "" {
@@ -65,8 +90,11 @@ func (t *Tracker) SetProviders(providers map[string]config.Provider) {
 		}
 	}
 	for name := range t.known {
-		if !known[name] && t.metrics != nil {
-			t.metrics.RemoveProviderHealthy(name)
+		if !known[name] {
+			if t.metrics != nil {
+				t.metrics.RemoveProviderHealthy(name)
+			}
+			delete(t.cache, name)
 		}
 	}
 	t.known = known
@@ -91,12 +119,10 @@ func (t *Tracker) SnapshotContext(ctx context.Context) map[string]bool {
 	out, err := t.backend.Snapshot(ctx, names)
 	if err != nil {
 		t.recordBackendError("snapshot")
-		out = make(map[string]bool, len(names))
-		for _, name := range names {
-			out[name] = true
-		}
+		return t.fallbackSnapshot(names, "snapshot")
 	}
 	t.recordHealth(out)
+	t.updateCache(out)
 	return out
 }
 
@@ -119,6 +145,7 @@ func (t *Tracker) MarkSuccessContext(ctx context.Context, name string) {
 		return
 	}
 	_ = t.backend.MarkSuccess(ctx, name)
+	t.writeCache(name, true)
 	if t.metrics != nil {
 		t.metrics.SetProviderHealthy(name, true)
 	}
@@ -133,6 +160,7 @@ func (t *Tracker) MarkFailureContext(ctx context.Context, name string) {
 		return
 	}
 	_ = t.backend.MarkFailure(ctx, name, t.cooldown)
+	t.writeCache(name, false)
 	if t.metrics != nil {
 		t.metrics.SetProviderHealthy(name, false)
 	}
@@ -149,8 +177,13 @@ func (t *Tracker) IsHealthyContext(ctx context.Context, name string) bool {
 	healthy, err := t.backend.IsHealthy(ctx, name)
 	if err != nil {
 		t.recordBackendError("is_healthy")
-		return true
+		fallback := t.fallbackHealth(name, "is_healthy")
+		if t.metrics != nil {
+			t.metrics.SetProviderHealthy(name, fallback)
+		}
+		return fallback
 	}
+	t.writeCache(name, healthy)
 	if t.metrics != nil {
 		t.metrics.SetProviderHealthy(name, healthy)
 	}
@@ -172,9 +205,16 @@ func (t *Tracker) AnyHealthyContext(ctx context.Context, providers map[string]co
 	health, err := t.backend.Snapshot(ctx, names)
 	if err != nil {
 		t.recordBackendError("any_healthy")
-		return true
+		health = t.fallbackSnapshot(names, "any_healthy")
+		for _, healthy := range health {
+			if healthy {
+				return true
+			}
+		}
+		return false
 	}
 	t.recordHealth(health)
+	t.updateCache(health)
 	for _, healthy := range health {
 		if healthy {
 			return true
@@ -196,6 +236,101 @@ func (t *Tracker) recordBackendError(operation string) {
 	if t.metrics != nil {
 		t.metrics.RecordProviderHealthBackendError(operation)
 	}
+}
+
+func (t *Tracker) recordFallback(operation, reason string) {
+	if t.metrics != nil {
+		t.metrics.RecordProviderHealthFallback(operation, reason)
+	}
+	if t.logger != nil {
+		t.logger.Debug("provider health fallback",
+			"operation", operation,
+			"reason", reason)
+	}
+}
+
+func (t *Tracker) fallbackHealth(name, operation string) bool {
+	cached, ok := t.readCache(name)
+	if !ok {
+		t.recordFallback(operation, "open_no_cache")
+		return true
+	}
+	t.recordFallback(operation, "cached")
+	return cached
+}
+
+func (t *Tracker) fallbackSnapshot(names []string, operation string) map[string]bool {
+	out := make(map[string]bool, len(names))
+	uncached := make([]string, 0, len(names))
+	for _, name := range names {
+		cached, ok := t.readCache(name)
+		if !ok {
+			uncached = append(uncached, name)
+			out[name] = true
+			continue
+		}
+		out[name] = cached
+	}
+	if len(uncached) > 0 {
+		t.recordFallback(operation, "open_no_cache")
+	} else {
+		t.recordFallback(operation, "cached")
+	}
+	t.recordHealth(out)
+	return out
+}
+
+func (t *Tracker) readCache(name string) (bool, bool) {
+	if t == nil {
+		return false, false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.cache == nil {
+		return false, false
+	}
+	state, ok := t.cache[name]
+	if !ok {
+		return false, false
+	}
+	if t.curNow().After(state.expiresAt) {
+		return false, false
+	}
+	return state.healthy, true
+}
+
+func (t *Tracker) writeCache(name string, healthy bool) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.cache == nil {
+		t.cache = make(map[string]cachedHealth)
+	}
+	t.cache[name] = cachedHealth{healthy: healthy, expiresAt: t.curNow().Add(t.cacheTTL)}
+}
+
+func (t *Tracker) updateCache(health map[string]bool) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.cache == nil {
+		t.cache = make(map[string]cachedHealth, len(health))
+	}
+	expiry := t.curNow().Add(t.cacheTTL)
+	for name, healthy := range health {
+		t.cache[name] = cachedHealth{healthy: healthy, expiresAt: expiry}
+	}
+}
+
+func (t *Tracker) curNow() time.Time {
+	if t.now != nil {
+		return t.now()
+	}
+	return time.Now()
 }
 
 type memoryBackend struct {

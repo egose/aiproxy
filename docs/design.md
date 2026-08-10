@@ -664,8 +664,9 @@ The config loader should validate:
 - malformed provider `base_url` values, and non-loopback `http` base URLs
 - providers with both `api_key` and `api_key_ref`
 - malformed, zero, or negative `upstream_header_timeout` values
-- active providers with no resolved credential; current compatibility behavior
-  disables missing or empty credentials before routing instead
+- active providers with no resolved credential, including an empty
+  `api_key = env("...")`; missing or empty credentials fail validation unless
+  `enabled = false` is declared explicitly
 - `api_key_ref` blocks missing `key`
 - `api_key_ref` JSON files that do not exist or do not contain the requested key
 - providers without any models
@@ -676,11 +677,11 @@ The config loader should validate:
 
 The service should fail startup on invalid config.
 
-Current compatibility behavior treats a provider with no resolved credential,
-including an empty `api_key = env("...")`, as disabled before request routing.
-Disabled providers are still fully validated for structure, URLs, models, and
-capabilities. DEC-02 tracks whether this disable-on-missing-secret behavior will
-be replaced by an explicit enablement flag.
+Providers default to enabled. To intentionally disable a provider, declare
+`enabled = false`; disabled providers are still structurally validated (name,
+type, base URL, models, capabilities) but do not require a usable credential.
+The disabled state is reported explicitly in startup logs and dashboard
+snapshots rather than inferred from missing secret state.
 
 ## Observability And Security
 
@@ -719,13 +720,27 @@ Initial `/metrics` coverage includes:
 - upstream response body size histograms by operation/provider/outcome
 - upstream request counts by operation/provider/outcome
 - upstream request latency by operation/provider/outcome
+- provider health backend error counts
+- provider health fallback counts by operation and reason
 
-`GET /metrics` is served before API authentication on the same listener as the
-proxy API. Operators must expose that listener only on trusted networks or place
-network-level access control in front of `/metrics`; metric output can include
-tenant, client, provider, model, and alias labels. HTTP route labels are a
-closed set of stable endpoint names, with unknown dashboard-internal paths
-reported as `/_internal/dashboard/unknown`.
+`GET /metrics` is served on the same listener as the proxy API but is gated by
+a dedicated metrics bearer token declared in a `metrics { token = ... }` block.
+The token is checked independently of API auth client tokens; an empty or
+missing token is rejected at config validation so metrics are never exposed
+without a dedicated credential. Metric output can include tenant, client,
+provider, model, and alias labels, so the token must be shared only with
+trusted scrapers. HTTP route labels are a closed set of stable endpoint names,
+with unknown dashboard-internal paths reported as
+`/_internal/dashboard/unknown`.
+
+The interactive `aiproxy dashboard` command and the
+`/_internal/dashboard/{snapshot,logs}` endpoints share the metrics-token-less
+listener. The dashboard command refuses non-loopback plain-HTTP listeners
+unless `dashboard { allow_insecure_remote = true }` is declared with a strong
+explicit `token` (at least 32 characters). HTTPS listeners always satisfy the
+transport check. Repeated invalid dashboard tokens are rate limited with `429`
+and a `Retry-After` header so the bearer surface cannot be brute-forced from
+the listener.
 
 ## CLI Design
 
@@ -881,6 +896,15 @@ state sharing across instances:
 - `redis_url`
 - optional `key_prefix`
 - optional `cooldown`
+- optional `cache_ttl` (default 30s), bounding how long a stale local cache
+  entry is reused for routing and readiness when the Redis backend becomes
+  unreadable
+
+When `redis_url` is configured and a Redis health read fails, routing,
+readiness, and dashboard snapshots fall back to the bounded in-process cache
+and fail open only when no fresh cache entry exists. Both the backend error
+and the fallback reason are recorded as Prometheus metrics so degraded mode is
+observable.
 
 ## Reload Behavior
 
@@ -963,8 +987,9 @@ The chosen design allows fallback only for alias-based requests.
   `/`, so provider model names may contain `/` when each segment is valid
 - HCL uses two-label `provider "<type>" "<name>"` blocks
 - `openai-compatible` requires `base_url`
-- providers normally declare exactly one of `api_key` or `api_key_ref`; current
-  compatibility behavior disables providers with missing or empty credentials
+- providers normally declare exactly one of `api_key` or `api_key_ref`;
+  missing or empty credentials fail validation unless `enabled = false` is
+  declared explicitly
 - `api_key_ref.path` defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json` and falls back to `~/.config/aiproxy/keys.json`
 - aliases support `round_robin` and `least_connections`
 - alias retry only happens for transient upstream failures

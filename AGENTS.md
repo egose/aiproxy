@@ -83,7 +83,8 @@ repo has sandbox services for stable end-to-end provider coverage.)
   every slash-separated segment follows the same lowercase name rule.
 - Public model strings: `<provider-name>/<model-name>` or `alias/<alias-name>`.
 - Providers normally declare exactly one of `api_key` or `api_key_ref`;
-  unresolved empty credentials disable the provider pending DEC-02.
+  enabled providers with unresolved, empty, or missing credentials fail
+  validation. To intentionally disable a provider, set `enabled = false`.
   `api_key_ref.path` defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json`, falling
   back to `~/.config/aiproxy/keys.json`.
 - Direct (`<provider>/<model>`) requests never fail over to a different
@@ -101,7 +102,17 @@ repo has sandbox services for stable end-to-end provider coverage.)
 - Provider health state is shared in-process across requests and alias routing.
   Transient transport failures and upstream `5xx` responses temporarily mark a
   provider unhealthy. An optional `provider_health` Redis config can share that
-  transient state across instances.
+  transient state across instances; on Redis read failure routing and readiness
+  use a bounded in-process cache (`cache_ttl`, default 30s) and fail open only
+  when no fresh cache entry exists, recording both the backend error and the
+  fallback reason as Prometheus metrics.
+- `/metrics` requires a dedicated bearer token declared in a
+  `metrics { token = env("...") }` block; the token is checked independently of
+  API auth client tokens. An empty or missing token is rejected at validation.
+- The `aiproxy dashboard` command refuses non-loopback plain-HTTP listeners
+  unless `dashboard { allow_insecure_remote = true }` is configured with a
+  strong explicit `token` (at least 32 characters). HTTPS listeners are always
+  allowed. Repeated invalid dashboard tokens are rate limited with `429`.
 - The openai/openai-compatible adapter is pass-through: it only rewrites the
   `model` field to the configured `upstream_name`, injects the upstream
   `Authorization: Bearer` header, and copies the body (including SSE streams)

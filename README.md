@@ -310,6 +310,63 @@ The file path defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json`, falling back to
 `~/.config/aiproxy/keys.json` when `XDG_CONFIG_HOME` is unset. Override it per
 provider with `api_key_ref { path = "..." key = "..." }`.
 
+## Optional Configuration Blocks
+
+### `metrics`
+
+The optional `metrics` block governs Prometheus metric exposure. When present,
+`GET /metrics` requires `Authorization: Bearer <token>` with the configured
+token; the token is checked independently from API auth client tokens.
+
+```hcl
+metrics {
+  token = env("AIPROXY_METRICS_TOKEN")
+}
+```
+
+- The block is optional. When absent, `/metrics` is not exposed.
+- An empty token is rejected at config validation; metrics are never exposed
+  without a dedicated credential.
+- API auth clients (`auth.client` blocks) cannot scrape `/metrics` with their
+  own tokens — they are checked against the metrics token separately.
+
+### `dashboard`
+
+The optional `dashboard` block enables the `aiproxy dashboard` TUI and the
+`/_internal/dashboard/*` HTTP endpoints on the proxy listener.
+
+```hcl
+dashboard {
+  token                 = env("AIPROXY_DASHBOARD_TOKEN")
+  allow_insecure_remote = false
+}
+```
+
+- `token` is optional. When omitted, `aiproxy serve` mints a random secret at
+  startup and persists it to `$XDG_CONFIG_HOME/aiproxy/dashboard.token`; the
+  `dashboard` command reads that file to authenticate. Declared tokens are
+  used as-is and the file is not written.
+- `allow_insecure_remote` (optional, default `false`) authorizes the dashboard
+  command to talk to a non-loopback plain-HTTP listener. When `true`, `token`
+  must be declared explicitly in config and be at least 32 characters long; a
+  minted or weak token is rejected at validation. HTTPS listeners always
+  satisfy the transport check.
+
+### `provider { enabled = false }`
+
+Use the optional `enabled` field on a `provider` block to intentionally disable
+a provider. Disabled providers are structurally validated (name, type, base
+URL, models, capabilities) but do not require a usable `api_key` or
+`api_key_ref`. Enabled providers with an unresolved, empty, or missing
+credential fail validation.
+
+```hcl
+provider "openai" "backup" {
+  enabled = false
+  model "gpt-4o-mini" {}
+}
+```
+
 ## Notes on Behavior
 
 - `upstream_name` (optional on `model` blocks) lets the proxy-visible model name
@@ -324,7 +381,10 @@ provider with `api_key_ref { path = "..." key = "..." }`.
 - Provider `base_url` values must be absolute `https` URLs for remote upstreams.
   Plain `http` is accepted only for loopback development endpoints.
 - A provider with no resolved credential, including an empty `api_key = env("...")`,
-  is disabled before routing; disabled providers are still validated.
+  fails validation when the provider is enabled. To intentionally disable a
+  provider, set `enabled = false`; disabled providers are still structurally
+  validated (name, type, base URL, models, capabilities) but do not require a
+  usable credential.
 - `/v1/models` returns effective capabilities for both direct models and
   aliases. Alias capabilities are the safe intersection of their target models.
 - `/v1/models` also includes richer metadata:
@@ -337,7 +397,11 @@ provider with `api_key_ref { path = "..." key = "..." }`.
   Transient transport failures and upstream `5xx` responses temporarily mark a
   provider unhealthy for routing and readiness decisions, but this state is not
   coordinated across multiple proxy instances unless `provider_health.redis_url`
-  is configured.
+  is configured. When `provider_health.redis_url` is configured and a Redis read
+  fails, routing and readiness fall back to a bounded in-process cache
+  (`provider_health.cache_ttl`, default 30s) and fail open only when no fresh
+  cache entry exists; the fallback and the underlying backend error are
+  recorded as Prometheus metrics.
 - Direct `<provider>/<model>` requests do not fail over to other targets.
 - Alias requests retry the next target only on transport errors, timeouts, and
   upstream `5xx`; upstream `4xx` responses are returned to the client verbatim.
@@ -368,9 +432,20 @@ provider with `api_key_ref { path = "..." key = "..." }`.
   path, request / response body size histograms,
   streaming response counts / duration, proxy-generated HTTP error counts by
   endpoint and error type, alias in-flight request gauges by target, provider
-  health gauges, and upstream request counts / latency / response body size by
-  operation and provider.
+  health gauges, upstream request counts / latency / response body size by
+  operation and provider, provider health backend error counts, and provider
+  health fallback counts by operation and reason. `/metrics` requires a
+  dedicated bearer token declared in a `metrics { token = env("...") }` block;
+  `GET /metrics` without a valid `Authorization: Bearer <token>` header returns
+  `401`. The metrics token is independent of API auth client tokens.
 - API keys and client bearer tokens are never logged.
+- The interactive `aiproxy dashboard` command calls `/_internal/dashboard/*` on
+  the same listener as the proxy API. Plain HTTP dashboard RPC is allowed only
+  when the effective listener address is loopback; non-loopback plain HTTP is
+  rejected unless `dashboard { allow_insecure_remote = true }` is set with a
+  strong explicit `token` (at least 32 characters) declared in config. HTTPS
+  listeners are always allowed. Repeated invalid dashboard tokens are rate
+  limited with `429` and a `Retry-After` header.
 
 ## Deferred / Planned
 

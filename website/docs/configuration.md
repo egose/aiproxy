@@ -160,13 +160,21 @@ Common attributes:
 - `api_key`
 - `api_key_ref`
 - `upstream_header_timeout`
+- `enabled` (optional, default `true`)
 - nested `model` blocks
 
-Providers normally declare exactly one of `api_key` or `api_key_ref`.
+Providers normally declare exactly one of `api_key` or `api_key_ref`. Enabled
+providers with unresolved, empty, or missing credentials fail validation. To
+intentionally disable a provider, declare `enabled = false`; disabled
+providers are still validated for structure, URL, models, and capabilities,
+but they do not require a usable credential.
 
-For compatibility, a provider whose credential resolves to empty, including an
-empty `api_key = env("...")`, is disabled before request routing. Disabled
-providers are still validated for structure, URL, models, and capabilities.
+```hcl
+provider "openai" "backup" {
+  enabled = false
+  model "gpt-4o-mini" {}
+}
+```
 
 Provider `base_url` values must be absolute `https` URLs for remote upstreams.
 Plain `http` is accepted only for loopback development endpoints such as
@@ -285,8 +293,42 @@ Startup fails on invalid configuration. Important checks include:
 - `openai-compatible` providers missing `base_url`
 - malformed provider `base_url` values, and non-loopback `http` base URLs
 - providers with both `api_key` and `api_key_ref`
-- active providers with no resolved credential; current compatibility behavior
-  disables missing or empty credentials before routing instead
+- enabled providers with no resolved credential, including an empty
+  `api_key = env("...")`; missing or empty credentials fail validation unless
+  `enabled = false` is declared explicitly
 - providers without any models
 - aliases without any targets
 - alias targets that reference unknown providers or models
+- a `metrics` block with an empty or missing token
+- a `dashboard` block with `allow_insecure_remote = true` but a minted, weak
+  (fewer than 32 characters), or missing explicit `token`
+
+## Optional Blocks
+
+### `metrics`
+
+```hcl
+metrics {
+  token = env("AIPROXY_METRICS_TOKEN")
+}
+```
+
+When present, `GET /metrics` requires `Authorization: Bearer <token>` with the
+configured value. The metrics token is checked independently of API auth
+client tokens; API clients cannot scrape `/metrics` with their own credentials.
+
+### `dashboard`
+
+```hcl
+dashboard {
+  token                 = env("AIPROXY_DASHBOARD_TOKEN")
+  allow_insecure_remote = false
+}
+```
+
+When `token` is omitted, `aiproxy serve` mints a random secret at startup and
+persists it to `$XDG_CONFIG_HOME/aiproxy/dashboard.token`; the `dashboard`
+command reads that file to authenticate. To allow non-loopback plain-HTTP
+dashboard access, set `allow_insecure_remote = true` and declare a strong
+explicit `token` (at least 32 characters). HTTPS listeners always satisfy the
+transport check.

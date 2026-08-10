@@ -247,6 +247,7 @@ func buildDependencies(rt *config.Runtime, logger *slog.Logger, adapter provider
 		ClientForProvider: clients.ClientForProvider,
 		Catalog:           httpapi.BuildModelCatalog(rt),
 		Metrics:           metrics,
+		MetricsToken:      rt.Metrics.Token,
 		Providers:         rt.ProviderByName,
 		Health:            health,
 		RateLimiter:       rateLimiter,

@@ -73,7 +73,7 @@ func TestStartupSummaryIncludesEnabledSkippedAndAliases(t *testing.T) {
 		"openai (openai)",
 		"skipped providers: 1",
 		"localai (openai-compatible)",
-		"reason=\"empty api key\"",
+		"reason=\"disabled\"",
 		"aliases: 1",
 		"chat_default",
 		"openai/gpt-4o-mini",
@@ -97,6 +97,7 @@ provider "openai" "openai" {
 listener "http" "public" { address = ":0" }
 auth "main" { mode = "none" }
 provider "openai" "openai" {
+  enabled = false
   api_key = ""
   model "gpt-4o-mini" {}
 }
@@ -202,6 +203,7 @@ provider "openai" "openai" {
 listener "http" "public" { address = ":0" }
 auth "main" { mode = "none" }
 provider "openai" "openai" {
+  enabled = false
   api_key = ""
   model "gpt-4o-mini" {}
 }
@@ -733,5 +735,66 @@ provider "openai" "openai" {
 	a.Server.Handler.ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("snapshot endpoint with correct token should be 200, got %d (body=%s)", w.Code, w.Body.String())
+	}
+}
+
+func TestMetricsEndpointRequiresConfiguredToken(t *testing.T) {
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+metrics { token = "scrape-secret" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test"})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("metrics without token status = %d, want 401", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	r.Header.Set("Authorization", "Bearer wrong")
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("metrics with wrong token status = %d, want 401", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	r.Header.Set("Authorization", "Bearer scrape-secret")
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("metrics with correct token status = %d, want 200", w.Code)
+	}
+}
+
+func TestMetricsEndpointDisabledWithoutMetricsBlock(t *testing.T) {
+	configPath := writeConfigFile(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`)
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test"})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	a.Server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("metrics without metrics block status = %d, want 404", w.Code)
 	}
 }

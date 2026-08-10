@@ -265,6 +265,125 @@ func TestConfigureProviderNonInteractiveFlags(t *testing.T) {
 	}
 }
 
+func TestConfigureProviderNonInteractivePreservesDisabledOnUpdate(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := strings.TrimSpace(`provider "openai" "backup" {
+  enabled = false
+}`) + "\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+
+	stdout, stderr, err := executeRootCommand(
+		"",
+		"configure", "provider",
+		"--config", configPath,
+		"--non-interactive",
+		"--name", "backup",
+		"--display-name", "Backup provider",
+	)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	if !strings.Contains(configText, "enabled = false") {
+		t.Fatalf("expected enabled = false to be preserved:\n%s", configText)
+	}
+	if !strings.Contains(configText, `display_name = "Backup provider"`) {
+		t.Fatalf("expected updated display_name:\n%s", configText)
+	}
+	if strings.Contains(configText, "api_key") {
+		t.Fatalf("disabled provider should not gain a credential block:\n%s", configText)
+	}
+}
+
+func TestConfigureProviderNonInteractiveReEnablesWithFlag(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := strings.TrimSpace(`provider "openai" "backup" {
+  enabled = false
+}`) + "\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+
+	stdout, stderr, err := executeRootCommand(
+		"",
+		"configure", "provider",
+		"--config", configPath,
+		"--non-interactive",
+		"--name", "backup",
+		"--enabled=true",
+		"--api-key-env", "BACKUP_API_KEY",
+		"--model", "gpt-4o-mini",
+	)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	if strings.Contains(configText, "enabled = false") {
+		t.Fatalf("expected enabled = false to be removed when re-enabling:\n%s", configText)
+	}
+	if !strings.Contains(configText, `api_key = env("BACKUP_API_KEY")`) {
+		t.Fatalf("expected api_key env expression:\n%s", configText)
+	}
+	if !strings.Contains(configText, `model "gpt-4o-mini"`) {
+		t.Fatalf("expected model block:\n%s", configText)
+	}
+	_ = stdout
+}
+
+func TestConfigureProviderHealthNonInteractiveFlags(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+
+	stdout, stderr, err := executeRootCommand(
+		"",
+		"configure", "provider-health",
+		"--config", configPath,
+		"--non-interactive",
+		"--redis-url", "redis://localhost:6379/0",
+		"--key-prefix", "aiproxy:provider-health",
+		"--cooldown", "45s",
+		"--cache-ttl", "60s",
+	)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	checks := []string{
+		"provider_health {",
+		`redis_url = "redis://localhost:6379/0"`,
+		`key_prefix = "aiproxy:provider-health"`,
+		`cooldown = "45s"`,
+		`cache_ttl = "60s"`,
+	}
+	for _, check := range checks {
+		if !strings.Contains(configText, check) {
+			t.Fatalf("config output missing %q:\n%s", check, configText)
+		}
+	}
+	if !strings.Contains(stdout, "updated provider_health block") {
+		t.Fatalf("stdout missing summary:\n%s", stdout)
+	}
+}
+
 func TestConfigureUpstreamNonInteractiveSetsRootTimeout(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.hcl")
@@ -298,6 +417,64 @@ provider "openai" "primary" {
 	}
 	if !strings.Contains(stdout, "updated upstream settings") {
 		t.Fatalf("stdout missing upstream summary:\n%s", stdout)
+	}
+}
+
+func TestConfigureProviderNonInteractiveDisabledFlag(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+
+	stdout, stderr, err := executeRootCommand(
+		"",
+		"configure", "provider",
+		"--config", configPath,
+		"--non-interactive",
+		"--type", "openai",
+		"--name", "backup",
+		"--enabled=false",
+	)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	if !strings.Contains(configText, "enabled = false") {
+		t.Fatalf("expected enabled = false in config:\n%s", configText)
+	}
+	if strings.Contains(configText, "api_key") {
+		t.Fatalf("disabled provider should not render credential block:\n%s", configText)
+	}
+	if strings.Contains(configText, "model ") {
+		t.Fatalf("disabled provider should not render models:\n%s", configText)
+	}
+	if !strings.Contains(stdout, `updated provider "backup"`) {
+		t.Fatalf("stdout missing provider summary:\n%s", stdout)
+	}
+}
+
+func TestConfigureProviderRejectsDisabledWithCredentialFlags(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+
+	_, stderr, err := executeRootCommand(
+		"",
+		"configure", "provider",
+		"--config", configPath,
+		"--non-interactive",
+		"--type", "openai",
+		"--name", "backup",
+		"--enabled=false",
+		"--api-key", "sk-test",
+	)
+	if err == nil {
+		t.Fatalf("expected error when --enabled=false combined with --api-key")
+	}
+	if !strings.Contains(stderr, "--enabled=false cannot be combined with credential flags") {
+		t.Fatalf("stderr missing expected error:\n%s", stderr)
 	}
 }
 

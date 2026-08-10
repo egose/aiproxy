@@ -60,7 +60,12 @@ type ProviderInput struct {
 	BaseURL               string
 	UpstreamHeaderTimeout string
 	Credential            ProviderCredentialInput
+	Enabled               *bool
 	Models                []ProviderModelInput
+}
+
+func (i ProviderInput) IsExplicitlyDisabled() bool {
+	return i.Enabled != nil && !*i.Enabled
 }
 
 type ProviderCredentialInput struct {
@@ -93,6 +98,7 @@ type ProviderHealthInput struct {
 	RedisURL  string
 	KeyPrefix string
 	Cooldown  string
+	CacheTTL  string
 }
 
 type LoggingInput struct {
@@ -236,23 +242,29 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 		b.WriteString(strconv.Quote(input.UpstreamHeaderTimeout))
 		b.WriteString("\n")
 	}
-	b.WriteString("\n")
-	switch input.Credential.Mode {
-	case "secrets_file":
-		b.WriteString("  api_key_ref {\n")
-		if input.Credential.SecretsPath != defaultSecretsPath { // pragma: allowlist secret
-			b.WriteString("    path = ")
-			b.WriteString(strconv.Quote(input.Credential.SecretsPath))
+	if input.IsExplicitlyDisabled() {
+		b.WriteString("  enabled = false\n")
+	} else {
+		b.WriteString("\n")
+		switch input.Credential.Mode {
+		case "secrets_file":
+			b.WriteString("  api_key_ref {\n")
+			if input.Credential.SecretsPath != defaultSecretsPath { // pragma: allowlist secret
+				b.WriteString("    path = ")
+				b.WriteString(strconv.Quote(input.Credential.SecretsPath))
+				b.WriteString("\n")
+			}
+			b.WriteString("    key  = ")
+			b.WriteString(strconv.Quote(input.Credential.SecretsKey))
+			b.WriteString("\n")
+			b.WriteString("  }\n")
+		case "disabled":
+			// no credential block rendered for explicitly disabled providers
+		default:
+			b.WriteString("  api_key = ")
+			b.WriteString(RenderStringOrExpression(input.Credential.APIKeyValue))
 			b.WriteString("\n")
 		}
-		b.WriteString("    key  = ")
-		b.WriteString(strconv.Quote(input.Credential.SecretsKey))
-		b.WriteString("\n")
-		b.WriteString("  }\n")
-	default:
-		b.WriteString("  api_key = ")
-		b.WriteString(RenderStringOrExpression(input.Credential.APIKeyValue))
-		b.WriteString("\n")
 	}
 	for _, model := range input.Models {
 		b.WriteString("\n  model ")
@@ -322,6 +334,11 @@ func RenderProviderHealthBlock(input ProviderHealthInput) string {
 	if input.Cooldown != "" {
 		b.WriteString("  cooldown = ")
 		b.WriteString(strconv.Quote(input.Cooldown))
+		b.WriteString("\n")
+	}
+	if input.CacheTTL != "" {
+		b.WriteString("  cache_ttl = ")
+		b.WriteString(strconv.Quote(input.CacheTTL))
 		b.WriteString("\n")
 	}
 	b.WriteString("}\n")

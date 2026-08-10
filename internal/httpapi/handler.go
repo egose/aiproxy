@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -33,6 +34,7 @@ type Dependencies struct {
 	ClientForProvider func(config.Provider) *http.Client
 	Catalog           []ModelCard
 	Metrics           *observability.Metrics
+	MetricsToken      string
 	Providers         map[string]config.Provider
 	Health            *providerhealth.Tracker
 	RateLimiter       ratelimit.Limiter
@@ -60,8 +62,9 @@ func NewHandler(deps Dependencies) *Handler {
 }
 
 type Handler struct {
-	mu   sync.RWMutex
-	deps Dependencies
+	mu            sync.RWMutex
+	deps          Dependencies
+	dashAuthLimit *dashboardAuthLimiter
 }
 
 func normalizeDependencies(deps Dependencies) Dependencies {
@@ -102,6 +105,15 @@ func (h *Handler) current() Dependencies {
 	deps := h.deps
 	h.mu.RUnlock()
 	return deps
+}
+
+func dashboardAuthLimiterFor(h *Handler) *dashboardAuthLimiter {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.dashAuthLimit == nil {
+		h.dashAuthLimit = newDashboardAuthLimiter()
+	}
+	return h.dashAuthLimit
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -416,8 +428,32 @@ func (h *Handler) handleMetrics(deps Dependencies, w http.ResponseWriter, r *htt
 		h.writeRequestError(nil, w, r, http.StatusNotFound, "not_found", "metrics not configured")
 		return true
 	}
+	if deps.MetricsToken == "" {
+		h.writeRequestError(nil, w, r, http.StatusNotFound, "not_found", "metrics not configured")
+		return true
+	}
+	if !metricsAuthorized(deps.MetricsToken, r) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="aiproxy metrics"`)
+		h.writeRequestError(nil, w, r, http.StatusUnauthorized, "auth_failed", "metrics token required")
+		return true
+	}
 	deps.Metrics.Handler().ServeHTTP(w, r)
 	return true
+}
+
+func metricsAuthorized(token string, r *http.Request) bool {
+	if token == "" {
+		return false
+	}
+	got := r.Header.Get("Authorization")
+	if got == "" {
+		return false
+	}
+	const scheme = "Bearer "
+	if len(got) < len(scheme) || got[:len(scheme)] != scheme {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got[len(scheme):]), []byte(token)) == 1
 }
 
 func (h *Handler) handleModels(deps Dependencies, w http.ResponseWriter, r *http.Request, logger *slog.Logger) bool {

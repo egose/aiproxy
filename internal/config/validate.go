@@ -22,6 +22,9 @@ func Validate(rt *Runtime) error {
 	if err := validateProviderHealth(rt.ProviderHealth); err != nil {
 		return err
 	}
+	if err := validateMetrics(rt.Metrics); err != nil {
+		return err
+	}
 	if err := validateDashboard(rt.Dashboard); err != nil {
 		return err
 	}
@@ -62,13 +65,30 @@ func validateProviderHealth(h ProviderHealth) error {
 	return nil
 }
 
+const minInsecureRemoteDashboardTokenLen = 32
+
+func validateMetrics(m Metrics) error {
+	if !m.Enabled {
+		return nil
+	}
+	if m.Token == "" {
+		return fmt.Errorf("metrics: token is required when metrics block is present")
+	}
+	return nil
+}
+
 func validateDashboard(d Dashboard) error {
 	if !d.Enabled {
 		return nil
 	}
-	// token is optional: an empty token means "auto-generate and persist a
-	// random secret at Build time". The dashboard command reads the persisted
-	// token file when the config did not declare one.
+	if d.AllowInsecureRemote {
+		if d.Token == "" || !d.TokenFromConfig {
+			return fmt.Errorf("dashboard: allow_insecure_remote = true requires an explicit token declared in config (minted tokens are not permitted for remote cleartext access)")
+		}
+		if len(d.Token) < minInsecureRemoteDashboardTokenLen {
+			return fmt.Errorf("dashboard: allow_insecure_remote = true requires a strong token of at least %d characters", minInsecureRemoteDashboardTokenLen)
+		}
+	}
 	return nil
 }
 
@@ -138,7 +158,7 @@ func validateProviders(providers []Provider, requireCredential bool) error {
 			return err
 		}
 		if requireCredential && p.APIKey == "" {
-			return fmt.Errorf("provider %q: exactly one of api_key or api_key_ref must be set (no credential resolved)", p.Name)
+			return fmt.Errorf("provider %q: enabled providers require a non-empty api_key or a resolvable api_key_ref (set enabled = false to disable a provider intentionally)", p.Name)
 		}
 		if len(p.Models) == 0 {
 			return fmt.Errorf("provider %q: at least one model is required", p.Name)

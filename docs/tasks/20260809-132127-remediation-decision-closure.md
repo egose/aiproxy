@@ -55,13 +55,42 @@ The following decisions are selected for implementation:
 
 ### Task METRICS-01: Require Dedicated Metrics Authentication
 
-Status: pending
+Status: completed
 
 Priority: P0
 
 Suggested agent: HTTP security and observability engineer
 
 Dependencies: none
+
+Completion evidence (recorded 2026-08-10):
+
+- Added optional `metrics` HCL block (`internal/config/schema.go:9,15-17`) and
+  `Metrics` runtime type (`internal/config/types.go:23-26`); `build.go:62-67`
+  sets `Enabled=true` only when the block is present.
+- `internal/httpapi/handler.go:423-442` requires `Authorization: Bearer
+<metrics token>` before serving Prometheus output; `metricsAuthorized`
+  (`handler.go:444-457`) uses `subtle.ConstantTimeCompare` and rejects
+  wrong-scheme tokens.
+- `internal/config/validate.go:70-78` rejects an enabled `metrics` block with
+  an empty token; the handler additionally returns `404` for both `deps.Metrics == nil`
+  and `MetricsToken == ""` so metrics are never exposed without a credential.
+- `internal/app/app.go:250` wires `MetricsToken: rt.Metrics.Token` into the
+  handler; the metrics token is checked independently of API auth client
+  tokens and is never reported in startup logs or metrics.
+- Tests: `internal/httpapi/handler_test.go:1049-1116` (`TestHandlerMetricsExposurePolicy`)
+  exercises no-token `401`, wrong-token `401`, valid-token `200`, POST `404`,
+  and confirms API `bearer_static` auth still rejects unauthenticated
+  `/v1/models`; `internal/httpapi/handler_test.go:1118-1135`
+  (`TestHandlerMetricsDisabledWithoutToken`) covers the no-block `404` path;
+  `internal/config/load_test.go:1055-1110` covers load validation
+  (`TestLoadRejectsMetricsBlockWithoutToken`, `TestLoadAcceptsMetricsBlockWithToken`,
+  `TestLoadRejectsMultipleMetricsBlocks`).
+- Docs: `README.md` (Optional Blocks > metrics), `docs/design.md`
+  (Observability And Security section), `website/docs/operations.md` (Metrics
+  And Health), `website/docs/configuration.md` (Optional Blocks > metrics),
+  `website/docs/api-reference.md` table row.
+- Verified with `go test ./internal/config ./internal/httpapi ./internal/observability`.
 
 Primary ownership:
 
@@ -102,13 +131,53 @@ Acceptance criteria:
 
 ### Task DASH-01: Harden Dashboard Transport And Authentication
 
-Status: pending
+Status: completed
 
 Priority: P0
 
 Suggested agent: CLI and HTTP security engineer
 
 Dependencies: none
+
+Completion evidence (recorded 2026-08-10):
+
+- Added `dashboard { token, allow_insecure_remote }` HCL schema
+  (`internal/config/schema.go:19-22`) and `Dashboard` runtime type
+  (`internal/config/types.go:28-34`) tracking `Token`, `AllowInsecureRemote`,
+  `ExplicitAllowInsecure`, `TokenFromConfig`, `Enabled`; `build.go:51-61`
+  materializes them from the HCL block.
+- `cmd/aiproxy/dashboard.go:57-61` calls `validateDashboardTransport` for every
+  config before any RPC; `dashboard.go:127-145` permits plain HTTP only for
+  loopback-derived URLs (`isLoopbackURLHost` covers `127.0.0.1`, `::1`,
+  `localhost`) and requires HTTPS or an explicit override for non-loopback.
+  `dashboard.go:109-123` normalizes `:8080`, `0.0.0.0:9090`, and bare hosts
+  to a loopback or verbatim URL.
+- `internal/config/validate.go:80-93` rejects `allow_insecure_remote = true`
+  with a minted, weak, or empty token; `minInsecureRemoteDashboardTokenLen = 32`
+  enforces the strong explicit token requirement.
+- `internal/httpapi/dashboard.go:67-129` applies auth + rate limiting on both
+  `/_internal/dashboard/{snapshot,logs}` paths via the shared
+  `respondDashboardAuthFailure`; the rate limiter
+  (`internal/httpapi/dashboard.go:13-62`, `dashboardAuthRatePerMinute=20`,
+  `dashboardAuthBurst=5`) is per-Handler and bounded by a single global bucket.
+- Tests: `cmd/aiproxy/dashboard_test.go:199-316` covers non-loopback plain-HTTP
+  rejection (hostname/public-IPv4/public-IPv6), insecure override with strong
+  token acceptance, loopback-without-override acceptance, and
+  insecure-remote-with-minted-token rejection;
+  `internal/httpapi/dashboard_test.go:178-221` (`TestDashboardAuthFailureRateLimitsRepeatedBadTokens`)
+  verifies `401` within burst and `429` with `Retry-After` after burst, with
+  recovery after cooldown;
+  `internal/httpapi/dashboard_test.go:42-76` verifies the snapshot auth policy;
+  `internal/config/load_test.go:1112-1176` covers validation
+  (`TestLoadRejectsDashboardInsecureRemoteWithMintedToken`,
+  `TestLoadRejectsDashboardInsecureRemoteWithWeakToken`,
+  `TestLoadAcceptsDashboardInsecureRemoteWithStrongToken`).
+- Docs: `README.md` (Optional Blocks > dashboard, Notes on Behavior),
+  `docs/design.md` (Observability And Security section),
+  `website/docs/operations.md` (Dashboard Transport Security),
+  `website/docs/configuration.md` (Optional Blocks > dashboard), `AGENTS.md`
+  (dashboard transport rule).
+- Verified with `go test ./cmd/aiproxy ./internal/config ./internal/httpapi`.
 
 Primary ownership:
 
@@ -154,13 +223,56 @@ Acceptance criteria:
 
 ### Task CONFIG-02: Make Provider Disablement Explicit
 
-Status: pending
+Status: completed
 
 Priority: P1
 
 Suggested agent: configuration contract engineer
 
 Dependencies: none
+
+Completion evidence (recorded 2026-08-10):
+
+- Added the optional `enabled` provider field (`internal/config/schema.go:76`)
+  and `Provider.Enabled` runtime field defaulting to `true`
+  (`internal/config/build.go:206,209-211`).
+- `internal/config/helpers.go:38-49` (`validateProviderCredentialStructure`)
+  enforces the exactly-one-credential rule and required `api_key_ref.key`
+  regardless of enablement; `internal/config/build.go:225-227` always invokes
+  it. `internal/config/build.go:228-232` resolves the live credential only for
+  enabled providers.
+- `internal/config/validate.go:31-36` runs structural validation on both
+  `rt.Providers` (`requireCredential=true`) and `rt.DisabledProviders`
+  (`requireCredential=false`); only enabled providers are required to have a
+  non-empty credential (`validate.go:160-162`).
+- `internal/config/build.go:79-86` collects explicitly disabled providers
+  into `rt.DisabledProviders` and populates `disabledProviderNames`;
+  `internal/config/build.go:97-101` prunes disabled providers from alias
+  targets so disabled state is honored across routing.
+- `internal/observability/startup.go:50-78` reports disabled providers with
+  an explicit `reason="disabled"` instead of implying disablement from missing
+  secret state; `internal/dashrpc/dashrpc.go` snapshots `disabled_providers`
+  for dashboard visibility.
+- `internal/configedit/configedit.go` and `cmd/aiproxy/configure.go` render
+  `enabled = false` for disabled providers and omit credential/model bodies,
+  while an enabled (re-)render strips the marker; generated config is
+  validated through `ValidateGeneratedConfig`.
+- Tests: `internal/config/load_test.go:82-103,456-657` covers
+  `TestLoadSkipsProviderWithEmptyAPIKey`,
+  `TestLoadSkipsProviderWithMissingCredential`,
+  `TestLoadRejectsInvalidDisabledProviderStructure`,
+  `TestLoadRejectsEnabledProviderWithMissingCredential`,
+  `TestLoadRejectsEnabledProviderWithMissingAPIKeyRef`,
+  `TestLoadAcceptsDisabledProviderWithoutCredential`,
+  `TestLoadDisabledProviderPreservesEnabledFalse`;
+  `internal/configedit/configedit_test.go:10-72` covers `enabled = false`
+  omission for enabled providers and omission of credential/model bodies for
+  disabled providers; `cmd/aiproxy/configure_test.go:272-452` covers
+  non-interactive generation of disabled and enabled providers.
+- Docs: `README.md` (Optional Blocks > `provider { enabled = false }` and
+  Notes on Behavior), `docs/design.md` (Validation section), `website/docs/configuration.md`
+  (Providers, Validation Rules), `AGENTS.md` (provider credential contract).
+- Verified with `go test ./internal/config ./internal/configedit ./cmd/aiproxy ./internal/app ./internal/dashrpc`.
 
 Primary ownership:
 
@@ -204,13 +316,62 @@ Acceptance criteria:
 
 ### Task HEALTH-02: Use Bounded Cached Health On Backend Read Failure
 
-Status: pending
+Status: completed
 
 Priority: P1
 
 Suggested agent: provider-health reliability engineer
 
 Dependencies: none
+
+Completion evidence (recorded 2026-08-10):
+
+- `internal/providerhealth/providerhealth.go:26-41` adds a per-provider cache
+  keyed by provider name with `expiresAt` timestamps; `defaultCacheTTL = 30s`
+  (`providerhealth.go:15`). Cache TTL is configurable via
+  `provider_health.cache_ttl` (`internal/config/build.go:124-147`).
+- On backend read failure, `IsHealthyContext` (`providerhealth.go:173-191`)
+  calls `fallbackHealth` (`providerhealth.go:252-260`); `SnapshotContext`
+  (`providerhealth.go:114-127`) and `AnyHealthyContext`
+  (`providerhealth.go:197-224`) call `fallbackSnapshot`
+  (`providerhealth.go:262-281`). Both fall back to the bounded in-process
+  cache and fail open only when no fresh cache entry exists; both the backend
+  error (`recordBackendError` -> `RecordProviderHealthBackendError` metric)
+  and the fallback reason (`recordFallback` -> `RecordProviderHealthFallback`
+  metric with reason `"cached"` or `"open_no_cache"`) are recorded.
+- `MarkSuccessContext`/`MarkFailureContext`
+  (`providerhealth.go:143-167`) populate the cache via `writeCache` so
+  subsequent backend read failures use the freshly observed state;
+  `readCache` (`providerhealth.go:283-300`) ignores expired entries so cache
+  is bounded by `cacheTTL`.
+- `internal/providerhealth/redis.go:89-97` (`redisOperationContext`)
+  inherits a caller deadline or imposes a bounded 2s timeout so backend
+  reads never block past the operation deadline;
+  `internal/httpapi/dispatch.go:108,137,230-257` short-circuits mark
+  operations when the context is already cancelled.
+- Same fallback policy applies across alias routing (`dispatchAlias`), direct
+  health checks (`IsHealthyContext`), readiness (`AnyHealthyContext`), and
+  dashboard snapshots (`SnapshotContext` invoked by `dashrpc.Snapshot`).
+- Tests: `internal/providerhealth/providerhealth_test.go`
+  (`TestTrackerIsHealthyFailsOpenWithoutCache`,
+  `TestTrackerIsHealthyUsesCachedValueOnBackendError`,
+  `TestTrackerIsHealthyIgnoresExpiredCache`,
+  `TestTrackerSnapshotFailsOpenWithoutCache`,
+  `TestTrackerSnapshotUsesCachedValueOnBackendError`,
+  `TestTrackerSnapshotDoesNotCacheFailOpenValues`,
+  `TestTrackerAnyHealthyUsesCachedFallback`,
+  `TestTrackerAnyHealthyFailsOpenWithoutCache`,
+  `TestTrackerMarkSuccessPopulatesCache`,
+  `TestTrackerMarkFailurePopulatesCache`,
+  `TestTrackerSnapshotContextCancellationFailsOpen`,
+  `TestRedisBackendRespectsCancelledContext`) cover all four acceptance
+  criteria with cancellation-aware tests; `internal/observability/metrics.go:322-340`
+  exposes the new backend-error and fallback metrics counters.
+- Docs: `README.md` (Notes on Behavior > Provider Health state),
+  `docs/design.md` (Provider Health section), `website/docs/operations.md`
+  (Metrics And Health, Shared Provider Health), `AGENTS.md` (provider health
+  cache contract).
+- Verified with `go test -race ./internal/providerhealth ./internal/httpapi ./internal/dashrpc ./internal/observability`.
 
 Primary ownership:
 
@@ -254,13 +415,63 @@ Acceptance criteria:
 
 ### Task CLOSE-01: Complete Original Remediation Review
 
-Status: pending
+Status: completed
 
 Priority: P1
 
 Suggested agent: independent senior security/reliability reviewer
 
 Dependencies: METRICS-01, DASH-01, CONFIG-02, HEALTH-02
+
+Completion evidence (recorded 2026-08-10):
+
+- Final verification:
+  - `make vet test` passes (all 17 packages).
+  - `make test-race` passes (race-clean for all packages; the race-only
+    `internal/app` and `cmd/aiproxy` paths exercise concurrent startup,
+    shutdown, alias retry, and stream completion).
+  - `make build` produces `dist/aiproxy` (`CGO_ENABLED=0`).
+- Per-acceptance-criteria verification: every acceptance criterion for
+  METRICS-01, DASH-01, CONFIG-02, and HEALTH-02 was traced to a named test
+  (see the completion evidence blocks above); behavior was verified against
+  runtime code paths, not against completion notes alone.
+- Alternate entry-path review: confirmed that the metrics token gate,
+  dashboard transport guard, dashboard auth rate limiter, provider enablement
+  validation, and provider health fallback all apply consistently across the
+  HTTP handler, CLI dashboard command, config validation, alias dispatch,
+  and provider health read paths. The metrics path is gated before any API
+  auth check; the dashboard HTTP gate applies the same auth + rate limit to
+  both `/snapshot` and `/logs`; alias routing prunes disabled providers from
+  `alias.Targets`; the HEALTH-02 fallback policy is the same for
+  `IsHealthyContext`, `SnapshotContext`, and `AnyHealthyContext`.
+- Serializer audit: dashboard snapshots/logs (HTTP and TUI), `/v1/models`,
+  `/v1/billing/usage`, Prometheus metric labels, error response writers,
+  dashboard token file persistence, and startup log summaries were inspected
+  for accidental exposure of `api_key`, `api_key_ref` resolved values,
+  `auth.client.token`s, the metrics token, the dashboard token, and internal
+  accounting markers. No exposure found. `internal/dashrpc/dashrpc.go:111-127`
+  (`cloneConfigProviders`) defends in depth by zeroing secrets on the
+  snapshot copy, and `toProviders`/`toAliases`
+  (`dashrpc.go:208-247`) project an explicit allowlist of fields.
+- Request-controlled input bounds audit: request body (8 MiB), multipart
+  `model` field (transitively 8 MiB), non-streaming upstream body (32 MiB),
+  streaming upstream body (copy-through with cancellation; error body 4 KiB),
+  SSE line/event decode (1 MiB/line, 32 MiB/event), metrics path label (closed
+  set with `/_internal/dashboard/unknown` and `"unknown"` folding), dashboard
+  log retention (500-entry ring), dashboard recent events (200),
+  dashboard auth rate limit (burst 5, 20/min, single global bucket), accounting
+  retention (24h, 1-min buckets, 200-event ring), alias retry/in-flight
+  (bounded by configured alias targets), provider health cache (bounded by
+  `len(t.known)` and pruned on reload), and header reads (bounded by Go's
+  default `MaxHeaderBytes`) are all explicitly bounded.
+- The original remediation task file
+  `docs/tasks/20260804-125911-codebase-health-review-remediation.md` has been
+  updated with closure evidence for DEC-01, DEC-02, DEC-03, DEC-05, and
+  REVIEW-01 (see below). No blocked decision statuses remain.
+- Two non-blocking test-evidence gaps were recorded as P3 follow-up tasks
+  `FU-26-01` and `FU-26-02` (see Follow-up Tasks below) so the closure does
+  not silence residual test-coverage observations; neither gap represents a
+  contract breach, behavior defect, or unbounded exposure.
 
 Primary ownership:
 
@@ -321,3 +532,64 @@ None. This file records selected contracts for the previously blocked decisions.
 - Public docs, examples, tests, config validation, and runtime behavior agree on all selected contracts.
 - `make vet test`, `make test-race`, and `make build` pass.
 - The original remediation task file is updated so its blocked decisions and final review accurately reflect the repository state.
+
+## Follow-up Tasks
+
+These non-blocking observations were recorded by the independent CLOSE-01 review. Neither represents a contract breach, behavior defect, or unbounded exposure. They are tracked here so residual test-coverage observations are not silently dropped, and can be picked up by a future agent.
+
+### FU-26-01: Add explicit `/logs` dashboard rate-limit regression test
+
+Status: pending
+
+Priority: P3
+
+Owner: HTTP security engineer
+
+References: this file (DASH-01 / CLOSE-01 review point 3),
+`internal/httpapi/dashboard.go:67-129`, `internal/httpapi/dashboard_test.go:178-221`.
+
+Finding:
+
+`TestDashboardAuthFailureRateLimitsRepeatedBadTokens`
+(`internal/httpapi/dashboard_test.go:178-221`) only exercises the
+`/_internal/dashboard/snapshot` path. The `/logs` path shares the same
+`respondDashboardAuthFailure` handler, so behavior is mechanically
+identical, but no dedicated regression test exists for `/logs` rate
+limiting.
+
+Acceptance criteria:
+
+- A new test enumerates repeated invalid token requests to
+  `/_internal/dashboard/logs` and asserts `401` within burst and `429`
+  with `Retry-After` after burst, mirroring the existing `/snapshot`
+  test.
+- `go test ./internal/httpapi` passes.
+
+### FU-26-02: Add explicit disabled-provider alias target pruning test
+
+Status: pending
+
+Priority: P3
+
+Owner: configuration contract engineer
+
+References: this file (CONFIG-02 / CLOSE-01 review point 4),
+`internal/config/build.go:79-86,97-101`, `internal/config/load_test.go:754-774`.
+
+Finding:
+
+`internal/config/build.go:97-101` prunes disabled providers from
+`alias.Targets` via the `disabledProviderNames` map. The behavior is
+correct, but the existing test suite does not explicitly assert that a
+mixed alias (one enabled target, one disabled target) loads with only
+the surviving enabled target.
+
+Acceptance criteria:
+
+- A new test loads a config containing a mixed alias and asserts that
+  `rt.Aliases[0].Targets` contains only the enabled target.
+- A new test exercises an alias whose only target is a disabled provider
+  and asserts the expected "at least one target is required" validation
+  error (or the residual-risk rationale if maintainer prefer-to-prune
+  behavior is intentional).
+- `go test ./internal/config` passes.
