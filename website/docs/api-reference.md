@@ -14,7 +14,7 @@ This page focuses on the proxy-facing contract and operation coverage. It does n
 | -------------------------- | ------ | ---------------------------------------------------------------------- |
 | `/v1/models`               | `GET`  | Lists direct models and aliases                                        |
 | `/v1/billing/usage`        | `GET`  | Returns aggregated in-process usage summaries                          |
-| `/metrics`                 | `GET`  | Prometheus metrics                                                     |
+| `/metrics`                 | `GET`  | Prometheus metrics; requires dedicated `metrics.token` bearer token    |
 | `/v1/chat/completions`     | `POST` | JSON and SSE streaming                                                 |
 | `/v1/embeddings`           | `POST` | Supported for `openai`, `openai-compatible`, and `gemini`              |
 | `/v1/responses`            | `POST` | Supported for `openai`, `openai-compatible`, `anthropic`, and `gemini` |

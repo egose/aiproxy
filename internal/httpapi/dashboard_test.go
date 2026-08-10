@@ -19,6 +19,13 @@ import (
 )
 
 const dashboardTestToken = "sekret"
+const metricsTestToken = "metrics-secret-token"
+
+func authedMetricsRequest() *http.Request {
+	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	r.Header.Set("Authorization", "Bearer "+metricsTestToken)
+	return r
+}
 
 func newDashboardDeps(rt *config.Runtime, startTime time.Time, usage *accounting.Aggregator, health *providerhealth.Tracker, logs *observability.LogBuffer) Dependencies {
 	return Dependencies{
@@ -165,5 +172,50 @@ func TestDashboardLogsEndpointReturnsNewEntries(t *testing.T) {
 	_ = json.Unmarshal(w2.Body.Bytes(), &resp2)
 	if len(resp2.Logs) != 0 {
 		t.Fatalf("polled logs = %+v, want 0", resp2.Logs)
+	}
+}
+
+func TestDashboardAuthFailureRateLimitsRepeatedBadTokens(t *testing.T) {
+	rt := newRT()
+	rt.Listener = config.Listener{Address: ":8080"}
+	usage := accounting.NewAggregator()
+	health := providerhealth.New(nil, config.ProviderHealth{})
+	health.SetProviders(rt.ProviderByName)
+	logs := observability.NewLogBuffer(10)
+	start := time.Now()
+
+	h := NewHandler(newDashboardDeps(rt, start, usage, health, logs))
+
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	limiter := dashboardAuthLimiterFor(h)
+	limiter.now = func() time.Time { return clock }
+
+	moreThanBurst := dashboardAuthBurst + 5
+	for i := 0; i < moreThanBurst; i++ {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, dashrpc.SnapshotPath, nil)
+		r.Header.Set(dashrpc.AuthHeaderName, "Bearer wrong")
+		h.ServeHTTP(w, r)
+		if i < dashboardAuthBurst {
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("attempt %d: status = %d, want 401 (within burst)", i, w.Code)
+			}
+		} else {
+			if w.Code != http.StatusTooManyRequests {
+				t.Fatalf("attempt %d: status = %d, want 429 (rate limited)", i, w.Code)
+			}
+			if got := w.Header().Get("Retry-After"); got == "" {
+				t.Fatalf("attempt %d: expected Retry-After header", i)
+			}
+		}
+	}
+
+	clock = clock.Add(2 * time.Minute)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, dashrpc.SnapshotPath, nil)
+	r.Header.Set(dashrpc.AuthHeaderName, "Bearer "+dashboardTestToken)
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("after cooldown status = %d, want 200, body=%s", w.Code, w.Body.String())
 	}
 }

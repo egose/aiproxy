@@ -1062,20 +1062,38 @@ func TestHandlerMetricsExposurePolicy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rt := newRT()
 			h := NewHandler(Dependencies{
-				Resolver:   modelresolver.New(rt),
-				Adapter:    &stubAdapter{},
-				Auth:       auth.NewAuthenticator(tc.auth),
-				Authorizer: auth.NewAuthorizer(tc.auth),
-				Catalog:    BuildModelCatalog(rt),
-				Metrics:    observability.NewMetrics(),
-				Providers:  rt.ProviderByName,
+				Resolver:     modelresolver.New(rt),
+				Adapter:      &stubAdapter{},
+				Auth:         auth.NewAuthenticator(tc.auth),
+				Authorizer:   auth.NewAuthorizer(tc.auth),
+				Catalog:      BuildModelCatalog(rt),
+				Metrics:      observability.NewMetrics(),
+				MetricsToken: metricsTestToken,
+				Providers:    rt.ProviderByName,
 			})
 
 			w := httptest.NewRecorder()
 			r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 			h.ServeHTTP(w, r)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("GET /metrics without token status = %d, want 401, body=%s", w.Code, w.Body.String())
+			}
+			if got := w.Header().Get("WWW-Authenticate"); got == "" {
+				t.Fatalf("expected WWW-Authenticate header on unauthenticated /metrics")
+			}
+
+			w = httptest.NewRecorder()
+			r = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+			r.Header.Set("Authorization", "Bearer wrong-token")
+			h.ServeHTTP(w, r)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("GET /metrics with wrong token status = %d, want 401, body=%s", w.Code, w.Body.String())
+			}
+
+			w = httptest.NewRecorder()
+			h.ServeHTTP(w, authedMetricsRequest())
 			if w.Code != http.StatusOK {
-				t.Fatalf("GET /metrics status = %d, body=%s", w.Code, w.Body.String())
+				t.Fatalf("GET /metrics with correct token status = %d, want 200, body=%s", w.Code, w.Body.String())
 			}
 
 			w = httptest.NewRecorder()
@@ -1094,6 +1112,25 @@ func TestHandlerMetricsExposurePolicy(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestHandlerMetricsDisabledWithoutToken(t *testing.T) {
+	rt := newRT()
+	h := NewHandler(Dependencies{
+		Resolver:  modelresolver.New(rt),
+		Adapter:   &stubAdapter{},
+		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:   BuildModelCatalog(rt),
+		Metrics:   observability.NewMetrics(),
+		Providers: rt.ProviderByName,
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("GET /metrics without configured token status = %d, want 404", w.Code)
 	}
 }
 
@@ -1373,11 +1410,12 @@ func TestHandlerReadyzFailsWithoutProviders(t *testing.T) {
 	metrics := observability.NewMetrics()
 	metrics.RecordConfig(rt)
 	h := NewHandler(Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   &stubAdapter{},
-		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Metrics:   metrics,
-		Providers: rt.ProviderByName,
+		Resolver:     modelresolver.New(rt),
+		Adapter:      &stubAdapter{},
+		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Metrics:      metrics,
+		MetricsToken: metricsTestToken,
+		Providers:    rt.ProviderByName,
 	})
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -1385,9 +1423,8 @@ func TestHandlerReadyzFailsWithoutProviders(t *testing.T) {
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", w.Code)
 	}
-	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	metricsW := httptest.NewRecorder()
-	h.ServeHTTP(metricsW, metricsReq)
+	h.ServeHTTP(metricsW, authedMetricsRequest())
 	body := metricsW.Body.String()
 	for _, want := range []string{
 		"aiproxy_ready 0",
@@ -1408,12 +1445,13 @@ func TestHandlerReadyzFailsWithoutHealthyProviders(t *testing.T) {
 	health.SetProviders(rt.ProviderByName)
 	health.MarkFailure("openai")
 	h := NewHandler(Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   &stubAdapter{},
-		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Metrics:   metrics,
-		Providers: rt.ProviderByName,
-		Health:    health,
+		Resolver:     modelresolver.New(rt),
+		Adapter:      &stubAdapter{},
+		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Metrics:      metrics,
+		MetricsToken: metricsTestToken,
+		Providers:    rt.ProviderByName,
+		Health:       health,
 	})
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -1421,9 +1459,8 @@ func TestHandlerReadyzFailsWithoutHealthyProviders(t *testing.T) {
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", w.Code)
 	}
-	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	metricsW := httptest.NewRecorder()
-	h.ServeHTTP(metricsW, metricsReq)
+	h.ServeHTTP(metricsW, authedMetricsRequest())
 	body := metricsW.Body.String()
 	for _, want := range []string{
 		"aiproxy_ready 0",
@@ -1443,12 +1480,13 @@ func TestHandlerMetricsEndpointAndCounters(t *testing.T) {
 	metrics.RecordConfig(rt)
 	stub := &stubAdapter{}
 	h := NewHandler(Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   stub,
-		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:   BuildModelCatalog(rt),
-		Metrics:   metrics,
-		Providers: rt.ProviderByName,
+		Resolver:     modelresolver.New(rt),
+		Adapter:      stub,
+		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:      BuildModelCatalog(rt),
+		Metrics:      metrics,
+		MetricsToken: metricsTestToken,
+		Providers:    rt.ProviderByName,
 	})
 
 	post := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`)))
@@ -1458,9 +1496,8 @@ func TestHandlerMetricsEndpointAndCounters(t *testing.T) {
 		t.Fatalf("chat status = %d", postW.Code)
 	}
 
-	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	metricsW := httptest.NewRecorder()
-	h.ServeHTTP(metricsW, metricsReq)
+	h.ServeHTTP(metricsW, authedMetricsRequest())
 	if metricsW.Code != http.StatusOK {
 		t.Fatalf("metrics status = %d", metricsW.Code)
 	}
@@ -1539,12 +1576,13 @@ func TestHandlerMetricsIncludeProxyErrors(t *testing.T) {
 	metrics := observability.NewMetrics()
 	metrics.RecordConfig(rt)
 	h := NewHandler(Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   &stubAdapter{},
-		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:   BuildModelCatalog(rt),
-		Metrics:   metrics,
-		Providers: rt.ProviderByName,
+		Resolver:     modelresolver.New(rt),
+		Adapter:      &stubAdapter{},
+		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:      BuildModelCatalog(rt),
+		Metrics:      metrics,
+		MetricsToken: metricsTestToken,
+		Providers:    rt.ProviderByName,
 	})
 
 	badReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"messages":[{"role":"user","content":"hi"}]}`)))
@@ -1554,9 +1592,8 @@ func TestHandlerMetricsIncludeProxyErrors(t *testing.T) {
 		t.Fatalf("bad request status = %d", badW.Code)
 	}
 
-	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	metricsW := httptest.NewRecorder()
-	h.ServeHTTP(metricsW, metricsReq)
+	h.ServeHTTP(metricsW, authedMetricsRequest())
 	if metricsW.Code != http.StatusOK {
 		t.Fatalf("metrics status = %d", metricsW.Code)
 	}
@@ -1584,12 +1621,13 @@ func TestHandlerMetricsIncludeStreamingResponses(t *testing.T) {
 		StreamBody: io.NopCloser(strings.NewReader("data: hello\n\ndata: [DONE]\n\n")),
 	}}
 	h := NewHandler(Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   stub,
-		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:   BuildModelCatalog(rt),
-		Metrics:   metrics,
-		Providers: rt.ProviderByName,
+		Resolver:     modelresolver.New(rt),
+		Adapter:      stub,
+		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:      BuildModelCatalog(rt),
+		Metrics:      metrics,
+		MetricsToken: metricsTestToken,
+		Providers:    rt.ProviderByName,
 	})
 
 	w := httptest.NewRecorder()
@@ -1599,9 +1637,8 @@ func TestHandlerMetricsIncludeStreamingResponses(t *testing.T) {
 		t.Fatalf("streaming status = %d", w.Code)
 	}
 
-	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	metricsW := httptest.NewRecorder()
-	h.ServeHTTP(metricsW, metricsReq)
+	h.ServeHTTP(metricsW, authedMetricsRequest())
 	if metricsW.Code != http.StatusOK {
 		t.Fatalf("metrics status = %d", metricsW.Code)
 	}

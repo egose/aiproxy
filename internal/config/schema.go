@@ -6,13 +6,19 @@ type rawFile struct {
 	Auth                  []rawAuth          `hcl:"auth,block"`
 	Logging               *rawLogging        `hcl:"logging,block"`
 	ProviderHealth        *rawProviderHealth `hcl:"provider_health,block"`
+	Metrics               []*rawMetrics      `hcl:"metrics,block"`
 	Dashboard             []*rawDashboard    `hcl:"dashboard,block"`
 	Providers             []rawProvider      `hcl:"provider,block"`
 	Aliases               []rawAlias         `hcl:"alias,block"`
 }
 
-type rawDashboard struct {
+type rawMetrics struct {
 	Token string `hcl:"token,optional"`
+}
+
+type rawDashboard struct {
+	Token               string `hcl:"token,optional"`
+	AllowInsecureRemote *bool  `hcl:"allow_insecure_remote,optional"`
 }
 
 type rawLogging struct {
@@ -56,6 +62,7 @@ type rawProviderHealth struct {
 	RedisURL  string `hcl:"redis_url,optional"`
 	KeyPrefix string `hcl:"key_prefix,optional"`
 	Cooldown  string `hcl:"cooldown,optional"`
+	CacheTTL  string `hcl:"cache_ttl,optional"`
 }
 
 type rawProvider struct {
@@ -66,6 +73,7 @@ type rawProvider struct {
 	UpstreamHeaderTimeout string        `hcl:"upstream_header_timeout,optional"`
 	APIKey                string        `hcl:"api_key,optional"`
 	APIKeyRef             *rawAPIKeyRef `hcl:"api_key_ref,block"`
+	Enabled               *bool         `hcl:"enabled,optional"`
 	Models                []rawModel    `hcl:"model,block"`
 }
 

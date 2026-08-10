@@ -276,3 +276,161 @@ func TestTrackerAnyHealthyUsesOneBackendSnapshot(t *testing.T) {
 		t.Fatalf("backend snapshot calls = %d, want 1", calls.Load())
 	}
 }
+
+func TestTrackerIsHealthyFailsOpenWithoutCache(t *testing.T) {
+	var backendErr atomic.Int32
+	tracker := &Tracker{backend: stubBackend{isHealthy: func(ctx context.Context, name string) (bool, error) {
+		backendErr.Add(1)
+		return false, context.Canceled
+	}}}
+	if !tracker.IsHealthyContext(context.Background(), "openai") {
+		t.Fatal("should fail open when no cache exists")
+	}
+	if backendErr.Load() == 0 {
+		t.Fatal("backend should have been called")
+	}
+}
+
+func TestTrackerIsHealthyUsesCachedValueOnBackendError(t *testing.T) {
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tracker := &Tracker{cacheTTL: defaultCacheTTL, cache: map[string]cachedHealth{"openai": {healthy: false, expiresAt: clock.Add(time.Minute)}}, now: func() time.Time { return clock }}
+	calls := 0
+	tracker.backend = stubBackend{isHealthy: func(ctx context.Context, name string) (bool, error) {
+		calls++
+		return true, context.Canceled
+	}}
+	if tracker.IsHealthyContext(context.Background(), "openai") {
+		t.Fatal("cached unhealthy value should be returned on backend error")
+	}
+	if calls != 1 {
+		t.Fatalf("backend calls = %d, want 1", calls)
+	}
+}
+
+func TestTrackerIsHealthyIgnoresExpiredCache(t *testing.T) {
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tracker := &Tracker{cache: map[string]cachedHealth{"openai": {healthy: false, expiresAt: clock.Add(-time.Second)}}, now: func() time.Time { return clock }}
+	tracker.backend = stubBackend{isHealthy: func(ctx context.Context, name string) (bool, error) {
+		return true, context.Canceled
+	}}
+	if !tracker.IsHealthyContext(context.Background(), "openai") {
+		t.Fatal("expired cache entry should not influence fallback")
+	}
+}
+
+func TestTrackerSnapshotFailsOpenWithoutCache(t *testing.T) {
+	tracker := &Tracker{known: map[string]bool{"openai": true}, backend: stubBackend{snapshot: func(ctx context.Context, names []string) (map[string]bool, error) {
+		return nil, context.Canceled
+	}}}
+	snapshot := tracker.Snapshot()
+	if len(snapshot) != 1 || !snapshot["openai"] {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+}
+
+func TestTrackerSnapshotUsesCachedValueOnBackendError(t *testing.T) {
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tracker := &Tracker{
+		cacheTTL: defaultCacheTTL,
+		known:    map[string]bool{"openai": true, "backup": true},
+		cache: map[string]cachedHealth{
+			"openai": {healthy: true, expiresAt: clock.Add(time.Minute)},
+			"backup": {healthy: false, expiresAt: clock.Add(time.Minute)},
+		},
+		now: func() time.Time { return clock },
+		backend: stubBackend{snapshot: func(ctx context.Context, names []string) (map[string]bool, error) {
+			return nil, context.Canceled
+		}},
+	}
+	snapshot := tracker.Snapshot()
+	if len(snapshot) != 2 || !snapshot["openai"] || snapshot["backup"] {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+}
+
+func TestTrackerSnapshotDoesNotCacheFailOpenValues(t *testing.T) {
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	invocations := 0
+	tracker := &Tracker{known: map[string]bool{"openai": true}, now: func() time.Time { return clock }, backend: stubBackend{snapshot: func(ctx context.Context, names []string) (map[string]bool, error) {
+		invocations++
+		if invocations == 1 {
+			return nil, context.Canceled
+		}
+		return map[string]bool{"openai": false}, nil
+	}}}
+	if got := tracker.Snapshot(); !got["openai"] {
+		t.Fatalf("first call should fail open when no cache; got %+v", got)
+	}
+	if got := tracker.Snapshot(); got["openai"] {
+		t.Fatalf("second call should reflect unhealthy state from backend; got %+v", got)
+	}
+}
+
+func TestTrackerAnyHealthyUsesCachedFallback(t *testing.T) {
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tracker := &Tracker{
+		cacheTTL: defaultCacheTTL,
+		cache:    map[string]cachedHealth{"openai": {healthy: false, expiresAt: clock.Add(time.Minute)}},
+		now:      func() time.Time { return clock },
+		backend: stubBackend{snapshot: func(ctx context.Context, names []string) (map[string]bool, error) {
+			return nil, context.Canceled
+		}},
+	}
+	providers := map[string]config.Provider{"openai": {Name: "openai"}}
+	if tracker.AnyHealthyContext(context.Background(), providers) {
+		t.Fatal("cached unhealthy should suppress healthy fallback")
+	}
+
+	tracker2 := &Tracker{
+		cacheTTL: defaultCacheTTL,
+		cache:    map[string]cachedHealth{"openai": {healthy: true, expiresAt: clock.Add(time.Minute)}},
+		now:      func() time.Time { return clock },
+		backend: stubBackend{snapshot: func(ctx context.Context, names []string) (map[string]bool, error) {
+			return nil, context.Canceled
+		}},
+	}
+	if !tracker2.AnyHealthyContext(context.Background(), providers) {
+		t.Fatal("cached healthy should not be inverted on fallback")
+	}
+}
+
+func TestTrackerAnyHealthyFailsOpenWithoutCache(t *testing.T) {
+	tracker := &Tracker{backend: stubBackend{snapshot: func(ctx context.Context, names []string) (map[string]bool, error) {
+		return nil, context.Canceled
+	}}}
+	providers := map[string]config.Provider{"openai": {Name: "openai"}}
+	if !tracker.AnyHealthyContext(context.Background(), providers) {
+		t.Fatal("should fail open when no cache exists")
+	}
+}
+
+func TestTrackerMarkSuccessPopulatesCache(t *testing.T) {
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tracker := &Tracker{cacheTTL: defaultCacheTTL, now: func() time.Time { return clock }, backend: stubBackend{}}
+	tracker.MarkSuccess("openai")
+	clock = clock.Add(time.Second)
+	if healthy, ok := tracker.readCache("openai"); !ok || !healthy {
+		t.Fatalf("cache = %+v ok=%v", healthy, ok)
+	}
+	clock = clock.Add(defaultCacheTTL)
+	if _, ok := tracker.readCache("openai"); ok {
+		t.Fatal("cache entry should expire after TTL")
+	}
+}
+
+func TestTrackerMarkFailurePopulatesCache(t *testing.T) {
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tracker := &Tracker{cacheTTL: defaultCacheTTL, now: func() time.Time { return clock }, backend: stubBackend{}}
+	tracker.MarkFailure("openai")
+	if healthy, ok := tracker.readCache("openai"); !ok || healthy {
+		t.Fatalf("cache = %+v ok=%v", healthy, ok)
+	}
+
+	clock = clock.Add(time.Second)
+	tracker.backend = stubBackend{isHealthy: func(ctx context.Context, name string) (bool, error) {
+		return true, context.Canceled
+	}}
+	if tracker.IsHealthyContext(context.Background(), "openai") {
+		t.Fatal("MarkFailure should populate cache with unhealthy and survive backend error")
+	}
+}

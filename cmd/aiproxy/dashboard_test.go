@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -192,5 +193,124 @@ provider "openai" "openai" {
 	}
 	if !strings.Contains(stderr.String(), "no server running") {
 		t.Fatalf("stderr should say 'no server running', got: %s", stderr.String())
+	}
+}
+
+func TestDashboardRejectsNonLoopbackPlainHTTP(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	cases := []struct {
+		name    string
+		address string
+	}{
+		{name: "hostname", address: "llm.example.com:8080"},
+		{name: "public-ipv4", address: "10.0.0.5:8080"},
+		{name: "public-ipv6", address: "[2001:db8::1]:8080"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := writeDashboardConfig(t, `
+listener "http" "public" { address = "`+tc.address+`" }
+auth "main" { mode = "none" }
+dashboard { token = "`+strings.Repeat("a", 40)+`" }
+provider "openai" "openai" {
+  api_key = "sk-dummy"
+  model "gpt-4o-mini" {}
+}
+`)
+			var stdout, stderr bytes.Buffer
+			err := runDashboard(context.Background(), cfg, &stdout, &stderr)
+			if !errors.Is(err, errDashboardInsecureTransport) {
+				t.Fatalf("expected errDashboardInsecureTransport, got %v (stderr=%s)", err, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "non-loopback") {
+				t.Fatalf("stderr should mention non-loopback, got: %s", stderr.String())
+			}
+		})
+	}
+}
+
+func TestDashboardAllowsNonLoopbackHTTPWithInsecureOverride(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	stub := newSnapshotStub(t, strings.Repeat("a", 40))
+	defer stub.Close()
+	stubAddr := stub.Listener.Addr().String()
+	cfg := writeDashboardConfig(t, `
+listener "http" "public" { address = "`+stubAddr+`" }
+auth "main" { mode = "none" }
+dashboard {
+  token = "`+strings.Repeat("a", 40)+`"
+  allow_insecure_remote = true
+}
+provider "openai" "openai" {
+  api_key = "sk-dummy"
+  model "gpt-4o-mini" {}
+}
+`)
+	var stdout, stderr bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_ = runDashboard(ctx, cfg, &stdout, &stderr)
+	if strings.Contains(stderr.String(), "non-loopback") {
+		t.Fatalf("override should allow non-loopback, stderr=%s", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "no server running") {
+		t.Fatalf("override dashboard should reach stub, stderr=%s", stderr.String())
+	}
+	if !stub.gotAuth("Bearer " + strings.Repeat("a", 40)) {
+		t.Fatal("stub never received authenticated snapshot request")
+	}
+}
+
+func TestDashboardAllowsLoopbackPlainHTTPWithoutOverride(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	stub := newSnapshotStub(t, "loopback-token")
+	defer stub.Close()
+	stubAddr := stub.Listener.Addr().String()
+	cfg := writeDashboardConfig(t, `
+listener "http" "public" { address = "`+stubAddr+`" }
+auth "main" { mode = "none" }
+dashboard { token = "loopback-token" }
+provider "openai" "openai" {
+  api_key = "sk-dummy"
+  model "gpt-4o-mini" {}
+}
+`)
+	var stdout, stderr bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_ = runDashboard(ctx, cfg, &stdout, &stderr)
+	if strings.Contains(stderr.String(), "non-loopback") {
+		t.Fatalf("loopback should be allowed without override, stderr=%s", stderr.String())
+	}
+	if !stub.gotAuth("Bearer loopback-token") {
+		t.Fatal("stub never received authenticated snapshot request")
+	}
+}
+
+func TestDashboardRejectsConfigLoadWhenInsecureRemoteHasMintedToken(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	cfg := writeDashboardConfig(t, `
+listener "http" "public" { address = "10.0.0.5:8080" }
+auth "main" { mode = "none" }
+dashboard {
+  allow_insecure_remote = true
+}
+provider "openai" "openai" {
+  api_key = "sk-dummy"
+  model "gpt-4o-mini" {}
+}
+`)
+	var stdout, stderr bytes.Buffer
+	err := runDashboard(context.Background(), cfg, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected validation error for insecure remote with minted token")
 	}
 }

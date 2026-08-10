@@ -32,10 +32,10 @@ func trimLeadingWhitespace(src []byte) []byte {
 	return src
 }
 
-// resolveProviderCredential materializes the effective API key for a provider.
-// If both api_key and api_key_ref are set, the loader rejects the config.
-// Validation enforces the "exactly one" rule; resolution just reads the file.
-func resolveProviderCredential(p *Provider) error {
+// validateProviderCredentialStructure enforces the "exactly one credential"
+// rule and required api_key_ref.key without reading any file. Disabled
+// providers must still pass these structural checks.
+func validateProviderCredentialStructure(p *Provider) error {
 	if p.APIKey != "" && p.APIKeyRef != nil { // pragma: allowlist secret
 		return fmt.Errorf("only one of api_key or api_key_ref may be set")
 	}
@@ -44,6 +44,16 @@ func resolveProviderCredential(p *Provider) error {
 	}
 	if p.APIKeyRef.Key == "" {
 		return fmt.Errorf("api_key_ref.key is required")
+	}
+	return nil
+}
+
+// resolveProviderCredential materializes the effective API key for an enabled
+// provider. Structural checks must already have passed via
+// validateProviderCredentialStructure.
+func resolveProviderCredential(p *Provider) error {
+	if p.APIKeyRef == nil { // pragma: allowlist secret
+		return nil
 	}
 
 	data, err := os.ReadFile(p.APIKeyRef.Path)

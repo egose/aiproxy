@@ -41,7 +41,32 @@ provider "openai" "primary" {
 	if !strings.Contains(updated, `api_key = env("LOCALAI_API_KEY")`) {
 		t.Fatalf("env expression was not preserved:\n%s", updated)
 	}
+	if strings.Contains(updated, "enabled = false") {
+		t.Fatalf("enabled = false should not render for enabled provider:\n%s", updated)
+	}
 	if err := ValidateGeneratedConfig([]byte(updated), "config.hcl"); err != nil {
+		t.Fatalf("ValidateGeneratedConfig(): %v", err)
+	}
+}
+
+func TestRenderProviderBlockDisabled(t *testing.T) {
+	disabled := false
+	block := RenderProviderBlock(ProviderInput{
+		ProviderType: "openai",
+		Name:         "backup",
+		Enabled:      &disabled,
+		Credential:   ProviderCredentialInput{Mode: "disabled"},
+	}, "/unused/keys.json")
+	if !strings.Contains(block, "enabled = false") {
+		t.Fatalf("expected enabled = false marker:\n%s", block)
+	}
+	if strings.Contains(block, "api_key") {
+		t.Fatalf("disabled provider must not render credential block:\n%s", block)
+	}
+	if strings.Contains(block, "model ") {
+		t.Fatalf("disabled provider should not render models:\n%s", block)
+	}
+	if err := ValidateGeneratedConfig([]byte(block), "config.hcl"); err != nil {
 		t.Fatalf("ValidateGeneratedConfig(): %v", err)
 	}
 }

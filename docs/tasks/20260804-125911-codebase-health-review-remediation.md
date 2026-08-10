@@ -800,7 +800,7 @@ Completion evidence:
 
 ### DEC-01: Metrics Security Boundary
 
-Status: blocked
+Status: completed
 
 Owner: maintainer/security
 
@@ -808,9 +808,13 @@ Decision needed:
 
 Choose one contract for `/metrics`: API authentication, a dedicated metrics token/listener, or intentionally public metrics with tenant/client labels removed. Current pre-auth exposure includes identity and usage dimensions at `internal/httpapi/handler.go:195-197` and `internal/observability/metrics.go:314-330`.
 
+Resolution (recorded 2026-08-10 by `docs/tasks/20260809-132127-remediation-decision-closure.md` METRICS-01):
+
+A dedicated metrics bearer token is required. `metrics { token = env("AIPROXY_METRICS_TOKEN") }` becomes an optional HCL block. `GET /metrics` without a valid `Authorization: Bearer <token>` returns `401`; the token is checked independently of API auth client tokens. An enabled `metrics` block with an empty or missing token is rejected at config validation (`internal/config/validate.go:70-78`). Test evidence: `internal/httpapi/handler_test.go:1049-1135` and `internal/config/load_test.go:1055-1110`.
+
 ### DEC-02: Missing Provider Secret Contract
 
-Status: blocked
+Status: completed
 
 Owner: maintainer/product
 
@@ -818,15 +822,23 @@ Decision needed:
 
 Choose whether an unresolved credential must fail startup or intentionally disable a provider. If disabling remains supported, add an explicit configuration mechanism such as `enabled = false`; do not use a missing required secret as the disable signal. Current behavior is in `internal/config/build.go:56-67` and conflicts with the documented exactly-one-credential contract.
 
+Resolution (recorded 2026-08-10 by `docs/tasks/20260809-132127-remediation-decision-closure.md` CONFIG-02):
+
+Enabled providers with unresolved, empty, or missing credentials fail validation. The optional `enabled = false` field is added to the `provider` block (default `true`). Disabled providers are still structurally validated (name, type, base URL, models, capabilities) but do not require a usable credential; disabled state is reported explicitly in startup logs (`reason="disabled"`) and dashboard snapshots rather than inferred from missing secret state. Test evidence: `internal/config/load_test.go:456-657`, `internal/configedit/configedit_test.go:10-72`, and `cmd/aiproxy/configure_test.go:272-452`.
+
 ### DEC-03: Shared Health Backend Failure Policy
 
-Status: blocked
+Status: completed
 
 Owner: maintainer/operations
 
 Decision needed:
 
 Define whether Redis health read failures are fail-open, fail-closed, or use bounded cached state for routing and readiness. The current implementation silently treats errors as healthy at `internal/providerhealth/providerhealth.go:116-127`.
+
+Resolution (recorded 2026-08-10 by `docs/tasks/20260809-132127-remediation-decision-closure.md` HEALTH-02):
+
+Redis health read failures use a bounded in-process cache (`provider_health.cache_ttl`, default 30s) and fail open only when no fresh cache entry exists. `IsHealthyContext`, `SnapshotContext`, and `AnyHealthyContext` share the same fallback policy; both the backend error and the fallback reason are recorded as Prometheus metrics so degraded mode is observable. Test evidence: `internal/providerhealth/providerhealth_test.go:280-436` covers fail-open-without-cache, cached-value-on-backend-error, expired-cache-ignored, snapshot/any-healthy fallback, mark-populates-cache, and cancellation-aware behavior.
 
 ### DEC-04: Accounting Retention Meaning
 
@@ -840,7 +852,7 @@ Usage retention is a rolling in-process window. Aggregated billing summaries are
 
 ### DEC-05: Dashboard Transport Security
 
-Status: blocked
+Status: completed
 
 Owner: maintainer/security
 
@@ -849,6 +861,10 @@ Decision needed:
 Choose whether dashboard RPC must use a loopback/Unix socket, HTTPS for non-loopback listeners, or an explicitly acknowledged insecure override. The CLI currently derives plain HTTP from listener addresses and sends the bearer token at `cmd/aiproxy/dashboard.go:103-128`.
 
 After the decision, create a focused implementation task requiring non-loopback cleartext rejection or a separate protected transport, plus tests and operator documentation. Also apply rate limiting to dashboard authentication and define a minimum explicit-token strength if remote access remains supported.
+
+Resolution (recorded 2026-08-10 by `docs/tasks/20260809-132127-remediation-decision-closure.md` DASH-01):
+
+The dashboard command refuses non-loopback plain-HTTP listeners unless `dashboard { allow_insecure_remote = true }` is declared with a strong explicit `token` (at least 32 characters); HTTPS listeners are always allowed. Repeated invalid dashboard tokens are rate limited with `429` and `Retry-After`. The HTTP-side dashboard gate applies auth and rate limiting to both `/_internal/dashboard/{snapshot,logs}` paths. Test evidence: `cmd/aiproxy/dashboard_test.go:199-316`, `internal/httpapi/dashboard_test.go:42-221`, and `internal/config/load_test.go:1112-1176`.
 
 ## Parallelization Guidance
 
@@ -875,7 +891,7 @@ Shared hotspots:
 
 ### Task REVIEW-01: Independently Verify Remediation
 
-Status: pending
+Status: completed
 
 Priority: P1
 
@@ -915,6 +931,16 @@ Acceptance criteria:
 - All completed task criteria have traceable tests or documented runtime evidence.
 - No unrelated worktree changes were reverted or folded into remediation.
 - Remaining gaps are recorded as new uniquely numbered tasks with ownership, priority, references, and acceptance criteria.
+
+Completion evidence (recorded 2026-08-10 by `docs/tasks/20260809-132127-remediation-decision-closure.md` CLOSE-01):
+
+- Verification gates: `make vet test` passes (all 17 packages); `make test-race` passes (race-clean for all packages); `make build` produces `dist/aiproxy` (`CGO_ENABLED=0`).
+- Per-acceptance-criteria verification: every acceptance criterion for the four decision tasks (METRICS-01, DASH-01, CONFIG-02, HEALTH-02) was traced to a named test in the closure task file; behavior was verified against runtime code paths, not against completion notes alone.
+- Alternate entry-path review: confirmed consistent enforcement of the metrics token gate, dashboard transport guard, dashboard auth rate limiter, provider enablement validation, and provider health fallback across the HTTP handler, CLI dashboard command, config validation, alias dispatch, and provider health read paths.
+- Serializer audit: dashboard snapshots/logs (HTTP and TUI), `/v1/models`, `/v1/billing/usage`, Prometheus metric labels, error response writers, dashboard token file persistence, and startup log summaries were inspected for accidental exposure of `api_key`, `api_key_ref` resolved values, `auth.client.token`s, the metrics token, the dashboard token, and internal accounting markers. No exposure found.
+- Request-controlled input bounds audit: request body (8 MiB), multipart `model` field (transitively 8 MiB), non-streaming upstream body (32 MiB), streaming upstream body (copy-through with cancellation; error body 4 KiB), SSE line/event decode (1 MiB/line, 32 MiB/event), metrics path label (closed set), dashboard log retention (500-entry ring), dashboard recent events (200), dashboard auth rate limit (burst 5, 20/min), accounting retention (24h, 1-min buckets, 200-event ring), alias retry/in-flight (bounded by configured targets), provider health cache (bounded by `len(t.known)` and pruned on reload), and header reads (bounded by Go's default `MaxHeaderBytes`) are all explicitly bounded.
+- Deferred-decision closure: DEC-01, DEC-02, DEC-03, and DEC-05 are marked completed with concrete resolution evidence above. No blocked security policy remains.
+- Non-blocking test-evidence gaps recorded as P3 follow-up tasks `FU-26-01` (explicit `/logs` dashboard rate-limit regression test) and `FU-26-02` (explicit disabled-provider alias-target pruning test) in `docs/tasks/20260809-132127-remediation-decision-closure.md`. Neither represents a contract breach, behavior defect, or unbounded exposure.
 
 ## Definition Of Done
 

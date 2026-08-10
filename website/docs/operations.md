@@ -194,6 +194,21 @@ Coverage includes:
 - provider health state
 - readiness state and reason
 - upstream request counts, latency, and response sizes
+- provider health backend error counts
+- provider health fallback counts by operation and reason
+
+`/metrics` requires a dedicated bearer token declared in a `metrics` block:
+
+```hcl
+metrics {
+  token = env("AIPROXY_METRICS_TOKEN")
+}
+```
+
+`GET /metrics` without a valid `Authorization: Bearer <metrics token>` header
+returns `401`. The metrics token is checked independently of API auth client
+tokens; API clients cannot scrape `/metrics` with their own credentials. An
+empty or missing token is rejected at config validation.
 
 Transient transport failures and upstream `5xx` responses can mark a provider unhealthy for routing and readiness decisions.
 
@@ -205,7 +220,36 @@ Without extra config, provider health is in-process only.
 
 You can optionally configure Redis-backed shared health state with `provider_health` so multiple instances can observe the same transient provider status.
 
+```hcl
+provider_health {
+  redis_url  = env("AIPROXY_REDIS_URL")
+  key_prefix = "aiproxy:provider-health"
+  cooldown   = "30s"
+  cache_ttl  = "30s"
+}
+```
+
+`cache_ttl` (default 30s) bounds how long a stale in-process cache entry is
+reused for routing and readiness when the Redis backend becomes unreadable.
+When a Redis health read fails, routing, readiness, and dashboard snapshots fall
+back to the bounded in-process cache and fail open only when no fresh cache
+entry exists; both the backend error and the fallback reason are recorded as
+Prometheus metrics so degraded mode is observable.
+
 Without Redis-backed sharing, each instance tracks transient health independently.
+
+## Dashboard Transport Security
+
+The `aiproxy dashboard` command and the `/_internal/dashboard/*` HTTP endpoints
+share the proxy listener.
+
+- Loopback plain HTTP is always allowed for the dashboard command.
+- Non-loopback plain HTTP is rejected unless
+  `dashboard { allow_insecure_remote = true }` is declared with a strong
+  explicit `token` (at least 32 characters).
+- HTTPS listeners always satisfy the transport check regardless of host.
+- Repeated invalid dashboard tokens are rate limited with `429` and a
+  `Retry-After` header.
 
 ## Security Defaults
 
@@ -240,5 +284,10 @@ Mount this file read-only in production deployments.
 - enable `bearer_static` auth unless the deployment is fully trusted
 - keep provider secrets out of the HCL file when possible
 - mount config and key files read-only
-- scrape `GET /metrics`
+- declare `metrics { token = env("AIPROXY_METRICS_TOKEN") }` and scrape
+  `GET /metrics` with the configured bearer token
+- for non-loopback dashboard access, use an HTTPS listener or declare
+  `dashboard { allow_insecure_remote = true token = "<32+ char token>" }`
+- explicitly `enabled = false` any provider you want to keep defined but
+  inactive; missing credentials on enabled providers fail validation
 - use aliases for controlled failover instead of relying on direct model requests

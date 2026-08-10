@@ -16,7 +16,7 @@ func LogStartup(logger *slog.Logger, rt *config.Runtime) {
 		"auth_mode", rt.Auth.Mode,
 	)
 	for _, p := range rt.DisabledProviders {
-		logger.Warn("provider skipped because api key is empty",
+		logger.Info("provider disabled by config",
 			"name", p.Name,
 			"type", p.Type,
 			"display_name", p.DisplayName,
@@ -64,7 +64,7 @@ func StartupSummary(rt *config.Runtime) string {
 		if display == "" {
 			display = p.Name
 		}
-		fmt.Fprintf(&b, "    - %s (%s) models=%d display=%q reason=%q\n", p.Name, p.Type, len(p.Models), display, "empty api key")
+		fmt.Fprintf(&b, "    - %s (%s) models=%d display=%q reason=%q\n", p.Name, p.Type, len(p.Models), display, "disabled")
 	}
 	fmt.Fprintf(&b, "  aliases: %d\n", len(rt.Aliases))
 	for _, a := range rt.Aliases {

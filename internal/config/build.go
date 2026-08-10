@@ -52,7 +52,18 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		if len(raw.Dashboard) > 1 {
 			return nil, fmt.Errorf("only one dashboard block is supported")
 		}
-		rt.Dashboard = Dashboard{Token: raw.Dashboard[0].Token, Enabled: true}
+		rawDash := raw.Dashboard[0]
+		rt.Dashboard = Dashboard{Token: rawDash.Token, TokenFromConfig: rawDash.Token != "", Enabled: true}
+		if rawDash.AllowInsecureRemote != nil {
+			rt.Dashboard.AllowInsecureRemote = *rawDash.AllowInsecureRemote
+			rt.Dashboard.ExplicitAllowInsecure = true
+		}
+	}
+	if len(raw.Metrics) > 0 {
+		if len(raw.Metrics) > 1 {
+			return nil, fmt.Errorf("only one metrics block is supported")
+		}
+		rt.Metrics = Metrics{Token: raw.Metrics[0].Token, Enabled: true}
 	}
 
 	for _, p := range raw.Providers {
@@ -65,7 +76,7 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		if err != nil {
 			return nil, fmt.Errorf("provider %q: %w", p.Name, err)
 		}
-		if provider.APIKey == "" {
+		if !provider.Enabled {
 			rt.DisabledProviders = append(rt.DisabledProviders, provider)
 			disabledProviderNames[provider.Name] = true
 			continue
@@ -121,6 +132,16 @@ func buildProviderHealth(rawHealth *rawProviderHealth) (ProviderHealth, error) {
 			return ProviderHealth{}, fmt.Errorf("provider_health.cooldown: %w", err)
 		}
 		out.Cooldown = d
+	}
+	if rawHealth.CacheTTL != "" {
+		d, err := time.ParseDuration(rawHealth.CacheTTL)
+		if err != nil {
+			return ProviderHealth{}, fmt.Errorf("provider_health.cache_ttl: %w", err)
+		}
+		if d <= 0 {
+			return ProviderHealth{}, fmt.Errorf("provider_health.cache_ttl must be positive")
+		}
+		out.CacheTTL = d
 	}
 	return out, nil
 }
@@ -182,7 +203,11 @@ func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Durat
 		BaseURL:               rawProvider.BaseURL,
 		UpstreamHeaderTimeout: rootUpstreamHeaderTimeout,
 		APIKey:                rawProvider.APIKey,
+		Enabled:               true,
 		ModelByName:           make(map[string]Model),
+	}
+	if rawProvider.Enabled != nil {
+		provider.Enabled = *rawProvider.Enabled
 	}
 	if rawProvider.UpstreamHeaderTimeout != "" {
 		d, err := parsePositiveDuration("upstream_header_timeout", rawProvider.UpstreamHeaderTimeout)
@@ -197,8 +222,13 @@ func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Durat
 			provider.APIKeyRef.Path = defaultKeyFilePath()
 		}
 	}
-	if err := resolveProviderCredential(&provider); err != nil {
+	if err := validateProviderCredentialStructure(&provider); err != nil {
 		return Provider{}, err
+	}
+	if provider.Enabled {
+		if err := resolveProviderCredential(&provider); err != nil {
+			return Provider{}, err
+		}
 	}
 	for _, m := range rawProvider.Models {
 		if _, dup := provider.ModelByName[m.Name]; dup {
