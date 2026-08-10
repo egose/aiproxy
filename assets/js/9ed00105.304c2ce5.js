@@ -85,12 +85,25 @@ const toc = [{
   "value": "Validation Rules",
   "id": "validation-rules",
   "level": 2
+}, {
+  "value": "Optional Blocks",
+  "id": "optional-blocks",
+  "level": 2
+}, {
+  "value": "<code>metrics</code>",
+  "id": "metrics",
+  "level": 3
+}, {
+  "value": "<code>dashboard</code>",
+  "id": "dashboard",
+  "level": 3
 }];
 function _createMdxContent(props) {
   const _components = {
     code: "code",
     h1: "h1",
     h2: "h2",
+    h3: "h3",
     header: "header",
     li: "li",
     ol: "ol",
@@ -316,6 +329,12 @@ function _createMdxContent(props) {
           children: "upstream_header_timeout"
         })
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "enabled"
+        }), " (optional, default ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "true"
+        }), ")"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["nested ", (0,jsx_runtime.jsx)(_components.code, {
           children: "model"
         }), " blocks"]
@@ -325,11 +344,14 @@ function _createMdxContent(props) {
         children: "api_key"
       }), " or ", (0,jsx_runtime.jsx)(_components.code, {
         children: "api_key_ref"
-      }), "."]
-    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["For compatibility, a provider whose credential resolves to empty, including an\nempty ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "api_key = env(\"...\")"
-      }), ", is disabled before request routing. Disabled\nproviders are still validated for structure, URL, models, and capabilities."]
+      }), ". Enabled\nproviders with unresolved, empty, or missing credentials fail validation. To\nintentionally disable a provider, declare ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "enabled = false"
+      }), "; disabled\nproviders are still validated for structure, URL, models, and capabilities,\nbut they do not require a usable credential."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "provider \"openai\" \"backup\" {\n  enabled = false\n  model \"gpt-4o-mini\" {}\n}\n"
+      })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Provider ", (0,jsx_runtime.jsx)(_components.code, {
         children: "base_url"
@@ -562,15 +584,76 @@ function _createMdxContent(props) {
         }), " and ", (0,jsx_runtime.jsx)(_components.code, {
           children: "api_key_ref"
         })]
-      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
-        children: "active providers with no resolved credential; current compatibility behavior\ndisables missing or empty credentials before routing instead"
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["enabled providers with no resolved credential, including an empty\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "api_key = env(\"...\")"
+        }), "; missing or empty credentials fail validation unless\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "enabled = false"
+        }), " is declared explicitly"]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "providers without any models"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "aliases without any targets"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "alias targets that reference unknown providers or models"
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["a ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "metrics"
+        }), " block with an empty or missing token"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["a ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "dashboard"
+        }), " block with ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "allow_insecure_remote = true"
+        }), " but a minted, weak\n(fewer than 32 characters), or missing explicit ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "token"
+        })]
       }), "\n"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "optional-blocks",
+      children: "Optional Blocks"
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "metrics",
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        children: "metrics"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "metrics {\n  token = env(\"AIPROXY_METRICS_TOKEN\")\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["When present, ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "GET /metrics"
+      }), " requires ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Authorization: Bearer <token>"
+      }), " with the\nconfigured value. The metrics token is checked independently of API auth\nclient tokens; API clients cannot scrape ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/metrics"
+      }), " with their own credentials."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "dashboard",
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        children: "dashboard"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "dashboard {\n  token                 = env(\"AIPROXY_DASHBOARD_TOKEN\")\n  allow_insecure_remote = false\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["When ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "token"
+      }), " is omitted, ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy serve"
+      }), " mints a random secret at startup and\npersists it to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "$XDG_CONFIG_HOME/aiproxy/dashboard.token"
+      }), "; the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "dashboard"
+      }), "\ncommand reads that file to authenticate. To allow non-loopback plain-HTTP\ndashboard access, set ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allow_insecure_remote = true"
+      }), " and declare a strong\nexplicit ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "token"
+      }), " (at least 32 characters). HTTPS listeners always satisfy the\ntransport check."]
     })]
   });
 }

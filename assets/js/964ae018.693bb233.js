@@ -145,8 +145,10 @@ function _createMdxContent(props) {
             children: (0,jsx_runtime.jsx)(_components.code, {
               children: "GET"
             })
-          }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Prometheus metrics"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Prometheus metrics; requires dedicated ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "metrics.token"
+            }), " bearer token"]
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {

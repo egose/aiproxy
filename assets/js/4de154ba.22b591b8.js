@@ -66,6 +66,10 @@ const toc = [{
   "id": "shared-provider-health",
   "level": 2
 }, {
+  "value": "Dashboard Transport Security",
+  "id": "dashboard-transport-security",
+  "level": 2
+}, {
   "value": "Security Defaults",
   "id": "security-defaults",
   "level": 2
@@ -316,7 +320,32 @@ function _createMdxContent(props) {
         children: "readiness state and reason"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "upstream request counts, latency, and response sizes"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "provider health backend error counts"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "provider health fallback counts by operation and reason"
       }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "/metrics"
+      }), " requires a dedicated bearer token declared in a ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "metrics"
+      }), " block:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "metrics {\n  token = env(\"AIPROXY_METRICS_TOKEN\")\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "GET /metrics"
+      }), " without a valid ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Authorization: Bearer <metrics token>"
+      }), " header\nreturns ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "401"
+      }), ". The metrics token is checked independently of API auth client\ntokens; API clients cannot scrape ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/metrics"
+      }), " with their own credentials. An\nempty or missing token is rejected at config validation."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Transient transport failures and upstream ", (0,jsx_runtime.jsx)(_components.code, {
         children: "5xx"
@@ -332,8 +361,44 @@ function _createMdxContent(props) {
       children: ["You can optionally configure Redis-backed shared health state with ", (0,jsx_runtime.jsx)(_components.code, {
         children: "provider_health"
       }), " so multiple instances can observe the same transient provider status."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "provider_health {\n  redis_url  = env(\"AIPROXY_REDIS_URL\")\n  key_prefix = \"aiproxy:provider-health\"\n  cooldown   = \"30s\"\n  cache_ttl  = \"30s\"\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "cache_ttl"
+      }), " (default 30s) bounds how long a stale in-process cache entry is\nreused for routing and readiness when the Redis backend becomes unreadable.\nWhen a Redis health read fails, routing, readiness, and dashboard snapshots fall\nback to the bounded in-process cache and fail open only when no fresh cache\nentry exists; both the backend error and the fallback reason are recorded as\nPrometheus metrics so degraded mode is observable."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Without Redis-backed sharing, each instance tracks transient health independently."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "dashboard-transport-security",
+      children: "Dashboard Transport Security"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy dashboard"
+      }), " command and the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/_internal/dashboard/*"
+      }), " HTTP endpoints\nshare the proxy listener."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "Loopback plain HTTP is always allowed for the dashboard command."
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Non-loopback plain HTTP is rejected unless\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "dashboard { allow_insecure_remote = true }"
+        }), " is declared with a strong\nexplicit ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "token"
+        }), " (at least 32 characters)."]
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "HTTPS listeners always satisfy the transport check regardless of host."
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Repeated invalid dashboard tokens are rate limited with ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "429"
+        }), " and a\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "Retry-After"
+        }), " header."]
+      }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "security-defaults",
       children: "Security Defaults"
@@ -393,9 +458,19 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "mount config and key files read-only"
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["scrape ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ["declare ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "metrics { token = env(\"AIPROXY_METRICS_TOKEN\") }"
+        }), " and scrape\n", (0,jsx_runtime.jsx)(_components.code, {
           children: "GET /metrics"
+        }), " with the configured bearer token"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["for non-loopback dashboard access, use an HTTPS listener or declare\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "dashboard { allow_insecure_remote = true token = \"<32+ char token>\" }"
         })]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["explicitly ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "enabled = false"
+        }), " any provider you want to keep defined but\ninactive; missing credentials on enabled providers fail validation"]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "use aliases for controlled failover instead of relying on direct model requests"
       }), "\n"]

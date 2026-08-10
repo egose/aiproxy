@@ -287,9 +287,21 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "mount config and key files read-only"
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["scrape ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ["declare ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "metrics { token = env(\"AIPROXY_METRICS_TOKEN\") }"
+        }), " and scrape\n", (0,jsx_runtime.jsx)(_components.code, {
           children: "GET /metrics"
+        }), " with the configured bearer token (the token is independent of\nAPI auth client tokens)"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["for non-loopback ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "aiproxy dashboard"
+        }), " access, use an HTTPS listener or declare\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "dashboard { allow_insecure_remote = true token = \"<32+ char token>\" }"
         })]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["explicitly ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "enabled = false"
+        }), " any provider you want defined but inactive;\nenabled providers with missing credentials fail validation"]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "use aliases for stable client-facing models and controlled failover"
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
@@ -318,7 +330,11 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["Confirm ", (0,jsx_runtime.jsx)(_components.code, {
           children: "GET /metrics"
-        }), " is scraped successfully."]
+        }), " returns ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "200"
+        }), " with the configured bearer token (and\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "401"
+        }), " without it)."]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["If using reloads, test a ", (0,jsx_runtime.jsx)(_components.code, {
           children: "SIGHUP"
