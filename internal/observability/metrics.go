@@ -225,9 +225,9 @@ func (m *Metrics) RecordConfig(rt *config.Runtime) {
 	m.configMu.Lock()
 	defer m.configMu.Unlock()
 	m.removeRetiredConfigLabels(rt)
-	m.providerCount.Set(float64(len(rt.Providers)))
-	m.disabledCount.Set(float64(len(rt.DisabledProviders)))
-	m.aliasCount.Set(float64(len(rt.Aliases)))
+	m.providerCount.Set(float64(rt.Catalog.ProviderCount()))
+	m.disabledCount.Set(float64(rt.Catalog.DisabledProviderCount()))
+	m.aliasCount.Set(float64(rt.Catalog.AliasCount()))
 	for _, mode := range []config.AuthMode{config.AuthModeNone, config.AuthModeBearerStatic} {
 		value := 0.0
 		if rt.Auth.Mode == mode {
@@ -245,11 +245,11 @@ func (m *Metrics) RecordConfig(rt *config.Runtime) {
 		providerTypeCounts[string(providerType)+":active"] = 0
 		providerTypeCounts[string(providerType)+":disabled"] = 0
 	}
-	for _, p := range rt.Providers {
+	for _, p := range rt.Catalog.Providers() {
 		providerTypeCounts[string(p.Type)+":active"]++
 		m.providerHealthy.WithLabelValues(p.Name).Set(1)
 	}
-	for _, p := range rt.DisabledProviders {
+	for _, p := range rt.Catalog.DisabledProviders() {
 		providerTypeCounts[string(p.Type)+":disabled"]++
 	}
 	for key, count := range providerTypeCounts {
@@ -260,16 +260,16 @@ func (m *Metrics) RecordConfig(rt *config.Runtime) {
 	for _, algorithm := range []config.Algorithm{config.AlgorithmRoundRobin, config.AlgorithmLeastConnections} {
 		aliasAlgorithmCounts[string(algorithm)] = 0
 	}
-	for _, alias := range rt.Aliases {
+	for _, alias := range rt.Catalog.Aliases() {
 		aliasAlgorithmCounts[string(alias.Algorithm)]++
 	}
 	for algorithm, count := range aliasAlgorithmCounts {
 		m.aliasesByAlgorithm.WithLabelValues(algorithm).Set(count)
 	}
-	for _, p := range rt.DisabledProviders {
+	for _, p := range rt.Catalog.DisabledProviders() {
 		m.skippedProviders.WithLabelValues(p.Name, string(p.Type)).Set(1)
 	}
-	if len(rt.Providers) > 0 {
+	if rt.Catalog.ProviderCount() > 0 {
 		m.SetReadyWithReason(true, "active_providers")
 	} else {
 		m.SetReadyWithReason(false, "no_active_providers")
@@ -281,20 +281,20 @@ func (m *Metrics) removeRetiredConfigLabels(rt *config.Runtime) {
 	if m.lastConfig == nil {
 		return
 	}
-	activeProviders := make(map[string]bool, len(rt.Providers))
-	for _, p := range rt.Providers {
+	activeProviders := make(map[string]bool, rt.Catalog.ProviderCount())
+	for _, p := range rt.Catalog.Providers() {
 		activeProviders[p.Name] = true
 	}
-	for _, p := range m.lastConfig.Providers {
+	for _, p := range m.lastConfig.Catalog.Providers() {
 		if !activeProviders[p.Name] {
 			m.providerHealthy.DeleteLabelValues(p.Name)
 		}
 	}
-	disabledProviders := make(map[string]bool, len(rt.DisabledProviders))
-	for _, p := range rt.DisabledProviders {
+	disabledProviders := make(map[string]bool, rt.Catalog.DisabledProviderCount())
+	for _, p := range rt.Catalog.DisabledProviders() {
 		disabledProviders[p.Name+"\x00"+string(p.Type)] = true
 	}
-	for _, p := range m.lastConfig.DisabledProviders {
+	for _, p := range m.lastConfig.Catalog.DisabledProviders() {
 		if !disabledProviders[p.Name+"\x00"+string(p.Type)] {
 			m.skippedProviders.DeleteLabelValues(p.Name, string(p.Type))
 		}

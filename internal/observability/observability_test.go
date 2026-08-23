@@ -18,33 +18,21 @@ func TestRequestIDUsesExistingOrGenerates(t *testing.T) {
 
 func TestStartupSummaryIncludesKeySections(t *testing.T) {
 	rt := &config.Runtime{
-		Providers: []config.Provider{{
+		Catalog: config.NewCatalog([]config.Provider{{
 			Type:        config.ProviderTypeOpenAI,
 			Name:        "openai",
 			DisplayName: "OpenAI",
 			Models:      []config.Model{{Name: "gpt-4o-mini", Capabilities: []config.Capability{config.CapabilityChat}}},
-			ModelByName: map[string]config.Model{"gpt-4o-mini": {Name: "gpt-4o-mini", Capabilities: []config.Capability{config.CapabilityChat}}},
-		}},
-		DisabledProviders: []config.Provider{{
+		}}, []config.Provider{{
 			Type:        config.ProviderTypeOpenAICompatible,
 			Name:        "localai",
 			DisplayName: "LocalAI",
 			Models:      []config.Model{{Name: "qwen3-32b"}},
-		}},
-		Aliases: []config.Alias{{
+		}}, []config.Alias{{
 			Name:      "chat_default",
 			Algorithm: config.AlgorithmRoundRobin,
 			Targets:   []config.AliasTarget{{Provider: "openai", Model: "gpt-4o-mini"}},
-		}},
-		ProviderByName: map[string]config.Provider{
-			"openai": {
-				Type:        config.ProviderTypeOpenAI,
-				Name:        "openai",
-				DisplayName: "OpenAI",
-				Models:      []config.Model{{Name: "gpt-4o-mini", Capabilities: []config.Capability{config.CapabilityChat}}},
-				ModelByName: map[string]config.Model{"gpt-4o-mini": {Name: "gpt-4o-mini", Capabilities: []config.Capability{config.CapabilityChat}}},
-			},
-		},
+		}}),
 	}
 
 	summary := StartupSummary(rt)

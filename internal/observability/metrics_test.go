@@ -30,10 +30,12 @@ func TestMetricsAliasInFlightGauge(t *testing.T) {
 func TestMetricsRecordConfigStartupState(t *testing.T) {
 	m := NewMetrics()
 	m.RecordConfig(&config.Runtime{
-		Auth:              config.Auth{Mode: config.AuthModeBearerStatic},
-		Providers:         []config.Provider{{Type: config.ProviderTypeOpenAI}, {Type: config.ProviderTypeGemini}},
-		DisabledProviders: []config.Provider{{Type: config.ProviderTypeAnthropic}},
-		Aliases:           []config.Alias{{Algorithm: config.AlgorithmRoundRobin}, {Algorithm: config.AlgorithmLeastConnections}},
+		Auth: config.Auth{Mode: config.AuthModeBearerStatic},
+		Catalog: config.NewCatalog(
+			[]config.Provider{{Type: config.ProviderTypeOpenAI}, {Type: config.ProviderTypeGemini}},
+			[]config.Provider{{Type: config.ProviderTypeAnthropic}},
+			[]config.Alias{{Algorithm: config.AlgorithmRoundRobin}, {Algorithm: config.AlgorithmLeastConnections}},
+		),
 	})
 
 	w := httptest.NewRecorder()
@@ -64,15 +66,19 @@ func TestMetricsRecordConfigStartupState(t *testing.T) {
 func TestMetricsRecordConfigRemovesRetiredInventoryLabels(t *testing.T) {
 	m := NewMetrics()
 	m.RecordConfig(&config.Runtime{
-		Providers:         []config.Provider{{Name: "openai", Type: config.ProviderTypeOpenAI}},
-		DisabledProviders: []config.Provider{{Name: "old", Type: config.ProviderTypeGemini}},
-		Aliases:           []config.Alias{{Algorithm: config.AlgorithmRoundRobin}},
+		Catalog: config.NewCatalog(
+			[]config.Provider{{Name: "openai", Type: config.ProviderTypeOpenAI}},
+			[]config.Provider{{Name: "old", Type: config.ProviderTypeGemini}},
+			[]config.Alias{{Algorithm: config.AlgorithmRoundRobin}},
+		),
 	})
 	m.SetProviderHealthy("openai", false)
 	m.RecordConfig(&config.Runtime{
-		Providers:         []config.Provider{{Name: "anthropic", Type: config.ProviderTypeAnthropic}},
-		DisabledProviders: []config.Provider{{Name: "new", Type: config.ProviderTypeGemini}},
-		Aliases:           []config.Alias{{Algorithm: config.AlgorithmLeastConnections}},
+		Catalog: config.NewCatalog(
+			[]config.Provider{{Name: "anthropic", Type: config.ProviderTypeAnthropic}},
+			[]config.Provider{{Name: "new", Type: config.ProviderTypeGemini}},
+			[]config.Alias{{Algorithm: config.AlgorithmLeastConnections}},
+		),
 	})
 
 	w := httptest.NewRecorder()

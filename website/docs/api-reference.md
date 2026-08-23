@@ -8,32 +8,40 @@ sidebar_position: 5
 
 This page focuses on the proxy-facing contract and operation coverage. It does not attempt to restate every upstream provider-specific field or option.
 
-## Endpoints
+## Endpoint And Provider Support Matrix
 
-| Endpoint                   | Method | Notes                                                                  |
-| -------------------------- | ------ | ---------------------------------------------------------------------- |
-| `/v1/models`               | `GET`  | Lists direct models and aliases                                        |
-| `/v1/billing/usage`        | `GET`  | Returns aggregated in-process usage summaries                          |
-| `/metrics`                 | `GET`  | Prometheus metrics; requires dedicated `metrics.token` bearer token    |
-| `/v1/chat/completions`     | `POST` | JSON and SSE streaming                                                 |
-| `/v1/embeddings`           | `POST` | Supported for `openai`, `openai-compatible`, and `gemini`              |
-| `/v1/responses`            | `POST` | Supported for `openai`, `openai-compatible`, `anthropic`, and `gemini` |
-| `/v1/images/generations`   | `POST` | Supported for `openai` and `openai-compatible`                         |
-| `/v1/audio/transcriptions` | `POST` | Supported for `openai` and `openai-compatible`                         |
-| `/v1/audio/speech`         | `POST` | Supported for `openai` and `openai-compatible`                         |
+<!-- docs-contract:public-matrix:start -->
 
-## Provider Support Matrix
+| Surface                         | `openai`                           | `openai-compatible`                | `anthropic`                        | `gemini`                           |
+| ------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- |
+| `GET /v1/models`                | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        |
+| `GET /v1/billing/usage`         | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting |
+| `GET /metrics`                  | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     |
+| `POST /v1/chat/completions`     | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated            | JSON and SSE translated            |
+| `POST /v1/embeddings`           | Yes                                | Yes                                | No                                 | Yes                                |
+| `POST /v1/responses`            | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated subset     | JSON and SSE translated subset     |
+| `POST /v1/images/generations`   | Yes                                | Yes                                | No                                 | No                                 |
+| `POST /v1/audio/transcriptions` | Yes                                | Yes                                | No                                 | No                                 |
+| `POST /v1/audio/speech`         | Yes                                | Yes                                | No                                 | No                                 |
 
-| Operation                       | `openai` | `openai-compatible` | `anthropic` | `gemini` |
-| ------------------------------- | -------- | ------------------- | ----------- | -------- |
-| `GET /v1/models`                | Yes      | Yes                 | Yes         | Yes      |
-| `GET /v1/billing/usage`         | Yes      | Yes                 | Yes         | Yes      |
-| `POST /v1/chat/completions`     | Yes      | Yes                 | Yes         | Yes      |
-| `POST /v1/embeddings`           | Yes      | Yes                 | No          | Yes      |
-| `POST /v1/responses`            | Yes      | Yes                 | Yes         | Yes      |
-| `POST /v1/images/generations`   | Yes      | Yes                 | No          | No       |
-| `POST /v1/audio/transcriptions` | Yes      | Yes                 | No          | No       |
-| `POST /v1/audio/speech`         | Yes      | Yes                 | No          | No       |
+<!-- docs-contract:public-matrix:end -->
+
+## Provider Capability Defaults
+
+<!-- docs-contract:capability-matrix:start -->
+
+| Provider type       | Default capabilities when omitted | Additional supported capabilities                |
+| ------------------- | --------------------------------- | ------------------------------------------------ |
+| `openai`            | `chat`, `responses`, `embeddings` | `images`, `audio_transcriptions`, `audio_speech` |
+| `openai-compatible` | `chat`, `responses`, `embeddings` | `images`, `audio_transcriptions`, `audio_speech` |
+| `anthropic`         | `chat`, `responses`               | None                                             |
+| `gemini`            | `chat`, `responses`               | `embeddings`                                     |
+
+<!-- docs-contract:capability-matrix:end -->
+
+When a model omits `capabilities`, the provider-type defaults are used. Explicit
+capabilities can narrow that default or opt into an additional supported
+capability listed above.
 
 ## Streaming
 
@@ -64,12 +72,17 @@ proxy's rolling 24-hour accounting window.
 
 - When the authenticated client has a `tenant`, results are scoped to that tenant
 - Otherwise, results are scoped to the caller's client identity
+- This endpoint is local accounting only; it is not an external billing,
+  invoicing, or quota system
 
 ## Error Behavior
 
 - Direct requests never fail over to another provider
-- Alias requests retry the next target on transport errors and upstream `5xx`
-- Alias requests also retry on upstream `4xx` responses listed in `retry_status_codes` (default: `5xx` only)
+- Alias requests retry the next target on transport errors, timeouts, and status
+  codes listed in `retry_status_codes`
+- The default `retry_status_codes` list is `500`, `502`, `503`, and `504`
+- Configured retry statuses may include `4xx` responses such as `429`; retryable
+  `4xx` statuses do not mark providers unhealthy
 - Other upstream `4xx` responses are returned verbatim
 - Unsupported operations return client-visible proxy errors
 

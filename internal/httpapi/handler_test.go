@@ -48,6 +48,12 @@ type trackingReadCloser struct {
 	closed atomic.Bool
 }
 
+type delayedReadCloser struct {
+	reader io.Reader
+	delay  time.Duration
+	once   sync.Once
+}
+
 func (r *errorAfterReader) Read(p []byte) (int, error) {
 	if len(r.data) > 0 {
 		n := copy(p, r.data)
@@ -66,8 +72,21 @@ func (r *trackingReadCloser) Close() error {
 	return nil
 }
 
+func (r *delayedReadCloser) Read(p []byte) (int, error) {
+	r.once.Do(func() { time.Sleep(r.delay) })
+	return r.reader.Read(p)
+}
+
+func (r *delayedReadCloser) Close() error { return nil }
+
 type failingResponseWriter struct {
 	header http.Header
+	status int
+}
+
+type cancelingResponseWriter struct {
+	header http.Header
+	cancel context.CancelFunc
 	status int
 }
 
@@ -83,6 +102,22 @@ func (w *failingResponseWriter) Write([]byte) (int, error) { return 0, context.C
 func (w *failingResponseWriter) WriteHeader(status int) { w.status = status }
 
 func (w *failingResponseWriter) Flush() {}
+
+func (w *cancelingResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *cancelingResponseWriter) Write([]byte) (int, error) {
+	w.cancel()
+	return 0, context.Canceled
+}
+
+func (w *cancelingResponseWriter) WriteHeader(status int) { w.status = status }
+
+func (w *cancelingResponseWriter) Flush() {}
 
 func (s *stubAdapter) Do(ctx context.Context, r provider.Request) (*provider.Result, error) {
 	s.got = r
@@ -116,56 +151,68 @@ func (a *clientCaptureAdapter) snapshot() []*http.Client {
 
 func newRT() *config.Runtime {
 	return &config.Runtime{
-		Providers: []config.Provider{
+		Catalog: config.NewCatalog([]config.Provider{
 			{
 				Type:    config.ProviderTypeOpenAI,
 				Name:    "openai",
 				BaseURL: "https://api.openai.com/v1",
 				APIKey:  "sk",
-				ModelByName: map[string]config.Model{
-					"gpt-4o-mini": {Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"},
-				},
-				Models: []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}},
+				Models:  []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}},
 			},
-		},
-		ProviderByName: map[string]config.Provider{
-			"openai": {
-				Type:    config.ProviderTypeOpenAI,
-				Name:    "openai",
-				BaseURL: "https://api.openai.com/v1",
-				APIKey:  "sk",
-				ModelByName: map[string]config.Model{
-					"gpt-4o-mini": {Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"},
-				},
-				Models: []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}},
-			},
-		},
-		AliasByName: map[string]config.Alias{
-			"chat_default": {
-				Name:      "chat_default",
-				Algorithm: config.AlgorithmRoundRobin,
-				Targets:   []config.AliasTarget{{Provider: "openai", Model: "gpt-4o-mini"}},
-			},
-		},
-		Aliases: []config.Alias{
+		}, nil, []config.Alias{
 			{
 				Name:      "chat_default",
 				Algorithm: config.AlgorithmRoundRobin,
 				Targets:   []config.AliasTarget{{Provider: "openai", Model: "gpt-4o-mini"}},
 			},
-		},
+		}),
 	}
+}
+
+func testProvider(t *testing.T, rt *config.Runtime, name string) config.Provider {
+	t.Helper()
+	provider, ok := rt.Catalog.Provider(name)
+	if !ok {
+		t.Fatalf("provider %q not found", name)
+	}
+	return provider
+}
+
+func replaceProviders(rt *config.Runtime, providers []config.Provider) {
+	rt.Catalog = config.NewCatalog(providers, nil, rt.Catalog.Aliases())
+}
+
+func withProviderModel(rt *config.Runtime, providerName string, model config.Model) {
+	providers := rt.Catalog.Providers()
+	for i := range providers {
+		if providers[i].Name == providerName {
+			providers[i].Models = append(providers[i].Models, model)
+			break
+		}
+	}
+	replaceProviders(rt, providers)
+}
+
+func twoProviderAliasRT(algorithm config.Algorithm, retryStatusCodes []int) *config.Runtime {
+	return &config.Runtime{Catalog: config.NewCatalog([]config.Provider{
+		{Type: config.ProviderTypeOpenAI, Name: "p1", APIKey: "key1", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}},
+		{Type: config.ProviderTypeOpenAI, Name: "p2", APIKey: "key2", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}},
+	}, nil, []config.Alias{{
+		Name:             "a",
+		Algorithm:        algorithm,
+		RetryStatusCodes: retryStatusCodes,
+		Targets:          []config.AliasTarget{{Provider: "p1", Model: "m"}, {Provider: "p2", Model: "m"}},
+	}})}
 }
 
 func newHandler(t *testing.T, rt *config.Runtime, adapter provider.Adapter) http.Handler {
 	t.Helper()
 	return NewHandler(Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   adapter,
-		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:   BuildModelCatalog(rt),
-		Metrics:   observability.NewMetrics(),
-		Providers: rt.ProviderByName,
+		Resolver: modelresolver.New(rt),
+		Adapter:  adapter,
+		Auth:     auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:  rt.Catalog,
+		Metrics:  observability.NewMetrics(),
 	})
 }
 
@@ -174,30 +221,61 @@ func newLoggedHandler(t *testing.T, rt *config.Runtime, adapter provider.Adapter
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	return NewHandler(Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   adapter,
-		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:   BuildModelCatalog(rt),
-		Metrics:   observability.NewMetrics(),
-		Providers: rt.ProviderByName,
-		Logger:    logger,
+		Resolver: modelresolver.New(rt),
+		Adapter:  adapter,
+		Auth:     auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:  rt.Catalog,
+		Metrics:  observability.NewMetrics(),
+		Logger:   logger,
 	}), &logs
+}
+
+func collectMetrics(t *testing.T, h http.Handler) string {
+	t.Helper()
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, authedMetricsRequest())
+	if w.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d", w.Code)
+	}
+	return w.Body.String()
+}
+
+func metricValue(t *testing.T, body, name string) float64 {
+	t.Helper()
+	scanner := bufio.NewScanner(strings.NewReader(body))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, name+" ") {
+			fields := strings.Fields(line)
+			if len(fields) != 2 {
+				t.Fatalf("invalid metric line %q", line)
+			}
+			value, err := strconv.ParseFloat(fields[1], 64)
+			if err != nil {
+				t.Fatalf("parse metric line %q: %v", line, err)
+			}
+			return value
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan metrics: %v", err)
+	}
+	t.Fatalf("metrics output missing %q\n%s", name, body)
+	return 0
 }
 
 func TestDirectDispatchUsesProviderClient(t *testing.T) {
 	rt := newRT()
-	providerConfig := rt.ProviderByName["openai"]
+	providerConfig := testProvider(t, rt, "openai")
 	providerConfig.UpstreamHeaderTimeout = 120 * time.Second
-	rt.Providers[0] = providerConfig
-	rt.ProviderByName["openai"] = providerConfig
+	rt.Catalog = config.NewCatalog([]config.Provider{providerConfig}, nil, rt.Catalog.Aliases())
 	wantClient := &http.Client{}
 	adapter := &clientCaptureAdapter{}
 	h := NewHandler(Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   adapter,
-		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:   BuildModelCatalog(rt),
-		Providers: rt.ProviderByName,
+		Resolver: modelresolver.New(rt),
+		Adapter:  adapter,
+		Auth:     auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:  rt.Catalog,
 		ClientForProvider: func(p config.Provider) *http.Client {
 			if p.UpstreamHeaderTimeout != 120*time.Second {
 				t.Fatalf("provider timeout = %v", p.UpstreamHeaderTimeout)
@@ -221,7 +299,7 @@ func TestAliasDispatchUsesEachProviderClient(t *testing.T) {
 	client1 := &http.Client{}
 	client2 := &http.Client{}
 	rt := newRT()
-	p1 := rt.ProviderByName["openai"]
+	p1 := testProvider(t, rt, "openai")
 	p1.Name = "primary"
 	p1.APIKey = "key1"
 	p1.UpstreamHeaderTimeout = 10 * time.Millisecond
@@ -229,17 +307,13 @@ func TestAliasDispatchUsesEachProviderClient(t *testing.T) {
 	p2.Name = "backup"
 	p2.APIKey = "key2"
 	p2.UpstreamHeaderTimeout = 200 * time.Millisecond
-	rt.Providers = []config.Provider{p1, p2}
-	rt.ProviderByName = map[string]config.Provider{"primary": p1, "backup": p2}
-	rt.Aliases = []config.Alias{{Name: "chat_default", Algorithm: config.AlgorithmRoundRobin, RetryStatusCodes: []int{500}, Targets: []config.AliasTarget{{Provider: "primary", Model: "gpt-4o-mini"}, {Provider: "backup", Model: "gpt-4o-mini"}}}}
-	rt.AliasByName = map[string]config.Alias{"chat_default": rt.Aliases[0]}
+	rt.Catalog = config.NewCatalog([]config.Provider{p1, p2}, nil, []config.Alias{{Name: "chat_default", Algorithm: config.AlgorithmRoundRobin, RetryStatusCodes: []int{500}, Targets: []config.AliasTarget{{Provider: "primary", Model: "gpt-4o-mini"}, {Provider: "backup", Model: "gpt-4o-mini"}}}})
 	adapter := &statusByAPIKeyAdapter{rules: map[string]int{"key1": http.StatusInternalServerError}}
 	h := NewHandler(Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   adapter,
-		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:   BuildModelCatalog(rt),
-		Providers: rt.ProviderByName,
+		Resolver: modelresolver.New(rt),
+		Adapter:  adapter,
+		Auth:     auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:  rt.Catalog,
 		ClientForProvider: func(p config.Provider) *http.Client {
 			switch p.Name {
 			case "primary":
@@ -390,9 +464,11 @@ func TestHandlerLogsDirectRequestLifecycle(t *testing.T) {
 
 func TestHandlerRewritesModelToUpstream(t *testing.T) {
 	rt := newRT()
-	rt.ProviderByName["openai"].ModelByName["gpt-4o-mini"] = config.Model{
+	providers := rt.Catalog.Providers()
+	providers[0].Models[0] = config.Model{
 		Name: "gpt-4o-mini", UpstreamName: "gpt-4o-2024-08-06",
 	}
+	replaceProviders(rt, providers)
 	stub := &stubAdapter{}
 	h := newHandler(t, rt, stub)
 
@@ -481,11 +557,7 @@ func TestHandlerImagesRoute(t *testing.T) {
 		Body:       []byte(`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`),
 	}}
 	rt := newRT()
-	providerCfg := rt.ProviderByName["openai"]
-	providerCfg.ModelByName["gpt-image-1"] = config.Model{Name: "gpt-image-1", UpstreamName: "gpt-image-1", Capabilities: []config.Capability{config.CapabilityImages}}
-	providerCfg.Models = append(providerCfg.Models, config.Model{Name: "gpt-image-1", UpstreamName: "gpt-image-1", Capabilities: []config.Capability{config.CapabilityImages}})
-	rt.ProviderByName["openai"] = providerCfg
-	rt.Providers = []config.Provider{providerCfg}
+	withProviderModel(rt, "openai", config.Model{Name: "gpt-image-1", UpstreamName: "gpt-image-1", Capabilities: []config.Capability{config.CapabilityImages}})
 	h := newHandler(t, rt, stub)
 
 	body := []byte(`{"model":"openai/gpt-image-1","prompt":"a cat"}`)
@@ -511,11 +583,7 @@ func TestHandlerAudioTranscriptionsRoute(t *testing.T) {
 		Body:       []byte(`{"text":"hello world"}`),
 	}}
 	rt := newRT()
-	providerCfg := rt.ProviderByName["openai"]
-	providerCfg.ModelByName["gpt-4o-transcribe"] = config.Model{Name: "gpt-4o-transcribe", UpstreamName: "gpt-4o-transcribe", Capabilities: []config.Capability{config.CapabilityAudioTranscriptions}}
-	providerCfg.Models = append(providerCfg.Models, config.Model{Name: "gpt-4o-transcribe", UpstreamName: "gpt-4o-transcribe", Capabilities: []config.Capability{config.CapabilityAudioTranscriptions}})
-	rt.ProviderByName["openai"] = providerCfg
-	rt.Providers = []config.Provider{providerCfg}
+	withProviderModel(rt, "openai", config.Model{Name: "gpt-4o-transcribe", UpstreamName: "gpt-4o-transcribe", Capabilities: []config.Capability{config.CapabilityAudioTranscriptions}})
 	h := newHandler(t, rt, stub)
 
 	var body bytes.Buffer
@@ -549,11 +617,7 @@ func TestHandlerAudioSpeechRoute(t *testing.T) {
 		Body:       []byte("mp3-bytes"),
 	}}
 	rt := newRT()
-	providerCfg := rt.ProviderByName["openai"]
-	providerCfg.ModelByName["tts-1"] = config.Model{Name: "tts-1", UpstreamName: "tts-1", Capabilities: []config.Capability{config.CapabilityAudioSpeech}}
-	providerCfg.Models = append(providerCfg.Models, config.Model{Name: "tts-1", UpstreamName: "tts-1", Capabilities: []config.Capability{config.CapabilityAudioSpeech}})
-	rt.ProviderByName["openai"] = providerCfg
-	rt.Providers = []config.Provider{providerCfg}
+	withProviderModel(rt, "openai", config.Model{Name: "tts-1", UpstreamName: "tts-1", Capabilities: []config.Capability{config.CapabilityAudioSpeech}})
 	h := newHandler(t, rt, stub)
 
 	body := []byte(`{"model":"openai/tts-1","input":"hello","voice":"alloy"}`)
@@ -590,19 +654,13 @@ func TestHandlerRejectsImagesForDefaultOpenAIModel(t *testing.T) {
 
 func TestHandlerRejectsEmbeddingsForChatOnlyModel(t *testing.T) {
 	rt := newRT()
-	providerCfg := rt.ProviderByName["openai"]
-	providerCfg.ModelByName["gpt-4o-mini"] = config.Model{
-		Name:         "gpt-4o-mini",
-		UpstreamName: "gpt-4o-mini",
-		Capabilities: []config.Capability{config.CapabilityChat},
-	}
+	providerCfg := testProvider(t, rt, "openai")
 	providerCfg.Models = []config.Model{{
 		Name:         "gpt-4o-mini",
 		UpstreamName: "gpt-4o-mini",
 		Capabilities: []config.Capability{config.CapabilityChat},
 	}}
-	rt.ProviderByName["openai"] = providerCfg
-	rt.Providers = []config.Provider{providerCfg}
+	replaceProviders(rt, []config.Provider{providerCfg})
 
 	stub := &stubAdapter{}
 	h := newHandler(t, rt, stub)
@@ -620,39 +678,24 @@ func TestHandlerRejectsEmbeddingsForChatOnlyModel(t *testing.T) {
 
 func TestHandlerRejectsResponsesForAliasWithoutSharedCapability(t *testing.T) {
 	rt := &config.Runtime{
-		Providers: []config.Provider{
+		Catalog: config.NewCatalog([]config.Provider{
 			{
 				Type:   config.ProviderTypeOpenAI,
 				Name:   "openai",
 				APIKey: "sk-openai",
 				Models: []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini", Capabilities: []config.Capability{config.CapabilityChat, config.CapabilityResponses}}},
-				ModelByName: map[string]config.Model{
-					"gpt-4o-mini": {Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini", Capabilities: []config.Capability{config.CapabilityChat, config.CapabilityResponses}},
-				},
 			},
 			{
 				Type:   config.ProviderTypeGemini,
 				Name:   "gemini",
 				APIKey: "gem-key",
 				Models: []config.Model{{Name: "gemini-2.5-pro", UpstreamName: "gemini-2.5-pro", Capabilities: []config.Capability{config.CapabilityChat}}},
-				ModelByName: map[string]config.Model{
-					"gemini-2.5-pro": {Name: "gemini-2.5-pro", UpstreamName: "gemini-2.5-pro", Capabilities: []config.Capability{config.CapabilityChat}},
-				},
 			},
-		},
-		ProviderByName: map[string]config.Provider{},
-		Aliases: []config.Alias{{
+		}, nil, []config.Alias{{
 			Name:      "mixed",
 			Algorithm: config.AlgorithmRoundRobin,
 			Targets:   []config.AliasTarget{{Provider: "openai", Model: "gpt-4o-mini"}, {Provider: "gemini", Model: "gemini-2.5-pro"}},
-		}},
-		AliasByName: map[string]config.Alias{},
-	}
-	for _, p := range rt.Providers {
-		rt.ProviderByName[p.Name] = p
-	}
-	for _, a := range rt.Aliases {
-		rt.AliasByName[a.Name] = a
+		}}),
 	}
 
 	stub := &stubAdapter{}
@@ -671,26 +714,12 @@ func TestHandlerRejectsResponsesForAliasWithoutSharedCapability(t *testing.T) {
 
 func TestHandlerEmbeddingsUnsupportedProvider(t *testing.T) {
 	rt := &config.Runtime{
-		Providers: []config.Provider{{
+		Catalog: config.NewCatalog([]config.Provider{{
 			Type:   config.ProviderTypeAnthropic,
 			Name:   "anthropic",
 			APIKey: "sk-ant",
 			Models: []config.Model{{Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"}},
-			ModelByName: map[string]config.Model{
-				"claude-sonnet": {Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"},
-			},
-		}},
-		ProviderByName: map[string]config.Provider{
-			"anthropic": {
-				Type:   config.ProviderTypeAnthropic,
-				Name:   "anthropic",
-				APIKey: "sk-ant",
-				Models: []config.Model{{Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"}},
-				ModelByName: map[string]config.Model{
-					"claude-sonnet": {Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"},
-				},
-			},
-		},
+		}}, nil, nil),
 	}
 	h := newHandler(t, rt, provider.New())
 
@@ -716,26 +745,12 @@ func TestHandlerEmbeddingsUnsupportedProvider(t *testing.T) {
 
 func TestHandlerRejectsResponsesForChatOnlyModel(t *testing.T) {
 	rt := &config.Runtime{
-		Providers: []config.Provider{{
+		Catalog: config.NewCatalog([]config.Provider{{
 			Type:   config.ProviderTypeGemini,
 			Name:   "gemini",
 			APIKey: "gem-key",
 			Models: []config.Model{{Name: "gemini-2.5-pro", UpstreamName: "gemini-2.5-pro", Capabilities: []config.Capability{config.CapabilityChat}}},
-			ModelByName: map[string]config.Model{
-				"gemini-2.5-pro": {Name: "gemini-2.5-pro", UpstreamName: "gemini-2.5-pro", Capabilities: []config.Capability{config.CapabilityChat}},
-			},
-		}},
-		ProviderByName: map[string]config.Provider{
-			"gemini": {
-				Type:   config.ProviderTypeGemini,
-				Name:   "gemini",
-				APIKey: "gem-key",
-				Models: []config.Model{{Name: "gemini-2.5-pro", UpstreamName: "gemini-2.5-pro", Capabilities: []config.Capability{config.CapabilityChat}}},
-				ModelByName: map[string]config.Model{
-					"gemini-2.5-pro": {Name: "gemini-2.5-pro", UpstreamName: "gemini-2.5-pro", Capabilities: []config.Capability{config.CapabilityChat}},
-				},
-			},
-		},
+		}}, nil, nil),
 	}
 	h := newHandler(t, rt, provider.New())
 
@@ -761,26 +776,12 @@ func TestHandlerRejectsResponsesForChatOnlyModel(t *testing.T) {
 
 func TestHandlerRejectsImagesForUnsupportedProvider(t *testing.T) {
 	rt := &config.Runtime{
-		Providers: []config.Provider{{
+		Catalog: config.NewCatalog([]config.Provider{{
 			Type:   config.ProviderTypeAnthropic,
 			Name:   "anthropic",
 			APIKey: "sk-ant",
 			Models: []config.Model{{Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"}},
-			ModelByName: map[string]config.Model{
-				"claude-sonnet": {Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"},
-			},
-		}},
-		ProviderByName: map[string]config.Provider{
-			"anthropic": {
-				Type:   config.ProviderTypeAnthropic,
-				Name:   "anthropic",
-				APIKey: "sk-ant",
-				Models: []config.Model{{Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"}},
-				ModelByName: map[string]config.Model{
-					"claude-sonnet": {Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"},
-				},
-			},
-		},
+		}}, nil, nil),
 	}
 	h := newHandler(t, rt, provider.New())
 
@@ -844,7 +845,7 @@ func TestHandlerUnknownEndpoint(t *testing.T) {
 
 func TestHandlerListModelsIncludesProvidersAndAliases(t *testing.T) {
 	rt := newRT()
-	rt.ProviderByName["openai"] = config.Provider{
+	providerConfig := config.Provider{
 		Type:        config.ProviderTypeOpenAI,
 		Name:        "openai",
 		DisplayName: "OpenAI",
@@ -859,7 +860,7 @@ func TestHandlerListModelsIncludesProvidersAndAliases(t *testing.T) {
 			{Name: "gpt-4.1", DisplayName: "GPT-4.1", UpstreamName: "gpt-4.1", Capabilities: []config.Capability{config.CapabilityChat, config.CapabilityResponses}},
 		},
 	}
-	rt.Providers = []config.Provider{rt.ProviderByName["openai"]}
+	replaceProviders(rt, []config.Provider{providerConfig})
 	h := newHandler(t, rt, &stubAdapter{})
 
 	w := httptest.NewRecorder()
@@ -950,9 +951,8 @@ func TestHandlerListModelsFiltersUnauthorizedModels(t *testing.T) {
 				"ci": {Name: "ci", Token: "tok", AllowedModels: []string{"openai/gpt-4o-mini"}},
 			},
 		}),
-		Catalog:   BuildModelCatalog(rt),
-		Metrics:   observability.NewMetrics(),
-		Providers: rt.ProviderByName,
+		Catalog: rt.Catalog,
+		Metrics: observability.NewMetrics(),
 	})
 
 	w := httptest.NewRecorder()
@@ -1012,12 +1012,11 @@ func TestHandlerHTTPMetricDashboardUnknownCardinalityIsBounded(t *testing.T) {
 	rt := newRT()
 	metrics := observability.NewMetrics()
 	h := NewHandler(Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   &stubAdapter{},
-		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:   BuildModelCatalog(rt),
-		Metrics:   metrics,
-		Providers: rt.ProviderByName,
+		Resolver: modelresolver.New(rt),
+		Adapter:  &stubAdapter{},
+		Auth:     auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:  rt.Catalog,
+		Metrics:  metrics,
 	})
 
 	for i := 0; i < 50; i++ {
@@ -1066,10 +1065,9 @@ func TestHandlerMetricsExposurePolicy(t *testing.T) {
 				Adapter:      &stubAdapter{},
 				Auth:         auth.NewAuthenticator(tc.auth),
 				Authorizer:   auth.NewAuthorizer(tc.auth),
-				Catalog:      BuildModelCatalog(rt),
+				Catalog:      rt.Catalog,
 				Metrics:      observability.NewMetrics(),
 				MetricsToken: metricsTestToken,
-				Providers:    rt.ProviderByName,
 			})
 
 			w := httptest.NewRecorder()
@@ -1118,12 +1116,11 @@ func TestHandlerMetricsExposurePolicy(t *testing.T) {
 func TestHandlerMetricsDisabledWithoutToken(t *testing.T) {
 	rt := newRT()
 	h := NewHandler(Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   &stubAdapter{},
-		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:   BuildModelCatalog(rt),
-		Metrics:   observability.NewMetrics(),
-		Providers: rt.ProviderByName,
+		Resolver: modelresolver.New(rt),
+		Adapter:  &stubAdapter{},
+		Auth:     auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:  rt.Catalog,
+		Metrics:  observability.NewMetrics(),
 	})
 
 	w := httptest.NewRecorder()
@@ -1270,13 +1267,13 @@ func TestHandlerRecordsFinalStreamingUsage(t *testing.T) {
 		Stream:     stream,
 	}}
 	var got accounting.Event
+	rt := newRT()
 	h := NewHandler(Dependencies{
-		Resolver:     modelresolver.New(newRT()),
+		Resolver:     modelresolver.New(rt),
 		Adapter:      stub,
 		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:      BuildModelCatalog(newRT()),
+		Catalog:      rt.Catalog,
 		Metrics:      observability.NewMetrics(),
-		Providers:    newRT().ProviderByName,
 		Accounting:   accounting.RecorderFunc(func(event accounting.Event) { got = event }),
 		AccessLog:    false,
 		HasAccessLog: true,
@@ -1304,16 +1301,15 @@ func TestHandlerMarksMidStreamUpstreamErrorUnhealthy(t *testing.T) {
 		Stream:     stream,
 	}}
 	metrics := observability.NewMetrics()
-	health := providerhealth.New(metrics, config.ProviderHealth{})
-	health.SetProviders(map[string]config.Provider{"openai": {Name: "openai"}})
 	rt := newRT()
+	health := providerhealth.New(metrics, config.ProviderHealth{})
+	health.SetProviders(rt.Catalog)
 	h := NewHandler(Dependencies{
 		Resolver:     modelresolver.New(rt),
 		Adapter:      stub,
 		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:      BuildModelCatalog(rt),
+		Catalog:      rt.Catalog,
 		Metrics:      metrics,
-		Providers:    rt.ProviderByName,
 		Health:       health,
 		AccessLog:    false,
 		HasAccessLog: true,
@@ -1338,16 +1334,15 @@ func TestHandlerDoesNotMarkClientCanceledStreamUnhealthy(t *testing.T) {
 		Stream:     stream,
 	}}
 	metrics := observability.NewMetrics()
-	health := providerhealth.New(metrics, config.ProviderHealth{})
-	health.SetProviders(map[string]config.Provider{"openai": {Name: "openai"}})
 	rt := newRT()
+	health := providerhealth.New(metrics, config.ProviderHealth{})
+	health.SetProviders(rt.Catalog)
 	h := NewHandler(Dependencies{
 		Resolver:     modelresolver.New(rt),
 		Adapter:      stub,
 		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:      BuildModelCatalog(rt),
+		Catalog:      rt.Catalog,
 		Metrics:      metrics,
-		Providers:    rt.ProviderByName,
 		Health:       health,
 		AccessLog:    false,
 		HasAccessLog: true,
@@ -1406,16 +1401,16 @@ func TestHandlerHealthEndpoints(t *testing.T) {
 }
 
 func TestHandlerReadyzFailsWithoutProviders(t *testing.T) {
-	rt := &config.Runtime{ProviderByName: map[string]config.Provider{}, AliasByName: map[string]config.Alias{}}
+	rt := &config.Runtime{}
 	metrics := observability.NewMetrics()
 	metrics.RecordConfig(rt)
 	h := NewHandler(Dependencies{
 		Resolver:     modelresolver.New(rt),
 		Adapter:      &stubAdapter{},
 		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:      rt.Catalog,
 		Metrics:      metrics,
 		MetricsToken: metricsTestToken,
-		Providers:    rt.ProviderByName,
 	})
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -1442,15 +1437,15 @@ func TestHandlerReadyzFailsWithoutHealthyProviders(t *testing.T) {
 	metrics := observability.NewMetrics()
 	metrics.RecordConfig(rt)
 	health := providerhealth.New(metrics, config.ProviderHealth{})
-	health.SetProviders(rt.ProviderByName)
+	health.SetProviders(rt.Catalog)
 	health.MarkFailure("openai")
 	h := NewHandler(Dependencies{
 		Resolver:     modelresolver.New(rt),
 		Adapter:      &stubAdapter{},
 		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:      rt.Catalog,
 		Metrics:      metrics,
 		MetricsToken: metricsTestToken,
-		Providers:    rt.ProviderByName,
 		Health:       health,
 	})
 	w := httptest.NewRecorder()
@@ -1483,10 +1478,9 @@ func TestHandlerMetricsEndpointAndCounters(t *testing.T) {
 		Resolver:     modelresolver.New(rt),
 		Adapter:      stub,
 		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:      BuildModelCatalog(rt),
+		Catalog:      rt.Catalog,
 		Metrics:      metrics,
 		MetricsToken: metricsTestToken,
-		Providers:    rt.ProviderByName,
 	})
 
 	post := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`)))
@@ -1527,32 +1521,22 @@ func TestHandlerMetricsEndpointAndCounters(t *testing.T) {
 
 func TestHandlerAliasSkipsUnhealthyProviderAfterTransientFailure(t *testing.T) {
 	rt := &config.Runtime{
-		Providers: []config.Provider{
-			{Type: config.ProviderTypeOpenAI, Name: "primary", APIKey: "bad-key", BaseURL: "https://x", Models: []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}}, ModelByName: map[string]config.Model{"gpt-4o-mini": {Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}}},
-			{Type: config.ProviderTypeOpenAI, Name: "backup", APIKey: "good-key", BaseURL: "https://x", Models: []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}}, ModelByName: map[string]config.Model{"gpt-4o-mini": {Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}}},
-		},
-		ProviderByName: map[string]config.Provider{},
-		Aliases:        []config.Alias{{Name: "chat_default", Algorithm: config.AlgorithmLeastConnections, Targets: []config.AliasTarget{{Provider: "primary", Model: "gpt-4o-mini"}, {Provider: "backup", Model: "gpt-4o-mini"}}}},
-		AliasByName:    map[string]config.Alias{},
-	}
-	for _, p := range rt.Providers {
-		rt.ProviderByName[p.Name] = p
-	}
-	for _, a := range rt.Aliases {
-		rt.AliasByName[a.Name] = a
+		Catalog: config.NewCatalog([]config.Provider{
+			{Type: config.ProviderTypeOpenAI, Name: "primary", APIKey: "bad-key", BaseURL: "https://x", Models: []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}}},
+			{Type: config.ProviderTypeOpenAI, Name: "backup", APIKey: "good-key", BaseURL: "https://x", Models: []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}}},
+		}, nil, []config.Alias{{Name: "chat_default", Algorithm: config.AlgorithmLeastConnections, Targets: []config.AliasTarget{{Provider: "primary", Model: "gpt-4o-mini"}, {Provider: "backup", Model: "gpt-4o-mini"}}}}),
 	}
 	metrics := observability.NewMetrics()
 	health := providerhealth.New(metrics, config.ProviderHealth{})
-	health.SetProviders(rt.ProviderByName)
+	health.SetProviders(rt.Catalog)
 	adapter := &failFirstProviderAdapter{}
 	h := NewHandler(Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   adapter,
-		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:   BuildModelCatalog(rt),
-		Metrics:   metrics,
-		Providers: rt.ProviderByName,
-		Health:    health,
+		Resolver: modelresolver.New(rt),
+		Adapter:  adapter,
+		Auth:     auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:  rt.Catalog,
+		Metrics:  metrics,
+		Health:   health,
 	})
 
 	for i := 0; i < 2; i++ {
@@ -1579,10 +1563,9 @@ func TestHandlerMetricsIncludeProxyErrors(t *testing.T) {
 		Resolver:     modelresolver.New(rt),
 		Adapter:      &stubAdapter{},
 		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:      BuildModelCatalog(rt),
+		Catalog:      rt.Catalog,
 		Metrics:      metrics,
 		MetricsToken: metricsTestToken,
-		Providers:    rt.ProviderByName,
 	})
 
 	badReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"messages":[{"role":"user","content":"hi"}]}`)))
@@ -1624,10 +1607,9 @@ func TestHandlerMetricsIncludeStreamingResponses(t *testing.T) {
 		Resolver:     modelresolver.New(rt),
 		Adapter:      stub,
 		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:      BuildModelCatalog(rt),
+		Catalog:      rt.Catalog,
 		Metrics:      metrics,
 		MetricsToken: metricsTestToken,
-		Providers:    rt.ProviderByName,
 	})
 
 	w := httptest.NewRecorder()
@@ -1646,11 +1628,130 @@ func TestHandlerMetricsIncludeStreamingResponses(t *testing.T) {
 	for _, want := range []string{
 		`aiproxy_http_stream_responses_total{method="POST",path="/v1/chat/completions",status="200"} 1`,
 		`aiproxy_http_stream_duration_seconds_count{method="POST",path="/v1/chat/completions",status="200"} 1`,
+		`aiproxy_upstream_requests_total{operation="chat_completions",outcome="success",provider="openai"} 1`,
+		`aiproxy_upstream_request_duration_seconds_count{operation="chat_completions",outcome="success",provider="openai"} 1`,
 		`aiproxy_upstream_response_body_bytes_count{operation="chat_completions",outcome="success",provider="openai"} 1`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics output missing %q\n%s", want, body)
 		}
+	}
+}
+
+func TestHandlerMetricsCountAliasStreamingAttemptOnceAtCompletion(t *testing.T) {
+	rt := newRT()
+	metrics := observability.NewMetrics()
+	stream := provider.NewStreamCompletion()
+	delay := 30 * time.Millisecond
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Streaming:  true,
+		StreamBody: &delayedReadCloser{reader: strings.NewReader("data: hello\n\ndata: [DONE]\n\n"), delay: delay},
+		Stream:     stream,
+	}}
+	h := NewHandler(Dependencies{
+		Resolver:     modelresolver.New(rt),
+		Adapter:      stub,
+		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:      rt.Catalog,
+		Metrics:      metrics,
+		MetricsToken: metricsTestToken,
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"alias/chat_default","stream":true,"messages":[]}`)))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("streaming status = %d", w.Code)
+	}
+
+	body := collectMetrics(t, h)
+	countName := `aiproxy_upstream_request_duration_seconds_count{operation="chat_completions",outcome="success",provider="openai"}`
+	if got := metricValue(t, body, countName); got != 1 {
+		t.Fatalf("upstream duration count = %v, want 1\n%s", got, body)
+	}
+	sumName := `aiproxy_upstream_request_duration_seconds_sum{operation="chat_completions",outcome="success",provider="openai"}`
+	if got := metricValue(t, body, sumName); got < delay.Seconds()/2 {
+		t.Fatalf("upstream duration sum = %v, want stream completion latency >= %v\n%s", got, delay.Seconds()/2, body)
+	}
+	if want := `aiproxy_upstream_requests_total{operation="chat_completions",outcome="success",provider="openai"} 1`; !strings.Contains(body, want) {
+		t.Fatalf("metrics output missing %q\n%s", want, body)
+	}
+}
+
+func TestHandlerMetricsClassifyAliasMidStreamUpstreamErrorOnce(t *testing.T) {
+	rt := newRT()
+	metrics := observability.NewMetrics()
+	health := providerhealth.New(metrics, config.ProviderHealth{})
+	health.SetProviders(rt.Catalog)
+	stream := provider.NewStreamCompletion()
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Streaming:  true,
+		StreamBody: &errorAfterReader{data: []byte("data: partial\n\n"), err: io.ErrUnexpectedEOF},
+		Stream:     stream,
+	}}
+	h := NewHandler(Dependencies{
+		Resolver:     modelresolver.New(rt),
+		Adapter:      stub,
+		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:      rt.Catalog,
+		Metrics:      metrics,
+		MetricsToken: metricsTestToken,
+		Health:       health,
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"alias/chat_default","stream":true,"messages":[]}`)))
+	h.ServeHTTP(w, r)
+
+	body := collectMetrics(t, h)
+	if want := `aiproxy_upstream_requests_total{operation="chat_completions",outcome="transport_error",provider="openai"} 1`; !strings.Contains(body, want) {
+		t.Fatalf("metrics output missing %q\n%s", want, body)
+	}
+	if unexpected := `aiproxy_upstream_requests_total{operation="chat_completions",outcome="success",provider="openai"}`; strings.Contains(body, unexpected) {
+		t.Fatalf("metrics output contains unexpected success observation %q\n%s", unexpected, body)
+	}
+	if health.IsHealthy("openai") {
+		t.Fatalf("mid-stream upstream error did not mark provider unhealthy")
+	}
+}
+
+func TestHandlerMetricsClassifyAliasDownstreamCancellationOnce(t *testing.T) {
+	rt := newRT()
+	metrics := observability.NewMetrics()
+	health := providerhealth.New(metrics, config.ProviderHealth{})
+	health.SetProviders(rt.Catalog)
+	stream := provider.NewStreamCompletion()
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Streaming:  true,
+		StreamBody: io.NopCloser(strings.NewReader("data: partial\n\n")),
+		Stream:     stream,
+	}}
+	h := NewHandler(Dependencies{
+		Resolver:     modelresolver.New(rt),
+		Adapter:      stub,
+		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:      rt.Catalog,
+		Metrics:      metrics,
+		MetricsToken: metricsTestToken,
+		Health:       health,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"alias/chat_default","stream":true,"messages":[]}`))).WithContext(ctx)
+
+	h.ServeHTTP(&cancelingResponseWriter{cancel: cancel}, r)
+
+	body := collectMetrics(t, h)
+	if want := `aiproxy_upstream_requests_total{operation="chat_completions",outcome="success",provider="openai"} 1`; !strings.Contains(body, want) {
+		t.Fatalf("metrics output missing %q\n%s", want, body)
+	}
+	if !health.IsHealthy("openai") {
+		t.Fatalf("downstream-canceled stream marked provider unhealthy")
 	}
 }
 
@@ -1774,8 +1875,8 @@ func TestHandlerAuthorizerRejectsForbiddenModel(t *testing.T) {
 				"ci": {Name: "ci", Token: "tok", AllowedModels: []string{"openai/gpt-4.1"}},
 			},
 		}),
-		Metrics:   observability.NewMetrics(),
-		Providers: rt.ProviderByName,
+		Catalog: rt.Catalog,
+		Metrics: observability.NewMetrics(),
 	})
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[]}`)))
@@ -1815,9 +1916,8 @@ func TestHandlerAccountingRecordsTenantClientModelAndStatus(t *testing.T) {
 				"ci": {Name: "ci", Token: "tok", Tenant: "team-a", AllowedModels: []string{"openai/gpt-4o-mini"}},
 			},
 		}),
-		Catalog:    BuildModelCatalog(rt),
+		Catalog:    rt.Catalog,
 		Metrics:    observability.NewMetrics(),
-		Providers:  rt.ProviderByName,
 		Accounting: recorder,
 	})
 	w := httptest.NewRecorder()
@@ -1855,9 +1955,8 @@ func TestHandlerAccountingRecordsUsageTokens(t *testing.T) {
 			Mode: config.AuthModeNone,
 		}),
 		Authorizer: auth.NewAuthorizer(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:    BuildModelCatalog(rt),
+		Catalog:    rt.Catalog,
 		Metrics:    observability.NewMetrics(),
-		Providers:  rt.ProviderByName,
 		Accounting: recorder,
 	})
 	w := httptest.NewRecorder()
@@ -1886,9 +1985,8 @@ func TestHandlerAccountingCollapsesUnknownModels(t *testing.T) {
 		Resolver:   modelresolver.New(rt),
 		Adapter:    &stubAdapter{},
 		Auth:       auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:    BuildModelCatalog(rt),
+		Catalog:    rt.Catalog,
 		Metrics:    observability.NewMetrics(),
-		Providers:  rt.ProviderByName,
 		Accounting: usage,
 	})
 
@@ -1934,8 +2032,8 @@ func TestHandlerAccountingCollapsesForbiddenModels(t *testing.T) {
 				"ci": {Name: "ci", Token: "tok", AllowedModels: []string{"openai/gpt-4.1"}},
 			},
 		}),
+		Catalog:    rt.Catalog,
 		Metrics:    observability.NewMetrics(),
-		Providers:  rt.ProviderByName,
 		Accounting: usage,
 	})
 
@@ -1984,9 +2082,9 @@ func TestHandlerBillingUsageFiltersToTenant(t *testing.T) {
 				"ci": {Name: "ci", Token: "tok", Tenant: "team-a"},
 			},
 		}),
-		Metrics:   observability.NewMetrics(),
-		Providers: rt.ProviderByName,
-		Usage:     usage,
+		Catalog: rt.Catalog,
+		Metrics: observability.NewMetrics(),
+		Usage:   usage,
 	})
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/v1/billing/usage", nil)
@@ -2016,9 +2114,8 @@ func TestHandlerRateLimitRejectsWithRetryAfter(t *testing.T) {
 		Resolver:    modelresolver.New(rt),
 		Adapter:     &stubAdapter{},
 		Auth:        auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:     BuildModelCatalog(rt),
+		Catalog:     rt.Catalog,
 		Metrics:     observability.NewMetrics(),
-		Providers:   rt.ProviderByName,
 		RateLimiter: &denySecondLimiter{},
 	})
 
@@ -2132,19 +2229,13 @@ func TestHandlerStreamingPassthroughFlushesIncrementally(t *testing.T) {
 
 func TestHandlerInvalidTranslatedRequestReturns400(t *testing.T) {
 	rt := &config.Runtime{
-		Providers: []config.Provider{{
+		Catalog: config.NewCatalog([]config.Provider{{
 			Type:   config.ProviderTypeAnthropic,
 			Name:   "anthropic",
 			APIKey: "sk-ant",
 			Models: []config.Model{{Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"}},
-			ModelByName: map[string]config.Model{
-				"claude-sonnet": {Name: "claude-sonnet", UpstreamName: "claude-sonnet-4-20250514"},
-			},
-		}},
-		ProviderByName: map[string]config.Provider{},
-		AliasByName:    map[string]config.Alias{},
+		}}, nil, nil),
 	}
-	rt.ProviderByName["anthropic"] = rt.Providers[0]
 	h := newHandler(t, rt, provider.New())
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"anthropic/claude-sonnet","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/x.png"}}]}]}`)))
@@ -2223,6 +2314,12 @@ type statusByAPIKeyAdapter struct {
 	rules   map[string]int
 }
 
+type streamingStatusByAPIKeyAdapter struct {
+	mu    sync.Mutex
+	calls []string
+	rules map[string]int
+}
+
 func (a *statusByAPIKeyAdapter) Do(ctx context.Context, r provider.Request) (*provider.Result, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -2255,27 +2352,74 @@ func (a *statusByAPIKeyAdapter) Calls() []string {
 	return out
 }
 
+func (a *streamingStatusByAPIKeyAdapter) Do(ctx context.Context, r provider.Request) (*provider.Result, error) {
+	a.mu.Lock()
+	a.calls = append(a.calls, r.APIKey)
+	a.mu.Unlock()
+	status := http.StatusOK
+	if s, ok := a.rules[r.APIKey]; ok {
+		status = s
+	}
+	return &provider.Result{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Streaming:  true,
+		StreamBody: io.NopCloser(strings.NewReader("data: hello\n\ndata: [DONE]\n\n")),
+		Stream:     provider.NewStreamCompletion(),
+	}, nil
+}
+
+func (a *streamingStatusByAPIKeyAdapter) Calls() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]string, len(a.calls))
+	copy(out, a.calls)
+	return out
+}
+
+func TestHandlerMetricsCountAliasStreamingRetryAttemptsOnce(t *testing.T) {
+	rt := twoProviderAliasRT(config.AlgorithmLeastConnections, []int{500})
+	metrics := observability.NewMetrics()
+	adapter := &streamingStatusByAPIKeyAdapter{rules: map[string]int{"key1": http.StatusInternalServerError}}
+	h := NewHandler(Dependencies{
+		Resolver:     modelresolver.New(rt),
+		Adapter:      adapter,
+		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:      rt.Catalog,
+		Metrics:      metrics,
+		MetricsToken: metricsTestToken,
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"alias/a","stream":true,"messages":[]}`)))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if calls := adapter.Calls(); len(calls) != 2 || calls[0] != "key1" || calls[1] != "key2" {
+		t.Fatalf("calls = %v, want key1 then key2", calls)
+	}
+
+	body := collectMetrics(t, h)
+	for _, want := range []string{
+		`aiproxy_upstream_requests_total{operation="chat_completions",outcome="http_5xx",provider="p1"} 1`,
+		`aiproxy_upstream_requests_total{operation="chat_completions",outcome="success",provider="p2"} 1`,
+		`aiproxy_alias_retries_total{alias="a",model="m",provider="p1",reason="upstream_5xx"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics output missing %q\n%s", want, body)
+		}
+	}
+	if got := metricValue(t, body, `aiproxy_alias_inflight_requests{alias="a",model="m",provider="p1"}`); got != 0 {
+		t.Fatalf("p1 alias in-flight = %v, want 0\n%s", got, body)
+	}
+	if got := metricValue(t, body, `aiproxy_alias_inflight_requests{alias="a",model="m",provider="p2"}`); got != 0 {
+		t.Fatalf("p2 alias in-flight = %v, want 0\n%s", got, body)
+	}
+}
+
 func TestHandlerAliasRetriesOnConfiguredStatusCode(t *testing.T) {
-	rt := &config.Runtime{
-		Providers: []config.Provider{
-			{Type: config.ProviderTypeOpenAI, Name: "p1", APIKey: "key1", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
-			{Type: config.ProviderTypeOpenAI, Name: "p2", APIKey: "key2", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
-		},
-		ProviderByName: map[string]config.Provider{},
-		Aliases: []config.Alias{{
-			Name:             "a",
-			Algorithm:        config.AlgorithmRoundRobin,
-			RetryStatusCodes: []int{429},
-			Targets:          []config.AliasTarget{{Provider: "p1", Model: "m"}, {Provider: "p2", Model: "m"}},
-		}},
-		AliasByName: map[string]config.Alias{},
-	}
-	for _, p := range rt.Providers {
-		rt.ProviderByName[p.Name] = p
-	}
-	for _, a := range rt.Aliases {
-		rt.AliasByName[a.Name] = a
-	}
+	rt := twoProviderAliasRT(config.AlgorithmRoundRobin, []int{429})
 	adapter := &statusByAPIKeyAdapter{rules: map[string]int{"key1": http.StatusTooManyRequests}}
 	h := newHandler(t, rt, adapter)
 
@@ -2295,26 +2439,7 @@ func TestHandlerAliasRetriesOnConfiguredStatusCode(t *testing.T) {
 }
 
 func TestHandlerAliasNoRetryOnUnconfiguredStatusCode(t *testing.T) {
-	rt := &config.Runtime{
-		Providers: []config.Provider{
-			{Type: config.ProviderTypeOpenAI, Name: "p1", APIKey: "key1", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
-			{Type: config.ProviderTypeOpenAI, Name: "p2", APIKey: "key2", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
-		},
-		ProviderByName: map[string]config.Provider{},
-		Aliases: []config.Alias{{
-			Name:             "a",
-			Algorithm:        config.AlgorithmRoundRobin,
-			RetryStatusCodes: []int{503},
-			Targets:          []config.AliasTarget{{Provider: "p1", Model: "m"}, {Provider: "p2", Model: "m"}},
-		}},
-		AliasByName: map[string]config.Alias{},
-	}
-	for _, p := range rt.Providers {
-		rt.ProviderByName[p.Name] = p
-	}
-	for _, a := range rt.Aliases {
-		rt.AliasByName[a.Name] = a
-	}
+	rt := twoProviderAliasRT(config.AlgorithmRoundRobin, []int{503})
 	adapter := &statusByAPIKeyAdapter{rules: map[string]int{"key1": http.StatusTooManyRequests}}
 	h := newHandler(t, rt, adapter)
 
@@ -2331,26 +2456,7 @@ func TestHandlerAliasNoRetryOnUnconfiguredStatusCode(t *testing.T) {
 }
 
 func TestHandlerAliasRetriesOn5xxByDefault(t *testing.T) {
-	rt := &config.Runtime{
-		Providers: []config.Provider{
-			{Type: config.ProviderTypeOpenAI, Name: "p1", APIKey: "key1", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
-			{Type: config.ProviderTypeOpenAI, Name: "p2", APIKey: "key2", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
-		},
-		ProviderByName: map[string]config.Provider{},
-		Aliases: []config.Alias{{
-			Name:             "a",
-			Algorithm:        config.AlgorithmRoundRobin,
-			RetryStatusCodes: []int{500, 502, 503, 504},
-			Targets:          []config.AliasTarget{{Provider: "p1", Model: "m"}, {Provider: "p2", Model: "m"}},
-		}},
-		AliasByName: map[string]config.Alias{},
-	}
-	for _, p := range rt.Providers {
-		rt.ProviderByName[p.Name] = p
-	}
-	for _, a := range rt.Aliases {
-		rt.AliasByName[a.Name] = a
-	}
+	rt := twoProviderAliasRT(config.AlgorithmRoundRobin, []int{500, 502, 503, 504})
 	adapter := &statusByAPIKeyAdapter{rules: map[string]int{"key1": http.StatusBadGateway}}
 	h := newHandler(t, rt, adapter)
 
@@ -2367,40 +2473,20 @@ func TestHandlerAliasRetriesOn5xxByDefault(t *testing.T) {
 }
 
 func TestHandlerAliasAllTargetsUnhealthyDoesNotDispatch(t *testing.T) {
-	rt := &config.Runtime{
-		Providers: []config.Provider{
-			{Type: config.ProviderTypeOpenAI, Name: "p1", APIKey: "key1", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
-			{Type: config.ProviderTypeOpenAI, Name: "p2", APIKey: "key2", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
-		},
-		ProviderByName: map[string]config.Provider{},
-		Aliases: []config.Alias{{
-			Name:             "a",
-			Algorithm:        config.AlgorithmLeastConnections,
-			RetryStatusCodes: []int{500, 502, 503, 504},
-			Targets:          []config.AliasTarget{{Provider: "p1", Model: "m"}, {Provider: "p2", Model: "m"}},
-		}},
-		AliasByName: map[string]config.Alias{},
-	}
-	for _, p := range rt.Providers {
-		rt.ProviderByName[p.Name] = p
-	}
-	for _, a := range rt.Aliases {
-		rt.AliasByName[a.Name] = a
-	}
+	rt := twoProviderAliasRT(config.AlgorithmLeastConnections, []int{500, 502, 503, 504})
 	metrics := observability.NewMetrics()
 	health := providerhealth.New(metrics, config.ProviderHealth{})
-	health.SetProviders(rt.ProviderByName)
+	health.SetProviders(rt.Catalog)
 	health.MarkFailure("p1")
 	health.MarkFailure("p2")
 	adapter := &statusByAPIKeyAdapter{}
 	h := NewHandler(Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   adapter,
-		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:   BuildModelCatalog(rt),
-		Metrics:   metrics,
-		Providers: rt.ProviderByName,
-		Health:    health,
+		Resolver: modelresolver.New(rt),
+		Adapter:  adapter,
+		Auth:     auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:  rt.Catalog,
+		Metrics:  metrics,
+		Health:   health,
 	})
 
 	w := httptest.NewRecorder()
@@ -2416,38 +2502,18 @@ func TestHandlerAliasAllTargetsUnhealthyDoesNotDispatch(t *testing.T) {
 }
 
 func TestHandlerAliasRetryStatusDoesNotMarkProviderUnhealthy(t *testing.T) {
-	rt := &config.Runtime{
-		Providers: []config.Provider{
-			{Type: config.ProviderTypeOpenAI, Name: "p1", APIKey: "key1", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
-			{Type: config.ProviderTypeOpenAI, Name: "p2", APIKey: "key2", BaseURL: "https://x", Models: []config.Model{{Name: "m", UpstreamName: "m"}}, ModelByName: map[string]config.Model{"m": {Name: "m", UpstreamName: "m"}}},
-		},
-		ProviderByName: map[string]config.Provider{},
-		Aliases: []config.Alias{{
-			Name:             "a",
-			Algorithm:        config.AlgorithmRoundRobin,
-			RetryStatusCodes: []int{429},
-			Targets:          []config.AliasTarget{{Provider: "p1", Model: "m"}, {Provider: "p2", Model: "m"}},
-		}},
-		AliasByName: map[string]config.Alias{},
-	}
-	for _, p := range rt.Providers {
-		rt.ProviderByName[p.Name] = p
-	}
-	for _, a := range rt.Aliases {
-		rt.AliasByName[a.Name] = a
-	}
+	rt := twoProviderAliasRT(config.AlgorithmRoundRobin, []int{429})
 	metrics := observability.NewMetrics()
 	health := providerhealth.New(metrics, config.ProviderHealth{})
-	health.SetProviders(rt.ProviderByName)
+	health.SetProviders(rt.Catalog)
 	adapter := &statusByAPIKeyAdapter{rules: map[string]int{"key1": http.StatusTooManyRequests}}
 	h := NewHandler(Dependencies{
-		Resolver:  modelresolver.New(rt),
-		Adapter:   adapter,
-		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Catalog:   BuildModelCatalog(rt),
-		Metrics:   metrics,
-		Providers: rt.ProviderByName,
-		Health:    health,
+		Resolver: modelresolver.New(rt),
+		Adapter:  adapter,
+		Auth:     auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:  rt.Catalog,
+		Metrics:  metrics,
+		Health:   health,
 	})
 
 	w := httptest.NewRecorder()
@@ -2465,7 +2531,7 @@ func TestHandlerAliasRetryStatusDoesNotMarkProviderUnhealthy(t *testing.T) {
 func TestRecordProviderHealthSkipsInboundCancellation(t *testing.T) {
 	metrics := observability.NewMetrics()
 	health := providerhealth.New(metrics, config.ProviderHealth{})
-	health.SetProviders(map[string]config.Provider{"p": {Name: "p"}})
+	health.SetProviders(config.NewCatalog([]config.Provider{{Name: "p"}}, nil, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -2480,7 +2546,7 @@ func TestRecordProviderHealthSkipsInboundCancellation(t *testing.T) {
 func TestRecordProviderHealthMarksSelected5xxUnhealthy(t *testing.T) {
 	metrics := observability.NewMetrics()
 	health := providerhealth.New(metrics, config.ProviderHealth{})
-	health.SetProviders(map[string]config.Provider{"p": {Name: "p"}})
+	health.SetProviders(config.NewCatalog([]config.Provider{{Name: "p"}}, nil, nil))
 
 	var h Handler
 	h.recordProviderHealth(Dependencies{Health: health}, context.Background(), "p", &provider.Result{StatusCode: http.StatusInternalServerError}, nil, false)

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,7 +12,6 @@ import (
 	"os"
 	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/egose/aiproxy/internal/accounting"
@@ -40,12 +40,15 @@ type BuildOptions struct {
 type App struct {
 	mu                    sync.RWMutex
 	reloadMu              sync.Mutex
+	closeOnce             sync.Once
+	closeErr              error
 	Config                *config.Runtime
 	Server                *http.Server
 	handler               *httpapi.Handler
 	metrics               *observability.Metrics
 	logger                *slog.Logger
 	adapter               provider.Adapter
+	resolver              *modelresolver.Resolver
 	clients               *upstreamClientPool
 	health                *providerhealth.Tracker
 	rateLimiter           ratelimit.Limiter
@@ -55,6 +58,8 @@ type App struct {
 	startTime             time.Time
 	dashboardTokenMinted  bool
 	dashboardTokenWritten bool
+	listen                func(network, address string) (net.Listener, error)
+	shutdownTimeout       time.Duration
 }
 
 func Build(ctx context.Context, opts BuildOptions) (*App, error) {
@@ -86,48 +91,84 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	metrics.RecordConfig(rt)
 	usage := accounting.NewAggregator()
 	health := providerhealth.New(metrics, rt.ProviderHealth)
-	health.SetProviders(rt.ProviderByName)
+	health.SetProviders(rt.Catalog)
 	rateLimiter := ratelimit.New(rt.Auth)
 
 	httpClients := newUpstreamClientPool()
 
 	startTime := time.Now()
-	handler := httpapi.NewHandler(buildDependencies(rt, logger, adapter, metrics, health, rateLimiter, usage, httpClients, logs, startTime, opts.Version))
+	resolver := modelresolver.New(rt)
+	handler := httpapi.NewHandler(buildDependencies(rt, resolver, logger, adapter, metrics, health, rateLimiter, usage, httpClients, logs, startTime, opts.Version))
 	server := &http.Server{
 		Handler: handler,
 	}
 	applyServerConfig(server, rt.Listener)
 
-	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, clients: httpClients, health: health, rateLimiter: rateLimiter, usage: usage, logs: logs, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}, nil
+	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, resolver: resolver, clients: httpClients, health: health, rateLimiter: rateLimiter, usage: usage, logs: logs, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
 	return a.RunReady(ctx, nil)
 }
 
-func (a *App) RunReady(ctx context.Context, ready func() error) error {
+func (a *App) RunReady(ctx context.Context, ready func() error) (runErr error) {
+	cleanupDone := false
+	var listener net.Listener
+	listenerOwned := false
+	cleanup := func() error {
+		if cleanupDone {
+			return nil
+		}
+		cleanupDone = true
+		var err error
+		if listenerOwned && listener != nil {
+			if closeErr := listener.Close(); closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
+				err = errors.Join(err, fmt.Errorf("listener close: %w", closeErr))
+			}
+		}
+		if closeErr := a.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("app close: %w", closeErr))
+		}
+		return err
+	}
+	defer func() {
+		if cleanupErr := cleanup(); cleanupErr != nil {
+			if runErr != nil {
+				runErr = errors.Join(runErr, cleanupErr)
+			} else {
+				runErr = cleanupErr
+			}
+		}
+	}()
+
 	a.logger.Info("starting server", "address", a.Server.Addr)
-	listener, err := net.Listen("tcp", a.Server.Addr)
+	listen := a.listen
+	if listen == nil {
+		listen = net.Listen
+	}
+	listener, err := listen("tcp", a.Server.Addr)
 	if err != nil {
 		return err
 	}
+	listenerOwned = true
 	if err := a.persistDashboardTokenIfNeeded(); err != nil {
-		_ = listener.Close()
 		return fmt.Errorf("dashboard token: %w", err)
 	}
 	observability.LogStartup(a.logger, a.Config)
 	if ready != nil {
 		if err := ready(); err != nil {
-			_ = listener.Close()
 			return err
 		}
 	}
 
 	reloadCh := make(chan os.Signal, 1)
-	signal.Notify(reloadCh, syscall.SIGHUP)
-	defer signal.Stop(reloadCh)
+	if signals := reloadSignals(); len(signals) > 0 {
+		signal.Notify(reloadCh, signals...)
+		defer signal.Stop(reloadCh)
+	}
 
 	errCh := make(chan error, 1)
+	listenerOwned = false
 	go func() {
 		if err := a.Server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			errCh <- err
@@ -146,13 +187,21 @@ func (a *App) RunReady(ctx context.Context, ready func() error) error {
 			}
 		case <-ctx.Done():
 			a.logger.Info("shutting down server")
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			shutdownTimeout := a.shutdownTimeout
+			if shutdownTimeout <= 0 {
+				shutdownTimeout = 10 * time.Second
+			}
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 			defer cancel()
 			if err := a.Server.Shutdown(shutdownCtx); err != nil {
-				return fmt.Errorf("server shutdown: %w", err)
+				shutdownErr := fmt.Errorf("server shutdown: %w", err)
+				if closeErr := a.Server.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
+					shutdownErr = errors.Join(shutdownErr, fmt.Errorf("server close: %w", closeErr))
+				}
+				return shutdownErr
 			}
-			if err := a.Close(); err != nil {
-				return fmt.Errorf("app close: %w", err)
+			if err := cleanup(); err != nil {
+				return err
 			}
 			a.logger.Info("server stopped")
 			return nil
@@ -171,6 +220,7 @@ func (a *App) Reload() error {
 
 	a.mu.RLock()
 	current := a.Config
+	currentResolver := a.resolver
 	a.mu.RUnlock()
 	if current != nil && (rt.Listener.Address != current.Listener.Address || rt.Listener.Timeouts != current.Listener.Timeouts) {
 		return fmt.Errorf("listener changes require restart")
@@ -186,18 +236,20 @@ func (a *App) Reload() error {
 		return fmt.Errorf("dashboard token: %w", err)
 	}
 
+	nextResolver := modelresolver.NewWithPrevious(rt, currentResolver)
 	nextHealth := reloadHealthTracker(a.health, a.metrics, current, rt)
-	nextHealth.SetProviders(rt.ProviderByName)
+	nextHealth.SetProviders(rt.Catalog)
 	nextRateLimiter := a.rateLimiter
 	if current == nil || !ratelimit.ConfigEqual(current.Auth, rt.Auth) {
 		nextRateLimiter = ratelimit.New(rt.Auth)
 	}
 	a.metrics.SetBuildInfo(a.buildOpt.Version)
 	a.metrics.RecordConfig(rt)
-	a.handler.UpdateDependencies(buildDependencies(rt, a.logger, a.adapter, a.metrics, nextHealth, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version))
+	a.handler.UpdateDependencies(buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version))
 	oldHealth := a.health
 	a.mu.Lock()
 	a.Config = rt
+	a.resolver = nextResolver
 	a.health = nextHealth
 	a.rateLimiter = nextRateLimiter
 	a.dashboardTokenMinted = dashboardTokenMinted
@@ -214,14 +266,19 @@ func (a *App) Close() error {
 	if a == nil {
 		return nil
 	}
-	a.mu.RLock()
-	clients := a.clients
-	health := a.health
-	a.mu.RUnlock()
-	if clients != nil {
-		clients.CloseIdleConnections()
-	}
-	return health.Close()
+	a.closeOnce.Do(func() {
+		a.mu.RLock()
+		clients := a.clients
+		health := a.health
+		a.mu.RUnlock()
+		if clients != nil {
+			clients.CloseIdleConnections()
+		}
+		if health != nil {
+			a.closeErr = health.Close()
+		}
+	})
+	return a.closeErr
 }
 
 func (a *App) persistDashboardTokenIfNeeded() error {
@@ -237,18 +294,20 @@ func (a *App) persistDashboardTokenIfNeeded() error {
 	return nil
 }
 
-func buildDependencies(rt *config.Runtime, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string) httpapi.Dependencies {
+func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string) httpapi.Dependencies {
+	if resolver == nil {
+		resolver = modelresolver.New(rt)
+	}
 	return httpapi.Dependencies{
-		Resolver:          modelresolver.New(rt),
+		Resolver:          resolver,
 		Adapter:           adapter,
 		Auth:              auth.NewAuthenticator(rt.Auth),
 		Authorizer:        auth.NewAuthorizer(rt.Auth),
 		Client:            clients.Client(config.DefaultUpstreamHeaderTimeout),
 		ClientForProvider: clients.ClientForProvider,
-		Catalog:           httpapi.BuildModelCatalog(rt),
+		Catalog:           rt.Catalog,
 		Metrics:           metrics,
 		MetricsToken:      rt.Metrics.Token,
-		Providers:         rt.ProviderByName,
 		Health:            health,
 		RateLimiter:       rateLimiter,
 		Accounting:        accounting.NewMulti(metrics, usage),
@@ -256,7 +315,7 @@ func buildDependencies(rt *config.Runtime, logger *slog.Logger, adapter provider
 		AccessLog:         rt.Logging.AccessLog,
 		HasAccessLog:      true,
 		Logger:            logger,
-		Dashboard:         dashrpc.NewRuntimeSource(rt.Dashboard, version, rt.Listener.Address, string(rt.Auth.Mode), startTime, rt.Providers, rt.DisabledProviders, rt.Aliases, aOrAggregator(usage), health, logs),
+		Dashboard:         dashrpc.NewRuntimeSource(rt.Dashboard, version, rt.Listener.Address, string(rt.Auth.Mode), startTime, rt.Catalog, aOrAggregator(usage), health, logs),
 	}
 }
 

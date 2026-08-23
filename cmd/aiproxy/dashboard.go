@@ -55,7 +55,7 @@ func runDashboard(parentCtx context.Context, cfgPath string, stdout, stderr io.W
 	}
 
 	baseURL := normalizeBaseURL(rt.Listener.Address)
-	if err := validateDashboardTransport(baseURL, rt.Dashboard); err != nil {
+	if err := validateDashboardTransport(baseURL); err != nil {
 		fmt.Fprintln(stderr, err.Error())
 		return err
 	}
@@ -116,32 +116,23 @@ func normalizeBaseURL(addr string) string {
 	if strings.HasPrefix(addr, "0.0.0.0:") {
 		return "http://127.0.0.1:" + strings.TrimPrefix(addr, "0.0.0.0:")
 	}
-	if !strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://") {
-		return "http://" + addr
-	}
-	return addr
+	return "http://" + addr
 }
 
 var errDashboardInsecureTransport = errors.New("dashboard transport insecure")
 
-func validateDashboardTransport(baseURL string, dash config.Dashboard) error {
+func validateDashboardTransport(baseURL string) error {
 	u, err := neturl.Parse(baseURL)
 	if err != nil || u.Host == "" {
 		return fmt.Errorf("dashboard: cannot parse listener address %q", baseURL)
 	}
-	if u.Scheme == "https" {
-		return nil
-	}
 	if u.Scheme != "http" {
-		return fmt.Errorf("dashboard: unsupported listener scheme %q (only http and https are supported)", u.Scheme)
+		return fmt.Errorf("dashboard: unsupported listener scheme %q (only local http is supported)", u.Scheme)
 	}
 	if isLoopbackURLHost(u.Hostname()) {
 		return nil
 	}
-	if dash.AllowInsecureRemote {
-		return nil
-	}
-	return fmt.Errorf("%w: dashboard listener %q is non-loopback plain HTTP; set dashboard { allow_insecure_remote = true } with a strong explicit token, or use an https listener", errDashboardInsecureTransport, baseURL)
+	return fmt.Errorf("%w: dashboard command is local-only; listener %q is non-loopback", errDashboardInsecureTransport, baseURL)
 }
 
 func isLoopbackURLHost(host string) bool {

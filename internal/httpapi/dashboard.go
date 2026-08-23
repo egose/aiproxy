@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -125,7 +126,7 @@ func dashboardAuthorized(source dashrpc.Source, r *http.Request) bool {
 	if got[:len(dashrpc.AuthScheme)] != dashrpc.AuthScheme {
 		return false
 	}
-	return got[len(dashrpc.AuthScheme):] == source.Token()
+	return subtle.ConstantTimeCompare([]byte(got[len(dashrpc.AuthScheme):]), []byte(source.Token())) == 1
 }
 
 type snapshotResponse struct {

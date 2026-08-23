@@ -176,6 +176,90 @@ alias "chat_default" {
 	}
 }
 
+func TestEndToEndDerivedProviderDirectAndAliasRouting(t *testing.T) {
+	base := newOpenAIStub(t,
+		`{"id":"chatcmpl_base","object":"chat.completion","choices":[]}`,
+		`{"object":"list","data":[],"model":"unused"}`,
+		`{"id":"resp_unused","object":"response","output":[]}`,
+		`{"created":123,"data":[]}`,
+		`{"text":"unused"}`,
+		"unused",
+	)
+	upstream := newOpenAIStub(t,
+		`{"id":"chatcmpl_derived","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"from-derived"},"finish_reason":"stop"}]}`,
+		`{"object":"list","data":[],"model":"unused"}`,
+		`{"id":"resp_unused","object":"response","output":[]}`,
+		`{"created":123,"data":[]}`,
+		`{"text":"unused"}`,
+		"unused",
+	)
+	dir := t.TempDir()
+	secretsPath := filepath.Join(dir, "keys.json")
+	if err := os.WriteFile(secretsPath, []byte(`{"derived":"sk-derived"}`), 0o600); err != nil {
+		t.Fatalf("write secrets: %v", err)
+	}
+	configPath := writeConfig(t, `
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai-compatible" "base" {
+  base_url = "`+upstream.URL()+`/v1"
+  api_key  = "sk-base"
+  model "glm" {
+    upstream_name = "upstream-glm"
+  }
+}
+provider "openai-compatible" "derived" {
+  extends = "base"
+  api_key_ref {
+    path = "`+secretsPath+`"
+    key = "derived"
+  }
+}
+provider "openai-compatible" "unusedbase" {
+  base_url = "`+base.URL()+`/v1"
+  api_key  = "sk-unused"
+  model "glm" {}
+}
+alias "chat_default" {
+  algorithm = "round_robin"
+  target {
+    provider = "derived"
+    model = "glm"
+  }
+}
+`)
+	server := newTestServer(t, configPath)
+
+	for _, model := range []string{"derived/glm", "alias/chat_default"} {
+		resp, err := server.Client().Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"`+model+`","messages":[{"role":"user","content":"hi"}]}`))
+		if err != nil {
+			t.Fatalf("post %s: %v", model, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s status = %d", model, resp.StatusCode)
+		}
+	}
+	if len(base.Calls()) != 0 {
+		t.Fatalf("unrelated base stub should not be called, got %+v", base.Calls())
+	}
+	calls := upstream.Calls()
+	if len(calls) != 2 {
+		t.Fatalf("derived upstream calls = %d", len(calls))
+	}
+	for _, call := range calls {
+		if call.Path != "/v1/chat/completions" {
+			t.Fatalf("path = %q", call.Path)
+		}
+		if call.Authorization != "Bearer sk-derived" {
+			t.Fatalf("authorization = %q", call.Authorization)
+		}
+		if !strings.Contains(call.Body, `"model":"upstream-glm"`) {
+			t.Fatalf("upstream body missing inherited model mapping: %s", call.Body)
+		}
+	}
+}
+
 func TestEndToEndEmbeddingsAndResponses(t *testing.T) {
 	openai := newOpenAIStub(t,
 		`{"id":"chat_unused","object":"chat.completion","choices":[]}`,

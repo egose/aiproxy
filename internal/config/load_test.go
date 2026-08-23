@@ -18,6 +18,24 @@ func writeTempFile(t *testing.T, name, content string) string {
 	return path
 }
 
+func testProvider(t *testing.T, rt *Runtime, name string) Provider {
+	t.Helper()
+	provider, ok := rt.Catalog.Provider(name)
+	if !ok {
+		t.Fatalf("provider %q not found", name)
+	}
+	return provider
+}
+
+func testAlias(t *testing.T, rt *Runtime, name string) Alias {
+	t.Helper()
+	alias, ok := rt.Catalog.Alias(name)
+	if !ok {
+		t.Fatalf("alias %q not found", name)
+	}
+	return alias
+}
+
 func TestLoadMinimalConfig(t *testing.T) {
 	cfg := `
 listener "http" "public" {
@@ -46,10 +64,11 @@ provider "openai" "openai" {
 	if rt.Logging.Level != LogLevelInfo || !rt.Logging.AccessLog {
 		t.Fatalf("logging = %+v", rt.Logging)
 	}
-	if len(rt.Providers) != 1 {
-		t.Fatalf("expected 1 provider, got %d", len(rt.Providers))
+	providers := rt.Catalog.Providers()
+	if len(providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(providers))
 	}
-	p := rt.Providers[0]
+	p := providers[0]
 	if p.Type != ProviderTypeOpenAI {
 		t.Errorf("provider type = %q", p.Type)
 	}
@@ -91,13 +110,14 @@ provider "openai" "slow" {
 	if rt.UpstreamHeaderTimeout != 120*time.Second {
 		t.Fatalf("root upstream header timeout = %v", rt.UpstreamHeaderTimeout)
 	}
-	if got := rt.ProviderByName["primary"].UpstreamHeaderTimeout; got != 120*time.Second {
+	if got := testProvider(t, rt, "primary").UpstreamHeaderTimeout; got != 120*time.Second {
 		t.Fatalf("primary timeout = %v", got)
 	}
-	if len(rt.DisabledProviders) != 1 {
-		t.Fatalf("disabled providers = %d", len(rt.DisabledProviders))
+	disabledProviders := rt.Catalog.DisabledProviders()
+	if len(disabledProviders) != 1 {
+		t.Fatalf("disabled providers = %d", len(disabledProviders))
 	}
-	if got := rt.DisabledProviders[0].UpstreamHeaderTimeout; got != 180*time.Second {
+	if got := disabledProviders[0].UpstreamHeaderTimeout; got != 180*time.Second {
 		t.Fatalf("disabled provider timeout = %v", got)
 	}
 }
@@ -166,7 +186,7 @@ provider "anthropic" "anthropic" {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	p := rt.Providers[0]
+	p := rt.Catalog.Providers()[0]
 	m := p.ModelByName["claude"]
 	if m.UpstreamName != "claude-sonnet-4-20250514" {
 		t.Errorf("upstream = %q", m.UpstreamName)
@@ -188,7 +208,7 @@ provider "openai" "openai" {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	got := rt.Providers[0].ModelByName["text-embedding-3-large"].Capabilities
+	got := rt.Catalog.Providers()[0].ModelByName["text-embedding-3-large"].Capabilities
 	if len(got) != 1 || got[0] != CapabilityEmbeddings {
 		t.Fatalf("capabilities = %+v", got)
 	}
@@ -210,11 +230,12 @@ provider "openai-compatible" "nvidia" {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if _, ok := rt.Providers[0].ModelByName["z-ai/glm-5.2"]; !ok {
-		t.Fatalf("model with slash not loaded: %+v", rt.Providers[0].ModelByName)
+	providers := rt.Catalog.Providers()
+	if _, ok := providers[0].ModelByName["z-ai/glm-5.2"]; !ok {
+		t.Fatalf("model with slash not loaded: %+v", providers[0].ModelByName)
 	}
-	if rt.Providers[0].Models[0].UpstreamName != "z-ai/glm-5.2" {
-		t.Fatalf("upstream_name = %q", rt.Providers[0].Models[0].UpstreamName)
+	if providers[0].Models[0].UpstreamName != "z-ai/glm-5.2" {
+		t.Fatalf("upstream_name = %q", providers[0].Models[0].UpstreamName)
 	}
 }
 
@@ -257,7 +278,7 @@ alias "chat" {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	derived := rt.ProviderByName["derived"]
+	derived := testProvider(t, rt, "derived")
 	if derived.Type != ProviderTypeOpenAICompatible || derived.BaseURL != "https://integrate.api.nvidia.com/v1" || derived.UpstreamHeaderTimeout != 30*time.Second {
 		t.Fatalf("derived inherited fields = %+v", derived)
 	}
@@ -269,8 +290,34 @@ alias "chat" {
 		t.Fatalf("derived model = %+v", model)
 	}
 	derived.Models[0].Capabilities[0] = CapabilityEmbeddings
-	if rt.ProviderByName["base"].Models[0].Capabilities[0] != CapabilityChat {
+	if testProvider(t, rt, "base").Models[0].Capabilities[0] != CapabilityChat {
 		t.Fatalf("derived model capabilities shared with base")
+	}
+}
+
+func TestLoadDerivedProviderAcceptsInlineLocalCredential(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "base" {
+  api_key = "sk-base"
+  model "gpt-4o-mini" {}
+}
+provider "openai" "derived" {
+  extends = "base"
+  api_key = "sk-derived"
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	derived := testProvider(t, rt, "derived")
+	if derived.APIKey != "sk-derived" {
+		t.Fatalf("derived api key = %q", derived.APIKey)
+	}
+	if _, ok := derived.ModelByName["gpt-4o-mini"]; !ok {
+		t.Fatalf("derived models = %+v", derived.Models)
 	}
 }
 
@@ -599,6 +646,40 @@ provider "openai" "openai" {
 	}
 }
 
+func TestLoadRejectsURLShapedListenerAddress(t *testing.T) {
+	for _, address := range []string{"http://127.0.0.1:8080", "https://dashboard.example.com:8443"} {
+		t.Run(address, func(t *testing.T) {
+			cfg := `
+listener "http" "public" { address = "` + address + `" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+			_, err := Load([]byte(cfg), "test.hcl")
+			if err == nil || !strings.Contains(err.Error(), "not a URL") {
+				t.Fatalf("expected URL-shaped listener address error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsInvalidListenerAddress(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = "127.0.0.1" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "host:port") {
+		t.Fatalf("expected host:port listener address error, got %v", err)
+	}
+}
+
 func TestLoadRejectsBothAPIKeyAndRef(t *testing.T) {
 	keyFile := writeTempFile(t, "keys.json", `{"k":"v"}`)
 	cfg := `
@@ -644,10 +725,11 @@ provider "openai" "openai" {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if rt.Providers[0].APIKey != "sk-from-file" {
-		t.Errorf("resolved key = %q", rt.Providers[0].APIKey)
+	providers := rt.Catalog.Providers()
+	if providers[0].APIKey != "sk-from-file" {
+		t.Errorf("resolved key = %q", providers[0].APIKey)
 	}
-	if !rt.Providers[0].APIKeyRef.Resolved {
+	if !providers[0].APIKeyRef.Resolved {
 		t.Errorf("Resolved flag not set")
 	}
 }
@@ -670,14 +752,16 @@ provider "openai" "backup" {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(rt.Providers) != 1 || rt.Providers[0].Name != "backup" {
-		t.Fatalf("active providers = %+v", rt.Providers)
+	providers := rt.Catalog.Providers()
+	if len(providers) != 1 || providers[0].Name != "backup" {
+		t.Fatalf("active providers = %+v", providers)
 	}
-	if len(rt.DisabledProviders) != 1 || rt.DisabledProviders[0].Name != "openai" {
-		t.Fatalf("disabled providers = %+v", rt.DisabledProviders)
+	disabledProviders := rt.Catalog.DisabledProviders()
+	if len(disabledProviders) != 1 || disabledProviders[0].Name != "openai" {
+		t.Fatalf("disabled providers = %+v", disabledProviders)
 	}
-	if _, ok := rt.ProviderByName["openai"]; ok {
-		t.Fatalf("disabled provider unexpectedly present in ProviderByName")
+	if _, ok := rt.Catalog.Provider("openai"); ok {
+		t.Fatalf("disabled provider unexpectedly present in active catalog")
 	}
 }
 
@@ -698,8 +782,9 @@ provider "openai" "backup" {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(rt.DisabledProviders) != 1 || rt.DisabledProviders[0].Name != "openai" {
-		t.Fatalf("disabled providers = %+v", rt.DisabledProviders)
+	disabledProviders := rt.Catalog.DisabledProviders()
+	if len(disabledProviders) != 1 || disabledProviders[0].Name != "openai" {
+		t.Fatalf("disabled providers = %+v", disabledProviders)
 	}
 }
 
@@ -769,10 +854,11 @@ provider "openai" "backup" {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(rt.DisabledProviders) != 1 || rt.DisabledProviders[0].Name != "openai" {
-		t.Fatalf("disabled providers = %+v", rt.DisabledProviders)
+	disabledProviders := rt.Catalog.DisabledProviders()
+	if len(disabledProviders) != 1 || disabledProviders[0].Name != "openai" {
+		t.Fatalf("disabled providers = %+v", disabledProviders)
 	}
-	if rt.DisabledProviders[0].Enabled {
+	if disabledProviders[0].Enabled {
 		t.Fatalf("disabled provider should preserve Enabled=false")
 	}
 }
@@ -791,14 +877,108 @@ provider "openai" "openai" {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(rt.DisabledProviders) != 1 {
-		t.Fatalf("disabled providers = %+v", rt.DisabledProviders)
+	disabledProviders := rt.Catalog.DisabledProviders()
+	if len(disabledProviders) != 1 {
+		t.Fatalf("disabled providers = %+v", disabledProviders)
 	}
-	if rt.DisabledProviders[0].Enabled {
+	if disabledProviders[0].Enabled {
 		t.Fatalf("Enabled should be false on disabled provider")
 	}
-	if rt.DisabledProviders[0].APIKey != "sk-still" {
-		t.Fatalf("APIKey should be preserved, got %q", rt.DisabledProviders[0].APIKey)
+	if disabledProviders[0].APIKey != "sk-still" {
+		t.Fatalf("APIKey should be preserved, got %q", disabledProviders[0].APIKey)
+	}
+}
+
+func TestLoadAliasPrunesDisabledProviderTargets(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "primary" {
+  api_key = "sk-primary"
+  model "gpt-4o-mini" {}
+}
+provider "openai" "disabled-a" {
+  enabled = false
+  model "gpt-4o-mini" {}
+}
+provider "openai" "backup" {
+  api_key = "sk-backup"
+  model "gpt-4o-mini" {}
+}
+provider "openai" "disabled-b" {
+  enabled = false
+  api_key = ""
+  model "gpt-4o-mini" {}
+}
+alias "chat" {
+  algorithm = "round_robin"
+  target {
+    provider = "disabled-a"
+    model    = "gpt-4o-mini"
+  }
+  target {
+    provider = "backup"
+    model    = "gpt-4o-mini"
+  }
+  target {
+    provider = "disabled-b"
+    model    = "gpt-4o-mini"
+  }
+  target {
+    provider = "primary"
+    model    = "gpt-4o-mini"
+  }
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	a := testAlias(t, rt, "chat")
+	want := []AliasTarget{{Provider: "backup", Model: "gpt-4o-mini"}, {Provider: "primary", Model: "gpt-4o-mini"}}
+	if len(a.Targets) != len(want) {
+		t.Fatalf("targets = %+v, want %+v", a.Targets, want)
+	}
+	for i := range want {
+		if a.Targets[i] != want[i] {
+			t.Fatalf("targets = %+v, want %+v", a.Targets, want)
+		}
+	}
+}
+
+func TestLoadRejectsAliasWithOnlyDisabledProviderTargets(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "primary" {
+  api_key = "sk-primary"
+  model "gpt-4o-mini" {}
+}
+provider "openai" "disabled-a" {
+  enabled = false
+  model "gpt-4o-mini" {}
+}
+provider "openai" "disabled-b" {
+  enabled = false
+  api_key = ""
+  model "gpt-4o-mini" {}
+}
+alias "chat" {
+  algorithm = "round_robin"
+  target {
+    provider = "disabled-a"
+    model    = "gpt-4o-mini"
+  }
+  target {
+    provider = "disabled-b"
+    model    = "gpt-4o-mini"
+  }
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	want := `alias "chat": at least one target is required`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want %q", err, want)
 	}
 }
 
@@ -1037,8 +1217,8 @@ provider "openai" "p" {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if rt.Providers[0].APIKey != "sk-from-env" {
-		t.Errorf("api_key = %q", rt.Providers[0].APIKey)
+	if got := rt.Catalog.Providers()[0].APIKey; got != "sk-from-env" {
+		t.Errorf("api_key = %q", got)
 	}
 }
 
@@ -1056,8 +1236,8 @@ provider "openai" "p" {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if rt.Providers[0].APIKey != "sk-\"quoted\"\\value" {
-		t.Errorf("api_key = %q", rt.Providers[0].APIKey)
+	if got := rt.Catalog.Providers()[0].APIKey; got != "sk-\"quoted\"\\value" {
+		t.Errorf("api_key = %q", got)
 	}
 }
 
@@ -1082,10 +1262,7 @@ alias "a" {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	a, ok := rt.AliasByName["a"]
-	if !ok {
-		t.Fatal("alias not found")
-	}
+	a := testAlias(t, rt, "a")
 	if len(a.RetryStatusCodes) != 2 {
 		t.Fatalf("retry_status_codes = %v, want 2 entries", a.RetryStatusCodes)
 	}
@@ -1114,10 +1291,7 @@ alias "a" {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	a, ok := rt.AliasByName["a"]
-	if !ok {
-		t.Fatal("alias not found")
-	}
+	a := testAlias(t, rt, "a")
 	want := []int{500, 502, 503, 504}
 	if len(a.RetryStatusCodes) != len(want) {
 		t.Fatalf("retry_status_codes = %v, want %v", a.RetryStatusCodes, want)
@@ -1268,7 +1442,7 @@ provider "openai" "openai" {
 }
 `
 	_, err := Load([]byte(cfg), "test.hcl")
-	if err == nil || !strings.Contains(err.Error(), "allow_insecure_remote = true requires an explicit token") {
+	if err == nil || !strings.Contains(err.Error(), "allow_insecure_remote is unsupported") {
 		t.Fatalf("expected insecure remote token error, got %v", err)
 	}
 }
@@ -1287,12 +1461,12 @@ provider "openai" "openai" {
 }
 `
 	_, err := Load([]byte(cfg), "test.hcl")
-	if err == nil || !strings.Contains(err.Error(), "requires a strong token") {
-		t.Fatalf("expected strong token error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "allow_insecure_remote is unsupported") {
+		t.Fatalf("expected unsupported allow_insecure_remote error, got %v", err)
 	}
 }
 
-func TestLoadAcceptsDashboardInsecureRemoteWithStrongToken(t *testing.T) {
+func TestLoadRejectsDashboardInsecureRemoteWithStrongToken(t *testing.T) {
 	token := strings.Repeat("a", 40)
 	cfg := `
 listener "http" "public" { address = ":8080" }
@@ -1306,17 +1480,8 @@ provider "openai" "openai" {
   model "gpt-4o-mini" {}
 }
 `
-	rt, err := Load([]byte(cfg), "test.hcl")
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if !rt.Dashboard.AllowInsecureRemote {
-		t.Fatalf("AllowInsecureRemote = false, want true")
-	}
-	if !rt.Dashboard.ExplicitAllowInsecure {
-		t.Fatalf("ExplicitAllowInsecure = false, want true")
-	}
-	if !rt.Dashboard.TokenFromConfig {
-		t.Fatalf("TokenFromConfig = false, want true")
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "allow_insecure_remote is unsupported") {
+		t.Fatalf("expected unsupported allow_insecure_remote error, got %v", err)
 	}
 }

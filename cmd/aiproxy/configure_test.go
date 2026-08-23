@@ -317,6 +317,49 @@ func TestConfigureProviderNonInteractiveCreatesDerivedProvider(t *testing.T) {
 	}
 }
 
+func TestConfigureProviderInteractiveChoosesDerivedBaseProvider(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	secretsPath := filepath.Join(dir, "keys.json")
+	seed := strings.TrimSpace(`provider "openai-compatible" "nvidia-1" {
+  base_url = "https://integrate.api.nvidia.com/v1"
+  api_key = "base"
+  model "z-ai/glm-5.2" {}
+}`) + "\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+
+	input := strings.Join([]string{
+		"",
+		"openai-compatible",
+		"nvidia-2",
+		"Nvidia - corean",
+		"nvidia-1",
+		"",
+		secretsPath,
+		"nvidia-2",
+		"secret-value",
+	}, "\n") + "\n"
+	stdout, stderr, err := executeRootCommand(input, "configure", "provider", "--config", configPath)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "1. none") || !strings.Contains(stdout, "2. nvidia-1") {
+		t.Fatalf("stdout missing base-provider choices:\n%s", stdout)
+	}
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	for _, want := range []string{`provider "openai-compatible" "nvidia-2"`, `extends = "nvidia-1"`, `key  = "nvidia-2"`} {
+		if !strings.Contains(configText, want) {
+			t.Fatalf("config output missing %q:\n%s", want, configText)
+		}
+	}
+}
+
 func TestConfigureProviderNonInteractiveRejectsDerivedInheritedFlags(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.hcl")

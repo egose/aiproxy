@@ -9,31 +9,10 @@ func EffectiveCapabilities(providerType ProviderType, model Model) []Capability 
 	return defaultCapabilitiesForProvider(providerType)
 }
 
-func AliasEffectiveCapabilities(alias Alias, providers map[string]Provider) []Capability {
-	if len(alias.Targets) == 0 {
-		return nil
-	}
-	var intersection []Capability
-	for i, target := range alias.Targets {
-		provider, ok := providers[target.Provider]
-		if !ok {
-			return nil
-		}
-		model, ok := provider.ModelByName[target.Model]
-		if !ok {
-			return nil
-		}
-		caps := EffectiveCapabilities(provider.Type, model)
-		if i == 0 {
-			intersection = append(intersection, caps...)
-			continue
-		}
-		intersection = intersectCapabilities(intersection, caps)
-		if len(intersection) == 0 {
-			return nil
-		}
-	}
-	return intersection
+func ProviderTypes() []ProviderType {
+	out := make([]ProviderType, len(providerTypeOrder))
+	copy(out, providerTypeOrder)
+	return out
 }
 
 func HasCapability(caps []Capability, want Capability) bool {
@@ -46,16 +25,46 @@ func HasCapability(caps []Capability, want Capability) bool {
 }
 
 func defaultCapabilitiesForProvider(providerType ProviderType) []Capability {
-	switch providerType {
-	case ProviderTypeOpenAI, ProviderTypeOpenAICompatible:
-		return []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings}
-	case ProviderTypeAnthropic:
-		return []Capability{CapabilityChat, CapabilityResponses}
-	case ProviderTypeGemini:
-		return []Capability{CapabilityChat, CapabilityResponses}
-	default:
+	policy, ok := providerTypePolicies[providerType]
+	if !ok {
 		return nil
 	}
+	out := make([]Capability, len(policy.defaultCapabilities))
+	copy(out, policy.defaultCapabilities)
+	return out
+}
+
+type providerTypePolicy struct {
+	defaultCapabilities   []Capability
+	supportedCapabilities []Capability
+	requiresBaseURL       bool
+}
+
+var providerTypeOrder = []ProviderType{
+	ProviderTypeOpenAI,
+	ProviderTypeOpenAICompatible,
+	ProviderTypeAnthropic,
+	ProviderTypeGemini,
+}
+
+var providerTypePolicies = map[ProviderType]providerTypePolicy{
+	ProviderTypeOpenAI: {
+		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings},
+		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings, CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech},
+	},
+	ProviderTypeOpenAICompatible: {
+		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings},
+		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings, CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech},
+		requiresBaseURL:       true,
+	},
+	ProviderTypeAnthropic: {
+		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
+		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses},
+	},
+	ProviderTypeGemini: {
+		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
+		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings},
+	},
 }
 
 func intersectCapabilities(left, right []Capability) []Capability {

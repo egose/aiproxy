@@ -15,7 +15,9 @@ Clients use one of two forms:
 - `<provider-name>/<model-name>` for direct routing
 - `alias/<alias-name>` for proxy-managed routing
 
-Names are lowercase and must not contain spaces or `/`.
+Provider and alias names are lowercase and must not contain spaces or `/`.
+Model names are lowercase, must not contain spaces, and may contain `/` when
+every slash-separated segment follows the same lowercase name rule.
 
 ## Direct Routing
 
@@ -70,18 +72,19 @@ If you run multiple proxy instances, each instance makes its own routing decisio
 
 ## Failover Rules
 
-Alias requests retry the next target only when the selected target fails with:
+Alias requests retry the next target when the selected target fails with:
 
 - transport errors
 - timeouts
-- upstream `5xx` responses
-- upstream `4xx` responses whose status code is listed in `retry_status_codes`
+- upstream responses whose status code is listed in `retry_status_codes`
 
-By default `retry_status_codes` is `["500", "502", "503", "504"]`, so only `5xx` responses trigger failover. Add codes like `"429"` to also retry on rate-limited responses.
+By default `retry_status_codes` is `["500", "502", "503", "504"]`, so only those common `5xx` responses trigger status-based failover. Add codes like `"429"` to also retry on rate-limited responses.
 
 Alias requests do not fail over on other upstream `4xx` responses. Those are returned to the client as-is.
 
 This avoids masking client-side request problems as routing problems.
+
+Retryable `4xx` statuses are an alias failover policy only. They do not mark the provider unhealthy; provider health is mutated by transport/upstream request errors and upstream `5xx` responses.
 
 ## Provider Types
 
@@ -119,7 +122,18 @@ Supported values:
 
 If `capabilities` is omitted, the proxy derives defaults from the provider type and then enforces operation support at request time.
 
-Set explicit capabilities when you want the public catalog to reflect a narrower, safer contract than the provider's default behavior.
+<!-- docs-contract:capability-matrix:start -->
+
+| Provider type       | Default capabilities when omitted | Additional supported capabilities                |
+| ------------------- | --------------------------------- | ------------------------------------------------ |
+| `openai`            | `chat`, `responses`, `embeddings` | `images`, `audio_transcriptions`, `audio_speech` |
+| `openai-compatible` | `chat`, `responses`, `embeddings` | `images`, `audio_transcriptions`, `audio_speech` |
+| `anthropic`         | `chat`, `responses`               | None                                             |
+| `gemini`            | `chat`, `responses`               | `embeddings`                                     |
+
+<!-- docs-contract:capability-matrix:end -->
+
+Set explicit capabilities when you want the public catalog to reflect a narrower contract than the provider's default behavior, or to opt into one of the additional supported capabilities for that provider type.
 
 ## `GET /v1/models` Metadata
 

@@ -12,6 +12,11 @@ The service is delivered as:
 - a single Go CLI binary
 - a container image exposing the service as a public HTTP API
 
+Foreground `aiproxy serve` is cross-platform across the advertised release
+targets. Daemon lifecycle commands (`serve -d`, `status`, `stop`, and
+`restart`) are Linux-only because their safety checks depend on Linux process
+identity primitives.
+
 Configuration is written in HCL with an Alloy-like two-label block style.
 
 ## Goals
@@ -21,19 +26,18 @@ Configuration is written in HCL with an Alloy-like two-label block style.
 - Support direct addressing of configured provider models.
 - Support aliases that load-balance across multiple provider/model pairs.
 - Keep the external API shape consistent even when upstream providers differ.
-- Support streaming chat responses for the MVP API surface.
+- Support streaming responses where listed in the current public API surface.
 - Keep configuration static, explicit, and easy to validate.
 - Package the service as a single binary and Docker image.
 
-## Non-Goals For MVP
+## Non-Goals
 
 - Admin API for provider or alias management
 - Provider-specific public APIs exposed directly to clients
 - Global cross-instance balancing state
 - Persistent request queueing
-- Rate limiting and quota accounting
-- Billing and tenant management
-- Audio APIs and translated-provider image support in the first release
+- External billing, invoicing, and quota systems
+- Translated-provider image and audio endpoints
 
 ## Core Design Principle
 
@@ -58,34 +62,31 @@ The proxy must:
 
 ## API Surface
 
-### MVP
+The current public API surface is:
 
-The initial public API surface is:
+<!-- docs-contract:public-matrix:start -->
 
-- `GET /v1/models`
-- `GET /v1/billing/usage`
-- `GET /metrics`
-- `POST /v1/chat/completions`
-- `POST /v1/embeddings` for `openai`, `openai-compatible`, and `gemini`
-- `POST /v1/responses` for `openai`, `openai-compatible`, `anthropic`, and `gemini`
-- `POST /v1/images/generations` for `openai` and `openai-compatible`
-- `POST /v1/audio/transcriptions` for `openai` and `openai-compatible`
-- `POST /v1/audio/speech` for `openai` and `openai-compatible`
+| Surface                         | `openai`                           | `openai-compatible`                | `anthropic`                        | `gemini`                           |
+| ------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- |
+| `GET /v1/models`                | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        |
+| `GET /v1/billing/usage`         | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting |
+| `GET /metrics`                  | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     |
+| `POST /v1/chat/completions`     | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated            | JSON and SSE translated            |
+| `POST /v1/embeddings`           | Yes                                | Yes                                | No                                 | Yes                                |
+| `POST /v1/responses`            | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated subset     | JSON and SSE translated subset     |
+| `POST /v1/images/generations`   | Yes                                | Yes                                | No                                 | No                                 |
+| `POST /v1/audio/transcriptions` | Yes                                | Yes                                | No                                 | No                                 |
+| `POST /v1/audio/speech`         | Yes                                | Yes                                | No                                 | No                                 |
 
-The MVP supports both:
+<!-- docs-contract:public-matrix:end -->
 
-- standard JSON responses
-- streaming responses via Server-Sent Events when `stream = true`
+Chat completions and responses support both standard JSON responses and
+OpenAI-compatible Server-Sent Events where the matrix lists SSE support.
+`GET /v1/billing/usage` is local in-process usage accounting over the proxy's
+rolling window; it is not an external billing, invoicing, or quota system.
 
-### Future API Surface
-
-The design should leave room for later support of:
-
-- translated-provider embeddings
-- translated-provider audio transcription and speech endpoints
-
-These later endpoints should reuse the same provider, model, alias, credential,
-and adapter concepts rather than defining a separate config model.
+Future provider endpoints should reuse the same provider, model, alias,
+credential, and adapter concepts rather than defining a separate config model.
 
 ## External Naming Model
 
@@ -130,11 +131,9 @@ type RequestContext struct {
 }
 ```
 
-Initial operation support for MVP:
-
-- `ChatCompletions`
-
-Future operations can reuse the same resolver and adapter pipeline.
+Supported operations reuse the same resolver and adapter pipeline for chat
+completions, embeddings, responses, image generations, audio transcriptions, and
+audio speech.
 
 ## Authentication
 
@@ -295,8 +294,8 @@ the public OpenAI-compatible API and the provider-native API.
 
 In the current implementation:
 
-- `anthropic` supports translated chat completions
-- `gemini` supports translated chat completions and embeddings
+- `anthropic` supports translated chat completions and responses
+- `gemini` supports translated chat completions, responses, and embeddings
 
 ## Model Model
 
@@ -334,13 +333,20 @@ Capability values:
 
 Default capability behavior:
 
-- `openai` and `openai-compatible` default to `chat`, `responses`, and `embeddings`
-- `anthropic` default to `chat` and `responses`
-- `gemini` default to `chat` and `responses`
+<!-- docs-contract:capability-matrix:start -->
 
-If `capabilities` is set on a model, it narrows the effective capability set.
-The config validator rejects capability values that the provider type cannot
-actually serve.
+| Provider type       | Default capabilities when omitted | Additional supported capabilities                |
+| ------------------- | --------------------------------- | ------------------------------------------------ |
+| `openai`            | `chat`, `responses`, `embeddings` | `images`, `audio_transcriptions`, `audio_speech` |
+| `openai-compatible` | `chat`, `responses`, `embeddings` | `images`, `audio_transcriptions`, `audio_speech` |
+| `anthropic`         | `chat`, `responses`               | None                                             |
+| `gemini`            | `chat`, `responses`               | `embeddings`                                     |
+
+<!-- docs-contract:capability-matrix:end -->
+
+If `capabilities` is set on a model, it replaces the default capability set for
+that model. The config validator rejects capability values that the provider
+type cannot actually serve.
 
 ## Alias Model
 
@@ -386,8 +392,9 @@ alias "chat_default" {
 }
 ```
 
-For MVP, aliases are chat-only and should only contain models that are safe to
-use interchangeably for chat requests.
+Aliases can serve any operation included in the intersection of their targets'
+effective capabilities. Operators should only combine targets that are safe to
+use interchangeably for the operations exposed through that alias.
 
 When the proxy renders `GET /v1/models`, alias capability metadata is the
 intersection of the effective capabilities of every target in the alias pool.
@@ -436,12 +443,20 @@ This is:
 
 If the chosen alias target fails, the retry policy is:
 
-- do not retry on upstream `4xx` request validation errors
-- do retry another alias target on transport errors, timeouts, and upstream `5xx`
+- do retry another alias target on transport errors and timeouts
+- do retry another alias target on upstream statuses listed in
+  `retry_status_codes`; the default is `500`, `502`, `503`, and `504`
+- configured retry statuses may be any status in the `400`-`599` range, so
+  deployments can opt into retrying responses such as `429`
+- do not retry on other upstream `4xx` request validation errors
 - stop after each target in the alias pool has been tried at most once
 
 This avoids hiding client request mistakes while still allowing basic failover
 for transient upstream failures.
+
+Retryable `4xx` statuses are an alias-routing decision only. They do not mark a
+provider unhealthy; provider-health mutation remains tied to transport/upstream
+request errors and upstream `5xx` responses.
 
 Direct provider model requests do not fail over to a different provider or
 model, because the client selected a specific target explicitly.
@@ -466,7 +481,7 @@ Adapter categories:
 
 ## Streaming Behavior
 
-The MVP should support streaming chat completions.
+The current API supports streaming chat completions and streaming responses.
 
 Streaming rules:
 
@@ -757,12 +772,13 @@ with unknown dashboard-internal paths reported as
 
 The interactive `aiproxy dashboard` command and the
 `/_internal/dashboard/{snapshot,logs}` endpoints share the metrics-token-less
-listener. The dashboard command refuses non-loopback plain-HTTP listeners
-unless `dashboard { allow_insecure_remote = true }` is declared with a strong
-explicit `token` (at least 32 characters). HTTPS listeners always satisfy the
-transport check. Repeated invalid dashboard tokens are rate limited with `429`
-and a `Retry-After` header so the bearer surface cannot be brute-forced from
-the listener.
+listener. Listener addresses are TCP bind addresses in `host:port` form, not
+URLs. The dashboard command is local-only: it derives a loopback plain-HTTP URL
+from wildcard or loopback binds, refuses concrete non-loopback hosts, and uses a
+dashboard bearer token for every RPC. Remote dashboard support requires a future
+explicit transport design. Repeated invalid dashboard tokens are rate limited
+with `429` and a `Retry-After` header so the bearer surface cannot be
+brute-forced from the listener.
 
 ## CLI Design
 
@@ -773,6 +789,11 @@ Recommended commands:
 - `aiproxy serve --config /etc/aiproxy/config.hcl`
 - `aiproxy validate --config /etc/aiproxy/config.hcl`
 - `aiproxy version`
+
+Linux also supports `aiproxy serve -d`, `aiproxy status`, `aiproxy stop`, and
+`aiproxy restart` for daemon lifecycle management. On non-Linux platforms,
+foreground `serve` remains supported but daemon lifecycle commands return
+`daemon lifecycle is unsupported on this platform`.
 
 Optional future commands:
 
@@ -816,7 +837,10 @@ internal/stream/
 internal/observability/
 ```
 
-## Implementation Plan
+## Historical Implementation Plan
+
+The milestone list below is historical and no longer defines the current public
+contract.
 
 ### Milestone 1
 
@@ -843,8 +867,8 @@ internal/observability/
 ### Later Phase
 
 - anthropic embeddings if a viable provider-native mapping exists
-- image and audio APIs
-- quotas
+- translated-provider image and audio APIs
+- external billing/invoicing and quota systems
 - per-client policy
 - broader provider catalog
 
@@ -874,41 +898,42 @@ Run against in-process provider stubs using `httptest` servers:
 These tests exercise the full proxy request path without depending on external
 provider accounts or sandbox containers.
 
-### Integration Tests
+### Hermetic Binary Integration Tests
 
-Integration tests are intentionally skipped for now.
+The normal CI suite includes hermetic binary-level integration tests that build
+`dist/aiproxy`, start the binary with temporary local configuration and upstream
+stubs, and exercise listener, readiness, reload, auth, metrics, streaming,
+derived-provider routing, and alias retry behavior without paid provider
+credentials.
 
-Add them back once the repo has sandbox services or stable provider stubs for
-repeatable end-to-end coverage.
+Real-provider sandbox tests remain separate and optional.
 
-Planned coverage once the sandbox exists:
+### Documentation Contract Checks
 
-- direct `openai/<model>` chat completion
-- `alias/<name>` resolution
-- round-robin balancing across alias targets
-- least-connections selection behavior
-- retry to another alias target on transient failure
-- no retry on upstream `4xx` validation errors
-- streaming chat responses
-- invalid auth rejection
-- provider auth failure surfacing
+`make docs-contract` checks the marked public endpoint/provider and provider
+capability tables in README, this design document, the website docs, and
+AGENTS.md. Markdown-only pull requests run the same check through the `Docs
+Contract` workflow so high-drift contract tables cannot change in only one
+location.
 
 ## Deferred Features
 
-The following are intentionally out of scope for the MVP:
+The following are intentionally out of scope for the current public contract:
 
 - anthropic embeddings
 - translated-provider image endpoints
 - translated-provider audio endpoints
-- external billing / invoicing systems
+- external billing / invoicing systems and quotas
 
 ## Provider Health
 
 The proxy maintains dynamic provider health state in-process and shares it
 across requests and aliases.
 
-Transient transport failures and upstream `5xx` responses mark a provider
-temporarily unhealthy for alias routing and readiness decisions.
+Transient transport failures, upstream request errors, and upstream `5xx`
+responses mark a provider temporarily unhealthy for alias routing and readiness
+decisions. Configured retryable `4xx` statuses can cause an alias to try another
+target, but they do not mutate provider health.
 
 Provider health state is not coordinated across multiple proxy instances.
 
@@ -937,6 +962,10 @@ Reload currently rebuilds and swaps:
 - inbound auth configuration
 - provider/model catalog
 - alias routing state
+- root and provider upstream header timeouts
+- access-log enablement
+- metrics configuration
+- provider-health configuration
 - readiness and startup inventory metrics
 
 Reload does not replace the active listener socket.
@@ -945,6 +974,8 @@ The following config changes still require a full restart:
 
 - listener address changes
 - listener timeout changes
+- logging level changes
+- enabling the dashboard after startup
 
 ## Appendix: Open Questions And Rejected Alternatives
 
@@ -969,7 +1000,7 @@ Reason:
 
 #### Public provider-native endpoint passthrough
 
-Rejected for MVP.
+Rejected for the current public contract.
 
 Reason:
 
@@ -979,7 +1010,7 @@ Reason:
 
 #### Global least-connections balancing across all instances
 
-Rejected for MVP.
+Rejected for the current public contract.
 
 Reason:
 
@@ -999,10 +1030,10 @@ Reason:
 
 The chosen design allows fallback only for alias-based requests.
 
-## Final MVP Decisions
+## Final Current Decisions
 
 - the public API is OpenAI-compatible
-- the MVP endpoint is `POST /v1/chat/completions`
+- the current endpoint/provider support matrix is the one listed in API Surface
 - direct model names use `<provider-name>/<model-name>`
 - alias names use `alias/<alias-name>`
 - provider name `alias` is reserved, and direct model resolution uses the first
@@ -1014,6 +1045,7 @@ The chosen design allows fallback only for alias-based requests.
   declared explicitly
 - `api_key_ref.path` defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json` and falls back to `~/.config/aiproxy/keys.json`
 - aliases support `round_robin` and `least_connections`
-- alias retry only happens for transient upstream failures
+- alias retry happens for transport errors, timeouts, and configured
+  `retry_status_codes` in the `400`-`599` range
 - direct provider/model requests do not fall back to different targets
-- streaming chat responses are part of the MVP
+- streaming chat completions and responses are part of the current supported API

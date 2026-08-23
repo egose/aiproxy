@@ -32,10 +32,9 @@ type Dependencies struct {
 	Authorizer        auth.Authorizer
 	Client            *http.Client
 	ClientForProvider func(config.Provider) *http.Client
-	Catalog           []ModelCard
+	Catalog           config.Catalog
 	Metrics           *observability.Metrics
 	MetricsToken      string
-	Providers         map[string]config.Provider
 	Health            *providerhealth.Tracker
 	RateLimiter       ratelimit.Limiter
 	Accounting        accounting.Recorder
@@ -277,7 +276,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	accountingModel = publicModel
-	if err := ensureOperationSupported(op, resolved, deps.Providers); err != nil {
+	if err := ensureOperationSupported(op, resolved, deps.Catalog); err != nil {
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadRequest, "unsupported_operation", err.Error())
 		return
 	}
@@ -379,7 +378,7 @@ func (h *Handler) handleHealth(deps Dependencies, w http.ResponseWriter, r *http
 		if !allowHealthMethod(w, r) {
 			return true
 		}
-		if len(deps.Providers) == 0 {
+		if deps.Catalog.ProviderCount() == 0 {
 			if deps.Metrics != nil {
 				deps.Metrics.SetReadyWithReason(false, "no_active_providers")
 			}
@@ -389,7 +388,7 @@ func (h *Handler) handleHealth(deps Dependencies, w http.ResponseWriter, r *http
 			}
 			return true
 		}
-		if deps.Health != nil && !deps.Health.AnyHealthyContext(r.Context(), deps.Providers) {
+		if deps.Health != nil && !deps.Health.AnyHealthyCatalogContext(r.Context(), deps.Catalog) {
 			if deps.Metrics != nil {
 				deps.Metrics.SetReadyWithReason(false, "no_healthy_providers")
 			}
@@ -469,7 +468,7 @@ func (h *Handler) handleModels(deps Dependencies, w http.ResponseWriter, r *http
 	if !h.allowRequest(deps, w, r, principal) {
 		return true
 	}
-	h.writeModels(w, filterModelCatalog(deps.Catalog, deps.Authorizer, principal))
+	h.writeModels(w, filterModelCatalog(BuildModelCatalog(deps.Catalog), deps.Authorizer, principal))
 	return true
 }
 

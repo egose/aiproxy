@@ -93,15 +93,13 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			continue
 		}
 		tried[t] = true
-		prov, ok := deps.Resolver.Provider(t.Provider)
+		prov, model, ok := deps.Resolver.Model(t.Provider, t.Model)
 		if !ok {
-			lastErr = fmt.Errorf("alias target provider %q not found", t.Provider)
-			releaseLease()
-			continue
-		}
-		model, ok := prov.ModelByName[t.Model]
-		if !ok {
-			lastErr = fmt.Errorf("alias target model %q not found on provider %q", t.Model, t.Provider)
+			if _, providerOK := deps.Resolver.Provider(t.Provider); !providerOK {
+				lastErr = fmt.Errorf("alias target provider %q not found", t.Provider)
+			} else {
+				lastErr = fmt.Errorf("alias target model %q not found on provider %q", t.Model, t.Provider)
+			}
 			releaseLease()
 			continue
 		}
@@ -145,7 +143,7 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			Inbound:       req,
 			Client:        clientForProvider(deps, prov),
 		})
-		if deps.Metrics != nil {
+		if deps.Metrics != nil && (result == nil || !result.Streaming) {
 			status := 0
 			if result != nil {
 				status = result.StatusCode

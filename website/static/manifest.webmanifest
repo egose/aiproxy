@@ -1,0 +1,17 @@
+{
+  "name": "aiproxy documentation",
+  "short_name": "aiproxy",
+  "description": "Documentation for aiproxy, an OpenAI-compatible proxy for multiple AI providers.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/img/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

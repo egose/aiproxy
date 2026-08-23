@@ -19,16 +19,18 @@ The CLI defaults to `$XDG_CONFIG_HOME/aiproxy/config.hcl`, falling back to
 
 The CLI also includes:
 
-- `aiproxy serve -d` (`--daemon`) to background `serve`, redirecting logs to
+- On Linux, `aiproxy serve -d` (`--daemon`) to background `serve`, redirecting logs to
   `$XDG_CONFIG_HOME/aiproxy/aiproxy.log` and writing a per-config daemon state
   record under the same `aiproxy/` subdir of `XDG_CONFIG_HOME` (or
   `~/.config/aiproxy/` when `XDG_CONFIG_HOME` is unset). Daemon state is scoped
   by the canonical config path, so lifecycle commands should use the same
   `--config` value that started the background server.
-- `aiproxy stop`, `aiproxy status`, `aiproxy restart` for lifecycle control
+- On Linux, `aiproxy stop`, `aiproxy status`, `aiproxy restart` for lifecycle control
   of a backgrounded daemon. They verify the recorded executable and process
   start identity before signaling; if no matching live daemon is present, all
-  three print `no server running` and exit non-zero.
+  three print `no server running` and exit non-zero. On non-Linux platforms,
+  foreground `serve` is supported, but daemon lifecycle commands return
+  `daemon lifecycle is unsupported on this platform`.
 - `aiproxy dashboard` to attach the interactive TUI to a **running**
   `aiproxy serve`. It requires a `dashboard { ... }` block in the config; the
   dashboard command calls `/_internal/dashboard/snapshot` on the server's
@@ -52,25 +54,31 @@ The HCL config uses `env("VAR")` for secret/placeholder substitution; values
 are textually inlined **before** HCL parsing. Run `set -a; . ./.env; set +a`
 before invoking the binary locally so env vars resolve.
 
-The server supports `SIGHUP`-triggered live config reload for auth, provider,
-model, alias, and metrics-backed inventory state. Listener address or timeout
-changes still require restart.
+The server supports `SIGHUP`-triggered live config reload for auth, providers,
+models, aliases, root and provider upstream header timeouts, access-log
+enablement, metrics config, provider-health config, and metrics-backed inventory
+state. Listener address, listener timeout, logging level, and enabling the
+dashboard after startup require restart.
 
 ## Lint / typecheck / test
 
-| Command          | Effect                                                  |
-| ---------------- | ------------------------------------------------------- |
-| `make vet`       | `go vet ./...`                                          |
-| `make test`      | `go test ./...` (unit tests only)                       |
-| `make test-race` | `go test -race ./...`                                   |
-| `make cover`     | Unit tests with coverage profile at `dist/coverage.out` |
+| Command              | Effect                                                  |
+| -------------------- | ------------------------------------------------------- |
+| `make vet`           | `go vet ./...`                                          |
+| `make test`          | `go test ./...` (unit tests only)                       |
+| `make test-race`     | `go test -race ./...`                                   |
+| `make cover`         | Unit tests with coverage profile at `dist/coverage.out` |
+| `make docs-contract` | Verify public docs contract matrices stay aligned       |
 
 `make vet test` is the default pre-commit sanity check; run it after any
 non-trivial change. There is no separate typecheck target — Go's compiler
 is the typecheck, and `make build` exercises it.
 
-(Integration tests are intentionally skipped for now. Add them back once the
-repo has sandbox services for stable end-to-end provider coverage.)
+Hermetic binary-level integration tests run in normal CI through `make
+integration`. Real-provider sandbox tests remain separate and optional.
+Markdown-only documentation pull requests run the `Docs Contract` workflow,
+which executes `make docs-contract` against the highest-drift public support
+matrices.
 
 ## Conventions
 
@@ -93,8 +101,10 @@ repo has sandbox services for stable end-to-end provider coverage.)
   `extends`, optional `display_name`, and exactly one local `api_key` or
   `api_key_ref`; the base must be enabled, concrete, and the same type.
 - Direct (`<provider>/<model>`) requests never fail over to a different
-  target. Alias requests retry the next target on transport / 5xx only;
-  client 4xx errors are returned verbatim.
+  target. Alias requests retry the next target on transport errors, timeouts,
+  and configured `retry_status_codes` in the `400`-`599` range. The default list
+  is `500`, `502`, `503`, and `504`; other upstream `4xx` responses are returned
+  verbatim. Retryable `4xx` statuses do not mark providers unhealthy.
 - The optional `auth.rate_limit` block applies a local in-memory request rate
   limit. In `bearer_static` mode it is keyed per authenticated client; in
   `none` mode it uses a shared anonymous bucket.
@@ -105,19 +115,22 @@ repo has sandbox services for stable end-to-end provider coverage.)
   filtered to the caller's tenant when present, otherwise to the caller's
   client identity.
 - Provider health state is shared in-process across requests and alias routing.
-  Transient transport failures and upstream `5xx` responses temporarily mark a
-  provider unhealthy. An optional `provider_health` Redis config can share that
-  transient state across instances; on Redis read failure routing and readiness
-  use a bounded in-process cache (`cache_ttl`, default 30s) and fail open only
-  when no fresh cache entry exists, recording both the backend error and the
-  fallback reason as Prometheus metrics.
+  Transient transport failures, upstream request errors, and upstream `5xx`
+  responses temporarily mark a provider unhealthy. Configured retryable `4xx`
+  statuses can trigger alias failover without mutating provider health. An
+  optional `provider_health` Redis config can share transient health state across
+  instances; on Redis read failure routing and readiness use a bounded
+  in-process cache (`cache_ttl`, default 30s) and fail open only when no fresh
+  cache entry exists, recording both the backend error and the fallback reason as
+  Prometheus metrics.
 - `/metrics` requires a dedicated bearer token declared in a
   `metrics { token = env("...") }` block; the token is checked independently of
   API auth client tokens. An empty or missing token is rejected at validation.
-- The `aiproxy dashboard` command refuses non-loopback plain-HTTP listeners
-  unless `dashboard { allow_insecure_remote = true }` is configured with a
-  strong explicit `token` (at least 32 characters). HTTPS listeners are always
-  allowed. Repeated invalid dashboard tokens are rate limited with `429`.
+- Listener addresses are TCP bind addresses in `host:port` form, not URLs. The
+  `aiproxy dashboard` command is local-only: it connects over loopback plain
+  HTTP using bearer authentication and refuses non-loopback listener hosts.
+  Remote dashboard support requires a future explicit transport design.
+  Repeated invalid dashboard tokens are rate limited with `429`.
 - The openai/openai-compatible adapter is pass-through: it only rewrites the
   `model` field to the configured `upstream_name`, injects the upstream
   `Authorization: Bearer` header, and copies the body (including SSE streams)
@@ -128,3 +141,34 @@ repo has sandbox services for stable end-to-end provider coverage.)
   `POST /v1/audio/transcriptions` and `POST /v1/audio/speech` are currently
   supported only for `openai` and `openai-compatible`. Anthropic embeddings are
   still deferred.
+
+Public endpoint/provider support matrix:
+
+<!-- docs-contract:public-matrix:start -->
+
+| Surface                         | `openai`                           | `openai-compatible`                | `anthropic`                        | `gemini`                           |
+| ------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- |
+| `GET /v1/models`                | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        |
+| `GET /v1/billing/usage`         | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting |
+| `GET /metrics`                  | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     |
+| `POST /v1/chat/completions`     | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated            | JSON and SSE translated            |
+| `POST /v1/embeddings`           | Yes                                | Yes                                | No                                 | Yes                                |
+| `POST /v1/responses`            | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated subset     | JSON and SSE translated subset     |
+| `POST /v1/images/generations`   | Yes                                | Yes                                | No                                 | No                                 |
+| `POST /v1/audio/transcriptions` | Yes                                | Yes                                | No                                 | No                                 |
+| `POST /v1/audio/speech`         | Yes                                | Yes                                | No                                 | No                                 |
+
+<!-- docs-contract:public-matrix:end -->
+
+Provider capability defaults and additional supported capabilities:
+
+<!-- docs-contract:capability-matrix:start -->
+
+| Provider type       | Default capabilities when omitted | Additional supported capabilities                |
+| ------------------- | --------------------------------- | ------------------------------------------------ |
+| `openai`            | `chat`, `responses`, `embeddings` | `images`, `audio_transcriptions`, `audio_speech` |
+| `openai-compatible` | `chat`, `responses`, `embeddings` | `images`, `audio_transcriptions`, `audio_speech` |
+| `anthropic`         | `chat`, `responses`               | None                                             |
+| `gemini`            | `chat`, `responses`               | `embeddings`                                     |
+
+<!-- docs-contract:capability-matrix:end -->

@@ -10,7 +10,11 @@ env:
   IMAGE_NAME: egose/aiproxy
 
 jobs:
+  quality:
+    uses: ./.github/workflows/test.yml
+
   build-push:
+    needs: quality
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -24,8 +28,63 @@ jobs:
     - name: Setup Tools
       uses: ./.github/actions/setup-tools
 
-    - name: Build and Push
-      uses: egose/actions/docker-build-push@799b388fb3497236093c6eb7e3eac0b4c8f956ce
+    - name: Normalize version
+      id: version
+      run: |
+        set -euo pipefail
+        version="${GITHUB_REF_NAME#v}"
+        if [ -z "$version" ] || [ "$version" = "$GITHUB_REF_NAME" ]; then
+          echo "unexpected release tag $GITHUB_REF_NAME" >&2
+          exit 1
+        fi
+        major="${version%%.*}"
+        rest="${version#*.}"
+        minor="${rest%%.*}"
+        image="${DOCKER_REGISTRY}/${IMAGE_NAME}"
+        {
+          echo "version=$version"
+          echo "image=$image"
+          echo "verify_tag=aiproxy:release-verify-$GITHUB_SHA"
+          echo "major_tag=$image:$major"
+          echo "minor_tag=$image:$major.$minor"
+          echo "version_tag=$image:$version"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Build image for verification
+      run: |
+        set -euo pipefail
+        docker build \
+          --build-arg VERSION=${{ steps.version.outputs.version }} \
+          -t ${{ steps.version.outputs.verify_tag }} \
+          -f Dockerfile .
+
+    - name: Verify image version
+      run: |
+        set -euo pipefail
+        actual=$(docker run --rm --entrypoint /usr/local/bin/aiproxy ${{ steps.version.outputs.verify_tag }} version)
+        if [ "$actual" != "${{ steps.version.outputs.version }}" ]; then
+          echo "image reports version $actual, expected ${{ steps.version.outputs.version }}" >&2
+          exit 1
+        fi
+
+    - name: Scan image
+      uses: aquasecurity/trivy-action@0.33.1
+      with:
+        image-ref: ${{ steps.version.outputs.verify_tag }}
+        format: sarif
+        output: trivy-results.sarif
+        severity: HIGH,CRITICAL
+        ignore-unfixed: true
+        exit-code: '1'
+
+    - name: Upload scan results
+      if: always()
+      uses: github/codeql-action/upload-sarif@3c3833e0f8c1c83d449a7478aa59c036a9165498
+      with:
+        sarif_file: trivy-results.sarif
+
+    - name: Build and push image
+      uses: egose/actions/docker-build-push@fbfffcb8803b91ff10096df512564a801173c24f
       with:
         registry-url: ${{ env.DOCKER_REGISTRY }}
         registry-username: ${{ github.actor }}
@@ -35,4 +94,7 @@ jobs:
           type=semver,pattern={{version}}
           type=semver,pattern={{major}}.{{minor}}
           type=semver,pattern={{major}}
-        trivy: false
+        docker-context: .
+        docker-file: Dockerfile
+        docker-args: |
+          VERSION=${{ steps.version.outputs.version }}

@@ -108,7 +108,7 @@ The listener block configures the inbound HTTP server.
 - `address` sets the listen address such as `:8080`
 - `timeouts` configures read, idle, and write timeouts
 
-Listener address and timeout changes still require a restart, even though some runtime state can reload on `SIGHUP`.
+Listener address and timeout changes still require a restart, even though runtime state such as auth, providers, models, aliases, upstream header timeouts, access-log enablement, metrics, and provider-health config can reload on `SIGHUP`. Logging level changes and enabling the dashboard after startup also require a restart.
 
 For most deployments, one HTTP listener is enough.
 
@@ -336,8 +336,9 @@ Startup fails on invalid configuration. Important checks include:
 - aliases without any targets
 - alias targets that reference unknown providers or models
 - a `metrics` block with an empty or missing token
-- a `dashboard` block with `allow_insecure_remote = true` but a minted, weak
-  (fewer than 32 characters), or missing explicit `token`
+- listener addresses that are URLs instead of TCP `host:port` bind addresses
+- a `dashboard` block with `allow_insecure_remote = true`; the dashboard command
+  is local-only
 
 ## Optional Blocks
 
@@ -357,14 +358,13 @@ client tokens; API clients cannot scrape `/metrics` with their own credentials.
 
 ```hcl
 dashboard {
-  token                 = env("AIPROXY_DASHBOARD_TOKEN")
-  allow_insecure_remote = false
+  token = env("AIPROXY_DASHBOARD_TOKEN")
 }
 ```
 
 When `token` is omitted, `aiproxy serve` mints a random secret at startup and
 persists it to `$XDG_CONFIG_HOME/aiproxy/dashboard.token`; the `dashboard`
-command reads that file to authenticate. To allow non-loopback plain-HTTP
-dashboard access, set `allow_insecure_remote = true` and declare a strong
-explicit `token` (at least 32 characters). HTTPS listeners always satisfy the
-transport check.
+command reads that file to authenticate. The dashboard command is local-only: it
+connects over loopback plain HTTP and refuses concrete non-loopback listener
+hosts. HTTPS and remote dashboard URLs are not supported by the current
+configuration model.

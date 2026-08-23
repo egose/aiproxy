@@ -11,6 +11,10 @@
 *~
 
 node_modules
+/.docusaurus/
+/build/
+/website/.docusaurus/
+/website/build/
 id_ed25519*
 .wip
 /aiproxy

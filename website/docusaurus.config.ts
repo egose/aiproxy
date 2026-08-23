@@ -11,6 +11,7 @@ const config: Config = {
 
   url: 'https://aiproxy.pages.dev/',
   baseUrl: '/',
+  trailingSlash: true,
 
   organizationName: 'egose',
   projectName: 'aiproxy',
@@ -129,11 +130,39 @@ const config: Config = {
         hideable: true,
       },
     },
+    colorMode: {
+      disableSwitch: false,
+      respectPrefersColorScheme: true,
+    },
     prism: {
       theme: prismThemes.github,
       darkTheme: prismThemes.dracula,
     },
   } satisfies Preset.ThemeConfig,
+  headTags: [
+    {
+      tagName: 'link',
+      attributes: {
+        rel: 'icon',
+        type: 'image/svg+xml',
+        href: '/img/logo.svg',
+      },
+    },
+    {
+      tagName: 'meta',
+      attributes: {
+        name: 'robots',
+        content: 'index, follow',
+      },
+    },
+    {
+      tagName: 'link',
+      attributes: {
+        rel: 'manifest',
+        href: '/manifest.webmanifest',
+      },
+    },
+  ],
 };
 
 export default config;

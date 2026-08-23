@@ -283,3 +283,27 @@ Verification attempted:
 - `make build`: failed because `go` is not on `PATH`.
 
 Runtime provider consumers require no inheritance-specific branches because derived providers are flattened during configuration loading before normal validation and alias construction.
+
+Follow-up verification on 2026-08-23:
+
+- Added `TestLoadDerivedProviderAcceptsInlineLocalCredential` to explicitly prove
+  inline `api_key` succeeds for derived providers alongside the existing
+  `api_key_ref` success coverage.
+- Added `TestEndToEndDerivedProviderDirectAndAliasRouting` to prove direct and
+  alias HTTP requests route to a derived provider using its local credential and
+  inherited endpoint/model mapping.
+- Added `TestDerivedProviderIdentityAcrossRuntimeSurfaces` to prove derived
+  provider identity is independent across routing, provider health, Prometheus
+  metrics, accounting summaries, and dashboard snapshots.
+- Added `TestReloadAddsChangesRemovesDerivedProviderAndRollsBackInvalidCandidate`
+  to prove successful derived-provider add/change/remove reloads and that an
+  invalid inherited-provider candidate rolls back without breaking the previous
+  derived route.
+- Added `TestConfigureProviderInteractiveChoosesDerivedBaseProvider` and updated
+  interactive configure behavior so `extends` is selected from `none` plus
+  eligible existing concrete, enabled base providers of the selected type.
+- Verified: `ASDF_GOLANG_VERSION=1.26.6 go test ./internal/config
+./internal/configedit ./cmd/aiproxy ./internal/app ./internal/e2e` passed.
+- Verified: `ASDF_GOLANG_VERSION=1.26.6 make vet test` passed.
+- Verified: `ASDF_GOLANG_VERSION=1.26.6 make test-race` passed.
+- Verified: `ASDF_GOLANG_VERSION=1.26.6 make build` passed.

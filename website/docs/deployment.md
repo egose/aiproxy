@@ -13,6 +13,11 @@ The project ships as:
 - a single Go binary named `aiproxy`
 - a container image built from the repo `Dockerfile`
 
+Foreground `aiproxy serve` is supported across the advertised release targets.
+Daemon lifecycle commands (`serve -d`, `status`, `stop`, and `restart`) are
+Linux-only; on other platforms they return `daemon lifecycle is unsupported on
+this platform`.
+
 The container image:
 
 - exposes port `8080`
@@ -119,7 +124,7 @@ Recommended layout:
 
 ## Reloading Config
 
-`aiproxy` supports runtime reload on `SIGHUP` for auth, providers, models, aliases, and metrics-backed inventory state.
+`aiproxy` supports runtime reload on `SIGHUP` for auth, providers, models, aliases, root and provider upstream header timeouts, access-log enablement, metrics config, provider-health config, and metrics-backed inventory state.
 
 Reload with:
 
@@ -139,7 +144,7 @@ For a container:
 docker kill --signal HUP <container>
 ```
 
-Listener address and timeout changes still require a full restart.
+Listener address, listener timeout, logging level, and enabling the dashboard after startup require a full restart.
 
 ## Reverse Proxying
 
@@ -162,8 +167,8 @@ Keep the proxy-visible auth boundary enabled unless the deployment is fully trus
 - declare `metrics { token = env("AIPROXY_METRICS_TOKEN") }` and scrape
   `GET /metrics` with the configured bearer token (the token is independent of
   API auth client tokens)
-- for non-loopback `aiproxy dashboard` access, use an HTTPS listener or declare
-  `dashboard { allow_insecure_remote = true token = "<32+ char token>" }`
+- use `aiproxy dashboard` only from the local host; remote dashboard access is
+  unsupported until an explicit transport design is added
 - explicitly `enabled = false` any provider you want defined but inactive;
   enabled providers with missing credentials fail validation
 - use aliases for stable client-facing models and controlled failover

@@ -44,10 +44,7 @@ func newSnapshot() *RuntimeSnapshot {
 		Operation: "chat_completions", StatusCode: 404,
 	})
 	health := providerhealth.New(nil, config.ProviderHealth{})
-	health.SetProviders(map[string]config.Provider{
-		"openai": {Name: "openai"},
-		"backup": {Name: "backup"},
-	})
+	health.SetProviders(config.NewCatalog([]config.Provider{{Name: "openai"}, {Name: "backup"}}, nil, nil))
 	health.MarkFailure("backup")
 	return &RuntimeSnapshot{
 		Version:   "test",

@@ -862,9 +862,9 @@ Choose whether dashboard RPC must use a loopback/Unix socket, HTTPS for non-loop
 
 After the decision, create a focused implementation task requiring non-loopback cleartext rejection or a separate protected transport, plus tests and operator documentation. Also apply rate limiting to dashboard authentication and define a minimum explicit-token strength if remote access remains supported.
 
-Resolution (recorded 2026-08-10 by `docs/tasks/20260809-132127-remediation-decision-closure.md` DASH-01):
+Resolution (recorded 2026-08-10 by `docs/tasks/20260809-132127-remediation-decision-closure.md` DASH-01; superseded by 2026-08-23 DEC-02 option 3):
 
-The dashboard command refuses non-loopback plain-HTTP listeners unless `dashboard { allow_insecure_remote = true }` is declared with a strong explicit `token` (at least 32 characters); HTTPS listeners are always allowed. Repeated invalid dashboard tokens are rate limited with `429` and `Retry-After`. The HTTP-side dashboard gate applies auth and rate limiting to both `/_internal/dashboard/{snapshot,logs}` paths. Test evidence: `cmd/aiproxy/dashboard_test.go:199-316`, `internal/httpapi/dashboard_test.go:42-221`, and `internal/config/load_test.go:1112-1176`.
+The dashboard command is now local-only: it derives loopback plain HTTP from wildcard or loopback binds, rejects concrete non-loopback hosts, and no longer treats HTTPS or `allow_insecure_remote` as supported remote dashboard transports. Repeated invalid dashboard tokens are rate limited with `429` and `Retry-After`. The HTTP-side dashboard gate applies auth and rate limiting to both `/_internal/dashboard/{snapshot,logs}` paths. Test evidence: `cmd/aiproxy/dashboard_test.go`, `internal/httpapi/dashboard_test.go`, and `internal/config/load_test.go`.
 
 ## Parallelization Guidance
 

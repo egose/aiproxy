@@ -31,11 +31,11 @@ func newDashboardDeps(rt *config.Runtime, startTime time.Time, usage *accounting
 	return Dependencies{
 		Resolver:  modelresolver.New(rt),
 		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
-		Providers: rt.ProviderByName,
+		Catalog:   rt.Catalog,
 		Metrics:   observability.NewMetrics(),
 		Health:    health,
 		Usage:     usage,
-		Dashboard: dashrpc.NewRuntimeSource(config.Dashboard{Token: dashboardTestToken, Enabled: true}, "test", rt.Listener.Address, string(rt.Auth.Mode), startTime, rt.Providers, rt.DisabledProviders, rt.Aliases, usage, health, logs),
+		Dashboard: dashrpc.NewRuntimeSource(config.Dashboard{Token: dashboardTestToken, Enabled: true}, "test", rt.Listener.Address, string(rt.Auth.Mode), startTime, rt.Catalog, usage, health, logs),
 	}
 }
 
@@ -44,7 +44,7 @@ func TestDashboardSnapshotEndpointRejectsUnauthenticatedRequests(t *testing.T) {
 	rt.Listener = config.Listener{Address: ":8080"}
 	usage := accounting.NewAggregator()
 	health := providerhealth.New(nil, config.ProviderHealth{})
-	health.SetProviders(rt.ProviderByName)
+	health.SetProviders(rt.Catalog)
 	logs := observability.NewLogBuffer(10)
 	start := time.Now()
 
@@ -84,7 +84,7 @@ func TestDashboardSnapshotEndpointServesJSON(t *testing.T) {
 		StatusCode: 200, Duration: 50 * time.Millisecond,
 	})
 	health := providerhealth.New(nil, config.ProviderHealth{})
-	health.SetProviders(rt.ProviderByName)
+	health.SetProviders(rt.Catalog)
 	logs := observability.NewLogBuffer(10)
 	logs.Add(observability.LogEntry{Level: slog.LevelInfo, Message: "starting"})
 	start := time.Now().Add(-time.Minute)
@@ -128,7 +128,7 @@ func TestDashboardLogsEndpointReturnsNewEntries(t *testing.T) {
 	rt.Listener = config.Listener{Address: ":8080"}
 	usage := accounting.NewAggregator()
 	health := providerhealth.New(nil, config.ProviderHealth{})
-	health.SetProviders(rt.ProviderByName)
+	health.SetProviders(rt.Catalog)
 	logs := observability.NewLogBuffer(50)
 	logs.Add(observability.LogEntry{Level: slog.LevelInfo, Message: "first"})
 	logs.Add(observability.LogEntry{Level: slog.LevelInfo, Message: "second"})
@@ -176,46 +176,69 @@ func TestDashboardLogsEndpointReturnsNewEntries(t *testing.T) {
 }
 
 func TestDashboardAuthFailureRateLimitsRepeatedBadTokens(t *testing.T) {
-	rt := newRT()
-	rt.Listener = config.Listener{Address: ":8080"}
-	usage := accounting.NewAggregator()
-	health := providerhealth.New(nil, config.ProviderHealth{})
-	health.SetProviders(rt.ProviderByName)
-	logs := observability.NewLogBuffer(10)
-	start := time.Now()
+	routes := []string{dashrpc.SnapshotPath, dashrpc.LogsPath}
+	for _, path := range routes {
+		t.Run(path, func(t *testing.T) {
+			rt := newRT()
+			rt.Listener = config.Listener{Address: ":8080"}
+			usage := accounting.NewAggregator()
+			health := providerhealth.New(nil, config.ProviderHealth{})
+			health.SetProviders(rt.Catalog)
+			logs := observability.NewLogBuffer(10)
+			start := time.Now()
 
-	h := NewHandler(newDashboardDeps(rt, start, usage, health, logs))
+			h := NewHandler(newDashboardDeps(rt, start, usage, health, logs))
 
-	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	limiter := dashboardAuthLimiterFor(h)
-	limiter.now = func() time.Time { return clock }
+			clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			limiter := dashboardAuthLimiterFor(h)
+			limiter.now = func() time.Time { return clock }
 
-	moreThanBurst := dashboardAuthBurst + 5
-	for i := 0; i < moreThanBurst; i++ {
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest(http.MethodGet, dashrpc.SnapshotPath, nil)
-		r.Header.Set(dashrpc.AuthHeaderName, "Bearer wrong")
-		h.ServeHTTP(w, r)
-		if i < dashboardAuthBurst {
-			if w.Code != http.StatusUnauthorized {
-				t.Fatalf("attempt %d: status = %d, want 401 (within burst)", i, w.Code)
+			for i := 0; i < dashboardAuthBurst; i++ {
+				w := httptest.NewRecorder()
+				r := httptest.NewRequest(http.MethodGet, path, nil)
+				r.Header.Set(dashrpc.AuthHeaderName, "Bearer "+dashboardTestToken)
+				h.ServeHTTP(w, r)
+				if w.Code != http.StatusOK {
+					t.Fatalf("valid attempt %d: status = %d, want 200, body=%s", i, w.Code, w.Body.String())
+				}
 			}
-		} else {
-			if w.Code != http.StatusTooManyRequests {
-				t.Fatalf("attempt %d: status = %d, want 429 (rate limited)", i, w.Code)
-			}
-			if got := w.Header().Get("Retry-After"); got == "" {
-				t.Fatalf("attempt %d: expected Retry-After header", i)
-			}
-		}
-	}
 
-	clock = clock.Add(2 * time.Minute)
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, dashrpc.SnapshotPath, nil)
-	r.Header.Set(dashrpc.AuthHeaderName, "Bearer "+dashboardTestToken)
-	h.ServeHTTP(w, r)
-	if w.Code != http.StatusOK {
-		t.Fatalf("after cooldown status = %d, want 200, body=%s", w.Code, w.Body.String())
+			moreThanBurst := dashboardAuthBurst + 5
+			for i := 0; i < moreThanBurst; i++ {
+				w := httptest.NewRecorder()
+				r := httptest.NewRequest(http.MethodGet, path, nil)
+				r.Header.Set(dashrpc.AuthHeaderName, "Bearer wrong")
+				h.ServeHTTP(w, r)
+				if i < dashboardAuthBurst {
+					if w.Code != http.StatusUnauthorized {
+						t.Fatalf("attempt %d: status = %d, want 401 (within burst)", i, w.Code)
+					}
+				} else {
+					if w.Code != http.StatusTooManyRequests {
+						t.Fatalf("attempt %d: status = %d, want 429 (rate limited)", i, w.Code)
+					}
+					if got := w.Header().Get("Retry-After"); got == "" {
+						t.Fatalf("attempt %d: expected Retry-After header", i)
+					}
+				}
+			}
+
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, path, nil)
+			r.Header.Set(dashrpc.AuthHeaderName, "Bearer "+dashboardTestToken)
+			h.ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("valid after invalid limit status = %d, want 200, body=%s", w.Code, w.Body.String())
+			}
+
+			clock = clock.Add(2 * time.Minute)
+			w = httptest.NewRecorder()
+			r = httptest.NewRequest(http.MethodGet, path, nil)
+			r.Header.Set(dashrpc.AuthHeaderName, "Bearer "+dashboardTestToken)
+			h.ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("after cooldown status = %d, want 200, body=%s", w.Code, w.Body.String())
+			}
+		})
 	}
 }
