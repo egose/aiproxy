@@ -28,6 +28,33 @@ capability_expected=$(cat <<'EOF'
 EOF
 )
 
+normalize_table_block() {
+  awk '
+    {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+      if ($0 == "") next
+
+      n = split($0, cells, /\|/)
+      start = 1
+      end = n
+      if (cells[start] ~ /^[[:space:]]*$/) start++
+      if (cells[end] ~ /^[[:space:]]*$/) end--
+
+      out = "|"
+      for (i = start; i <= end; i++) {
+        cell = cells[i]
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", cell)
+        if (cell ~ /^:?-{3,}:?$/) cell = "---"
+        out = out " " cell " |"
+      }
+      print out
+    }
+  '
+}
+
+public_expected=$(printf '%s\n' "$public_expected" | normalize_table_block)
+capability_expected=$(printf '%s\n' "$capability_expected" | normalize_table_block)
+
 public_matrix_files=(
   AGENTS.md
   README.md
@@ -51,7 +78,7 @@ extract_block() {
 
 for relative in "${public_matrix_files[@]}"; do
   file="$root/$relative"
-  public_actual=$(extract_block "$file" public-matrix)
+  public_actual=$(extract_block "$file" public-matrix | normalize_table_block)
   if [[ "$public_actual" != "$public_expected" ]]; then
     printf 'public matrix drift in %s\n' "$relative" >&2
     exit 1
@@ -60,7 +87,7 @@ done
 
 for relative in "${capability_matrix_files[@]}"; do
   file="$root/$relative"
-  capability_actual=$(extract_block "$file" capability-matrix)
+  capability_actual=$(extract_block "$file" capability-matrix | normalize_table_block)
   if [[ "$capability_actual" != "$capability_expected" ]]; then
     printf 'capability matrix drift in %s\n' "$relative" >&2
     exit 1
