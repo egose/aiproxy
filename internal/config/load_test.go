@@ -218,6 +218,152 @@ provider "openai-compatible" "nvidia" {
 	}
 }
 
+func TestLoadDerivedProviderInheritsBaseAndUsesLocalCredential(t *testing.T) {
+	secretsPath := writeTempFile(t, "keys.json", `{"derived":"sk-derived"}`)
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+
+provider "openai-compatible" "derived" {
+  extends      = "base"
+  display_name = "Derived"
+  api_key_ref {
+    path = "` + secretsPath + `"
+    key  = "derived"
+  }
+}
+
+provider "openai-compatible" "base" {
+  display_name = "Base"
+  base_url = "https://integrate.api.nvidia.com/v1"
+  upstream_header_timeout = "30s"
+  api_key = "sk-base"
+  model "z-ai/glm-5.2" {
+    display_name = "GLM 5.2"
+    upstream_name = "upstream-glm"
+    capabilities = ["chat", "responses"]
+  }
+}
+
+alias "chat" {
+  algorithm = "round_robin"
+  target {
+    provider = "derived"
+    model    = "z-ai/glm-5.2"
+  }
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	derived := rt.ProviderByName["derived"]
+	if derived.Type != ProviderTypeOpenAICompatible || derived.BaseURL != "https://integrate.api.nvidia.com/v1" || derived.UpstreamHeaderTimeout != 30*time.Second {
+		t.Fatalf("derived inherited fields = %+v", derived)
+	}
+	if derived.DisplayName != "Derived" || derived.APIKey != "sk-derived" {
+		t.Fatalf("derived local fields = %+v", derived)
+	}
+	model := derived.ModelByName["z-ai/glm-5.2"]
+	if model.UpstreamName != "upstream-glm" || len(model.Capabilities) != 2 || model.Capabilities[1] != CapabilityResponses {
+		t.Fatalf("derived model = %+v", model)
+	}
+	derived.Models[0].Capabilities[0] = CapabilityEmbeddings
+	if rt.ProviderByName["base"].Models[0].Capabilities[0] != CapabilityChat {
+		t.Fatalf("derived model capabilities shared with base")
+	}
+}
+
+func TestLoadRejectsInvalidDerivedProviders(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "missing base", body: `provider "openai" "child" {
+  extends = "missing"
+  api_key = "k"
+}`, want: `provider "child": extends "missing" is not defined`},
+		{name: "self", body: `provider "openai" "child" {
+  extends = "child"
+  api_key = "k"
+}`, want: `provider "child": extends "child" references itself`},
+		{name: "chain", body: `provider "openai" "base" {
+  extends = "root"
+  api_key = "k"
+}
+provider "openai" "child" {
+  extends = "base"
+  api_key = "k"
+}
+provider "openai" "root" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}`, want: `provider "child": extends "base" references derived provider "base"`},
+		{name: "type mismatch", body: `provider "anthropic" "child" {
+  extends = "base"
+  api_key = "k"
+}
+provider "openai" "base" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}`, want: `provider "child": type "anthropic" must match base provider "base" type "openai"`},
+		{name: "disabled base", body: `provider "openai" "child" {
+  extends = "base"
+  api_key = "k"
+}
+provider "openai" "base" {
+  enabled = false
+  api_key = ""
+  model "gpt-4o-mini" {}
+}`, want: `provider "child": extends "base" references a disabled provider`},
+		{name: "forbidden empty base_url", body: `provider "openai" "child" {
+  extends = "base"
+  base_url = ""
+  api_key = "k"
+}
+provider "openai" "base" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}`, want: `provider "child": derived provider cannot declare base_url`},
+		{name: "forbidden model", body: `provider "openai" "child" {
+  extends = "base"
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+provider "openai" "base" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}`, want: `provider "child": derived provider cannot declare model blocks`},
+		{name: "no credential", body: `provider "openai" "child" { extends = "base" }
+provider "openai" "base" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}`, want: `provider "child": derived provider requires exactly one local credential`},
+		{name: "both credentials", body: `provider "openai" "child" {
+  extends = "base"
+  api_key = "k"
+  api_key_ref { key = "child" }
+}
+provider "openai" "base" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}`, want: `provider "child": derived provider requires exactly one local credential`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+` + tc.body + `
+`
+			_, err := Load([]byte(cfg), "test.hcl")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsProviderModelNamesWithEmptySlashSegment(t *testing.T) {
 	cfg := `
 listener "http" "public" { address = ":8080" }

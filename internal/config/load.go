@@ -30,6 +30,7 @@ func Load(src []byte, filename string) (*Runtime, error) {
 	if d := gohcl.DecodeBody(file.Body, nil, &raw); d.HasErrors() {
 		return nil, fmt.Errorf("decode config %s: %s", filename, d.Error())
 	}
+	annotateProviderSyntax(file.Body, &raw)
 
 	rt, err := buildRuntime(&raw)
 	if err != nil {
@@ -39,4 +40,26 @@ func Load(src []byte, filename string) (*Runtime, error) {
 		return nil, err
 	}
 	return rt, nil
+}
+
+func annotateProviderSyntax(body hcl.Body, raw *rawFile) {
+	syntaxBody, ok := body.(*hclsyntax.Body)
+	if !ok {
+		return
+	}
+	raw.providerSyntax = make([]rawProviderSyntax, 0, len(raw.Providers))
+	for _, block := range syntaxBody.Blocks {
+		if block.Type != "provider" {
+			continue
+		}
+		attrs := make(map[string]bool, len(block.Body.Attributes))
+		for name := range block.Body.Attributes {
+			attrs[name] = true
+		}
+		blocks := make(map[string]int)
+		for _, nested := range block.Body.Blocks {
+			blocks[nested.Type]++
+		}
+		raw.providerSyntax = append(raw.providerSyntax, rawProviderSyntax{Attrs: attrs, Blocks: blocks})
+	}
 }

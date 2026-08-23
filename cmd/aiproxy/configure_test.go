@@ -265,6 +265,82 @@ func TestConfigureProviderNonInteractiveFlags(t *testing.T) {
 	}
 }
 
+func TestConfigureProviderNonInteractiveCreatesDerivedProvider(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	secretsPath := filepath.Join(dir, "keys.json")
+	seed := strings.TrimSpace(`provider "openai-compatible" "nvidia-1" {
+  base_url = "https://integrate.api.nvidia.com/v1"
+  api_key = "base"
+  model "z-ai/glm-5.2" {}
+}`) + "\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+
+	stdout, stderr, err := executeRootCommand(
+		"",
+		"configure", "provider",
+		"--config", configPath,
+		"--non-interactive",
+		"--type", "openai-compatible",
+		"--name", "nvidia-2",
+		"--extends", "nvidia-1",
+		"--display-name", "Nvidia - corean",
+		"--secrets-path", secretsPath,
+		"--secrets-key", "nvidia-2",
+		"--api-key", "secret-value",
+	)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	for _, want := range []string{`provider "openai-compatible" "nvidia-2"`, `extends = "nvidia-1"`, `display_name = "Nvidia - corean"`, `key  = "nvidia-2"`} {
+		if !strings.Contains(configText, want) {
+			t.Fatalf("config output missing %q:\n%s", want, configText)
+		}
+	}
+	derivedStart := strings.Index(configText, `provider "openai-compatible" "nvidia-2"`)
+	if derivedStart < 0 {
+		t.Fatalf("derived provider missing:\n%s", configText)
+	}
+	derivedText := configText[derivedStart:]
+	if strings.Contains(derivedText, "base_url") || strings.Contains(derivedText, "model ") || strings.Contains(derivedText, "upstream_header_timeout") {
+		t.Fatalf("derived provider rendered inherited fields:\n%s", derivedText)
+	}
+}
+
+func TestConfigureProviderNonInteractiveRejectsDerivedInheritedFlags(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := strings.TrimSpace(`provider "openai" "base" {
+  api_key = "base"
+  model "gpt-4o-mini" {}
+}`) + "\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+
+	_, _, err := executeRootCommand(
+		"",
+		"configure", "provider",
+		"--config", configPath,
+		"--non-interactive",
+		"--type", "openai",
+		"--name", "child",
+		"--extends", "base",
+		"--api-key", "secret-value",
+		"--model", "gpt-4o-mini",
+	)
+	if err == nil || !strings.Contains(err.Error(), "--extends cannot be combined with inherited-field flags") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestConfigureProviderNonInteractivePreservesDisabledOnUpdate(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.hcl")

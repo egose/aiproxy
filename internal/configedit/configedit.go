@@ -56,6 +56,7 @@ type AuthClientInput struct {
 type ProviderInput struct {
 	ProviderType          string
 	Name                  string
+	Extends               string
 	DisplayName           string
 	BaseURL               string
 	UpstreamHeaderTimeout string
@@ -227,10 +228,21 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 	b.WriteString(" ")
 	b.WriteString(strconv.Quote(input.Name))
 	b.WriteString(" {\n")
+	if input.Extends != "" {
+		b.WriteString("  extends = ")
+		b.WriteString(strconv.Quote(input.Extends))
+		b.WriteString("\n")
+	}
 	if input.DisplayName != "" {
 		b.WriteString("  display_name = ")
 		b.WriteString(strconv.Quote(input.DisplayName))
 		b.WriteString("\n")
+	}
+	if input.Extends != "" {
+		b.WriteString("\n")
+		renderProviderCredential(&b, input, defaultSecretsPath)
+		b.WriteString("}\n")
+		return b.String()
 	}
 	if input.BaseURL != "" {
 		b.WriteString("  base_url = ")
@@ -246,25 +258,7 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 		b.WriteString("  enabled = false\n")
 	} else {
 		b.WriteString("\n")
-		switch input.Credential.Mode {
-		case "secrets_file":
-			b.WriteString("  api_key_ref {\n")
-			if input.Credential.SecretsPath != defaultSecretsPath { // pragma: allowlist secret
-				b.WriteString("    path = ")
-				b.WriteString(strconv.Quote(input.Credential.SecretsPath))
-				b.WriteString("\n")
-			}
-			b.WriteString("    key  = ")
-			b.WriteString(strconv.Quote(input.Credential.SecretsKey))
-			b.WriteString("\n")
-			b.WriteString("  }\n")
-		case "disabled":
-			// no credential block rendered for explicitly disabled providers
-		default:
-			b.WriteString("  api_key = ")
-			b.WriteString(RenderStringOrExpression(input.Credential.APIKeyValue))
-			b.WriteString("\n")
-		}
+		renderProviderCredential(&b, input, defaultSecretsPath)
 	}
 	for _, model := range input.Models {
 		b.WriteString("\n  model ")
@@ -289,6 +283,27 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+func renderProviderCredential(b *strings.Builder, input ProviderInput, defaultSecretsPath string) {
+	switch input.Credential.Mode {
+	case "secrets_file":
+		b.WriteString("  api_key_ref {\n")
+		if input.Credential.SecretsPath != "" && input.Credential.SecretsPath != defaultSecretsPath { // pragma: allowlist secret
+			b.WriteString("    path = ")
+			b.WriteString(strconv.Quote(input.Credential.SecretsPath))
+			b.WriteString("\n")
+		}
+		b.WriteString("    key  = ")
+		b.WriteString(strconv.Quote(input.Credential.SecretsKey))
+		b.WriteString("\n")
+		b.WriteString("  }\n")
+	case "disabled":
+	default:
+		b.WriteString("  api_key = ")
+		b.WriteString(RenderStringOrExpression(input.Credential.APIKeyValue))
+		b.WriteString("\n")
+	}
 }
 
 func RenderAliasBlock(input AliasInput) string {
@@ -658,17 +673,39 @@ func AliasBlockNames(blocks []TopLevelBlock) []string {
 
 func AvailableProviderModels(blocks []TopLevelBlock) []string {
 	var out []string
+	modelsByProvider := make(map[string][]string)
 	for _, block := range blocks {
 		if block.Type != "provider" || len(block.Labels) < 2 {
 			continue
 		}
 		providerName := block.Labels[1]
-		for _, modelName := range ModelNamesFromProviderBlock(block.Text) {
+		modelsByProvider[providerName] = ModelNamesFromProviderBlock(block.Text)
+	}
+	for _, block := range blocks {
+		if block.Type != "provider" || len(block.Labels) < 2 {
+			continue
+		}
+		providerName := block.Labels[1]
+		modelNames := modelsByProvider[providerName]
+		if len(modelNames) == 0 {
+			if baseName := ProviderExtendsFromBlock(block.Text); baseName != "" {
+				modelNames = modelsByProvider[baseName]
+			}
+		}
+		for _, modelName := range modelNames {
 			out = append(out, providerName+"/"+modelName)
 		}
 	}
 	sort.Strings(out)
 	return out
+}
+
+func ProviderExtendsFromBlock(block string) string {
+	match := regexp.MustCompile(`(?m)^\s*extends\s*=\s*"([^"]+)"`).FindStringSubmatch(block)
+	if len(match) != 2 {
+		return ""
+	}
+	return match[1]
 }
 
 func AvailablePublicModels(blocks []TopLevelBlock) []string {

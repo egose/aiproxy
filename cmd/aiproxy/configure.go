@@ -68,6 +68,7 @@ type authOptions struct {
 type providerOptions struct {
 	ProviderType          string
 	Name                  string
+	Extends               string
 	DisplayName           string
 	BaseURL               string
 	UpstreamHeaderTimeout string
@@ -245,6 +246,7 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&deleteBlock, "delete", false, "delete a provider block")
 	cmd.Flags().StringVar(&options.Name, "name", "", "provider name")
 	cmd.Flags().StringVar(&options.ProviderType, "type", "", "provider type")
+	cmd.Flags().StringVar(&options.Extends, "extends", "", "base provider name to inherit from")
 	cmd.Flags().StringVar(&options.DisplayName, "display-name", "", "provider display_name")
 	cmd.Flags().StringVar(&options.BaseURL, "base-url", "", "provider base_url")
 	cmd.Flags().StringVar(&options.UpstreamHeaderTimeout, "upstream-header-timeout", "", "provider upstream_header_timeout")
@@ -590,6 +592,9 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 
 	input, secretsUpdate, err := promptProviderInput(prompts, existingProviderInput(doc.blocks, nameForAction), options)
 	if err != nil {
+		return err
+	}
+	if err := validateProviderExtendsInput(doc.blocks, input); err != nil {
 		return err
 	}
 
@@ -1462,6 +1467,7 @@ func promptAuthInput(prompts *promptSession, blocks []topLevelBlock, existing *a
 }
 
 func promptProviderInput(prompts *promptSession, existing *providerInput, options providerOptions) (providerInput, secretsUpdate, error) {
+	var err error
 	defaults := providerInput{ProviderType: "openai"}
 	if existing != nil {
 		defaults = *existing
@@ -1472,8 +1478,14 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if options.Name != "" {
 		defaults.Name = options.Name
 	}
+	if options.Extends != "" {
+		defaults.Extends = options.Extends
+	}
 	if options.DisplayName != "" {
 		defaults.DisplayName = options.DisplayName
+	}
+	if defaults.Extends != "" && (options.BaseURL != "" || options.UpstreamHeaderTimeout != "" || options.HasEnabled || hasProviderModelOptions(options)) {
+		return providerInput{}, secretsUpdate{}, fmt.Errorf("--extends cannot be combined with inherited-field flags")
 	}
 	if options.BaseURL != "" {
 		defaults.BaseURL = options.BaseURL
@@ -1509,6 +1521,16 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if defaults.ProviderType == "" || defaults.Name == "" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider requires type and name in non-interactive mode")
 		}
+		if defaults.Extends != "" {
+			if defaults.Credential.Mode == "" {
+				return providerInput{}, secretsUpdate{}, fmt.Errorf("derived provider requires local credential flags in non-interactive mode")
+			}
+			defaults.BaseURL = ""
+			defaults.UpstreamHeaderTimeout = ""
+			defaults.Enabled = nil
+			defaults.Models = nil
+			return defaults, providerSecretsUpdate(defaults, options), nil
+		}
 		if defaults.IsExplicitlyDisabled() {
 			return defaults, secretsUpdate{}, nil
 		}
@@ -1527,6 +1549,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		providerType := defaults.ProviderType
 		providerName := defaults.Name
 		displayName := defaults.DisplayName
+		extends := defaults.Extends
 		upstreamHeaderTimeout := defaults.UpstreamHeaderTimeout
 		if err := prompts.runHuhForm(
 			huh.NewGroup(
@@ -1537,20 +1560,25 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 					huh.NewOption("Gemini", "gemini"),
 				).Value(&providerType),
 				huh.NewInput().Title("Provider name").Description(providerNameDescription()).Value(&providerName).Validate(validateProviderName),
+				huh.NewInput().Title("Extends provider").Description("Leave empty for a complete provider block").Value(&extends),
 				huh.NewInput().Title("Display name").Description(providerDisplayNameDescription()).Value(&displayName),
 			).Title("Provider"),
 		); err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
-		if err := prompts.runHuhForm(
-			huh.NewGroup(
-				huh.NewInput().Title("Upstream header timeout").Description(upstreamHeaderTimeoutDescription()).Value(&upstreamHeaderTimeout).Validate(validateOptionalPositiveDuration),
-			).Title("Upstream Timeout"),
-		); err != nil {
-			return providerInput{}, secretsUpdate{}, err
+		if strings.TrimSpace(extends) == "" {
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewInput().Title("Upstream header timeout").Description(upstreamHeaderTimeoutDescription()).Value(&upstreamHeaderTimeout).Validate(validateOptionalPositiveDuration),
+				).Title("Upstream Timeout"),
+			); err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
 		}
 		baseURL := defaults.BaseURL
-		if providerType == "openai-compatible" {
+		if strings.TrimSpace(extends) != "" {
+			baseURL = ""
+		} else if providerType == "openai-compatible" {
 			if baseURL == "" {
 				baseURL = "https://llm.internal/v1"
 			}
@@ -1628,13 +1656,17 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			}
 			credential.APIKeyValue = strings.TrimSpace(apiKey)
 		}
-		models, err := promptProviderModels(prompts, providerType, defaults.Models)
-		if err != nil {
-			return providerInput{}, secretsUpdate{}, err
+		var models []providerModelInput
+		if strings.TrimSpace(extends) == "" {
+			models, err = promptProviderModels(prompts, providerType, defaults.Models)
+			if err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
 		}
 		return providerInput{
 			ProviderType:          providerType,
 			Name:                  strings.TrimSpace(providerName),
+			Extends:               strings.TrimSpace(extends),
 			DisplayName:           strings.TrimSpace(displayName),
 			BaseURL:               strings.TrimSpace(baseURL),
 			UpstreamHeaderTimeout: strings.TrimSpace(upstreamHeaderTimeout),
@@ -1655,12 +1687,21 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
-	upstreamHeaderTimeout, err := prompts.askValidated("Upstream header timeout", defaults.UpstreamHeaderTimeout, validateOptionalPositiveDuration)
+	extends, err := prompts.ask("Extends provider (empty for none)", defaults.Extends)
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
+	upstreamHeaderTimeout := defaults.UpstreamHeaderTimeout
+	if strings.TrimSpace(extends) == "" {
+		upstreamHeaderTimeout, err = prompts.askValidated("Upstream header timeout", defaults.UpstreamHeaderTimeout, validateOptionalPositiveDuration)
+		if err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
+	}
 	baseURL := defaults.BaseURL
-	if providerType == "openai-compatible" {
+	if strings.TrimSpace(extends) != "" {
+		baseURL = ""
+	} else if providerType == "openai-compatible" {
 		if baseURL == "" {
 			baseURL = "https://llm.internal/v1"
 		}
@@ -1719,13 +1760,17 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			return providerInput{}, secretsUpdate{}, err
 		}
 	}
-	models, err := promptProviderModels(prompts, providerType, defaults.Models)
-	if err != nil {
-		return providerInput{}, secretsUpdate{}, err
+	var models []providerModelInput
+	if strings.TrimSpace(extends) == "" {
+		models, err = promptProviderModels(prompts, providerType, defaults.Models)
+		if err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
 	}
 	return providerInput{
 		ProviderType:          providerType,
 		Name:                  providerName,
+		Extends:               strings.TrimSpace(extends),
 		DisplayName:           displayName,
 		BaseURL:               baseURL,
 		UpstreamHeaderTimeout: upstreamHeaderTimeout,
@@ -3064,6 +3109,7 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 		input.Name = parsed.Labels[1]
 	}
 	input.DisplayName = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "display_name"))
+	input.Extends = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "extends"))
 	input.BaseURL = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "base_url"))
 	input.UpstreamHeaderTimeout = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "upstream_header_timeout"))
 	if enabledExpr := parseLiteralOrExpression(attributeExpr(src, parsed.Body, "enabled")); enabledExpr != "" {
@@ -3097,6 +3143,29 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 		input.Models = append(input.Models, model)
 	}
 	return input
+}
+
+func validateProviderExtendsInput(blocks []topLevelBlock, input providerInput) error {
+	if input.Extends == "" {
+		return nil
+	}
+	if input.Extends == input.Name {
+		return fmt.Errorf("provider %q: extends cannot reference itself", input.Name)
+	}
+	base := existingProviderInput(blocks, input.Extends)
+	if base == nil {
+		return fmt.Errorf("provider %q: extends provider %q not found", input.Name, input.Extends)
+	}
+	if base.Extends != "" {
+		return fmt.Errorf("provider %q: extends provider %q is also derived", input.Name, input.Extends)
+	}
+	if base.Enabled != nil && !*base.Enabled {
+		return fmt.Errorf("provider %q: extends provider %q is disabled", input.Name, input.Extends)
+	}
+	if input.ProviderType != base.ProviderType {
+		return fmt.Errorf("provider %q: type %q must match extends provider %q type %q", input.Name, input.ProviderType, input.Extends, base.ProviderType)
+	}
+	return nil
 }
 
 func existingAliasInput(blocks []topLevelBlock, name string) *aliasInput {

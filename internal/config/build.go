@@ -66,12 +66,23 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		rt.Metrics = Metrics{Token: raw.Metrics[0].Token, Enabled: true}
 	}
 
-	for _, p := range raw.Providers {
+	providerByRawName := make(map[string]rawProvider)
+	providerSyntaxByName := make(map[string]rawProviderSyntax)
+	for i, p := range raw.Providers {
 		if seenProviderNames[p.Name] {
 			return nil, fmt.Errorf("duplicate provider %q", p.Name)
 		}
 		seenProviderNames[p.Name] = true
+		providerByRawName[p.Name] = p
+		if i < len(raw.providerSyntax) {
+			providerSyntaxByName[p.Name] = raw.providerSyntax[i]
+		}
+	}
 
+	for _, p := range raw.Providers {
+		if p.Extends != "" {
+			continue
+		}
 		provider, err := buildProvider(p, rt.UpstreamHeaderTimeout)
 		if err != nil {
 			return nil, fmt.Errorf("provider %q: %w", p.Name, err)
@@ -80,6 +91,17 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 			rt.DisabledProviders = append(rt.DisabledProviders, provider)
 			disabledProviderNames[provider.Name] = true
 			continue
+		}
+		rt.Providers = append(rt.Providers, provider)
+		rt.ProviderByName[p.Name] = provider
+	}
+	for _, p := range raw.Providers {
+		if p.Extends == "" {
+			continue
+		}
+		provider, err := buildDerivedProvider(p, providerByRawName, providerSyntaxByName, rt.ProviderByName)
+		if err != nil {
+			return nil, fmt.Errorf("provider %q: %w", p.Name, err)
 		}
 		rt.Providers = append(rt.Providers, provider)
 		rt.ProviderByName[p.Name] = provider
@@ -105,6 +127,83 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 	}
 
 	return rt, nil
+}
+
+func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvider, syntaxByName map[string]rawProviderSyntax, builtByName map[string]Provider) (Provider, error) {
+	if rawProvider.Extends == rawProvider.Name {
+		return Provider{}, fmt.Errorf("extends %q references itself", rawProvider.Extends)
+	}
+	baseRaw, ok := rawByName[rawProvider.Extends]
+	if !ok {
+		return Provider{}, fmt.Errorf("extends %q is not defined", rawProvider.Extends)
+	}
+	if baseRaw.Extends != "" {
+		return Provider{}, fmt.Errorf("extends %q references derived provider %q; inheritance chains are not supported", rawProvider.Extends, rawProvider.Extends)
+	}
+	base, ok := builtByName[rawProvider.Extends]
+	if !ok {
+		return Provider{}, fmt.Errorf("extends %q references a disabled provider", rawProvider.Extends)
+	}
+	if rawProvider.Type != baseRaw.Type {
+		return Provider{}, fmt.Errorf("type %q must match base provider %q type %q", rawProvider.Type, rawProvider.Extends, baseRaw.Type)
+	}
+	if err := validateDerivedProviderSurface(rawProvider, syntaxByName[rawProvider.Name]); err != nil {
+		return Provider{}, err
+	}
+	provider := cloneProvider(base)
+	provider.Name = rawProvider.Name
+	if rawProvider.DisplayName != "" {
+		provider.DisplayName = rawProvider.DisplayName
+	}
+	provider.APIKey = rawProvider.APIKey // pragma: allowlist secret
+	provider.APIKeyRef = nil             // pragma: allowlist secret
+	if rawProvider.APIKeyRef != nil {    // pragma: allowlist secret
+		provider.APIKeyRef = &APIKeyRef{Path: rawProvider.APIKeyRef.Path, Key: rawProvider.APIKeyRef.Key}
+		if provider.APIKeyRef.Path == "" {
+			provider.APIKeyRef.Path = defaultKeyFilePath()
+		}
+	}
+	if err := validateProviderCredentialStructure(&provider); err != nil {
+		return Provider{}, err
+	}
+	if err := resolveProviderCredential(&provider); err != nil {
+		return Provider{}, err
+	}
+	return provider, nil
+}
+
+func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderSyntax) error {
+	for _, name := range []string{"base_url", "upstream_header_timeout", "enabled"} {
+		if syntax.Attrs[name] {
+			return fmt.Errorf("derived provider cannot declare %s", name)
+		}
+	}
+	if syntax.Blocks["model"] > 0 {
+		return fmt.Errorf("derived provider cannot declare model blocks")
+	}
+	hasAPIKey := syntax.Attrs["api_key"]
+	hasAPIKeyRef := syntax.Blocks["api_key_ref"] > 0
+	if hasAPIKey == hasAPIKeyRef { // pragma: allowlist secret
+		return fmt.Errorf("derived provider requires exactly one local credential: api_key or api_key_ref")
+	}
+	return nil
+}
+
+func cloneProvider(provider Provider) Provider {
+	out := provider
+	if provider.APIKeyRef != nil { // pragma: allowlist secret
+		ref := *provider.APIKeyRef
+		out.APIKeyRef = &ref
+	}
+	out.Models = make([]Model, 0, len(provider.Models))
+	out.ModelByName = make(map[string]Model, len(provider.ModelByName))
+	for _, model := range provider.Models {
+		copyModel := model
+		copyModel.Capabilities = append([]Capability(nil), model.Capabilities...)
+		out.Models = append(out.Models, copyModel)
+		out.ModelByName[copyModel.Name] = copyModel
+	}
+	return out
 }
 
 func buildLogging(rawLogging *rawLogging) (Logging, error) {
