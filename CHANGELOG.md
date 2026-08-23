@@ -1,3 +1,13 @@
+## [0.16.0](https://github.com/egose/aiproxy/compare/v0.15.0...v0.16.0) (2026-08-23)
+
+### Features
+
+* **website:** add restricted provider inheritance and derived provider editing ([66d9ff9](https://github.com/egose/aiproxy/commit/66d9ff94bea5368757273c7dc307e646c502e0c6))
+
+### Documentation
+
+* **website:** document provider inheritance and update examples ([21db482](https://github.com/egose/aiproxy/commit/21db482da9c19ad75c7f5a6760808155748df4d9))
+
 ## [0.15.0](https://github.com/egose/aiproxy/compare/v0.14.0...v0.15.0) (2026-08-10)
 
 ### Features
