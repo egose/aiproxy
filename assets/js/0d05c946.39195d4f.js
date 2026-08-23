@@ -58,6 +58,10 @@ const toc = [{
   "id": "key-file-example",
   "level": 2
 }, {
+  "value": "Repeated Credentials With <code>extends</code>",
+  "id": "repeated-credentials-with-extends",
+  "level": 2
+}, {
   "value": "Tips",
   "id": "tips",
   "level": 2
@@ -190,6 +194,28 @@ function _createMdxContent(props) {
         className: "language-hcl",
         children: "api_key_ref {\n  path = \"/etc/aiproxy/keys.json\"\n  key  = \"openai\"\n}\n"
       })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.h2, {
+      id: "repeated-credentials-with-extends",
+      children: ["Repeated Credentials With ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "extends"
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Use ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "extends"
+      }), " to define one provider's endpoint and models, then add more credentials as independent providers:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "provider \"openai-compatible\" \"nvidia-1\" {\n  display_name = \"Nvidia - j.dev\"\n  base_url     = \"https://integrate.api.nvidia.com/v1\"\n\n  api_key_ref {\n    key = \"nvidia-1\"\n  }\n\n  model \"z-ai/glm-5.2\" {\n    display_name = \"GLM 5.2\"\n    capabilities = [\"chat\", \"responses\"]\n  }\n}\n\nprovider \"openai-compatible\" \"nvidia-2\" {\n  extends      = \"nvidia-1\"\n  display_name = \"Nvidia - corean\"\n\n  api_key_ref {\n    key = \"nvidia-2\"\n  }\n}\n\nalias \"nvidia_chat\" {\n  algorithm = \"round_robin\"\n\n  target {\n    provider = \"nvidia-1\"\n    model    = \"z-ai/glm-5.2\"\n  }\n\n  target {\n    provider = \"nvidia-2\"\n    model    = \"z-ai/glm-5.2\"\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The derived provider must use the same type label as the base and must declare its own ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key"
+      }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key_ref"
+      }), ". It cannot override ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), ", timeout, enabled state, or models. Aliases still list each derived provider target explicitly."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "tips",
       children: "Tips"

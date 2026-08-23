@@ -196,7 +196,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-sh",
-        children: "aiproxy configure provider \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name backup \\\n  --type openai-compatible \\\n  --display-name \"Backup provider\" \\\n  --base-url https://llm.internal/v1 \\\n  --upstream-header-timeout 180s \\\n  --secrets-path /etc/aiproxy/keys.json \\\n  --secrets-key localai \\\n  --api-key \"$LOCALAI_API_KEY\" \\\n  --model qwen3-32b=qwen/qwen3-32b \\\n  --model-capabilities qwen3-32b=chat,responses\n"
+        children: "aiproxy configure provider \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name backup \\\n  --type openai-compatible \\\n  --display-name \"Backup provider\" \\\n  --base-url https://llm.internal/v1 \\\n  --upstream-header-timeout 180s \\\n  --secrets-path /etc/aiproxy/keys.json \\\n  --secrets-key localai \\\n  --api-key \"$LOCALAI_API_KEY\" \\\n  --model qwen3-32b=qwen/qwen3-32b \\\n  --model-capabilities qwen3-32b=chat,responses\n\naiproxy configure provider \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name backup-2 \\\n  --type openai-compatible \\\n  --extends backup \\\n  --display-name \"Backup provider 2\" \\\n  --secrets-key backup-2 \\\n  --api-key \"$BACKUP_2_API_KEY\"\n"
       })
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Root upstream timeout example:"

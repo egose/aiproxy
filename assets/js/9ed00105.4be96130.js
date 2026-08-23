@@ -62,6 +62,10 @@ const toc = [{
   "id": "providers",
   "level": 2
 }, {
+  "value": "Provider Inheritance",
+  "id": "provider-inheritance",
+  "level": 3
+}, {
   "value": "Upstream Header Timeout",
   "id": "upstream-header-timeout",
   "level": 2
@@ -316,6 +320,10 @@ function _createMdxContent(props) {
         }), " for ", (0,jsx_runtime.jsx)(_components.code, {
           children: "openai-compatible"
         })]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "extends"
+        }), " for restricted provider inheritance"]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: (0,jsx_runtime.jsx)(_components.code, {
           children: "api_key"
@@ -368,6 +376,44 @@ function _createMdxContent(props) {
       }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Provider names are part of the public model string, so keep them stable and machine-friendly."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "provider-inheritance",
+      children: "Provider Inheritance"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Use ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "extends"
+      }), " when several accounts share the same provider type, endpoint, timeout, and model inventory but need separate credentials:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "provider \"openai-compatible\" \"nvidia-1\" {\n  display_name = \"Nvidia - j.dev\"\n  base_url     = \"https://integrate.api.nvidia.com/v1\"\n\n  api_key_ref {\n    key = \"nvidia-1\"\n  }\n\n  model \"z-ai/glm-5.2\" {\n    display_name = \"GLM 5.2\"\n    capabilities = [\"chat\", \"responses\"]\n  }\n}\n\nprovider \"openai-compatible\" \"nvidia-2\" {\n  extends      = \"nvidia-1\"\n  display_name = \"Nvidia - corean\"\n\n  api_key_ref {\n    key = \"nvidia-2\"\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["A derived provider may be declared before or after its base. It may declare only ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "extends"
+      }), ", optional ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "display_name"
+      }), ", and exactly one local credential, either ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key"
+      }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key_ref"
+      }), ". It inherits the base provider type, ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), ", effective upstream header timeout, enabled state, and all model blocks."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The type label remains required and must match the base. The base must exist, be enabled, and must not itself use ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "extends"
+      }), "; inheritance chains are rejected. Local ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "upstream_header_timeout"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "enabled"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), " declarations are rejected instead of ignored."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Derived providers are flattened during config loading and reload. After a successful load, direct model strings, health, metrics, billing, and dashboard inventory use the derived provider's own name. Aliases still list each provider target explicitly."
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "upstream-header-timeout",
       children: "Upstream Header Timeout"
