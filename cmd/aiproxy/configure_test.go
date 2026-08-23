@@ -20,6 +20,7 @@ func TestConfigureProviderCreatesConfigAndSecrets(t *testing.T) {
 		"",
 		"",
 		"",
+		"",
 		secretsPath,
 		"",
 		"sk-test-primary",
@@ -80,6 +81,7 @@ func TestConfigureProviderRejectsInvalidProviderName(t *testing.T) {
 		"",
 		"",
 		"",
+		"",
 		secretsPath,
 		"",
 		"sk-test-primary",
@@ -135,6 +137,7 @@ provider "openai" "primary" {
 		"2",
 		"primary",
 		"Backup provider",
+		"",
 		"",
 		"https://llm.internal/v1",
 		"2",
@@ -922,6 +925,7 @@ func TestConfigureProviderEnvExpressionRejectsMalformedThenAccepts(t *testing.T)
 		"",                      // provider type default openai
 		"primary",               // provider name
 		"",                      // display name
+		"",                      // extends
 		"",                      // upstream header timeout
 		"2",                     // credential storage: env_expression
 		`env(FOO)`,              // malformed env expression -> re-prompt
