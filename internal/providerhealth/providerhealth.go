@@ -29,19 +29,31 @@ type cachedHealth struct {
 }
 
 type Tracker struct {
-	mu       sync.Mutex
-	known    map[string]bool
-	cache    map[string]cachedHealth
-	cooldown time.Duration
-	cacheTTL time.Duration
-	now      func() time.Time
-	logger   *slog.Logger
-	backend  backend
-	metrics  *observability.Metrics
+	closeOnce sync.Once
+	closeErr  error
+	mu        sync.Mutex
+	known     map[string]bool
+	cache     map[string]cachedHealth
+	cooldown  time.Duration
+	cacheTTL  time.Duration
+	now       func() time.Time
+	logger    *slog.Logger
+	backend   backend
+	metrics   *observability.Metrics
 }
+
+type Backend = backend
 
 func New(metrics *observability.Metrics, cfg config.ProviderHealth) *Tracker {
 	return newTracker(metrics, cfg, nil)
+}
+
+func NewWithBackend(metrics *observability.Metrics, cfg config.ProviderHealth, backend Backend) *Tracker {
+	t := newTracker(metrics, cfg, nil)
+	if backend != nil {
+		t.backend = backend
+	}
+	return t
 }
 
 func newTracker(metrics *observability.Metrics, cfg config.ProviderHealth, logger *slog.Logger) *Tracker {
@@ -76,14 +88,15 @@ func newTracker(metrics *observability.Metrics, cfg config.ProviderHealth, logge
 	return t
 }
 
-func (t *Tracker) SetProviders(providers map[string]config.Provider) {
+func (t *Tracker) SetProviders(catalog config.Catalog) {
 	if t == nil {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	known := make(map[string]bool, len(providers))
-	for name := range providers {
+	names := catalog.ProviderNames()
+	known := make(map[string]bool, len(names))
+	for _, name := range names {
 		known[name] = true
 		if t.metrics != nil {
 			t.metrics.SetProviderHealthy(name, true)
@@ -104,7 +117,10 @@ func (t *Tracker) Close() error {
 	if t == nil || t.backend == nil {
 		return nil
 	}
-	return t.backend.Close()
+	t.closeOnce.Do(func() {
+		t.closeErr = t.backend.Close()
+	})
+	return t.closeErr
 }
 
 func (t *Tracker) Snapshot() map[string]bool {
@@ -190,17 +206,14 @@ func (t *Tracker) IsHealthyContext(ctx context.Context, name string) bool {
 	return healthy
 }
 
-func (t *Tracker) AnyHealthy(providers map[string]config.Provider) bool {
-	return t.AnyHealthyContext(context.Background(), providers)
+func (t *Tracker) AnyHealthy(catalog config.Catalog) bool {
+	return t.AnyHealthyCatalogContext(context.Background(), catalog)
 }
 
-func (t *Tracker) AnyHealthyContext(ctx context.Context, providers map[string]config.Provider) bool {
-	if len(providers) == 0 {
+func (t *Tracker) AnyHealthyCatalogContext(ctx context.Context, catalog config.Catalog) bool {
+	names := catalog.ProviderNames()
+	if len(names) == 0 {
 		return false
-	}
-	names := make([]string, 0, len(providers))
-	for name := range providers {
-		names = append(names, name)
 	}
 	health, err := t.backend.Snapshot(ctx, names)
 	if err != nil {

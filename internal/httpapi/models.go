@@ -19,9 +19,9 @@ type AliasTargetCard struct {
 	DisplayName string `json:"display_name,omitempty"`
 }
 
-func BuildModelCatalog(rt *config.Runtime) []ModelCard {
-	cards := make([]ModelCard, 0, countCatalogSize(rt))
-	for _, provider := range rt.Providers {
+func BuildModelCatalog(catalog config.Catalog) []ModelCard {
+	cards := make([]ModelCard, 0, countCatalogSize(catalog))
+	for _, provider := range catalog.Providers() {
 		for _, model := range provider.Models {
 			caps := config.EffectiveCapabilities(provider.Type, model)
 			cards = append(cards, ModelCard{
@@ -35,23 +35,23 @@ func BuildModelCatalog(rt *config.Runtime) []ModelCard {
 			})
 		}
 	}
-	for _, alias := range rt.Aliases {
-		caps := config.AliasEffectiveCapabilities(alias, rt.ProviderByName)
+	for _, alias := range catalog.Aliases() {
+		caps := catalog.AliasEffectiveCapabilities(alias)
 		cards = append(cards, ModelCard{
 			ID:           "alias/" + alias.Name,
 			Object:       "model",
 			Created:      0,
 			OwnedBy:      "alias",
 			Capabilities: capabilityStrings(caps),
-			AliasTargets: buildAliasTargets(alias, rt.ProviderByName),
+			AliasTargets: buildAliasTargets(alias, catalog),
 		})
 	}
 	return cards
 }
 
-func countCatalogSize(rt *config.Runtime) int {
-	total := len(rt.Aliases)
-	for _, provider := range rt.Providers {
+func countCatalogSize(catalog config.Catalog) int {
+	total := catalog.AliasCount()
+	for _, provider := range catalog.Providers() {
 		total += len(provider.Models)
 	}
 	return total
@@ -68,7 +68,7 @@ func capabilityStrings(caps []config.Capability) []string {
 	return out
 }
 
-func buildAliasTargets(alias config.Alias, providers map[string]config.Provider) []AliasTargetCard {
+func buildAliasTargets(alias config.Alias, catalog config.Catalog) []AliasTargetCard {
 	if len(alias.Targets) == 0 {
 		return nil
 	}
@@ -78,10 +78,8 @@ func buildAliasTargets(alias config.Alias, providers map[string]config.Provider)
 			Provider: target.Provider,
 			Model:    target.Model,
 		}
-		if provider, ok := providers[target.Provider]; ok {
-			if model, ok := provider.ModelByName[target.Model]; ok {
-				card.DisplayName = modelDisplayName(provider, model)
-			}
+		if provider, model, ok := catalog.Model(target.Provider, target.Model); ok {
+			card.DisplayName = modelDisplayName(provider, model)
 		}
 		out = append(out, card)
 	}

@@ -83,6 +83,8 @@ type providerOptions struct {
 	Enabled               bool
 	HasEnabled            bool
 	NonInteractive        bool
+	BaseProviderNames     []string
+	BaseProviderTypes     map[string]string
 }
 
 type aliasOptions struct {
@@ -590,6 +592,7 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 		return nil
 	}
 
+	options.BaseProviderNames, options.BaseProviderTypes = eligibleBaseProviders(doc.blocks)
 	input, secretsUpdate, err := promptProviderInput(prompts, existingProviderInput(doc.blocks, nameForAction), options)
 	if err != nil {
 		return err
@@ -1549,7 +1552,6 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		providerType := defaults.ProviderType
 		providerName := defaults.Name
 		displayName := defaults.DisplayName
-		extends := defaults.Extends
 		upstreamHeaderTimeout := defaults.UpstreamHeaderTimeout
 		if err := prompts.runHuhForm(
 			huh.NewGroup(
@@ -1560,12 +1562,22 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 					huh.NewOption("Gemini", "gemini"),
 				).Value(&providerType),
 				huh.NewInput().Title("Provider name").Description(providerNameDescription()).Value(&providerName).Validate(validateProviderName),
-				huh.NewInput().Title("Extends provider").Description("Leave empty for a complete provider block").Value(&extends),
 				huh.NewInput().Title("Display name").Description(providerDisplayNameDescription()).Value(&displayName),
 			).Title("Provider"),
 		); err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
+		extends := defaults.Extends
+		baseChoices := providerBaseChoices(options, providerType, providerName, defaults.Extends)
+		extendsChoice := extendsDefault(baseChoices, defaults.Extends)
+		if err := prompts.runHuhForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().Title("Extends provider").Description("Choose none for a complete provider block").Options(huh.NewOptions(baseChoices...)...).Value(&extendsChoice),
+			).Title("Provider Inheritance"),
+		); err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
+		extends = extendsFromChoice(extendsChoice)
 		if strings.TrimSpace(extends) == "" {
 			if err := prompts.runHuhForm(
 				huh.NewGroup(
@@ -1687,10 +1699,13 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
-	extends, err := prompts.ask("Extends provider (empty for none)", defaults.Extends)
+	extends := defaults.Extends
+	baseChoices := providerBaseChoices(options, providerType, providerName, defaults.Extends)
+	extendsChoice, err := prompts.askChoiceWithDescription("Extends provider", "Choose none for a complete provider block.", baseChoices, extendsDefault(baseChoices, defaults.Extends))
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
+	extends = extendsFromChoice(extendsChoice)
 	upstreamHeaderTimeout := defaults.UpstreamHeaderTimeout
 	if strings.TrimSpace(extends) == "" {
 		upstreamHeaderTimeout, err = prompts.askValidated("Upstream header timeout", defaults.UpstreamHeaderTimeout, validateOptionalPositiveDuration)
@@ -3143,6 +3158,51 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 		input.Models = append(input.Models, model)
 	}
 	return input
+}
+
+func eligibleBaseProviders(blocks []topLevelBlock) ([]string, map[string]string) {
+	names := make([]string, 0, len(blocks))
+	types := make(map[string]string)
+	for _, block := range blocks {
+		if block.Type != "provider" || len(block.Labels) < 2 {
+			continue
+		}
+		input := existingProviderInput(blocks, block.Labels[1])
+		if input == nil || input.Extends != "" || input.ProviderType == "" || (input.Enabled != nil && !*input.Enabled) {
+			continue
+		}
+		names = append(names, input.Name)
+		types[input.Name] = input.ProviderType
+	}
+	return names, types
+}
+
+func providerBaseChoices(options providerOptions, providerType, providerName, current string) []string {
+	choices := []string{"none"}
+	for _, name := range options.BaseProviderNames {
+		if name == providerName || options.BaseProviderTypes[name] != providerType {
+			continue
+		}
+		choices = append(choices, name)
+	}
+	if current != "" && !containsName(choices, current) {
+		choices = append(choices, current)
+	}
+	return choices
+}
+
+func extendsDefault(choices []string, current string) string {
+	if current != "" && containsName(choices, current) {
+		return current
+	}
+	return "none"
+}
+
+func extendsFromChoice(choice string) string {
+	if choice == "none" {
+		return ""
+	}
+	return strings.TrimSpace(choice)
 }
 
 func validateProviderExtendsInput(blocks []topLevelBlock, input providerInput) error {

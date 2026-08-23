@@ -11,8 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
-	"syscall"
 	"time"
 
 	"github.com/egose/aiproxy/internal/filestore"
@@ -24,6 +22,8 @@ const (
 	daemonReadyEnv     = "AIPROXY_DAEMON_READY_FD"
 	daemonReadyMessage = "ready\n"
 )
+
+var errDaemonLifecycleUnsupported = errors.New("daemon lifecycle is unsupported on this platform")
 
 type daemonState struct {
 	Version   int    `json:"version"`
@@ -48,6 +48,9 @@ func resolveDaemonPaths() (pidPath, logPath string) {
 }
 
 func spawnDaemon(cmd *cobra.Command, cfgPath string) error {
+	if !daemonLifecycleSupported() {
+		return errDaemonLifecycleUnsupported
+	}
 	statePath, lockPath, logPath, canonicalConfig, err := resolveDaemonFiles(cfgPath)
 	if err != nil {
 		return err
@@ -94,7 +97,7 @@ func spawnDaemon(cmd *cobra.Command, cfgPath string) error {
 	child.Stdin = nil
 	child.Stdout = logFile
 	child.Stderr = logFile
-	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	configureDaemonCommand(child)
 	child.ExtraFiles = []*os.File{readyWrite}
 	child.Env = append(os.Environ(), daemonReadyEnv+"=3")
 	if err := child.Start(); err != nil {
@@ -105,7 +108,7 @@ func spawnDaemon(cmd *cobra.Command, cfgPath string) error {
 
 	pid := child.Process.Pid
 	if err := waitForDaemonReady(child, readyRead); err != nil {
-		_ = child.Process.Signal(syscall.SIGTERM)
+		_ = terminateDaemonProcess(child.Process)
 		_, _ = child.Process.Wait()
 		_ = os.Remove(statePath)
 		return err
@@ -113,7 +116,7 @@ func spawnDaemon(cmd *cobra.Command, cfgPath string) error {
 
 	startTime, err := processStartTime(pid)
 	if err != nil {
-		_ = child.Process.Signal(syscall.SIGTERM)
+		_ = terminateDaemonProcess(child.Process)
 		_, _ = child.Process.Wait()
 		_ = os.Remove(statePath)
 		return fmt.Errorf("verify daemon identity: %w", err)
@@ -121,20 +124,20 @@ func spawnDaemon(cmd *cobra.Command, cfgPath string) error {
 	state := daemonState{Version: daemonStateVersion, PID: pid, Exe: exe, StartTime: startTime, Config: canonicalConfig, Created: time.Now().Unix()}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
-		_ = child.Process.Signal(syscall.SIGTERM)
+		_ = terminateDaemonProcess(child.Process)
 		_, _ = child.Process.Wait()
 		_ = os.Remove(statePath)
 		return fmt.Errorf("encode daemon state: %w", err)
 	}
 	data = append(data, '\n')
 	if err := filestore.WriteFile(statePath, data, 0o600, filestore.Options{DirMode: 0o700, Secret: true}); err != nil {
-		_ = child.Process.Signal(syscall.SIGTERM)
+		_ = terminateDaemonProcess(child.Process)
 		_, _ = child.Process.Wait()
 		_ = os.Remove(statePath)
 		return fmt.Errorf("write daemon state %s: %w", statePath, err)
 	}
 	if err := child.Process.Release(); err != nil {
-		_ = child.Process.Signal(syscall.SIGTERM)
+		_ = terminateDaemonProcess(child.Process)
 		_, _ = child.Process.Wait()
 		_ = os.Remove(statePath)
 		return fmt.Errorf("release daemon: %w", err)
@@ -166,29 +169,6 @@ func canonicalConfigPath(path string) (string, error) {
 		return resolved, nil
 	}
 	return abs, nil
-}
-
-func acquireDaemonLock(path string) (*os.File, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("create lock dir %s: %w", filepath.Dir(path), err)
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("open lifecycle lock %s: %w", path, err)
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		_ = f.Close()
-		if errno, ok := err.(syscall.Errno); ok && (errno == syscall.EWOULDBLOCK || errno == syscall.EAGAIN) {
-			return nil, errors.New("another daemon lifecycle operation is in progress")
-		}
-		return nil, fmt.Errorf("lock lifecycle state: %w", err)
-	}
-	return f, nil
-}
-
-func releaseDaemonLock(f *os.File) {
-	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	_ = f.Close()
 }
 
 func waitForDaemonReady(child *exec.Cmd, ready *os.File) error {
@@ -265,46 +245,6 @@ func firstLine(data []byte) string {
 	return string(data)
 }
 
-// processAlive returns true if the process exists. We use signal 0, which is
-// the standard no-op probe.
-func processAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		if errors.Is(err, os.ErrProcessDone) {
-			return false
-		}
-		if errno, ok := err.(syscall.Errno); ok && errno == syscall.ESRCH {
-			return false
-		}
-		// EPERM means the process exists but we cannot signal it.
-		if errno, ok := err.(syscall.Errno); ok && errno == syscall.EPERM {
-			return true
-		}
-		return false
-	}
-	return !processZombie(pid)
-}
-
-func processZombie(pid int) bool {
-	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
-	if err != nil {
-		return false
-	}
-	s := string(data)
-	end := strings.LastIndex(s, ")")
-	if end < 0 || end+2 > len(s) {
-		return false
-	}
-	fields := strings.Fields(s[end+2:])
-	return len(fields) > 0 && fields[0] == "Z"
-}
-
 func readVerifiedDaemonState(path string) (daemonState, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -329,36 +269,10 @@ func readVerifiedDaemonState(path string) (daemonState, bool) {
 	return state, true
 }
 
-func processExe(pid int) (string, error) {
-	exe, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "exe"))
-	if err != nil {
-		return "", err
-	}
-	exe = strings.TrimSuffix(exe, " (deleted)")
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		return resolved, nil
-	}
-	return exe, nil
-}
-
-func processStartTime(pid int) (string, error) {
-	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
-	if err != nil {
-		return "", err
-	}
-	s := string(data)
-	end := strings.LastIndex(s, ")")
-	if end < 0 || end+2 > len(s) {
-		return "", errors.New("malformed process stat")
-	}
-	fields := strings.Fields(s[end+2:])
-	if len(fields) <= 19 {
-		return "", errors.New("malformed process stat")
-	}
-	return fields[19], nil
-}
-
 func stopServer(cfgPath string, out io.Writer) error {
+	if !daemonLifecycleSupported() {
+		return errDaemonLifecycleUnsupported
+	}
 	statePath, lockPath, _, _, err := resolveDaemonFiles(cfgPath)
 	if err != nil {
 		return err
@@ -377,7 +291,7 @@ func stopServer(cfgPath string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("find pid %d: %w", pid, err)
 	}
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
+	if err := terminateDaemonProcess(proc); err != nil {
 		return fmt.Errorf("signal pid %d: %w", pid, err)
 	}
 
@@ -390,7 +304,7 @@ func stopServer(cfgPath string, out io.Writer) error {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	if err := proc.Signal(syscall.SIGKILL); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := killDaemonProcess(proc); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return fmt.Errorf("kill pid %d: %w", pid, err)
 	}
 	_ = os.Remove(statePath)
@@ -399,6 +313,9 @@ func stopServer(cfgPath string, out io.Writer) error {
 }
 
 func statusServer(cfgPath string, out io.Writer) error {
+	if !daemonLifecycleSupported() {
+		return errDaemonLifecycleUnsupported
+	}
 	statePath, lockPath, _, _, err := resolveDaemonFiles(cfgPath)
 	if err != nil {
 		return err

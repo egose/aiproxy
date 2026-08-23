@@ -61,23 +61,32 @@ func (d *sseDecoder) Next() (sseEvent, error) {
 			continue
 		}
 
-		field, value, ok := strings.Cut(line, ":")
-		if ok && strings.HasPrefix(value, " ") {
-			value = value[1:]
-		}
-		if !ok {
-			value = ""
-		}
+		field, value := parseSSEField(line)
 
 		switch field {
 		case "event":
-			d.eventType = strings.TrimSpace(value)
+			d.eventType = value
 		case "data":
-			if err := d.appendData(strings.TrimSpace(value)); err != nil {
+			if err := d.appendData(value); err != nil {
 				return sseEvent{}, err
 			}
 		}
 	}
+}
+
+func parseSSEField(line string) (string, string) {
+	line = strings.TrimRight(line, "\r")
+	if line == "" || strings.HasPrefix(line, ":") {
+		return "", ""
+	}
+	field, value, ok := strings.Cut(line, ":")
+	if !ok {
+		return field, ""
+	}
+	if strings.HasPrefix(value, " ") {
+		value = value[1:]
+	}
+	return field, value
 }
 
 func (d *sseDecoder) readLine() (string, error) {
@@ -148,6 +157,108 @@ func (d *sseDecoder) flushEvent() sseEvent {
 	d.dataLines = nil
 	d.dataBytes = 0
 	return event
+}
+
+type sseObserver struct {
+	maxLine   int
+	maxEvent  int
+	line      []byte
+	eventType string
+	dataLines []string
+	dataBytes int
+	disabled  bool
+	onEvent   func(sseEvent)
+}
+
+func newSSEObserver(onEvent func(sseEvent)) *sseObserver {
+	return &sseObserver{maxLine: maxSSELineBytes, maxEvent: maxSSEEventBytes, onEvent: onEvent}
+}
+
+func (o *sseObserver) Observe(chunk []byte) error {
+	if o == nil || o.disabled {
+		return nil
+	}
+	for _, b := range chunk {
+		if b == '\n' {
+			if len(o.line)+1 > o.maxLine {
+				return o.disable(ErrSSEOverflow{Kind: "line", Limit: o.maxLine})
+			}
+			if err := o.observeLine(); err != nil {
+				return o.disable(err)
+			}
+			continue
+		}
+		if len(o.line)+1 > o.maxLine {
+			return o.disable(ErrSSEOverflow{Kind: "line", Limit: o.maxLine})
+		}
+		o.line = append(o.line, b)
+	}
+	return nil
+}
+
+func (o *sseObserver) ObserveEOF() error {
+	if o == nil || o.disabled {
+		return nil
+	}
+	if len(o.line) > 0 {
+		if err := o.observeLine(); err != nil {
+			return o.disable(err)
+		}
+	}
+	o.flushEvent()
+	return nil
+}
+
+func (o *sseObserver) observeLine() error {
+	line := string(o.line)
+	o.line = o.line[:0]
+	if strings.TrimRight(line, "\r") == "" {
+		o.flushEvent()
+		return nil
+	}
+	field, value := parseSSEField(line)
+	switch field {
+	case "event":
+		o.eventType = value
+	case "data":
+		return o.appendData(value)
+	}
+	return nil
+}
+
+func (o *sseObserver) appendData(value string) error {
+	added := len(value)
+	if len(o.dataLines) > 0 {
+		added++
+	}
+	if o.dataBytes+added > o.maxEvent {
+		return ErrSSEOverflow{Kind: "event", Limit: o.maxEvent}
+	}
+	o.dataLines = append(o.dataLines, value)
+	o.dataBytes += added
+	return nil
+}
+
+func (o *sseObserver) flushEvent() {
+	if o.eventType == "" && len(o.dataLines) == 0 {
+		return
+	}
+	event := sseEvent{Type: o.eventType, Data: strings.Join(o.dataLines, "\n")}
+	o.eventType = ""
+	o.dataLines = nil
+	o.dataBytes = 0
+	if o.onEvent != nil {
+		o.onEvent(event)
+	}
+}
+
+func (o *sseObserver) disable(err error) error {
+	o.disabled = true
+	o.line = nil
+	o.eventType = ""
+	o.dataLines = nil
+	o.dataBytes = 0
+	return err
 }
 
 type pipeReadCloser struct {

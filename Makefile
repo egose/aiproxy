@@ -1,7 +1,8 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
-.PHONY: help build build-all build-single build-archive format fmt vet test test-race cover clean \
-        docker-build docker-run run validate
+.PHONY: help build build-all build-single build-archive validate-archives \
+        validate-build-atomicity check-toolchain docs-contract format fmt vet test test-race integration cover clean docker-build \
+        docker-run run validate
 
 # --- Project --------------------------------------------------------------
 
@@ -11,6 +12,7 @@ VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 
 LD_FLAGS    := -s -w -X main.version=$(VERSION)
 DIST_DIR    := dist
 PREFIX      := aiproxy
+BUILD_GO    ?= go
 
 # --- Cross-compile matrix -------------------------------------------------
 
@@ -39,34 +41,81 @@ help: ## Show this help
 
 build: ## Build the aiproxy binary into dist/
 	@mkdir -p $(DIST_DIR)
-	CGO_ENABLED=0 go build -ldflags "$(LD_FLAGS)" -o $(DIST_DIR)/$(BINARY) $(MAIN_PKG)
+	CGO_ENABLED=0 $(BUILD_GO) build -ldflags "$(LD_FLAGS)" -o $(DIST_DIR)/$(BINARY) $(MAIN_PKG)
 	@echo "built $(DIST_DIR)/$(BINARY) (version $(VERSION))"
 
 build-single: ## Build for a single OS:ARCH pair (OS_ARCH=linux:amd64)
 	@set -e; \
+	if [ -z "$(OS_ARCH)" ]; then echo "OS_ARCH is required" >&2; exit 1; fi; \
 	OS_ARCH=$(OS_ARCH); \
-	OS=$$(echo $$OS_ARCH | cut -d: -f1); \
-	ARCH=$$(echo $$OS_ARCH | cut -d: -f2); \
+	OS=$${OS_ARCH%%:*}; \
+	ARCH=$${OS_ARCH#*:}; \
+	if [ -z "$$OS" ] || [ -z "$$ARCH" ] || [ "$$OS" = "$$ARCH" ]; then echo "invalid OS_ARCH=$$OS_ARCH" >&2; exit 1; fi; \
 	echo "Building for OS=$$OS and ARCH=$$ARCH"; \
 	DIR="$(DIST_DIR)/$$OS-$$ARCH"; \
-	mkdir -p $$DIR; \
 	EXT=$$(if [ "$$OS" = "windows" ]; then echo ".exe"; else echo ""; fi); \
+	TMP="$(DIST_DIR)/.tmp-$$OS-$$ARCH-$$$$"; \
+	rm -rf "$$TMP" "$$DIR"; \
+	mkdir -p "$(DIST_DIR)" "$$TMP"; \
+	trap 'rm -rf "'"$$TMP"'"' EXIT; \
 	CGO_ENABLED=0 GOOS=$$OS GOARCH=$$ARCH \
-	  go build -ldflags "$(LD_FLAGS) -X main.version=$(VERSION)/$$OS-$$ARCH" \
-	  -o $$DIR/$(BINARY)$$EXT $(MAIN_PKG)
+	  $(BUILD_GO) build -ldflags "$(LD_FLAGS) -X main.version=$(VERSION)/$$OS-$$ARCH" \
+	  -o "$$TMP/$(BINARY)$$EXT" $(MAIN_PKG); \
+	if [ ! -s "$$TMP/$(BINARY)$$EXT" ]; then echo "missing or empty executable for $$OS_ARCH" >&2; exit 1; fi; \
+	mv "$$TMP" "$$DIR"; \
+	trap - EXIT
 
 build-all: ## Cross-compile for all OS/arch pairs in OS_ARCH_PAIRS
-	@$(foreach pair,$(OS_ARCH_PAIRS),$(MAKE) build-single OS_ARCH=$(pair);)
+	@set -e; \
+	for pair in $(OS_ARCH_PAIRS); do \
+	  $(MAKE) build-single OS_ARCH=$$pair; \
+	done
 
 build-archive: ## Tar each cross-compiled dist/<os>-<arch>/ dir into a release archive
 	@set -e; \
-	for d in $(DIST_DIR)/*-*/; do \
-	  [ -d "$$d" ] || continue; \
-	  name=$$(basename "$$d"); \
+	for pair in $(OS_ARCH_PAIRS); do \
+	  OS=$${pair%%:*}; \
+	  ARCH=$${pair#*:}; \
+	  EXT=$$(if [ "$$OS" = "windows" ]; then echo ".exe"; else echo ""; fi); \
+	  name="$$OS-$$ARCH"; \
+	  d="$(DIST_DIR)/$$name"; \
+	  exe="$$d/$(BINARY)$$EXT"; \
+	  if [ ! -d "$$d" ]; then echo "missing target directory $$d" >&2; exit 1; fi; \
+	  if [ ! -f "$$exe" ] || [ ! -s "$$exe" ]; then echo "missing or empty expected executable $$exe" >&2; exit 1; fi; \
+	  shopt -s nullglob dotglob; entries=("$$d"/*); shopt -u nullglob dotglob; \
+	  if [ "$${#entries[@]}" -ne 1 ] || [ "$${entries[0]}" != "$$exe" ]; then echo "target $$d must contain only $(BINARY)$$EXT" >&2; exit 1; fi; \
 	  archive="$(DIST_DIR)/$(PREFIX)-$$name.tar.gz"; \
-	  tar -czf "$$archive" -C "$$d" .; \
+	  tar -czf "$$archive" -C "$$d" "$(BINARY)$$EXT"; \
 	  echo "archived $$archive"; \
 	done
+
+validate-archives: ## Validate each release archive contains exactly one expected executable
+	@set -e; \
+	for pair in $(OS_ARCH_PAIRS); do \
+	  OS=$${pair%%:*}; \
+	  ARCH=$${pair#*:}; \
+	  EXT=$$(if [ "$$OS" = "windows" ]; then echo ".exe"; else echo ""; fi); \
+	  name="$$OS-$$ARCH"; \
+	  archive="$(DIST_DIR)/$(PREFIX)-$$name.tar.gz"; \
+	  if [ ! -f "$$archive" ] || [ ! -s "$$archive" ]; then echo "missing or empty archive $$archive" >&2; exit 1; fi; \
+	  TMP=$$(mktemp -d); \
+	  trap 'rm -rf "'"$$TMP"'"' EXIT; \
+	  tar -xzf "$$archive" -C "$$TMP"; \
+	  shopt -s nullglob dotglob; entries=("$$TMP"/*); shopt -u nullglob dotglob; \
+	  if [ "$${#entries[@]}" -ne 1 ] || [ "$${entries[0]}" != "$$TMP/$(BINARY)$$EXT" ] || [ ! -f "$${entries[0]}" ] || [ ! -s "$${entries[0]}" ]; then echo "archive $$archive must contain exactly one non-empty $(BINARY)$$EXT" >&2; exit 1; fi; \
+	  rm -rf "$$TMP"; \
+	  trap - EXIT; \
+	  echo "validated $$archive"; \
+	done
+
+validate-build-atomicity: ## Validate cross-build failures and artifact checks fail closed
+	@./scripts/validate-build-atomicity.sh
+
+check-toolchain: ## Validate declared Go and pnpm tool versions stay aligned
+	@./scripts/check-toolchain.sh --self-test
+
+docs-contract: ## Validate high-drift public docs contract tables stay aligned
+	@./scripts/check-doc-contracts.sh
 
 # --- Quality --------------------------------------------------------------
 
@@ -81,6 +130,9 @@ test: ## Run all unit tests
 
 test-race: ## Run tests with the race detector
 	@go test -race ./...
+
+integration: build ## Run hermetic binary-level integration tests
+	@AIPROXY_BINARY="$(CURDIR)/$(DIST_DIR)/$(BINARY)" go test -tags=integration ./internal/integration
 
 cover: ## Run tests with coverage report
 	@go test -coverprofile=$(DIST_DIR)/coverage.out ./...

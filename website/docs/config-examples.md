@@ -104,7 +104,7 @@ Use this when:
 
 - clients should call one stable virtual model
 - you want simple balancing across two backends
-- you want alias retry behavior on transport failures and upstream `5xx`
+- you want alias retry behavior on transport failures, timeouts, and configured retryable upstream statuses
 
 ## Multi-Provider Chat Pool With Tenant-Aware Auth
 

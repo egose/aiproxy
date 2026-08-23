@@ -8,13 +8,16 @@ import (
 
 func buildRuntime(raw *rawFile) (*Runtime, error) {
 	rt := &Runtime{
-		ProviderByName:        make(map[string]Provider),
-		AliasByName:           make(map[string]Alias),
 		Logging:               Logging{Level: LogLevelInfo, AccessLog: true},
 		UpstreamHeaderTimeout: DefaultUpstreamHeaderTimeout,
 	}
 	seenProviderNames := make(map[string]bool)
 	disabledProviderNames := make(map[string]bool)
+	providerByName := make(map[string]Provider)
+	aliasByName := make(map[string]bool)
+	providers := []Provider(nil)
+	disabledProviders := []Provider(nil)
+	aliases := []Alias(nil)
 
 	listener, err := buildListener(raw.Listeners)
 	if err != nil {
@@ -88,29 +91,30 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 			return nil, fmt.Errorf("provider %q: %w", p.Name, err)
 		}
 		if !provider.Enabled {
-			rt.DisabledProviders = append(rt.DisabledProviders, provider)
+			disabledProviders = append(disabledProviders, provider)
 			disabledProviderNames[provider.Name] = true
 			continue
 		}
-		rt.Providers = append(rt.Providers, provider)
-		rt.ProviderByName[p.Name] = provider
+		providers = append(providers, provider)
+		providerByName[p.Name] = provider
 	}
 	for _, p := range raw.Providers {
 		if p.Extends == "" {
 			continue
 		}
-		provider, err := buildDerivedProvider(p, providerByRawName, providerSyntaxByName, rt.ProviderByName)
+		provider, err := buildDerivedProvider(p, providerByRawName, providerSyntaxByName, providerByName)
 		if err != nil {
 			return nil, fmt.Errorf("provider %q: %w", p.Name, err)
 		}
-		rt.Providers = append(rt.Providers, provider)
-		rt.ProviderByName[p.Name] = provider
+		providers = append(providers, provider)
+		providerByName[p.Name] = provider
 	}
 
 	for _, al := range raw.Aliases {
-		if _, dup := rt.AliasByName[al.Name]; dup {
+		if aliasByName[al.Name] {
 			return nil, fmt.Errorf("duplicate alias %q", al.Name)
 		}
+		aliasByName[al.Name] = true
 		retryCodes, err := parseRetryStatusCodes(al.RetryStatusCodes)
 		if err != nil {
 			return nil, fmt.Errorf("alias %q: %w", al.Name, err)
@@ -122,9 +126,9 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 			}
 			alias.Targets = append(alias.Targets, AliasTarget{Provider: t.Provider, Model: t.Model})
 		}
-		rt.Aliases = append(rt.Aliases, alias)
-		rt.AliasByName[al.Name] = alias
+		aliases = append(aliases, alias)
 	}
+	rt.Catalog = NewCatalog(providers, disabledProviders, aliases)
 
 	return rt, nil
 }
@@ -187,23 +191,6 @@ func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderS
 		return fmt.Errorf("derived provider requires exactly one local credential: api_key or api_key_ref")
 	}
 	return nil
-}
-
-func cloneProvider(provider Provider) Provider {
-	out := provider
-	if provider.APIKeyRef != nil { // pragma: allowlist secret
-		ref := *provider.APIKeyRef
-		out.APIKeyRef = &ref
-	}
-	out.Models = make([]Model, 0, len(provider.Models))
-	out.ModelByName = make(map[string]Model, len(provider.ModelByName))
-	for _, model := range provider.Models {
-		copyModel := model
-		copyModel.Capabilities = append([]Capability(nil), model.Capabilities...)
-		out.Models = append(out.Models, copyModel)
-		out.ModelByName[copyModel.Name] = copyModel
-	}
-	return out
 }
 
 func buildLogging(rawLogging *rawLogging) (Logging, error) {

@@ -6,19 +6,40 @@ configured provider-backed models or aliases, forwards requests upstream
 (translating when needed for non-OpenAI providers), and returns
 OpenAI-compatible responses.
 
-## Current MVP Scope
+## Current Supported Scope
 
 ### Supported Public API
 
-- `GET /v1/models`
-- `GET /v1/billing/usage`
-- `GET /metrics`
-- `POST /v1/chat/completions` (JSON and SSE streaming)
-- `POST /v1/embeddings` for `openai`, `openai-compatible`, and `gemini` providers
-- `POST /v1/responses` for `openai`, `openai-compatible`, `anthropic`, and `gemini` providers (JSON and SSE streaming)
-- `POST /v1/images/generations` for `openai` and `openai-compatible` providers
-- `POST /v1/audio/transcriptions` for `openai` and `openai-compatible` providers
-- `POST /v1/audio/speech` for `openai` and `openai-compatible` providers
+<!-- docs-contract:public-matrix:start -->
+
+| Surface                         | `openai`                           | `openai-compatible`                | `anthropic`                        | `gemini`                           |
+| ------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- |
+| `GET /v1/models`                | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        |
+| `GET /v1/billing/usage`         | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting |
+| `GET /metrics`                  | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     |
+| `POST /v1/chat/completions`     | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated            | JSON and SSE translated            |
+| `POST /v1/embeddings`           | Yes                                | Yes                                | No                                 | Yes                                |
+| `POST /v1/responses`            | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated subset     | JSON and SSE translated subset     |
+| `POST /v1/images/generations`   | Yes                                | Yes                                | No                                 | No                                 |
+| `POST /v1/audio/transcriptions` | Yes                                | Yes                                | No                                 | No                                 |
+| `POST /v1/audio/speech`         | Yes                                | Yes                                | No                                 | No                                 |
+
+<!-- docs-contract:public-matrix:end -->
+
+<!-- docs-contract:capability-matrix:start -->
+
+| Provider type       | Default capabilities when omitted | Additional supported capabilities                |
+| ------------------- | --------------------------------- | ------------------------------------------------ |
+| `openai`            | `chat`, `responses`, `embeddings` | `images`, `audio_transcriptions`, `audio_speech` |
+| `openai-compatible` | `chat`, `responses`, `embeddings` | `images`, `audio_transcriptions`, `audio_speech` |
+| `anthropic`         | `chat`, `responses`               | None                                             |
+| `gemini`            | `chat`, `responses`               | `embeddings`                                     |
+
+<!-- docs-contract:capability-matrix:end -->
+
+Capabilities are enforced per configured model. If `capabilities` is omitted,
+the provider-type defaults above are used; explicit values can narrow or, where
+listed as additionally supported, opt a model into more operations.
 
 ### Auth Modes
 
@@ -58,18 +79,23 @@ Pass-through providers rewrite only the top-level `model` JSON field and preserv
 - Alias addressing: `alias/<alias-name>`
 - An alias is a virtual model backed by one or more concrete provider/model targets
 - Alias algorithms: `round_robin`, `least_connections`
-- Alias failover: retry next target on transport errors and upstream `5xx`
-  only; `4xx` client errors are returned verbatim
+- Alias failover: retry the next target on transport errors, timeouts, and
+  upstream statuses listed in `retry_status_codes`. The default is `500`, `502`,
+  `503`, and `504`; configured `4xx` statuses such as `429` can be retried.
+  Other upstream `4xx` responses are returned verbatim.
 
-### Not in MVP
+### Not Implemented
 
-- Quotas, billing, tenancy
+- External billing, invoicing, and quota systems. The implemented
+  `/v1/billing/usage` endpoint is local in-process usage accounting, not an
+  external billing or quota authority.
 
-The server supports live config reload on `SIGHUP` for runtime request-routing
-state such as auth, providers, models, aliases, and metrics-backed inventory.
-Listener address, listener timeout, log-level, and dashboard enablement changes
-still require a restart. Unchanged rate-limit settings preserve existing buckets;
-changed rate-limit settings reset limiter state.
+The server supports live config reload on `SIGHUP` for auth, providers, models,
+aliases, root and provider upstream header timeouts, access-log enablement,
+metrics config, provider-health config, and metrics-backed inventory state.
+Listener address, listener timeout, logging level, and enabling the dashboard
+after startup require a restart. Unchanged rate-limit settings preserve existing
+buckets; changed rate-limit settings reset limiter state.
 
 See [docs/design.md](docs/design.md) for the full design document.
 
@@ -107,6 +133,12 @@ aiproxy version
 By default, the CLI looks for the config file at `$XDG_CONFIG_HOME/aiproxy/config.hcl`,
 falling back to `~/.config/aiproxy/config.hcl` when `XDG_CONFIG_HOME` is unset.
 Pass `--config` to use a different file.
+
+Foreground `aiproxy serve` is supported across the advertised release targets.
+Linux additionally supports `aiproxy serve -d` and the `aiproxy status`,
+`aiproxy stop`, and `aiproxy restart` daemon lifecycle commands. On non-Linux
+platforms those daemon lifecycle commands return `daemon lifecycle is
+unsupported on this platform`.
 
 ## Example Configuration
 
@@ -304,15 +336,21 @@ go run ./cmd/aiproxy serve --config config.hcl
 go test ./...                # unit tests
 make vet test               # vet + unit tests
 make test-race              # unit tests with the race detector
+make integration             # hermetic binary-level integration tests
+make docs-contract           # public docs contract matrix check
 ```
 
 The repo also includes stub-backed end-to-end tests that run as part of the
 normal Go test suite. These use in-process HTTP test servers as upstream
 providers so the full request path can be exercised without external services.
 
-Integration tests are intentionally skipped for now. The repo does not yet
-ship sandbox services for stable end-to-end provider testing. Reintroduce
-integration coverage once the sandbox stack is added.
+Hermetic binary-level integration tests run with local upstream stubs and are
+part of normal CI. Real-provider sandbox tests remain separate and optional so
+normal test runs do not require paid credentials or external services.
+
+Documentation-only changes run the `Docs Contract` workflow, which executes
+`make docs-contract` to keep the public endpoint/provider and capability
+matrices synchronized across README, design, website, and agent guidance.
 
 ## Environment Variables
 
@@ -363,8 +401,7 @@ The optional `dashboard` block enables the `aiproxy dashboard` TUI and the
 
 ```hcl
 dashboard {
-  token                 = env("AIPROXY_DASHBOARD_TOKEN")
-  allow_insecure_remote = false
+  token = env("AIPROXY_DASHBOARD_TOKEN")
 }
 ```
 
@@ -372,11 +409,10 @@ dashboard {
   startup and persists it to `$XDG_CONFIG_HOME/aiproxy/dashboard.token`; the
   `dashboard` command reads that file to authenticate. Declared tokens are
   used as-is and the file is not written.
-- `allow_insecure_remote` (optional, default `false`) authorizes the dashboard
-  command to talk to a non-loopback plain-HTTP listener. When `true`, `token`
-  must be declared explicitly in config and be at least 32 characters long; a
-  minted or weak token is rejected at validation. HTTPS listeners always
-  satisfy the transport check.
+- The `dashboard` command is local-only. It connects to the configured listener
+  over loopback plain HTTP with bearer authentication and refuses non-loopback
+  listener hosts. Remote dashboard access requires a future explicit transport
+  design.
 
 ### `provider { enabled = false }`
 
@@ -406,6 +442,8 @@ provider "openai" "backup" {
   and may contain `/` when every slash-separated segment is valid.
 - Provider `base_url` values must be absolute `https` URLs for remote upstreams.
   Plain `http` is accepted only for loopback development endpoints.
+- Listener `address` values must be TCP bind addresses in `host:port` form, not
+  URLs. Native TLS and remote dashboard URLs are not configured on the listener.
 - A provider with no resolved credential, including an empty `api_key = env("...")`,
   fails validation when the provider is enabled. To intentionally disable a
   provider, set `enabled = false`; disabled providers are still structurally
@@ -420,17 +458,21 @@ provider "openai" "backup" {
 - Alias `least_connections` selection is per-process and best-effort; it is not
   coordinated across multiple proxy instances.
 - Provider health state is shared in-process across requests and aliases.
-  Transient transport failures and upstream `5xx` responses temporarily mark a
-  provider unhealthy for routing and readiness decisions, but this state is not
-  coordinated across multiple proxy instances unless `provider_health.redis_url`
-  is configured. When `provider_health.redis_url` is configured and a Redis read
-  fails, routing and readiness fall back to a bounded in-process cache
+  Transient transport failures, upstream request errors, and upstream `5xx`
+  responses temporarily mark a provider unhealthy for routing and readiness
+  decisions. Configured retryable `4xx` statuses can trigger alias failover but
+  do not mark a provider unhealthy. This state is not coordinated across
+  multiple proxy instances unless `provider_health.redis_url` is configured.
+  When `provider_health.redis_url` is configured and a Redis read fails,
+  routing and readiness fall back to a bounded in-process cache
   (`provider_health.cache_ttl`, default 30s) and fail open only when no fresh
   cache entry exists; the fallback and the underlying backend error are
   recorded as Prometheus metrics.
 - Direct `<provider>/<model>` requests do not fail over to other targets.
-- Alias requests retry the next target only on transport errors, timeouts, and
-  upstream `5xx`; upstream `4xx` responses are returned to the client verbatim.
+- Alias requests retry the next target on transport errors, timeouts, and
+  configured `retry_status_codes` in the `400`-`599` range. The default list is
+  `500`, `502`, `503`, and `504`; other upstream `4xx` responses are returned to
+  the client verbatim.
 - Anthropic providers are translated through the Messages API for both JSON and
   SSE streaming chat completions.
 - Gemini providers are translated through `generateContent` and
@@ -466,15 +508,15 @@ provider "openai" "backup" {
   `401`. The metrics token is independent of API auth client tokens.
 - API keys and client bearer tokens are never logged.
 - The interactive `aiproxy dashboard` command calls `/_internal/dashboard/*` on
-  the same listener as the proxy API. Plain HTTP dashboard RPC is allowed only
-  when the effective listener address is loopback; non-loopback plain HTTP is
-  rejected unless `dashboard { allow_insecure_remote = true }` is set with a
-  strong explicit `token` (at least 32 characters) declared in config. HTTPS
-  listeners are always allowed. Repeated invalid dashboard tokens are rate
-  limited with `429` and a `Retry-After` header.
+  the same listener as the proxy API. It derives a local plain-HTTP URL from the
+  TCP bind address, maps wildcard binds such as `:8080` and `0.0.0.0:8080` to
+  loopback, and refuses concrete non-loopback hosts. HTTPS and remote dashboard
+  transports are not supported by the current configuration model. Repeated
+  invalid dashboard tokens are rate limited with `429` and a `Retry-After`
+  header.
 
 ## Deferred / Planned
 
 See the "Deferred Features" section in [docs/design.md](docs/design.md) for the
-full list, including image and audio APIs, rate limiting, and hot config
-reload.
+full list, including external billing/invoicing, quotas, translated-provider
+image and audio endpoints, and Anthropic embeddings.

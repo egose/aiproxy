@@ -7,7 +7,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/egose/aiproxy/internal/app"
 	"github.com/egose/aiproxy/internal/config"
@@ -32,7 +31,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "aiproxy",
 		Short: "Proxy multiple AI providers behind a single API",
-		Long:  "aiproxy proxies multiple AI providers behind a single OpenAI-compatible API.\n\nDefault config path: $XDG_CONFIG_HOME/aiproxy/config.hcl\nFallback config path: ~/.config/aiproxy/config.hcl\nDefault secrets path: $XDG_CONFIG_HOME/aiproxy/keys.json\nFallback secrets path: ~/.config/aiproxy/keys.json\n\nUse `aiproxy paths` to print resolved paths, `aiproxy examples` for boxed config examples, and `aiproxy configure` to create or update config blocks interactively.",
+		Long:  "aiproxy proxies multiple AI providers behind a single OpenAI-compatible API.\n\nDefault config path: $XDG_CONFIG_HOME/aiproxy/config.hcl\nFallback config path: ~/.config/aiproxy/config.hcl\nDefault secrets path: $XDG_CONFIG_HOME/aiproxy/keys.json\nFallback secrets path: ~/.config/aiproxy/keys.json\n\nDaemon lifecycle commands (`serve -d`, `stop`, `status`, `restart`) are Linux-only.\n\nUse `aiproxy paths` to print resolved paths, `aiproxy examples` for boxed config examples, and `aiproxy configure` to create or update config blocks interactively.",
 	}
 	rootCmd.AddCommand(newServeCommand())
 	rootCmd.AddCommand(newValidateCommand())
@@ -63,14 +62,14 @@ func newServeCommand() *cobra.Command {
 				return err
 			}
 
-			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 			defer stop()
 
 			return a.RunReady(ctx, notifyDaemonReady)
 		},
 	}
 	cmd.Flags().StringVarP(&configPath, "config", "c", defaultConfigPath(), "path to config file")
-	cmd.Flags().BoolVarP(&daemon, "daemon", "d", false, "run the server in the background")
+	cmd.Flags().BoolVarP(&daemon, "daemon", "d", false, "run the server in the background (Linux only)")
 	return cmd
 }
 
@@ -210,11 +209,11 @@ func configExamplesText() string {
 
 func commandExamplesText() string {
 	return renderExampleBox("Common commands", `aiproxy serve
-aiproxy serve -d
+aiproxy serve -d  # Linux only
 aiproxy serve --config /etc/aiproxy/config.hcl
-aiproxy stop
-aiproxy status
-aiproxy restart
+aiproxy stop      # Linux only
+aiproxy status    # Linux only
+aiproxy restart   # Linux only
 aiproxy dashboard --config /etc/aiproxy/config.hcl
 aiproxy validate
 aiproxy validate --config /etc/aiproxy/config.hcl

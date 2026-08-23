@@ -1,6 +1,7 @@
 name: Test
 
 on:
+  workflow_call:
   pull_request:
     paths-ignore:
     - '**.md'
@@ -14,6 +15,9 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
+    - name: validate toolchain declarations
+      run: make check-toolchain
+
     - name: Setup Tools (asdf)
       uses: ./.github/actions/setup-tools
 
@@ -25,6 +29,14 @@ jobs:
 
     - name: go build (all targets)
       run: make build-all
+
+    - name: validate build atomicity
+      run: make validate-build-atomicity
+
+    - name: validate release archives
+      run: |
+        make build-archive
+        make validate-archives
 
   unit-test:
     runs-on: ubuntu-24.04
@@ -40,6 +52,15 @@ jobs:
     - name: go test -race ./...
       run: make test-race
 
-  # Integration tests are intentionally skipped for now.
-  # Reintroduce them once sandbox services exist for stable end-to-end
-  # provider coverage.
+  integration-test:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+    - name: Setup Tools (asdf)
+      uses: ./.github/actions/setup-tools
+
+    - name: hermetic binary integration tests
+      run: make integration
+
+  # Real-provider sandbox tests remain intentionally separate from normal CI.

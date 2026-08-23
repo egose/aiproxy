@@ -26,6 +26,11 @@ case "$(uname -m)" in
   *) echo "Unsupported arch: $(uname -m)" >&2; exit 1 ;;
 esac
 
+case "${os}:${arch}" in
+  linux:amd64|linux:arm64|linux:386|linux:arm|windows:amd64|windows:386|darwin:amd64|darwin:arm64|freebsd:amd64|freebsd:arm64|openbsd:amd64|openbsd:arm64|netbsd:amd64) ;;
+  *) echo "Unsupported platform: ${os}:${arch}" >&2; exit 1 ;;
+esac
+
 filename="${tool_name}-${os}-${arch}.tar.gz"
 
 mkdir -p "$download_path"

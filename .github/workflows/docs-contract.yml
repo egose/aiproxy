@@ -1,0 +1,30 @@
+name: Docs Contract
+
+on:
+  pull_request:
+    paths:
+    - AGENTS.md
+    - README.md
+    - docs/**/*.md
+    - website/docs/**
+    - scripts/check-doc-contracts.sh
+    - Makefile
+    - .github/workflows/docs-contract.yml
+  push:
+    paths:
+    - AGENTS.md
+    - README.md
+    - docs/**/*.md
+    - website/docs/**
+    - scripts/check-doc-contracts.sh
+    - Makefile
+    - .github/workflows/docs-contract.yml
+
+jobs:
+  docs-contract:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+    - name: Check public documentation contracts
+      run: make docs-contract

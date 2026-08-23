@@ -33,6 +33,12 @@ aiproxy version
 Without `--config`, the CLI reads `$XDG_CONFIG_HOME/aiproxy/config.hcl`, falling back to
 `~/.config/aiproxy/config.hcl` when `XDG_CONFIG_HOME` is unset.
 
+Foreground `aiproxy serve` is supported across the advertised release targets.
+Linux additionally supports `aiproxy serve -d` and the `aiproxy status`,
+`aiproxy stop`, and `aiproxy restart` daemon lifecycle commands. On non-Linux
+platforms those daemon lifecycle commands return `daemon lifecycle is
+unsupported on this platform`.
+
 When running locally with env-based secrets, load your environment before invoking the binary:
 
 ```sh
@@ -157,6 +163,7 @@ In containerized deployments, mount the config file read-only and inject secrets
 make vet
 make test
 make test-race
+make docs-contract
 make cover
 ```
 
@@ -168,6 +175,10 @@ make vet test
 
 There is no separate typecheck target. A successful Go build is the typecheck.
 
+Documentation-only pull requests run `make docs-contract` through the `Docs
+Contract` workflow. Website pull requests also run `pnpm typecheck` and `pnpm
+build` from the `website` directory.
+
 ## Reload Behavior
 
 `aiproxy` supports live config reload on `SIGHUP` for runtime state such as:
@@ -176,6 +187,9 @@ There is no separate typecheck target. A successful Go build is the typecheck.
 - provider and model inventory
 - root and provider upstream header timeouts
 - alias routing state
+- access-log enablement
+- metrics configuration
+- provider-health configuration
 - metrics-backed inventory state
 
 If rate-limit settings are unchanged, reload preserves existing limiter buckets.
@@ -185,7 +199,7 @@ These changes still require a restart:
 
 - listener address changes
 - listener timeout changes
-- log-level changes
+- logging level changes
 - enabling the dashboard after startup
 
 Use reload for routing and auth changes, not for socket-level listener changes.
@@ -220,7 +234,7 @@ returns `401`. The metrics token is checked independently of API auth client
 tokens; API clients cannot scrape `/metrics` with their own credentials. An
 empty or missing token is rejected at config validation.
 
-Transient transport failures and upstream `5xx` responses can mark a provider unhealthy for routing and readiness decisions.
+Transient transport failures, upstream request errors, and upstream `5xx` responses can mark a provider unhealthy for routing and readiness decisions. Configured retryable `4xx` statuses can trigger alias failover but do not mark providers unhealthy.
 
 This health state is shared across requests within the same process.
 
@@ -253,11 +267,11 @@ Without Redis-backed sharing, each instance tracks transient health independentl
 The `aiproxy dashboard` command and the `/_internal/dashboard/*` HTTP endpoints
 share the proxy listener.
 
-- Loopback plain HTTP is always allowed for the dashboard command.
-- Non-loopback plain HTTP is rejected unless
-  `dashboard { allow_insecure_remote = true }` is declared with a strong
-  explicit `token` (at least 32 characters).
-- HTTPS listeners always satisfy the transport check regardless of host.
+- Listener addresses are TCP bind addresses in `host:port` form, not URLs.
+- The dashboard command is local-only. It connects over loopback plain HTTP with
+  bearer authentication and refuses concrete non-loopback listener hosts.
+- HTTPS and remote dashboard URLs are not supported by the current configuration
+  model. Remote dashboard access requires a future explicit transport design.
 - Repeated invalid dashboard tokens are rate limited with `429` and a
   `Retry-After` header.
 
@@ -296,8 +310,8 @@ Mount this file read-only in production deployments.
 - mount config and key files read-only
 - declare `metrics { token = env("AIPROXY_METRICS_TOKEN") }` and scrape
   `GET /metrics` with the configured bearer token
-- for non-loopback dashboard access, use an HTTPS listener or declare
-  `dashboard { allow_insecure_remote = true token = "<32+ char token>" }`
+- use `aiproxy dashboard` only from the local host; remote dashboard access is
+  unsupported until an explicit transport design is added
 - explicitly `enabled = false` any provider you want to keep defined but
   inactive; missing credentials on enabled providers fail validation
 - use aliases for controlled failover instead of relying on direct model requests

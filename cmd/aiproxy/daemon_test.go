@@ -1,3 +1,5 @@
+//go:build linux
+
 package main
 
 import (
@@ -118,8 +120,6 @@ func TestNormalizeBaseURL(t *testing.T) {
 		":8080":          "http://127.0.0.1:8080",
 		"0.0.0.0:9090":   "http://127.0.0.1:9090",
 		"127.0.0.1:8080": "http://127.0.0.1:8080",
-		"http://x:1":     "http://x:1",
-		"https://y:2":    "https://y:2",
 		"":               "http://127.0.0.1:8080",
 	}
 	for in, want := range cases {

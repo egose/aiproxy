@@ -25,7 +25,8 @@ It lets the proxy own:
 - Exposes a single OpenAI-compatible API surface to clients
 - Routes requests to multiple upstream providers
 - Supports direct model addressing and alias-based routing
-- Retries alias targets on transport failures and upstream `5xx` responses
+- Retries alias targets on transport failures, timeouts, and configured retryable
+  upstream status codes
 - Preserves streaming responses through OpenAI-compatible SSE framing
 - Keeps auth, provider credentials, routing, and observability in one service
 

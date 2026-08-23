@@ -231,15 +231,12 @@ provider "openai" "openai" {
 	}
 }
 
-func TestDashboardAllowsNonLoopbackHTTPWithInsecureOverride(t *testing.T) {
+func TestDashboardRejectsInsecureRemoteOverride(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 
-	stub := newSnapshotStub(t, strings.Repeat("a", 40))
-	defer stub.Close()
-	stubAddr := stub.Listener.Addr().String()
 	cfg := writeDashboardConfig(t, `
-listener "http" "public" { address = "`+stubAddr+`" }
+listener "http" "public" { address = "127.0.0.1:8080" }
 auth "main" { mode = "none" }
 dashboard {
   token = "`+strings.Repeat("a", 40)+`"
@@ -251,17 +248,9 @@ provider "openai" "openai" {
 }
 `)
 	var stdout, stderr bytes.Buffer
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	_ = runDashboard(ctx, cfg, &stdout, &stderr)
-	if strings.Contains(stderr.String(), "non-loopback") {
-		t.Fatalf("override should allow non-loopback, stderr=%s", stderr.String())
-	}
-	if strings.Contains(stderr.String(), "no server running") {
-		t.Fatalf("override dashboard should reach stub, stderr=%s", stderr.String())
-	}
-	if !stub.gotAuth("Bearer " + strings.Repeat("a", 40)) {
-		t.Fatal("stub never received authenticated snapshot request")
+	err := runDashboard(context.Background(), cfg, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "allow_insecure_remote is unsupported") {
+		t.Fatalf("expected unsupported allow_insecure_remote error, got %v", err)
 	}
 }
 

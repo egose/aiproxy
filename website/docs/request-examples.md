@@ -171,6 +171,6 @@ In `bearer_static` mode, results are scoped to the caller's tenant when present,
 ## Error Behavior Examples
 
 - direct request to `openai/gpt-4.1`: never rerouted to another provider
-- alias request to `alias/chat_default`: may retry the next target on timeout or upstream `5xx`
-- alias request returning upstream `4xx`: returned to the client without failover
+- alias request to `alias/chat_default`: may retry the next target on transport error, timeout, or configured `retry_status_codes`
+- alias request returning an upstream `4xx` not listed in `retry_status_codes`: returned to the client without failover
 - request to an unsupported operation: returned as a client-visible proxy error

@@ -17,6 +17,71 @@ import (
 	"github.com/egose/aiproxy/internal/config"
 )
 
+func TestProviderDescriptorsCoverConfiguredProviderTypes(t *testing.T) {
+	configured := config.ProviderTypes()
+	if len(providerDescriptors) != len(configured) {
+		t.Fatalf("providerDescriptors length = %d, configured provider types = %d", len(providerDescriptors), len(configured))
+	}
+	for _, providerType := range configured {
+		desc, ok := providerDescriptors[providerType]
+		if !ok {
+			t.Fatalf("providerDescriptors[%q] missing", providerType)
+		}
+		if desc.providerType != providerType {
+			t.Fatalf("providerDescriptors[%q].providerType = %q", providerType, desc.providerType)
+		}
+		if desc.defaultBaseURL == "" {
+			t.Fatalf("providerDescriptors[%q].defaultBaseURL is empty", providerType)
+		}
+		if desc.do == nil {
+			t.Fatalf("providerDescriptors[%q].do is nil", providerType)
+		}
+	}
+}
+
+func TestOperationDescriptorsDriveHTTPPathNameAndCapability(t *testing.T) {
+	tests := []struct {
+		operation  Operation
+		name       string
+		path       string
+		capability config.Capability
+	}{
+		{operation: OpChatCompletions, name: "chat_completions", path: "/v1/chat/completions", capability: config.CapabilityChat},
+		{operation: OpEmbeddings, name: "embeddings", path: "/v1/embeddings", capability: config.CapabilityEmbeddings},
+		{operation: OpResponses, name: "responses", path: "/v1/responses", capability: config.CapabilityResponses},
+		{operation: OpImagesGenerations, name: "images_generations", path: "/v1/images/generations", capability: config.CapabilityImages},
+		{operation: OpAudioTranscriptions, name: "audio_transcriptions", path: "/v1/audio/transcriptions", capability: config.CapabilityAudioTranscriptions},
+		{operation: OpAudioSpeech, name: "audio_speech", path: "/v1/audio/speech", capability: config.CapabilityAudioSpeech},
+	}
+
+	if len(operationDescriptors) != len(tests) {
+		t.Fatalf("operationDescriptors length = %d, want %d", len(operationDescriptors), len(tests))
+	}
+	for _, tt := range tests {
+		if got := tt.operation.String(); got != tt.name {
+			t.Fatalf("%v.String() = %q, want %q", tt.operation, got, tt.name)
+		}
+		op, ok := OperationForHTTP(http.MethodPost, tt.path)
+		if !ok || op != tt.operation {
+			t.Fatalf("OperationForHTTP(%q) = %v, %v; want %v, true", tt.path, op, ok, tt.operation)
+		}
+		capability, ok := RequiredCapability(tt.operation)
+		if !ok || capability != tt.capability {
+			t.Fatalf("RequiredCapability(%v) = %q, %v; want %q, true", tt.operation, capability, ok, tt.capability)
+		}
+		path, err := openAIPathForOperation(tt.operation)
+		if err != nil || path != tt.path {
+			t.Fatalf("openAIPathForOperation(%v) = %q, %v; want %q, nil", tt.operation, path, err, tt.path)
+		}
+	}
+	if _, ok := OperationForHTTP(http.MethodGet, "/v1/chat/completions"); ok {
+		t.Fatal("GET /v1/chat/completions should not map to an operation")
+	}
+	if _, ok := RequiredCapability(Operation(99)); ok {
+		t.Fatal("unknown operation should not map to a capability")
+	}
+}
+
 func TestAdapterRewritesModelAndForwards(t *testing.T) {
 	var seenAuth, seenBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1391,9 +1456,32 @@ func TestOpenAIStreamRecordsUsage(t *testing.T) {
 	}
 }
 
+func TestOpenAIStreamPreservesBytesAndObservesFragmentedEOFEvent(t *testing.T) {
+	completion := NewStreamCompletion()
+	raw := ": keepalive\r\n" +
+		"data: {\"choices\":[],\r\n" +
+		"data: \"usage\":{\"prompt_tokens\":7,\"completion_tokens\":11,\"total_tokens\":18}}"
+	src := newFragmentedReadCloser([]string{raw[:5], raw[5:17], raw[17:43], raw[43:]})
+	stream := newOpenAIStreamUsageReadCloser(src, completion)
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if string(body) != raw {
+		t.Fatalf("pass-through bytes changed:\ngot  %q\nwant %q", string(body), raw)
+	}
+	completion.Complete(nil, false)
+	usage := completion.Wait().Usage
+	if usage.PromptTokens != 7 || usage.CompletionTokens != 11 || usage.TotalTokens != 18 {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
 func TestOpenAIStreamRecordsErrorEvent(t *testing.T) {
 	completion := NewStreamCompletion()
-	src := io.NopCloser(strings.NewReader("data: {\"error\":{\"message\":\"capacity exhausted\",\"type\":\"server_error\",\"code\":500}}\n\n"))
+	src := newFragmentedReadCloser([]string{"data: {\"error\"", ":{\"message\":\"capacity exhausted\"", ",\"type\":\"server_error\",\"code\":500}}"})
 	stream := newOpenAIStreamUsageReadCloser(src, completion)
 	defer stream.Close()
 
@@ -1404,6 +1492,64 @@ func TestOpenAIStreamRecordsErrorEvent(t *testing.T) {
 	outcome := completion.Wait()
 	if outcome.Err == nil || !strings.Contains(outcome.Err.Error(), "server_error: 500: capacity exhausted") {
 		t.Fatalf("stream error = %v", outcome.Err)
+	}
+}
+
+func TestOpenAIStreamObservationOverflowContinuesPassThrough(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		maxLine  int
+		maxEvent int
+		kind     string
+	}{
+		{
+			name:     "fragmented line",
+			body:     "data: 123456789\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":1}}\n\n",
+			maxLine:  8,
+			maxEvent: maxSSEEventBytes,
+			kind:     "line",
+		},
+		{
+			name:     "multi-line event",
+			body:     "data: 12345\ndata: 67890\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":1}}\n\n",
+			maxLine:  maxSSELineBytes,
+			maxEvent: 10,
+			kind:     "event",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			completion := NewStreamCompletion()
+			src := newFragmentedReadCloser([]string{tt.body[:7], tt.body[7:12], tt.body[12:]})
+			stream := newOpenAIStreamUsageReadCloser(src, completion).(*openAIStreamUsageReadCloser)
+			stream.observer.maxLine = tt.maxLine
+			stream.observer.maxEvent = tt.maxEvent
+
+			body, err := io.ReadAll(stream)
+			if err != nil {
+				t.Fatalf("read stream: %v", err)
+			}
+			if string(body) != tt.body {
+				t.Fatalf("pass-through bytes changed:\ngot  %q\nwant %q", string(body), tt.body)
+			}
+			if !stream.observer.disabled || len(stream.observer.line) != 0 || len(stream.observer.dataLines) != 0 {
+				t.Fatalf("observer did not stop bounded observation after %s overflow", tt.kind)
+			}
+			completion.Complete(nil, false)
+			if usage := completion.Wait().Usage; usage.Has() {
+				t.Fatalf("usage recorded after overflow = %+v", usage)
+			}
+			if err := stream.Close(); err != nil {
+				t.Fatalf("close stream: %v", err)
+			}
+			select {
+			case <-src.closed:
+			case <-time.After(time.Second):
+				t.Fatal("upstream was not closed")
+			}
+		})
 	}
 }
 
@@ -1459,6 +1605,36 @@ func TestTranslatedStreamOverflowClosesUpstream(t *testing.T) {
 type blockingReadCloser struct {
 	closed chan struct{}
 	once   sync.Once
+}
+
+type fragmentedReadCloser struct {
+	chunks []string
+	idx    int
+	off    int
+	closed chan struct{}
+	once   sync.Once
+}
+
+func newFragmentedReadCloser(chunks []string) *fragmentedReadCloser {
+	return &fragmentedReadCloser{chunks: chunks, closed: make(chan struct{})}
+}
+
+func (r *fragmentedReadCloser) Read(p []byte) (int, error) {
+	for r.idx < len(r.chunks) && r.off == len(r.chunks[r.idx]) {
+		r.idx++
+		r.off = 0
+	}
+	if r.idx >= len(r.chunks) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.chunks[r.idx][r.off:])
+	r.off += n
+	return n, nil
+}
+
+func (r *fragmentedReadCloser) Close() error {
+	r.once.Do(func() { close(r.closed) })
+	return nil
 }
 
 func newBlockingReadCloser() *blockingReadCloser {

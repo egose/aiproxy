@@ -125,6 +125,35 @@ func New() Adapter {
 
 type adapter struct{}
 
+type providerDescriptor struct {
+	providerType   config.ProviderType
+	defaultBaseURL string
+	do             func(*adapter, context.Context, Request) (*Result, error)
+}
+
+var providerDescriptors = map[config.ProviderType]providerDescriptor{
+	config.ProviderTypeOpenAI: {
+		providerType:   config.ProviderTypeOpenAI,
+		defaultBaseURL: defaultOpenAIBaseURL,
+		do:             (*adapter).doOpenAI,
+	},
+	config.ProviderTypeOpenAICompatible: {
+		providerType:   config.ProviderTypeOpenAICompatible,
+		defaultBaseURL: defaultOpenAIBaseURL,
+		do:             (*adapter).doOpenAI,
+	},
+	config.ProviderTypeAnthropic: {
+		providerType:   config.ProviderTypeAnthropic,
+		defaultBaseURL: defaultAnthropicBaseURL,
+		do:             (*adapter).doAnthropic,
+	},
+	config.ProviderTypeGemini: {
+		providerType:   config.ProviderTypeGemini,
+		defaultBaseURL: defaultGeminiBaseURL,
+		do:             (*adapter).doGemini,
+	},
+}
+
 type ErrUnsupportedOperation struct {
 	ProviderType config.ProviderType
 	Operation    Operation
@@ -146,22 +175,12 @@ func (e ErrInvalidRequest) Error() string {
 }
 
 func (o Operation) String() string {
-	switch o {
-	case OpChatCompletions:
-		return "chat_completions"
-	case OpEmbeddings:
-		return "embeddings"
-	case OpResponses:
-		return "responses"
-	case OpImagesGenerations:
-		return "images_generations"
-	case OpAudioTranscriptions:
-		return "audio_transcriptions"
-	case OpAudioSpeech:
-		return "audio_speech"
-	default:
-		return "unknown"
+	for _, desc := range operationDescriptors {
+		if desc.operation == o {
+			return desc.name
+		}
 	}
+	return "unknown"
 }
 
 const (
@@ -180,17 +199,60 @@ func (a *adapter) Do(ctx context.Context, r Request) (*Result, error) {
 	if r.Client == nil {
 		r.Client = http.DefaultClient
 	}
-
-	switch r.ProviderType {
-	case config.ProviderTypeOpenAI, config.ProviderTypeOpenAICompatible:
-		return a.doOpenAI(ctx, r)
-	case config.ProviderTypeAnthropic:
-		return a.doAnthropic(ctx, r)
-	case config.ProviderTypeGemini:
-		return a.doGemini(ctx, r)
-	default:
+	desc, ok := providerDescriptors[r.ProviderType]
+	if !ok {
 		return nil, fmt.Errorf("unsupported provider type %q", r.ProviderType)
 	}
+	if r.BaseURL == "" {
+		r.BaseURL = desc.defaultBaseURL
+	}
+	return desc.do(a, ctx, r)
+}
+
+type operationDescriptor struct {
+	operation  Operation
+	name       string
+	path       string
+	capability config.Capability
+}
+
+var operationDescriptors = []operationDescriptor{
+	{operation: OpChatCompletions, name: "chat_completions", path: "/v1/chat/completions", capability: config.CapabilityChat},
+	{operation: OpEmbeddings, name: "embeddings", path: "/v1/embeddings", capability: config.CapabilityEmbeddings},
+	{operation: OpResponses, name: "responses", path: "/v1/responses", capability: config.CapabilityResponses},
+	{operation: OpImagesGenerations, name: "images_generations", path: "/v1/images/generations", capability: config.CapabilityImages},
+	{operation: OpAudioTranscriptions, name: "audio_transcriptions", path: "/v1/audio/transcriptions", capability: config.CapabilityAudioTranscriptions},
+	{operation: OpAudioSpeech, name: "audio_speech", path: "/v1/audio/speech", capability: config.CapabilityAudioSpeech},
+}
+
+func OperationForHTTP(method, path string) (Operation, bool) {
+	if method != http.MethodPost {
+		return 0, false
+	}
+	for _, desc := range operationDescriptors {
+		if desc.path == path {
+			return desc.operation, true
+		}
+	}
+	return 0, false
+}
+
+func RequiredCapability(op Operation) (config.Capability, bool) {
+	for _, desc := range operationDescriptors {
+		if desc.operation == op {
+			return desc.capability, true
+		}
+	}
+	return "", false
+}
+
+func openAIPathForOperation(op Operation) (string, error) {
+	for _, desc := range operationDescriptors {
+		if desc.operation == op {
+			return desc.path, nil
+		}
+	}
+	return "", ErrUnsupportedOperation{ProviderType: config.ProviderTypeOpenAICompatible, Operation: op}
 }
 
 func clientFor(r Request) *http.Client {

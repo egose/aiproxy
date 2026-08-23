@@ -13,9 +13,6 @@ import (
 )
 
 func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
-	if r.BaseURL == "" {
-		r.BaseURL = defaultOpenAIBaseURL
-	}
 	if r.Operation == OpAudioTranscriptions {
 		return a.doOpenAIAudioTranscriptions(ctx, r)
 	}
@@ -65,68 +62,39 @@ func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
 
 type openAIStreamUsageReadCloser struct {
 	io.ReadCloser
-	stream    *StreamCompletion
-	line      []byte
-	dataLines []string
+	observer *sseObserver
 }
 
 func newOpenAIStreamUsageReadCloser(src io.ReadCloser, stream *StreamCompletion) io.ReadCloser {
-	return &openAIStreamUsageReadCloser{ReadCloser: src, stream: stream}
+	return &openAIStreamUsageReadCloser{ReadCloser: src, observer: newSSEObserver(func(event sseEvent) {
+		observeOpenAIStreamEvent(stream, event)
+	})}
 }
 
 func (r *openAIStreamUsageReadCloser) Read(p []byte) (int, error) {
 	n, err := r.ReadCloser.Read(p)
 	if n > 0 {
-		r.observe(p[:n])
+		_ = r.observer.Observe(p[:n])
+	}
+	if err == io.EOF {
+		_ = r.observer.ObserveEOF()
 	}
 	return n, err
 }
 
-func (r *openAIStreamUsageReadCloser) observe(chunk []byte) {
-	for _, b := range chunk {
-		if b == '\n' {
-			r.observeLine(string(r.line))
-			r.line = r.line[:0]
-			continue
-		}
-		r.line = append(r.line, b)
-	}
-}
-
-func (r *openAIStreamUsageReadCloser) observeLine(line string) {
-	line = strings.TrimRight(line, "\r")
-	if line == "" {
-		r.observeEvent()
+func observeOpenAIStreamEvent(stream *StreamCompletion, event sseEvent) {
+	if event.Data == "" {
 		return
 	}
-	if strings.HasPrefix(line, ":") {
+	if strings.TrimSpace(event.Data) == "[DONE]" {
 		return
 	}
-	field, value, ok := strings.Cut(line, ":")
-	if !ok || field != "data" {
+	if err := openAIStreamError([]byte(event.Data)); err != nil {
+		stream.Complete(err, false)
 		return
 	}
-	if strings.HasPrefix(value, " ") {
-		value = value[1:]
-	}
-	r.dataLines = append(r.dataLines, value)
-}
-
-func (r *openAIStreamUsageReadCloser) observeEvent() {
-	if len(r.dataLines) == 0 {
-		return
-	}
-	data := strings.Join(r.dataLines, "\n")
-	r.dataLines = nil
-	if strings.TrimSpace(data) == "[DONE]" {
-		return
-	}
-	if err := openAIStreamError([]byte(data)); err != nil {
-		r.stream.Complete(err, false)
-		return
-	}
-	if usage := usageFromBody([]byte(data)); usage.Has() {
-		r.stream.SetUsage(usage)
+	if usage := usageFromBody([]byte(event.Data)); usage.Has() {
+		stream.SetUsage(usage)
 	}
 }
 
@@ -158,25 +126,6 @@ func openAIStreamError(data []byte) error {
 		}
 	}
 	return fmt.Errorf("upstream stream error: %s", strings.TrimSpace(string(event.Error)))
-}
-
-func openAIPathForOperation(op Operation) (string, error) {
-	switch op {
-	case OpChatCompletions:
-		return "/v1/chat/completions", nil
-	case OpEmbeddings:
-		return "/v1/embeddings", nil
-	case OpResponses:
-		return "/v1/responses", nil
-	case OpImagesGenerations:
-		return "/v1/images/generations", nil
-	case OpAudioTranscriptions:
-		return "/v1/audio/transcriptions", nil
-	case OpAudioSpeech:
-		return "/v1/audio/speech", nil
-	default:
-		return "", ErrUnsupportedOperation{ProviderType: "openai-compatible", Operation: op}
-	}
 }
 
 func (a *adapter) doOpenAIAudioTranscriptions(ctx context.Context, r Request) (*Result, error) {

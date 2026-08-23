@@ -109,9 +109,6 @@ func (a *adapter) doGemini(ctx context.Context, r Request) (*Result, error) {
 }
 
 func (a *adapter) doGeminiChat(ctx context.Context, r Request) (*Result, error) {
-	if r.BaseURL == "" {
-		r.BaseURL = defaultGeminiBaseURL
-	}
 	body, err := requestBody(r)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
@@ -156,9 +153,6 @@ func (a *adapter) doGeminiChat(ctx context.Context, r Request) (*Result, error) 
 }
 
 func (a *adapter) doGeminiEmbeddings(ctx context.Context, r Request) (*Result, error) {
-	if r.BaseURL == "" {
-		r.BaseURL = defaultGeminiBaseURL
-	}
 	body, err := requestBody(r)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
@@ -194,9 +188,6 @@ func (a *adapter) doGeminiEmbeddings(ctx context.Context, r Request) (*Result, e
 }
 
 func (a *adapter) doGeminiResponses(ctx context.Context, r Request) (*Result, error) {
-	if r.BaseURL == "" {
-		r.BaseURL = defaultGeminiBaseURL
-	}
 	body, err := requestBody(r)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)

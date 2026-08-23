@@ -49,7 +49,7 @@ The following decisions are selected for implementation:
 - DEC-01: `/metrics` must require a dedicated metrics bearer token when metrics exposure is enabled.
 - DEC-02: Missing provider credentials must fail validation for enabled providers; intentional disablement must use explicit provider configuration.
 - DEC-03: Redis health read failures must use bounded cached provider health when available and fail open only when no cache exists.
-- DEC-05: Dashboard RPC over plain HTTP is allowed only for loopback-derived access by default; non-loopback remote access requires HTTPS or an explicit insecure override with a strong explicit token.
+- DEC-05: Superseded by 2026-08-23 DEC-02 option 3; the dashboard command is local-only and remote dashboard access requires a future explicit transport design.
 
 ## Wave 1: External Exposure Contracts
 
@@ -139,39 +139,38 @@ Suggested agent: CLI and HTTP security engineer
 
 Dependencies: none
 
-Completion evidence (recorded 2026-08-10):
+Completion evidence (recorded 2026-08-10; dashboard remote transport contract
+superseded by 2026-08-23 DEC-02 option 3):
 
-- Added `dashboard { token, allow_insecure_remote }` HCL schema
-  (`internal/config/schema.go:19-22`) and `Dashboard` runtime type
-  (`internal/config/types.go:28-34`) tracking `Token`, `AllowInsecureRemote`,
-  `ExplicitAllowInsecure`, `TokenFromConfig`, `Enabled`; `build.go:51-61`
-  materializes them from the HCL block.
+- The current dashboard schema supports `token`; the legacy
+  `allow_insecure_remote` attribute is rejected as unsupported because the
+  dashboard command is local-only.
 - `cmd/aiproxy/dashboard.go:57-61` calls `validateDashboardTransport` for every
   config before any RPC; `dashboard.go:127-145` permits plain HTTP only for
   loopback-derived URLs (`isLoopbackURLHost` covers `127.0.0.1`, `::1`,
-  `localhost`) and requires HTTPS or an explicit override for non-loopback.
+  `localhost`) and rejects non-loopback dashboard CLI access.
   `dashboard.go:109-123` normalizes `:8080`, `0.0.0.0:9090`, and bare hosts
   to a loopback or verbatim URL.
 - `internal/config/validate.go:80-93` rejects `allow_insecure_remote = true`
-  with a minted, weak, or empty token; `minInsecureRemoteDashboardTokenLen = 32`
-  enforces the strong explicit token requirement.
+  as unsupported.
 - `internal/httpapi/dashboard.go:67-129` applies auth + rate limiting on both
   `/_internal/dashboard/{snapshot,logs}` paths via the shared
   `respondDashboardAuthFailure`; the rate limiter
   (`internal/httpapi/dashboard.go:13-62`, `dashboardAuthRatePerMinute=20`,
   `dashboardAuthBurst=5`) is per-Handler and bounded by a single global bucket.
-- Tests: `cmd/aiproxy/dashboard_test.go:199-316` covers non-loopback plain-HTTP
-  rejection (hostname/public-IPv4/public-IPv6), insecure override with strong
-  token acceptance, loopback-without-override acceptance, and
+- Tests: `cmd/aiproxy/dashboard_test.go:199-305` covers non-loopback plain-HTTP
+  rejection (hostname/public-IPv4/public-IPv6), unsupported insecure override
+  rejection, loopback-without-override acceptance, and
   insecure-remote-with-minted-token rejection;
   `internal/httpapi/dashboard_test.go:178-221` (`TestDashboardAuthFailureRateLimitsRepeatedBadTokens`)
   verifies `401` within burst and `429` with `Retry-After` after burst, with
   recovery after cooldown;
   `internal/httpapi/dashboard_test.go:42-76` verifies the snapshot auth policy;
-  `internal/config/load_test.go:1112-1176` covers validation
+  `internal/config/load_test.go` covers validation
   (`TestLoadRejectsDashboardInsecureRemoteWithMintedToken`,
   `TestLoadRejectsDashboardInsecureRemoteWithWeakToken`,
-  `TestLoadAcceptsDashboardInsecureRemoteWithStrongToken`).
+  `TestLoadRejectsDashboardInsecureRemoteWithStrongToken`, and
+  `TestLoadRejectsURLShapedListenerAddress`).
 - Docs: `README.md` (Optional Blocks > dashboard, Notes on Behavior),
   `docs/design.md` (Observability And Security section),
   `website/docs/operations.md` (Dashboard Transport Security),
@@ -203,19 +202,19 @@ References:
 Implementation requirements:
 
 1. Permit plain HTTP dashboard RPC only when the effective dashboard URL is loopback.
-2. Permit non-loopback dashboard RPC only over HTTPS unless `dashboard { allow_insecure_remote = true }` or an equivalent explicit override is configured.
-3. If insecure remote dashboard access is enabled, require an explicit strong token in config; do not allow a minted token file for this mode.
+2. Reject non-loopback dashboard RPC from the CLI until a separate remote transport is designed.
+3. Reject `dashboard { allow_insecure_remote = true }` as unsupported.
 4. Add local dashboard authentication failure rate limiting at the dashboard endpoint.
 5. Keep the existing minted-token behavior for safe loopback dashboard access.
 6. Return clear CLI and HTTP errors for disallowed transport configurations.
-7. Document the safe defaults, override risk, and required deployment controls.
+7. Document the local-only safe default and unsupported remote dashboard status.
 
 Acceptance criteria:
 
 - Plain HTTP dashboard access to loopback succeeds with the correct token.
-- Plain HTTP dashboard access to non-loopback is rejected unless the explicit insecure override is set.
-- HTTPS dashboard access to non-loopback is allowed when the token is valid.
-- Insecure remote override fails validation if the dashboard token is omitted, minted, weak, or empty.
+- Plain HTTP dashboard access to non-loopback is rejected.
+- HTTPS dashboard access to non-loopback is not advertised as supported.
+- Insecure remote override fails validation as unsupported.
 - Repeated invalid dashboard tokens are rate limited with a stable status and response.
 - `go test ./cmd/aiproxy ./internal/config ./internal/httpapi` passes.
 
@@ -539,7 +538,18 @@ These non-blocking observations were recorded by the independent CLOSE-01 review
 
 ### FU-26-01: Add explicit `/logs` dashboard rate-limit regression test
 
-Status: pending
+Status: completed
+
+Completion evidence:
+
+- `internal/httpapi/dashboard_test.go` now enumerates both
+  `/_internal/dashboard/snapshot` and `/_internal/dashboard/logs` in
+  `TestDashboardAuthFailureRateLimitsRepeatedBadTokens`.
+- The test asserts `401` within the invalid-credential burst and `429` with
+  `Retry-After` after the burst for both routes.
+- Verification: `ASDF_GOLANG_VERSION=1.26.6 go test ./internal/httpapi` and
+  `ASDF_GOLANG_VERSION=1.26.6 go test -race ./internal/httpapi
+./internal/auth` passed.
 
 Priority: P3
 
@@ -567,7 +577,17 @@ Acceptance criteria:
 
 ### FU-26-02: Add explicit disabled-provider alias target pruning test
 
-Status: pending
+Status: completed
+
+Completion evidence:
+
+- `internal/config/load_test.go` now covers mixed alias targets in
+  `TestLoadAliasPrunesDisabledProviderTargets`, asserting disabled providers are
+  pruned and enabled targets remain in alias declaration order.
+- `internal/config/load_test.go` now covers all-disabled alias targets in
+  `TestLoadRejectsAliasWithOnlyDisabledProviderTargets`, asserting the stable
+  validation error `alias "chat": at least one target is required`.
+- Verification: `ASDF_GOLANG_VERSION=1.26.6 go test ./internal/config` passed.
 
 Priority: P3
 

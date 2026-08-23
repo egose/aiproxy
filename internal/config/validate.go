@@ -28,13 +28,13 @@ func Validate(rt *Runtime) error {
 	if err := validateDashboard(rt.Dashboard); err != nil {
 		return err
 	}
-	if err := validateProviders(rt.Providers, true); err != nil {
+	if err := validateProviders(rt.Catalog.Providers(), true); err != nil {
 		return err
 	}
-	if err := validateProviders(rt.DisabledProviders, false); err != nil {
+	if err := validateProviders(rt.Catalog.DisabledProviders(), false); err != nil {
 		return err
 	}
-	if err := validateAliases(rt.Aliases, rt.ProviderByName); err != nil {
+	if err := validateAliases(rt.Catalog.Aliases(), rt.Catalog); err != nil {
 		return err
 	}
 	return nil
@@ -65,8 +65,6 @@ func validateProviderHealth(h ProviderHealth) error {
 	return nil
 }
 
-const minInsecureRemoteDashboardTokenLen = 32
-
 func validateMetrics(m Metrics) error {
 	if !m.Enabled {
 		return nil
@@ -82,12 +80,7 @@ func validateDashboard(d Dashboard) error {
 		return nil
 	}
 	if d.AllowInsecureRemote {
-		if d.Token == "" || !d.TokenFromConfig {
-			return fmt.Errorf("dashboard: allow_insecure_remote = true requires an explicit token declared in config (minted tokens are not permitted for remote cleartext access)")
-		}
-		if len(d.Token) < minInsecureRemoteDashboardTokenLen {
-			return fmt.Errorf("dashboard: allow_insecure_remote = true requires a strong token of at least %d characters", minInsecureRemoteDashboardTokenLen)
-		}
+		return fmt.Errorf("dashboard: allow_insecure_remote is unsupported; the dashboard command is local-only")
 	}
 	return nil
 }
@@ -95,6 +88,13 @@ func validateDashboard(d Dashboard) error {
 func validateListener(l Listener) error {
 	if l.Address == "" {
 		return fmt.Errorf("listener.http %q: address is required", l.Name)
+	}
+	if strings.Contains(l.Address, "://") {
+		return fmt.Errorf("listener.http %q: address must be a TCP bind address in host:port form, not a URL", l.Name)
+	}
+	_, port, err := net.SplitHostPort(l.Address)
+	if err != nil || port == "" {
+		return fmt.Errorf("listener.http %q: address must be a TCP bind address in host:port form", l.Name)
 	}
 	return nil
 }
@@ -146,13 +146,12 @@ func validateProviders(providers []Provider, requireCredential bool) error {
 		if p.Name == "alias" {
 			return fmt.Errorf("provider %q: name is reserved for alias model routing", p.Name)
 		}
-		switch p.Type {
-		case ProviderTypeOpenAI, ProviderTypeOpenAICompatible, ProviderTypeAnthropic, ProviderTypeGemini:
-		default:
+		policy, ok := providerTypePolicies[p.Type]
+		if !ok {
 			return fmt.Errorf("provider %q: unsupported type %q", p.Name, p.Type)
 		}
-		if p.Type == ProviderTypeOpenAICompatible && p.BaseURL == "" {
-			return fmt.Errorf("provider %q: base_url is required for openai-compatible", p.Name)
+		if policy.requiresBaseURL && p.BaseURL == "" {
+			return fmt.Errorf("provider %q: base_url is required for %s", p.Name, p.Type)
 		}
 		if err := validateProviderBaseURL(p); err != nil {
 			return err
@@ -220,7 +219,7 @@ func isLoopbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func validateAliases(aliases []Alias, providers map[string]Provider) error {
+func validateAliases(aliases []Alias, catalog Catalog) error {
 	for _, a := range aliases {
 		if !IsLowercaseName(a.Name) {
 			return fmt.Errorf("alias %q: name must be lowercase, no spaces, no '/', and start with [a-z0-9]", a.Name)
@@ -240,11 +239,11 @@ func validateAliases(aliases []Alias, providers map[string]Provider) error {
 		}
 		seen := make(map[string]bool)
 		for _, t := range a.Targets {
-			prov, ok := providers[t.Provider]
+			_, _, ok := catalog.Model(t.Provider, t.Model)
 			if !ok {
-				return fmt.Errorf("alias %q: target provider %q is not defined", a.Name, t.Provider)
-			}
-			if _, ok := prov.ModelByName[t.Model]; !ok {
+				if _, providerOK := catalog.Provider(t.Provider); !providerOK {
+					return fmt.Errorf("alias %q: target provider %q is not defined", a.Name, t.Provider)
+				}
 				return fmt.Errorf("alias %q: target model %q is not defined on provider %q", a.Name, t.Model, t.Provider)
 			}
 			key := t.Provider + "/" + t.Model
@@ -253,7 +252,7 @@ func validateAliases(aliases []Alias, providers map[string]Provider) error {
 			}
 			seen[key] = true
 		}
-		if len(AliasEffectiveCapabilities(a, providers)) == 0 {
+		if len(catalog.AliasEffectiveCapabilities(a)) == 0 {
 			return fmt.Errorf("alias %q: targets do not share any capabilities", a.Name)
 		}
 	}
@@ -272,14 +271,9 @@ func isValidCapability(c Capability) bool {
 }
 
 func providerSupportsCapability(t ProviderType, c Capability) bool {
-	switch t {
-	case ProviderTypeOpenAI, ProviderTypeOpenAICompatible:
-		return c == CapabilityChat || c == CapabilityResponses || c == CapabilityEmbeddings || c == CapabilityImages || c == CapabilityAudioTranscriptions || c == CapabilityAudioSpeech
-	case ProviderTypeAnthropic:
-		return c == CapabilityChat || c == CapabilityResponses
-	case ProviderTypeGemini:
-		return c == CapabilityChat || c == CapabilityResponses || c == CapabilityEmbeddings
-	default:
+	policy, ok := providerTypePolicies[t]
+	if !ok {
 		return false
 	}
+	return HasCapability(policy.supportedCapabilities, c)
 }

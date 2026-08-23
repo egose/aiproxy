@@ -25,14 +25,15 @@ func TestBuildSerializesAllLiveState(t *testing.T) {
 	aliases := []config.Alias{
 		{Name: "chat", Algorithm: config.AlgorithmRoundRobin, Targets: []config.AliasTarget{{Provider: "openai", Model: "gpt-4o-mini"}}},
 	}
+	catalog := config.NewCatalog(providers, disabled, aliases)
 	usage := accounting.NewAggregator()
 	usage.Record(accounting.Event{Model: "openai/gpt-4o-mini", Operation: "chat", StatusCode: 200, Duration: 5 * time.Millisecond})
 	health := providerhealth.New(nil, config.ProviderHealth{})
-	health.SetProviders(map[string]config.Provider{"openai": {Name: "openai"}})
+	health.SetProviders(catalog)
 	logs := observability.NewLogBuffer(10)
 	logs.Add(observability.LogEntry{Level: slog.LevelInfo, Message: "hi"})
 
-	snap := Build("v1", ":8080", "bearer_static", start, providers, disabled, aliases, usage, health, logs, 200)
+	snap := Build("v1", ":8080", "bearer_static", start, catalog, usage, health, logs, 200)
 	if snap.Version != "v1" || snap.Address != ":8080" || snap.AuthMode != "bearer_static" {
 		t.Fatalf("identity fields wrong: %+v", snap)
 	}
@@ -63,7 +64,7 @@ func TestBuildSerializesAllLiveState(t *testing.T) {
 }
 
 func TestBuildHandlesNilLiveState(t *testing.T) {
-	snap := Build("v", ":1", "none", time.Now(), nil, nil, nil, nil, nil, nil, 200)
+	snap := Build("v", ":1", "none", time.Now(), config.Catalog{}, nil, nil, nil, 200)
 	if len(snap.Providers) != 0 || len(snap.Health) != 0 || len(snap.Usage) != 0 || len(snap.Logs) != 0 {
 		t.Fatalf("expected zero state, got %+v", snap)
 	}

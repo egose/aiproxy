@@ -32,39 +32,62 @@ const (
 )
 
 type Resolver struct {
-	providers map[string]config.Provider
-	aliases   map[string]config.Alias
+	catalog   config.Catalog
 	selectors map[string]alias.Selector
 }
 
 func New(rt *config.Runtime) *Resolver {
-	selectors := make(map[string]alias.Selector, len(rt.Aliases))
-	for name, a := range rt.AliasByName {
-		selectors[name] = alias.NewSelector(a)
-	}
-	for _, a := range rt.Aliases {
-		if _, ok := selectors[a.Name]; !ok {
-			selectors[a.Name] = alias.NewSelector(a)
-		}
+	return NewWithPrevious(rt, nil)
+}
+
+func NewWithPrevious(rt *config.Runtime, previous *Resolver) *Resolver {
+	aliases := rt.Catalog.Aliases()
+	selectors := make(map[string]alias.Selector, len(aliases))
+	for _, a := range aliases {
+		selectors[a.Name] = selectorForAlias(a.Name, a, previous)
 	}
 	return &Resolver{
-		providers: rt.ProviderByName,
-		aliases:   rt.AliasByName,
+		catalog:   rt.Catalog,
 		selectors: selectors,
 	}
+}
+
+func selectorForAlias(name string, a config.Alias, previous *Resolver) alias.Selector {
+	if previous != nil {
+		if previousAlias, ok := previous.catalog.Alias(name); ok && aliasesShareSelectorState(previousAlias, a) {
+			if selector := previous.selectors[name]; selector != nil {
+				return selector
+			}
+		}
+	}
+	return alias.NewSelector(a)
+}
+
+func aliasesShareSelectorState(a, b config.Alias) bool {
+	if a.Name != b.Name || a.Algorithm != b.Algorithm || len(a.Targets) != len(b.Targets) {
+		return false
+	}
+	for i := range a.Targets {
+		if a.Targets[i].Provider != b.Targets[i].Provider || a.Targets[i].Model != b.Targets[i].Model {
+			return false
+		}
+	}
+	return true
 }
 
 // Provider returns a provider config by name, or ok=false if not registered.
 // Used by the dispatcher to look up alias target credentials and base URLs.
 func (r *Resolver) Provider(name string) (config.Provider, bool) {
-	p, ok := r.providers[name]
-	return p, ok
+	return r.catalog.Provider(name)
 }
 
 // Alias returns an alias config by name.
 func (r *Resolver) Alias(name string) (config.Alias, bool) {
-	a, ok := r.aliases[name]
-	return a, ok
+	return r.catalog.Alias(name)
+}
+
+func (r *Resolver) Model(providerName, modelName string) (config.Provider, config.Model, bool) {
+	return r.catalog.Model(providerName, modelName)
 }
 
 func (r *Resolver) Resolve(publicModel string) (ResolveResult, error) {
@@ -73,7 +96,7 @@ func (r *Resolver) Resolve(publicModel string) (ResolveResult, error) {
 	}
 	if strings.HasPrefix(publicModel, "alias/") {
 		name := strings.TrimPrefix(publicModel, "alias/")
-		a, ok := r.aliases[name]
+		a, ok := r.catalog.Alias(name)
 		if !ok {
 			return ResolveResult{}, ErrUnknownAlias{Alias: name}
 		}
@@ -84,11 +107,10 @@ func (r *Resolver) Resolve(publicModel string) (ResolveResult, error) {
 		return ResolveResult{}, ErrUnknownModel{Model: publicModel}
 	}
 	provName, modelName := parts[0], parts[1]
-	prov, ok := r.providers[provName]
-	if !ok {
+	if _, ok := r.catalog.Provider(provName); !ok {
 		return ResolveResult{}, ErrUnknownProvider{Provider: provName}
 	}
-	model, ok := prov.ModelByName[modelName]
+	prov, model, ok := r.catalog.Model(provName, modelName)
 	if !ok {
 		return ResolveResult{}, ErrUnknownModel{Model: publicModel}
 	}

@@ -12,12 +12,7 @@ type Runtime struct {
 	Metrics               Metrics
 	Dashboard             Dashboard
 	UpstreamHeaderTimeout time.Duration
-	Providers             []Provider
-	DisabledProviders     []Provider
-	Aliases               []Alias
-
-	ProviderByName map[string]Provider
-	AliasByName    map[string]Alias
+	Catalog               Catalog
 }
 
 type Metrics struct {

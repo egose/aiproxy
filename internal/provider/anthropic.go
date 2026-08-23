@@ -57,9 +57,6 @@ func (a *adapter) doAnthropic(ctx context.Context, r Request) (*Result, error) {
 }
 
 func (a *adapter) doAnthropicChat(ctx context.Context, r Request) (*Result, error) {
-	if r.BaseURL == "" {
-		r.BaseURL = defaultAnthropicBaseURL
-	}
 	body, err := requestBody(r)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
@@ -102,9 +99,6 @@ func (a *adapter) doAnthropicChat(ctx context.Context, r Request) (*Result, erro
 }
 
 func (a *adapter) doAnthropicResponses(ctx context.Context, r Request) (*Result, error) {
-	if r.BaseURL == "" {
-		r.BaseURL = defaultAnthropicBaseURL
-	}
 	body, err := requestBody(r)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)

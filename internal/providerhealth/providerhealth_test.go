@@ -12,6 +12,14 @@ import (
 	"github.com/egose/aiproxy/internal/observability"
 )
 
+func testCatalog(names ...string) config.Catalog {
+	providers := make([]config.Provider, 0, len(names))
+	for _, name := range names {
+		providers = append(providers, config.Provider{Name: name})
+	}
+	return config.NewCatalog(providers, nil, nil)
+}
+
 type stubBackend struct {
 	markSuccess func(context.Context, string) error
 	markFailure func(context.Context, string, time.Duration) error
@@ -69,7 +77,7 @@ func TestTrackerFailureCooldownAndRecovery(t *testing.T) {
 	tracker.cooldown = 30 * time.Second
 	backend := tracker.backend.(*memoryBackend)
 	backend.now = func() time.Time { return clock }
-	tracker.SetProviders(map[string]config.Provider{"openai": {Name: "openai"}})
+	tracker.SetProviders(testCatalog("openai"))
 	if !tracker.IsHealthy("openai") {
 		t.Fatal("provider should start healthy")
 	}
@@ -86,9 +94,9 @@ func TestTrackerFailureCooldownAndRecovery(t *testing.T) {
 func TestTrackerSetProvidersRemovesMissingMetrics(t *testing.T) {
 	metrics := observability.NewMetrics()
 	tracker := New(metrics, config.ProviderHealth{})
-	tracker.SetProviders(map[string]config.Provider{"openai": {Name: "openai"}})
+	tracker.SetProviders(testCatalog("openai"))
 	tracker.MarkFailure("openai")
-	tracker.SetProviders(map[string]config.Provider{"gemini": {Name: "gemini"}})
+	tracker.SetProviders(testCatalog("gemini"))
 	if tracker.IsHealthy("gemini") != true {
 		t.Fatal("new provider should be healthy")
 	}
@@ -157,16 +165,19 @@ func TestRedisBackendCloseClosesClient(t *testing.T) {
 }
 
 func TestTrackerCloseClosesBackend(t *testing.T) {
-	closed := false
+	var closes atomic.Int32
 	tracker := &Tracker{backend: stubBackend{close: func() error {
-		closed = true
+		closes.Add(1)
 		return nil
 	}}}
 	if err := tracker.Close(); err != nil {
 		t.Fatalf("close tracker: %v", err)
 	}
-	if !closed {
-		t.Fatal("backend was not closed")
+	if err := tracker.Close(); err != nil {
+		t.Fatalf("repeat close tracker: %v", err)
+	}
+	if closes.Load() != 1 {
+		t.Fatalf("backend closes = %d, want 1", closes.Load())
 	}
 }
 
@@ -197,11 +208,7 @@ func TestTrackerSnapshotReportsKnownProviders(t *testing.T) {
 	tracker := New(nil, config.ProviderHealth{})
 	backend := tracker.backend.(*memoryBackend)
 	backend.now = func() time.Time { return clock }
-	tracker.SetProviders(map[string]config.Provider{
-		"openai": {Name: "openai"},
-		"backup": {Name: "backup"},
-		"gemini": {Name: "gemini"},
-	})
+	tracker.SetProviders(testCatalog("openai", "backup", "gemini"))
 	tracker.MarkFailure("backup")
 	if snapshot := tracker.Snapshot(); len(snapshot) != 3 ||
 		!snapshot["openai"] || snapshot["backup"] || !snapshot["gemini"] {
@@ -236,7 +243,7 @@ func TestTrackerSnapshotDoesNotHoldProviderLockDuringBackendRead(t *testing.T) {
 	<-started
 	setDone := make(chan struct{})
 	go func() {
-		tracker.SetProviders(map[string]config.Provider{"gemini": {Name: "gemini"}})
+		tracker.SetProviders(testCatalog("gemini"))
 		close(setDone)
 	}()
 	select {
@@ -268,8 +275,8 @@ func TestTrackerAnyHealthyUsesOneBackendSnapshot(t *testing.T) {
 		calls.Add(1)
 		return map[string]bool{"openai": false, "gemini": true}, nil
 	}}}
-	providers := map[string]config.Provider{"openai": {Name: "openai"}, "gemini": {Name: "gemini"}}
-	if !tracker.AnyHealthyContext(context.Background(), providers) {
+	catalog := testCatalog("openai", "gemini")
+	if !tracker.AnyHealthyCatalogContext(context.Background(), catalog) {
 		t.Fatal("expected one healthy provider")
 	}
 	if calls.Load() != 1 {
@@ -376,8 +383,8 @@ func TestTrackerAnyHealthyUsesCachedFallback(t *testing.T) {
 			return nil, context.Canceled
 		}},
 	}
-	providers := map[string]config.Provider{"openai": {Name: "openai"}}
-	if tracker.AnyHealthyContext(context.Background(), providers) {
+	catalog := testCatalog("openai")
+	if tracker.AnyHealthyCatalogContext(context.Background(), catalog) {
 		t.Fatal("cached unhealthy should suppress healthy fallback")
 	}
 
@@ -389,7 +396,7 @@ func TestTrackerAnyHealthyUsesCachedFallback(t *testing.T) {
 			return nil, context.Canceled
 		}},
 	}
-	if !tracker2.AnyHealthyContext(context.Background(), providers) {
+	if !tracker2.AnyHealthyCatalogContext(context.Background(), catalog) {
 		t.Fatal("cached healthy should not be inverted on fallback")
 	}
 }
@@ -398,8 +405,7 @@ func TestTrackerAnyHealthyFailsOpenWithoutCache(t *testing.T) {
 	tracker := &Tracker{backend: stubBackend{snapshot: func(ctx context.Context, names []string) (map[string]bool, error) {
 		return nil, context.Canceled
 	}}}
-	providers := map[string]config.Provider{"openai": {Name: "openai"}}
-	if !tracker.AnyHealthyContext(context.Background(), providers) {
+	if !tracker.AnyHealthyCatalogContext(context.Background(), testCatalog("openai")) {
 		t.Fatal("should fail open when no cache exists")
 	}
 }
