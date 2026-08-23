@@ -542,10 +542,12 @@ Completion evidence:
   vet, unit, race, host build, strict cross-build, build-atomicity, and archive
   validation failures block publication. Release artifacts are archive-validated
   before upload and published with `dist/checksums.txt` containing SHA-256 sums
-  for every archive. Docker publication now normalizes the tag version, passes it
-  explicitly as `VERSION`, verifies the built image's `aiproxy version` output,
-  runs Trivy HIGH/CRITICAL scanning before registry login/push, uploads SARIF,
-  and only then pushes semver tags.
+  for every archive. Docker publication now normalizes the tag version, runs a
+  local pre-publish image build with `VERSION`, verifies the built image's
+  `aiproxy version` output, runs Trivy HIGH/CRITICAL scanning before
+  publication, uploads SARIF, and delegates registry publication to
+  `egose/actions/docker-build-push` with the same `VERSION` build argument and
+  semver tags.
 - Verification: `git diff --check`; `ASDF_ACTIONLINT_VERSION=1.7.12
 ASDF_SHELLCHECK_VERSION=0.11.0 actionlint .github/workflows/test.yml
 .github/workflows/release.yml .github/workflows/publish.yaml`;
@@ -557,8 +559,9 @@ make validate-build-atomicity`; `sha256sum ./*.tar.gz > checksums.txt && test
 -s checksums.txt` from `dist/`.
 - Result: passed.
 - Local limitation: Docker image build/version smoke and Trivy execution were not
-  run locally because the WSL environment has no `docker` command; the publish
-  workflow now enforces both before push.
+  run locally by the RELEASE-01 agent because that WSL environment had no
+  `docker` command; the publish workflow now enforces both before invoking the
+  shared publish action.
 - Follow-up: none.
 
 Priority: P1
@@ -1669,7 +1672,7 @@ aiproxy:review-verify version`.
 - Verified: `command -v trivy`.
 - Result: failed with no output; local scanner is unavailable, but
   `.github/workflows/publish.yaml` enforces Trivy HIGH/CRITICAL scanning before
-  registry login and push.
+  invoking `egose/actions/docker-build-push` for registry publication.
 - Verified: `ASDF_ACTIONLINT_VERSION=1.7.12 ASDF_SHELLCHECK_VERSION=0.11.0
 actionlint .github/workflows/test.yml .github/workflows/release.yml
 .github/workflows/publish.yaml .github/workflows/docs-contract.yml`.
