@@ -256,6 +256,51 @@ api_key_ref {
 }
 ```
 
+## Repeated Credentials With `extends`
+
+Use `extends` to define one provider's endpoint and models, then add more credentials as independent providers:
+
+```hcl
+provider "openai-compatible" "nvidia-1" {
+  display_name = "Nvidia - j.dev"
+  base_url     = "https://integrate.api.nvidia.com/v1"
+
+  api_key_ref {
+    key = "nvidia-1"
+  }
+
+  model "z-ai/glm-5.2" {
+    display_name = "GLM 5.2"
+    capabilities = ["chat", "responses"]
+  }
+}
+
+provider "openai-compatible" "nvidia-2" {
+  extends      = "nvidia-1"
+  display_name = "Nvidia - corean"
+
+  api_key_ref {
+    key = "nvidia-2"
+  }
+}
+
+alias "nvidia_chat" {
+  algorithm = "round_robin"
+
+  target {
+    provider = "nvidia-1"
+    model    = "z-ai/glm-5.2"
+  }
+
+  target {
+    provider = "nvidia-2"
+    model    = "z-ai/glm-5.2"
+  }
+}
+```
+
+The derived provider must use the same type label as the base and must declare its own `api_key` or `api_key_ref`. It cannot override `base_url`, timeout, enabled state, or models. Aliases still list each derived provider target explicitly.
+
 ## Tips
 
 - keep provider names stable because they appear in public model strings

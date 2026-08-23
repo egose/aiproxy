@@ -246,7 +246,29 @@ Provider attributes:
 - `base_url`
 - `api_key`
 - `api_key_ref`
+- `extends`
+- `upstream_header_timeout`
+- `enabled`
 - nested `model` blocks
+
+Provider inheritance is resolved during configuration loading. A provider may
+declare `extends = "<base-provider-name>"` to inherit the base provider's type,
+`base_url`, effective upstream header timeout, enabled state, and complete model
+inventory while using its own provider name and credential.
+
+Derived provider blocks are intentionally restricted:
+
+- the type label remains mandatory and must match the base provider type
+- the base must exist, be enabled, and must not itself declare `extends`
+- declaration order does not matter
+- `display_name` may override the inherited display name
+- exactly one local credential form, `api_key` or `api_key_ref`, is required
+- local `base_url`, `upstream_header_timeout`, `enabled`, and `model` blocks are rejected
+
+After loading, derived providers are ordinary providers. Direct routing,
+health, metrics, billing, dashboard inventory, reloads, and aliases identify
+them by their own provider names. Aliases do not expand inherited providers;
+each target must still list the concrete provider name and model.
 
 ### Provider Type Semantics
 
