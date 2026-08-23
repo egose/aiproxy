@@ -1,3 +1,19 @@
+## [0.17.0](https://github.com/egose/aiproxy/compare/v0.16.0...v0.17.0) (2026-08-23)
+
+### Features
+
+* delegate image publication to shared docker build-push action ([5d8b29b](https://github.com/egose/aiproxy/commit/5d8b29b02d919b65d8e577f38014f648c0c18bdb))
+* **website:** add docs contract validation and workflow gating ([2dbe10f](https://github.com/egose/aiproxy/commit/2dbe10f5391ac339e1a9b0af62e48b9b116df855))
+* **website:** add website workspace and docs app configuration ([9a73814](https://github.com/egose/aiproxy/commit/9a738141a21bfefcf33124d41d30854fef0d1436))
+
+### Bug Fixes
+
+* normalize doc contract tables before comparison ([c4913f6](https://github.com/egose/aiproxy/commit/c4913f69d92f59b72275531263593298ed4b4f67))
+
+### Documentation
+
+* update codebase health follow-up notes for publish workflow changes ([ed9d5ce](https://github.com/egose/aiproxy/commit/ed9d5ce69997a799dc536eb711291a3711842d9d))
+
 ## [0.16.0](https://github.com/egose/aiproxy/compare/v0.15.0...v0.16.0) (2026-08-23)
 
 ### Features
