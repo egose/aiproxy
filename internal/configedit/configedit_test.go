@@ -71,6 +71,53 @@ func TestRenderProviderBlockDisabled(t *testing.T) {
 	}
 }
 
+func TestRenderProviderBlockDerivedStaysCompact(t *testing.T) {
+	block := RenderProviderBlock(ProviderInput{
+		ProviderType: "openai-compatible",
+		Name:         "nvidia-2",
+		Extends:      "nvidia-1",
+		DisplayName:  "Nvidia - corean",
+		BaseURL:      "https://should-not-render.example/v1",
+		Credential:   ProviderCredentialInput{Mode: "secrets_file", SecretsKey: "nvidia-2"},
+		Models:       []ProviderModelInput{{Name: "should-not-render"}},
+	}, "/home/user/.config/aiproxy/keys.json")
+	for _, want := range []string{`extends = "nvidia-1"`, `display_name = "Nvidia - corean"`, `key  = "nvidia-2"`} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("derived provider missing %q:\n%s", want, block)
+		}
+	}
+	for _, forbidden := range []string{"base_url", "model ", "upstream_header_timeout", "enabled"} {
+		if strings.Contains(block, forbidden) {
+			t.Fatalf("derived provider rendered %q:\n%s", forbidden, block)
+		}
+	}
+	if err := ValidateGeneratedConfig([]byte(block), "config.hcl"); err != nil {
+		t.Fatalf("ValidateGeneratedConfig(): %v", err)
+	}
+}
+
+func TestAvailableProviderModelsIncludesDerivedProviderModels(t *testing.T) {
+	blocks, err := ParseTopLevelBlocks(`
+provider "openai-compatible" "nvidia-2" {
+  extends = "nvidia-1"
+  api_key = "k"
+}
+
+provider "openai-compatible" "nvidia-1" {
+  base_url = "https://integrate.api.nvidia.com/v1"
+  api_key = "k"
+  model "z-ai/glm-5.2" {}
+}
+`)
+	if err != nil {
+		t.Fatalf("ParseTopLevelBlocks(): %v", err)
+	}
+	models := AvailableProviderModels(blocks)
+	if len(models) != 2 || models[0] != "nvidia-1/z-ai/glm-5.2" || models[1] != "nvidia-2/z-ai/glm-5.2" {
+		t.Fatalf("models = %#v", models)
+	}
+}
+
 func TestWriteProviderFilesUpdatesConfigAndSecrets(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.hcl")

@@ -157,6 +157,7 @@ Common attributes:
 
 - `display_name`
 - `base_url` for `openai-compatible`
+- `extends` for restricted provider inheritance
 - `api_key`
 - `api_key_ref`
 - `upstream_header_timeout`
@@ -181,6 +182,41 @@ Plain `http` is accepted only for loopback development endpoints such as
 `localhost`, `127.0.0.1`, or `::1`.
 
 Provider names are part of the public model string, so keep them stable and machine-friendly.
+
+### Provider Inheritance
+
+Use `extends` when several accounts share the same provider type, endpoint, timeout, and model inventory but need separate credentials:
+
+```hcl
+provider "openai-compatible" "nvidia-1" {
+  display_name = "Nvidia - j.dev"
+  base_url     = "https://integrate.api.nvidia.com/v1"
+
+  api_key_ref {
+    key = "nvidia-1"
+  }
+
+  model "z-ai/glm-5.2" {
+    display_name = "GLM 5.2"
+    capabilities = ["chat", "responses"]
+  }
+}
+
+provider "openai-compatible" "nvidia-2" {
+  extends      = "nvidia-1"
+  display_name = "Nvidia - corean"
+
+  api_key_ref {
+    key = "nvidia-2"
+  }
+}
+```
+
+A derived provider may be declared before or after its base. It may declare only `extends`, optional `display_name`, and exactly one local credential, either `api_key` or `api_key_ref`. It inherits the base provider type, `base_url`, effective upstream header timeout, enabled state, and all model blocks.
+
+The type label remains required and must match the base. The base must exist, be enabled, and must not itself use `extends`; inheritance chains are rejected. Local `base_url`, `upstream_header_timeout`, `enabled`, and `model` declarations are rejected instead of ignored.
+
+Derived providers are flattened during config loading and reload. After a successful load, direct model strings, health, metrics, billing, and dashboard inventory use the derived provider's own name. Aliases still list each provider target explicitly.
 
 ## Upstream Header Timeout
 

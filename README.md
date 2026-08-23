@@ -183,6 +183,7 @@ aiproxy examples
 aiproxy configure
 aiproxy configure provider
 aiproxy configure provider --config /etc/aiproxy/config.hcl --non-interactive --name backup --type openai-compatible --base-url https://llm.internal/v1 --secrets-key localai --api-key "$LOCALAI_API_KEY" --model qwen3-32b
+aiproxy configure provider --config /etc/aiproxy/config.hcl --non-interactive --name backup-2 --type openai-compatible --extends backup --secrets-key backup-2 --api-key "$BACKUP_2_API_KEY"
 aiproxy serve --config /etc/aiproxy/config.hcl
 aiproxy validate --config /etc/aiproxy/config.hcl
 aiproxy version
@@ -245,6 +246,31 @@ aiproxy configure alias \
 ```
 
 Use `upstream_header_timeout` to control how long the proxy waits for upstream response headers. Provider values override the root value; otherwise the default is 90 seconds. This timeout does not cap response bodies or SSE streams after headers arrive.
+
+Use `extends` when several credentials share one provider type, endpoint, timeout, and model inventory. A derived provider keeps the two-label provider form and may declare only `extends`, optional `display_name`, and exactly one local credential (`api_key` or `api_key_ref`):
+
+```hcl
+provider "openai-compatible" "nvidia-1" {
+  display_name = "Nvidia - j.dev"
+  base_url     = "https://integrate.api.nvidia.com/v1"
+
+  api_key_ref { key = "nvidia-1" }
+
+  model "z-ai/glm-5.2" {
+    display_name = "GLM 5.2"
+    capabilities = ["chat", "responses"]
+  }
+}
+
+provider "openai-compatible" "nvidia-2" {
+  extends      = "nvidia-1"
+  display_name = "Nvidia - corean"
+
+  api_key_ref { key = "nvidia-2" }
+}
+```
+
+Derived providers may appear before or after the base. The base must be enabled, concrete, and the same provider type; inheritance chains are rejected. Aliases still enumerate each provider target explicitly, for example `nvidia-1/z-ai/glm-5.2` and `nvidia-2/z-ai/glm-5.2`.
 
 Delete existing blocks with `--delete`:
 

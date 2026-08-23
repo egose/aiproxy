@@ -87,6 +87,11 @@ repo has sandbox services for stable end-to-end provider coverage.)
   validation. To intentionally disable a provider, set `enabled = false`.
   `api_key_ref.path` defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json`, falling
   back to `~/.config/aiproxy/keys.json`.
+- Providers may declare `extends = "<base-provider-name>"` to inherit the base
+  provider type, endpoint, timeout, enabled state, and models while using their
+  own provider name and local credential. Derived providers may only declare
+  `extends`, optional `display_name`, and exactly one local `api_key` or
+  `api_key_ref`; the base must be enabled, concrete, and the same type.
 - Direct (`<provider>/<model>`) requests never fail over to a different
   target. Alias requests retry the next target on transport / 5xx only;
   client 4xx errors are returned verbatim.

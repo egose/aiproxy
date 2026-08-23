@@ -84,6 +84,16 @@ aiproxy configure provider \
   --api-key "$LOCALAI_API_KEY" \
   --model qwen3-32b=qwen/qwen3-32b \
   --model-capabilities qwen3-32b=chat,responses
+
+aiproxy configure provider \
+  --config /etc/aiproxy/config.hcl \
+  --non-interactive \
+  --name backup-2 \
+  --type openai-compatible \
+  --extends backup \
+  --display-name "Backup provider 2" \
+  --secrets-key backup-2 \
+  --api-key "$BACKUP_2_API_KEY"
 ```
 
 Root upstream timeout example:

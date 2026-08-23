@@ -10,6 +10,12 @@ type rawFile struct {
 	Dashboard             []*rawDashboard    `hcl:"dashboard,block"`
 	Providers             []rawProvider      `hcl:"provider,block"`
 	Aliases               []rawAlias         `hcl:"alias,block"`
+	providerSyntax        []rawProviderSyntax
+}
+
+type rawProviderSyntax struct {
+	Attrs  map[string]bool
+	Blocks map[string]int
 }
 
 type rawMetrics struct {
@@ -68,6 +74,7 @@ type rawProviderHealth struct {
 type rawProvider struct {
 	Type                  string        `hcl:"type,label"`
 	Name                  string        `hcl:"name,label"`
+	Extends               string        `hcl:"extends,optional"`
 	DisplayName           string        `hcl:"display_name,optional"`
 	BaseURL               string        `hcl:"base_url,optional"`
 	UpstreamHeaderTimeout string        `hcl:"upstream_header_timeout,optional"`
