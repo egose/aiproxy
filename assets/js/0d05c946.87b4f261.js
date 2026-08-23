@@ -128,10 +128,8 @@ function _createMdxContent(props) {
         children: "clients should call one stable virtual model"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "you want simple balancing across two backends"
-      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["you want alias retry behavior on transport failures and upstream ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "5xx"
-        })]
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "you want alias retry behavior on transport failures, timeouts, and configured retryable upstream statuses"
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "multi-provider-chat-pool-with-tenant-aware-auth",

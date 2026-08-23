@@ -127,10 +127,8 @@ function _createMdxContent(props) {
         children: "Routes requests to multiple upstream providers"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "Supports direct model addressing and alias-based routing"
-      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["Retries alias targets on transport failures and upstream ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "5xx"
-        }), " responses"]
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "Retries alias targets on transport failures, timeouts, and configured retryable\nupstream status codes"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "Preserves streaming responses through OpenAI-compatible SSE framing"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {

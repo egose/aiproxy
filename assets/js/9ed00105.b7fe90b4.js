@@ -202,9 +202,9 @@ function _createMdxContent(props) {
         }), " configures read, idle, and write timeouts"]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Listener address and timeout changes still require a restart, even though some runtime state can reload on ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Listener address and timeout changes still require a restart, even though runtime state such as auth, providers, models, aliases, upstream header timeouts, access-log enablement, metrics, and provider-health config can reload on ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
-      }), "."]
+      }), ". Logging level changes and enabling the dashboard after startup also require a restart."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "For most deployments, one HTTP listener is enough."
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
@@ -647,13 +647,15 @@ function _createMdxContent(props) {
           children: "metrics"
         }), " block with an empty or missing token"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["listener addresses that are URLs instead of TCP ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "host:port"
+        }), " bind addresses"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["a ", (0,jsx_runtime.jsx)(_components.code, {
           children: "dashboard"
         }), " block with ", (0,jsx_runtime.jsx)(_components.code, {
           children: "allow_insecure_remote = true"
-        }), " but a minted, weak\n(fewer than 32 characters), or missing explicit ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "token"
-        })]
+        }), "; the dashboard command\nis local-only"]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "optional-blocks",
@@ -684,7 +686,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
-        children: "dashboard {\n  token                 = env(\"AIPROXY_DASHBOARD_TOKEN\")\n  allow_insecure_remote = false\n}\n"
+        children: "dashboard {\n  token = env(\"AIPROXY_DASHBOARD_TOKEN\")\n}\n"
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["When ", (0,jsx_runtime.jsx)(_components.code, {
@@ -695,11 +697,7 @@ function _createMdxContent(props) {
         children: "$XDG_CONFIG_HOME/aiproxy/dashboard.token"
       }), "; the ", (0,jsx_runtime.jsx)(_components.code, {
         children: "dashboard"
-      }), "\ncommand reads that file to authenticate. To allow non-loopback plain-HTTP\ndashboard access, set ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "allow_insecure_remote = true"
-      }), " and declare a strong\nexplicit ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "token"
-      }), " (at least 32 characters). HTTPS listeners always satisfy the\ntransport check."]
+      }), "\ncommand reads that file to authenticate. The dashboard command is local-only: it\nconnects over loopback plain HTTP and refuses concrete non-loopback listener\nhosts. HTTPS and remote dashboard URLs are not supported by the current\nconfiguration model."]
     })]
   });
 }

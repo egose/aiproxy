@@ -249,12 +249,14 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["alias request to ", (0,jsx_runtime.jsx)(_components.code, {
           children: "alias/chat_default"
-        }), ": may retry the next target on timeout or upstream ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "5xx"
+        }), ": may retry the next target on transport error, timeout, or configured ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "retry_status_codes"
         })]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["alias request returning upstream ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ["alias request returning an upstream ", (0,jsx_runtime.jsx)(_components.code, {
           children: "4xx"
+        }), " not listed in ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "retry_status_codes"
         }), ": returned to the client without failover"]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "request to an unsupported operation: returned as a client-visible proxy error"

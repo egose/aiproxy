@@ -113,6 +113,20 @@ function _createMdxContent(props) {
           children: "Dockerfile"
         })]
       }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Foreground ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy serve"
+      }), " is supported across the advertised release targets.\nDaemon lifecycle commands (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "serve -d"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "status"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "stop"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "restart"
+      }), ") are\nLinux-only; on other platforms they return ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "daemon lifecycle is unsupported on this platform"
+      }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "The container image:"
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
@@ -229,7 +243,7 @@ function _createMdxContent(props) {
         children: "aiproxy"
       }), " supports runtime reload on ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
-      }), " for auth, providers, models, aliases, and metrics-backed inventory state."]
+      }), " for auth, providers, models, aliases, root and provider upstream header timeouts, access-log enablement, metrics config, provider-health config, and metrics-backed inventory state."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Reload with:"
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
@@ -252,7 +266,7 @@ function _createMdxContent(props) {
         children: "docker kill --signal HUP <container>\n"
       })
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
-      children: "Listener address and timeout changes still require a full restart."
+      children: "Listener address, listener timeout, logging level, and enabling the dashboard after startup require a full restart."
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "reverse-proxying",
       children: "Reverse Proxying"
@@ -293,11 +307,9 @@ function _createMdxContent(props) {
           children: "GET /metrics"
         }), " with the configured bearer token (the token is independent of\nAPI auth client tokens)"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["for non-loopback ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ["use ", (0,jsx_runtime.jsx)(_components.code, {
           children: "aiproxy dashboard"
-        }), " access, use an HTTPS listener or declare\n", (0,jsx_runtime.jsx)(_components.code, {
-          children: "dashboard { allow_insecure_remote = true token = \"<32+ char token>\" }"
-        })]
+        }), " only from the local host; remote dashboard access is\nunsupported until an explicit transport design is added"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["explicitly ", (0,jsx_runtime.jsx)(_components.code, {
           children: "enabled = false"

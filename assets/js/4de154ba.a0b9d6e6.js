@@ -134,6 +134,20 @@ function _createMdxContent(props) {
       }), " when ", (0,jsx_runtime.jsx)(_components.code, {
         children: "XDG_CONFIG_HOME"
       }), " is unset."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Foreground ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy serve"
+      }), " is supported across the advertised release targets.\nLinux additionally supports ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy serve -d"
+      }), " and the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy status"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy stop"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy restart"
+      }), " daemon lifecycle commands. On non-Linux\nplatforms those daemon lifecycle commands return ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "daemon lifecycle is unsupported on this platform"
+      }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "When running locally with env-based secrets, load your environment before invoking the binary:"
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
@@ -246,7 +260,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-sh",
-        children: "make vet\nmake test\nmake test-race\nmake cover\n"
+        children: "make vet\nmake test\nmake test-race\nmake docs-contract\nmake cover\n"
       })
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "The standard local sanity check is:"
@@ -257,6 +271,18 @@ function _createMdxContent(props) {
       })
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "There is no separate typecheck target. A successful Go build is the typecheck."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Documentation-only pull requests run ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "make docs-contract"
+      }), " through the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Docs Contract"
+      }), " workflow. Website pull requests also run ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "pnpm typecheck"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "pnpm build"
+      }), " from the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "website"
+      }), " directory."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "reload-behavior",
       children: "Reload Behavior"
@@ -276,6 +302,12 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "alias routing state"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "access-log enablement"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "metrics configuration"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "provider-health configuration"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "metrics-backed inventory state"
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
@@ -288,7 +320,7 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "listener timeout changes"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
-        children: "log-level changes"
+        children: "logging level changes"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "enabling the dashboard after startup"
       }), "\n"]
@@ -347,9 +379,11 @@ function _createMdxContent(props) {
         children: "/metrics"
       }), " with their own credentials. An\nempty or missing token is rejected at config validation."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Transient transport failures and upstream ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Transient transport failures, upstream request errors, and upstream ", (0,jsx_runtime.jsx)(_components.code, {
         children: "5xx"
-      }), " responses can mark a provider unhealthy for routing and readiness decisions."]
+      }), " responses can mark a provider unhealthy for routing and readiness decisions. Configured retryable ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "4xx"
+      }), " statuses can trigger alias failover but do not mark providers unhealthy."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "This health state is shared across requests within the same process."
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
@@ -382,16 +416,14 @@ function _createMdxContent(props) {
         children: "/_internal/dashboard/*"
       }), " HTTP endpoints\nshare the proxy listener."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
-      children: ["\n", (0,jsx_runtime.jsx)(_components.li, {
-        children: "Loopback plain HTTP is always allowed for the dashboard command."
-      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["Non-loopback plain HTTP is rejected unless\n", (0,jsx_runtime.jsx)(_components.code, {
-          children: "dashboard { allow_insecure_remote = true }"
-        }), " is declared with a strong\nexplicit ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "token"
-        }), " (at least 32 characters)."]
+      children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Listener addresses are TCP bind addresses in ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "host:port"
+        }), " form, not URLs."]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
-        children: "HTTPS listeners always satisfy the transport check regardless of host."
+        children: "The dashboard command is local-only. It connects over loopback plain HTTP with\nbearer authentication and refuses concrete non-loopback listener hosts."
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "HTTPS and remote dashboard URLs are not supported by the current configuration\nmodel. Remote dashboard access requires a future explicit transport design."
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["Repeated invalid dashboard tokens are rate limited with ", (0,jsx_runtime.jsx)(_components.code, {
           children: "429"
@@ -464,9 +496,9 @@ function _createMdxContent(props) {
           children: "GET /metrics"
         }), " with the configured bearer token"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["for non-loopback dashboard access, use an HTTPS listener or declare\n", (0,jsx_runtime.jsx)(_components.code, {
-          children: "dashboard { allow_insecure_remote = true token = \"<32+ char token>\" }"
-        })]
+        children: ["use ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "aiproxy dashboard"
+        }), " only from the local host; remote dashboard access is\nunsupported until an explicit transport design is added"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["explicitly ", (0,jsx_runtime.jsx)(_components.code, {
           children: "enabled = false"

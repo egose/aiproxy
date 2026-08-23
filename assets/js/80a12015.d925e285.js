@@ -117,9 +117,11 @@ function _createMdxContent(props) {
         }), " for proxy-managed routing"]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Names are lowercase and must not contain spaces or ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Provider and alias names are lowercase and must not contain spaces or ", (0,jsx_runtime.jsx)(_components.code, {
         children: "/"
-      }), "."]
+      }), ".\nModel names are lowercase, must not contain spaces, and may contain ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/"
+      }), " when\nevery slash-separated segment follows the same lowercase name rule."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "direct-routing",
       children: "Direct Routing"
@@ -194,20 +196,14 @@ function _createMdxContent(props) {
       id: "failover-rules",
       children: "Failover Rules"
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
-      children: "Alias requests retry the next target only when the selected target fails with:"
+      children: "Alias requests retry the next target when the selected target fails with:"
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
       children: ["\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "transport errors"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "timeouts"
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["upstream ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "5xx"
-        }), " responses"]
-      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["upstream ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "4xx"
-        }), " responses whose status code is listed in ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ["upstream responses whose status code is listed in ", (0,jsx_runtime.jsx)(_components.code, {
           children: "retry_status_codes"
         })]
       }), "\n"]
@@ -216,9 +212,9 @@ function _createMdxContent(props) {
         children: "retry_status_codes"
       }), " is ", (0,jsx_runtime.jsx)(_components.code, {
         children: "[\"500\", \"502\", \"503\", \"504\"]"
-      }), ", so only ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ", so only those common ", (0,jsx_runtime.jsx)(_components.code, {
         children: "5xx"
-      }), " responses trigger failover. Add codes like ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " responses trigger status-based failover. Add codes like ", (0,jsx_runtime.jsx)(_components.code, {
         children: "\"429\""
       }), " to also retry on rate-limited responses."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
@@ -227,6 +223,12 @@ function _createMdxContent(props) {
       }), " responses. Those are returned to the client as-is."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "This avoids masking client-side request problems as routing problems."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Retryable ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "4xx"
+      }), " statuses are an alias failover policy only. They do not mark the provider unhealthy; provider health is mutated by transport/upstream request errors and upstream ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "5xx"
+      }), " responses."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "provider-types",
       children: "Provider Types"
@@ -393,8 +395,96 @@ function _createMdxContent(props) {
       children: ["If ", (0,jsx_runtime.jsx)(_components.code, {
         children: "capabilities"
       }), " is omitted, the proxy derives defaults from the provider type and then enforces operation support at request time."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Provider type"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Default capabilities when omitted"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Additional supported capabilities"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "openai"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "embeddings"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "images"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_transcriptions"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_speech"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "openai-compatible"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "embeddings"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "images"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_transcriptions"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_speech"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "anthropic"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "None"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "gemini"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "embeddings"
+            })
+          })]
+        })]
+      })]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
-      children: "Set explicit capabilities when you want the public catalog to reflect a narrower, safer contract than the provider's default behavior."
+      children: "Set explicit capabilities when you want the public catalog to reflect a narrower contract than the provider's default behavior, or to opt into one of the additional supported capabilities for that provider type."
     }), "\n", (0,jsx_runtime.jsxs)(_components.h2, {
       id: "get-v1models-metadata",
       children: [(0,jsx_runtime.jsx)(_components.code, {

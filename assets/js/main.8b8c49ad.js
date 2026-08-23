@@ -72,7 +72,7 @@ var lib_default = /*#__PURE__*/__webpack_require__.n(lib);
 // EXTERNAL MODULE: ./.docusaurus/routesChunkNames.json
 var routesChunkNames = __webpack_require__(4054);
 ;// ./.docusaurus/registry.js
-/* harmony default export */ const registry = ({"0058b4c6":[()=>__webpack_require__.e(/* import() | 0058b4c6 */ 849).then(__webpack_require__.t.bind(__webpack_require__, 6164, 19)),"@generated/docusaurus-plugin-content-docs/default/p/docs-175.json",/*require.resolve*/(6164)],"0d05c946":[()=>__webpack_require__.e(/* import() | 0d05c946 */ 848).then(__webpack_require__.bind(__webpack_require__, 3060)),"@site/docs/config-examples.md",/*require.resolve*/(3060)],"0e384e19":[()=>__webpack_require__.e(/* import() | 0e384e19 */ 976).then(__webpack_require__.bind(__webpack_require__, 3394)),"@site/docs/intro.md",/*require.resolve*/(3394)],"17896441":[()=>Promise.all(/* import() | 17896441 */[__webpack_require__.e(869), __webpack_require__.e(226), __webpack_require__.e(401)]).then(__webpack_require__.bind(__webpack_require__, 339)),"@theme/DocItem",/*require.resolve*/(339)],"1df93b7f":[()=>__webpack_require__.e(/* import() | 1df93b7f */ 583).then(__webpack_require__.bind(__webpack_require__, 2721)),"@site/src/pages/index.tsx",/*require.resolve*/(2721)],"33ce0669":[()=>__webpack_require__.e(/* import() | 33ce0669 */ 68).then(__webpack_require__.bind(__webpack_require__, 1105)),"@site/docs/request-examples.md",/*require.resolve*/(1105)],"4de154ba":[()=>__webpack_require__.e(/* import() | 4de154ba */ 81).then(__webpack_require__.bind(__webpack_require__, 4852)),"@site/docs/operations.md",/*require.resolve*/(4852)],"5e95c892":[()=>__webpack_require__.e(/* import() | 5e95c892 */ 647).then(__webpack_require__.bind(__webpack_require__, 8388)),"@theme/DocsRoot",/*require.resolve*/(8388)],"5e9f5e1a":[()=>Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 4784)),"@generated/docusaurus.config",/*require.resolve*/(4784)],"8070e160":[()=>__webpack_require__.e(/* import() | 8070e160 */ 822).then(__webpack_require__.bind(__webpack_require__, 6766)),"@site/docs/quickstart.md",/*require.resolve*/(6766)],"80a12015":[()=>__webpack_require__.e(/* import() | 80a12015 */ 177).then(__webpack_require__.bind(__webpack_require__, 8634)),"@site/docs/providers-and-routing.md",/*require.resolve*/(8634)],"964ae018":[()=>__webpack_require__.e(/* import() | 964ae018 */ 443).then(__webpack_require__.bind(__webpack_require__, 2700)),"@site/docs/api-reference.md",/*require.resolve*/(2700)],"9ed00105":[()=>__webpack_require__.e(/* import() | 9ed00105 */ 873).then(__webpack_require__.bind(__webpack_require__, 2420)),"@site/docs/configuration.md",/*require.resolve*/(2420)],"a3713279":[()=>__webpack_require__.e(/* import() | a3713279 */ 588).then(__webpack_require__.bind(__webpack_require__, 4236)),"@site/docs/deployment.md",/*require.resolve*/(4236)],"a7456010":[()=>__webpack_require__.e(/* import() | a7456010 */ 235).then(__webpack_require__.t.bind(__webpack_require__, 8552, 19)),"@generated/docusaurus-plugin-content-pages/default/__plugin.json",/*require.resolve*/(8552)],"a7bd4aaa":[()=>__webpack_require__.e(/* import() | a7bd4aaa */ 98).then(__webpack_require__.bind(__webpack_require__, 9191)),"@theme/DocVersionRoot",/*require.resolve*/(9191)],"a94703ab":[()=>Promise.all(/* import() | a94703ab */[__webpack_require__.e(869), __webpack_require__.e(48)]).then(__webpack_require__.bind(__webpack_require__, 3816)),"@theme/DocRoot",/*require.resolve*/(3816)],"aba21aa0":[()=>__webpack_require__.e(/* import() | aba21aa0 */ 742).then(__webpack_require__.t.bind(__webpack_require__, 7093, 19)),"@generated/docusaurus-plugin-content-docs/default/__plugin.json",/*require.resolve*/(7093)]});
+/* harmony default export */ const registry = ({"0d05c946":[()=>__webpack_require__.e(/* import() | 0d05c946 */ 848).then(__webpack_require__.bind(__webpack_require__, 3060)),"@site/docs/config-examples.md",/*require.resolve*/(3060)],"0e384e19":[()=>__webpack_require__.e(/* import() | 0e384e19 */ 976).then(__webpack_require__.bind(__webpack_require__, 3394)),"@site/docs/intro.md",/*require.resolve*/(3394)],"11b43341":[()=>__webpack_require__.e(/* import() | 11b43341 */ 256).then(__webpack_require__.t.bind(__webpack_require__, 5293, 19)),"@generated/docusaurus-plugin-content-docs/default/p/docs-7fc.json",/*require.resolve*/(5293)],"17896441":[()=>Promise.all(/* import() | 17896441 */[__webpack_require__.e(869), __webpack_require__.e(226), __webpack_require__.e(401)]).then(__webpack_require__.bind(__webpack_require__, 339)),"@theme/DocItem",/*require.resolve*/(339)],"1df93b7f":[()=>__webpack_require__.e(/* import() | 1df93b7f */ 583).then(__webpack_require__.bind(__webpack_require__, 2721)),"@site/src/pages/index.tsx",/*require.resolve*/(2721)],"33ce0669":[()=>__webpack_require__.e(/* import() | 33ce0669 */ 68).then(__webpack_require__.bind(__webpack_require__, 1105)),"@site/docs/request-examples.md",/*require.resolve*/(1105)],"4de154ba":[()=>__webpack_require__.e(/* import() | 4de154ba */ 81).then(__webpack_require__.bind(__webpack_require__, 4852)),"@site/docs/operations.md",/*require.resolve*/(4852)],"5e95c892":[()=>__webpack_require__.e(/* import() | 5e95c892 */ 647).then(__webpack_require__.bind(__webpack_require__, 8388)),"@theme/DocsRoot",/*require.resolve*/(8388)],"5e9f5e1a":[()=>Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 4784)),"@generated/docusaurus.config",/*require.resolve*/(4784)],"8070e160":[()=>__webpack_require__.e(/* import() | 8070e160 */ 822).then(__webpack_require__.bind(__webpack_require__, 6766)),"@site/docs/quickstart.md",/*require.resolve*/(6766)],"80a12015":[()=>__webpack_require__.e(/* import() | 80a12015 */ 177).then(__webpack_require__.bind(__webpack_require__, 8634)),"@site/docs/providers-and-routing.md",/*require.resolve*/(8634)],"964ae018":[()=>__webpack_require__.e(/* import() | 964ae018 */ 443).then(__webpack_require__.bind(__webpack_require__, 2700)),"@site/docs/api-reference.md",/*require.resolve*/(2700)],"9ed00105":[()=>__webpack_require__.e(/* import() | 9ed00105 */ 873).then(__webpack_require__.bind(__webpack_require__, 2420)),"@site/docs/configuration.md",/*require.resolve*/(2420)],"a3713279":[()=>__webpack_require__.e(/* import() | a3713279 */ 588).then(__webpack_require__.bind(__webpack_require__, 4236)),"@site/docs/deployment.md",/*require.resolve*/(4236)],"a7456010":[()=>__webpack_require__.e(/* import() | a7456010 */ 235).then(__webpack_require__.t.bind(__webpack_require__, 8552, 19)),"@generated/docusaurus-plugin-content-pages/default/__plugin.json",/*require.resolve*/(8552)],"a7bd4aaa":[()=>__webpack_require__.e(/* import() | a7bd4aaa */ 98).then(__webpack_require__.bind(__webpack_require__, 9191)),"@theme/DocVersionRoot",/*require.resolve*/(9191)],"a94703ab":[()=>Promise.all(/* import() | a94703ab */[__webpack_require__.e(869), __webpack_require__.e(48)]).then(__webpack_require__.bind(__webpack_require__, 3816)),"@theme/DocRoot",/*require.resolve*/(3816)],"aba21aa0":[()=>__webpack_require__.e(/* import() | aba21aa0 */ 742).then(__webpack_require__.t.bind(__webpack_require__, 7093, 19)),"@generated/docusaurus-plugin-content-docs/default/__plugin.json",/*require.resolve*/(7093)]});
 // EXTERNAL MODULE: ./node_modules/.pnpm/react@19.2.6/node_modules/react/jsx-runtime.js
 var jsx_runtime = __webpack_require__(1325);
 ;// ./node_modules/.pnpm/@docusaurus+core@3.10.1_@mdx-js+react@3.1.1_@types+react@19.2.14_react@19.2.6__clean-cs_c6bb8a92892675e531eb6c2d31c3baf0/node_modules/@docusaurus/core/lib/client/theme-fallback/Loading/index.js
@@ -123,7 +123,7 @@ if(typeof chunk==='object'||typeof chunk==='function'){Object.keys(loadedModule)
 let val=loadedModules;const keyPaths=keyPath.split('.');keyPaths.slice(0,-1).forEach(k=>{val=val[k];});val[keyPaths[keyPaths.length-1]]=chunk;});/* eslint-disable no-underscore-dangle */const Component=loadedModules.__comp;delete loadedModules.__comp;const routeContext=loadedModules.__context;delete loadedModules.__context;const routeProps=loadedModules.__props;delete loadedModules.__props;/* eslint-enable no-underscore-dangle */// Is there any way to put this RouteContextProvider upper in the tree?
 return/*#__PURE__*/(0,jsx_runtime.jsx)(client_routeContext/* RouteContextProvider */.W,{value:routeContext,children:/*#__PURE__*/(0,jsx_runtime.jsx)(Component,{...loadedModules,...routeProps,...props})});}});}
 ;// ./.docusaurus/routes.js
-/* harmony default export */ const routes = ([{path:'/docs',component:ComponentCreator('/docs','889'),routes:[{path:'/docs',component:ComponentCreator('/docs','80f'),routes:[{path:'/docs',component:ComponentCreator('/docs','10e'),routes:[{path:'/docs/api-reference',component:ComponentCreator('/docs/api-reference','202'),exact:true,sidebar:"docsSidebar"},{path:'/docs/config-examples',component:ComponentCreator('/docs/config-examples','4a0'),exact:true,sidebar:"docsSidebar"},{path:'/docs/configuration',component:ComponentCreator('/docs/configuration','06c'),exact:true,sidebar:"docsSidebar"},{path:'/docs/deployment',component:ComponentCreator('/docs/deployment','9a4'),exact:true,sidebar:"docsSidebar"},{path:'/docs/intro',component:ComponentCreator('/docs/intro','058'),exact:true,sidebar:"docsSidebar"},{path:'/docs/operations',component:ComponentCreator('/docs/operations','1b3'),exact:true,sidebar:"docsSidebar"},{path:'/docs/providers-and-routing',component:ComponentCreator('/docs/providers-and-routing','c91'),exact:true,sidebar:"docsSidebar"},{path:'/docs/quickstart',component:ComponentCreator('/docs/quickstart','510'),exact:true,sidebar:"docsSidebar"},{path:'/docs/request-examples',component:ComponentCreator('/docs/request-examples','391'),exact:true,sidebar:"docsSidebar"}]}]}]},{path:'/',component:ComponentCreator('/','e5f'),exact:true},{path:'*',component:ComponentCreator('*')}]);
+/* harmony default export */ const routes = ([{path:'/docs/',component:ComponentCreator('/docs/','d6b'),routes:[{path:'/docs/',component:ComponentCreator('/docs/','ae7'),routes:[{path:'/docs/',component:ComponentCreator('/docs/','7a3'),routes:[{path:'/docs/api-reference/',component:ComponentCreator('/docs/api-reference/','599'),exact:true,sidebar:"docsSidebar"},{path:'/docs/config-examples/',component:ComponentCreator('/docs/config-examples/','7dd'),exact:true,sidebar:"docsSidebar"},{path:'/docs/configuration/',component:ComponentCreator('/docs/configuration/','975'),exact:true,sidebar:"docsSidebar"},{path:'/docs/deployment/',component:ComponentCreator('/docs/deployment/','502'),exact:true,sidebar:"docsSidebar"},{path:'/docs/intro/',component:ComponentCreator('/docs/intro/','f96'),exact:true,sidebar:"docsSidebar"},{path:'/docs/operations/',component:ComponentCreator('/docs/operations/','b7e'),exact:true,sidebar:"docsSidebar"},{path:'/docs/providers-and-routing/',component:ComponentCreator('/docs/providers-and-routing/','4b0'),exact:true,sidebar:"docsSidebar"},{path:'/docs/quickstart/',component:ComponentCreator('/docs/quickstart/','aa5'),exact:true,sidebar:"docsSidebar"},{path:'/docs/request-examples/',component:ComponentCreator('/docs/request-examples/','b5f'),exact:true,sidebar:"docsSidebar"}]}]}]},{path:'/',component:ComponentCreator('/','e5f'),exact:true},{path:'*',component:ComponentCreator('*')}]);
 
 /***/ },
 
@@ -24711,6 +24711,7 @@ __webpack_require__.r(__webpack_exports__);
   "favicon": "img/logo.svg",
   "url": "https://aiproxy.pages.dev",
   "baseUrl": "/",
+  "trailingSlash": true,
   "organizationName": "egose",
   "projectName": "aiproxy",
   "onBrokenLinks": "throw",
@@ -24843,6 +24844,11 @@ __webpack_require__.r(__webpack_exports__);
         "autoCollapseCategories": false
       },
       "versionPersistence": "localStorage"
+    },
+    "colorMode": {
+      "disableSwitch": false,
+      "respectPrefersColorScheme": true,
+      "defaultMode": "light"
     },
     "prism": {
       "theme": {
@@ -25048,11 +25054,6 @@ __webpack_require__.r(__webpack_exports__);
         }
       ]
     },
-    "colorMode": {
-      "defaultMode": "light",
-      "disableSwitch": false,
-      "respectPrefersColorScheme": false
-    },
     "blog": {
       "sidebar": {
         "groupByYear": true
@@ -25064,6 +25065,33 @@ __webpack_require__.r(__webpack_exports__);
       "maxHeadingLevel": 3
     }
   },
+  "headTags": [
+    {
+      "tagName": "link",
+      "attributes": {
+        "rel": "icon",
+        "type": "image/svg+xml",
+        "href": "/img/logo.svg"
+      },
+      "customElement": false
+    },
+    {
+      "tagName": "meta",
+      "attributes": {
+        "name": "robots",
+        "content": "index, follow"
+      },
+      "customElement": false
+    },
+    {
+      "tagName": "link",
+      "attributes": {
+        "rel": "manifest",
+        "href": "/manifest.webmanifest"
+      },
+      "customElement": false
+    }
+  ],
   "baseUrlIssueBanner": true,
   "storage": {
     "type": "localStorage",
@@ -25099,7 +25127,6 @@ __webpack_require__.r(__webpack_exports__);
   "customFields": {},
   "themes": [],
   "scripts": [],
-  "headTags": [],
   "stylesheets": [],
   "clientModules": [],
   "titleDelimiter": "|",
@@ -28826,7 +28853,7 @@ module.exports = {};
 (module) {
 
 "use strict";
-module.exports = /*#__PURE__*/JSON.parse('{"/docs-889":{"__comp":"5e95c892","__context":{"plugin":"aba21aa0"}},"/docs-80f":{"__comp":"a7bd4aaa","__props":"0058b4c6"},"/docs-10e":{"__comp":"a94703ab"},"/docs/api-reference-202":{"__comp":"17896441","content":"964ae018"},"/docs/config-examples-4a0":{"__comp":"17896441","content":"0d05c946"},"/docs/configuration-06c":{"__comp":"17896441","content":"9ed00105"},"/docs/deployment-9a4":{"__comp":"17896441","content":"a3713279"},"/docs/intro-058":{"__comp":"17896441","content":"0e384e19"},"/docs/operations-1b3":{"__comp":"17896441","content":"4de154ba"},"/docs/providers-and-routing-c91":{"__comp":"17896441","content":"80a12015"},"/docs/quickstart-510":{"__comp":"17896441","content":"8070e160"},"/docs/request-examples-391":{"__comp":"17896441","content":"33ce0669"},"/-e5f":{"__comp":"1df93b7f","__context":{"plugin":"a7456010"},"config":"5e9f5e1a"}}');
+module.exports = /*#__PURE__*/JSON.parse('{"/docs/-d6b":{"__comp":"5e95c892","__context":{"plugin":"aba21aa0"}},"/docs/-ae7":{"__comp":"a7bd4aaa","__props":"11b43341"},"/docs/-7a3":{"__comp":"a94703ab"},"/docs/api-reference/-599":{"__comp":"17896441","content":"964ae018"},"/docs/config-examples/-7dd":{"__comp":"17896441","content":"0d05c946"},"/docs/configuration/-975":{"__comp":"17896441","content":"9ed00105"},"/docs/deployment/-502":{"__comp":"17896441","content":"a3713279"},"/docs/intro/-f96":{"__comp":"17896441","content":"0e384e19"},"/docs/operations/-b7e":{"__comp":"17896441","content":"4de154ba"},"/docs/providers-and-routing/-4b0":{"__comp":"17896441","content":"80a12015"},"/docs/quickstart/-aa5":{"__comp":"17896441","content":"8070e160"},"/docs/request-examples/-b5f":{"__comp":"17896441","content":"33ce0669"},"/-e5f":{"__comp":"1df93b7f","__context":{"plugin":"a7456010"},"config":"5e9f5e1a"}}');
 
 /***/ }
 

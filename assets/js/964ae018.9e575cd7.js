@@ -38,12 +38,12 @@ const assets = {
 
 
 const toc = [{
-  "value": "Endpoints",
-  "id": "endpoints",
+  "value": "Endpoint And Provider Support Matrix",
+  "id": "endpoint-and-provider-support-matrix",
   "level": 2
 }, {
-  "value": "Provider Support Matrix",
-  "id": "provider-support-matrix",
+  "value": "Provider Capability Defaults",
+  "id": "provider-capability-defaults",
   "level": 2
 }, {
   "value": "Streaming",
@@ -98,166 +98,13 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "This page focuses on the proxy-facing contract and operation coverage. It does not attempt to restate every upstream provider-specific field or option."
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
-      id: "endpoints",
-      children: "Endpoints"
+      id: "endpoint-and-provider-support-matrix",
+      children: "Endpoint And Provider Support Matrix"
     }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
       children: [(0,jsx_runtime.jsx)(_components.thead, {
         children: (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.th, {
-            children: "Endpoint"
-          }), (0,jsx_runtime.jsx)(_components.th, {
-            children: "Method"
-          }), (0,jsx_runtime.jsx)(_components.th, {
-            children: "Notes"
-          })]
-        })
-      }), (0,jsx_runtime.jsxs)(_components.tbody, {
-        children: [(0,jsx_runtime.jsxs)(_components.tr, {
-          children: [(0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "/v1/models"
-            })
-          }), (0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "GET"
-            })
-          }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Lists direct models and aliases"
-          })]
-        }), (0,jsx_runtime.jsxs)(_components.tr, {
-          children: [(0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "/v1/billing/usage"
-            })
-          }), (0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "GET"
-            })
-          }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Returns aggregated in-process usage summaries"
-          })]
-        }), (0,jsx_runtime.jsxs)(_components.tr, {
-          children: [(0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "/metrics"
-            })
-          }), (0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "GET"
-            })
-          }), (0,jsx_runtime.jsxs)(_components.td, {
-            children: ["Prometheus metrics; requires dedicated ", (0,jsx_runtime.jsx)(_components.code, {
-              children: "metrics.token"
-            }), " bearer token"]
-          })]
-        }), (0,jsx_runtime.jsxs)(_components.tr, {
-          children: [(0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "/v1/chat/completions"
-            })
-          }), (0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "POST"
-            })
-          }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "JSON and SSE streaming"
-          })]
-        }), (0,jsx_runtime.jsxs)(_components.tr, {
-          children: [(0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "/v1/embeddings"
-            })
-          }), (0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "POST"
-            })
-          }), (0,jsx_runtime.jsxs)(_components.td, {
-            children: ["Supported for ", (0,jsx_runtime.jsx)(_components.code, {
-              children: "openai"
-            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
-              children: "openai-compatible"
-            }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
-              children: "gemini"
-            })]
-          })]
-        }), (0,jsx_runtime.jsxs)(_components.tr, {
-          children: [(0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "/v1/responses"
-            })
-          }), (0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "POST"
-            })
-          }), (0,jsx_runtime.jsxs)(_components.td, {
-            children: ["Supported for ", (0,jsx_runtime.jsx)(_components.code, {
-              children: "openai"
-            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
-              children: "openai-compatible"
-            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
-              children: "anthropic"
-            }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
-              children: "gemini"
-            })]
-          })]
-        }), (0,jsx_runtime.jsxs)(_components.tr, {
-          children: [(0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "/v1/images/generations"
-            })
-          }), (0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "POST"
-            })
-          }), (0,jsx_runtime.jsxs)(_components.td, {
-            children: ["Supported for ", (0,jsx_runtime.jsx)(_components.code, {
-              children: "openai"
-            }), " and ", (0,jsx_runtime.jsx)(_components.code, {
-              children: "openai-compatible"
-            })]
-          })]
-        }), (0,jsx_runtime.jsxs)(_components.tr, {
-          children: [(0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "/v1/audio/transcriptions"
-            })
-          }), (0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "POST"
-            })
-          }), (0,jsx_runtime.jsxs)(_components.td, {
-            children: ["Supported for ", (0,jsx_runtime.jsx)(_components.code, {
-              children: "openai"
-            }), " and ", (0,jsx_runtime.jsx)(_components.code, {
-              children: "openai-compatible"
-            })]
-          })]
-        }), (0,jsx_runtime.jsxs)(_components.tr, {
-          children: [(0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "/v1/audio/speech"
-            })
-          }), (0,jsx_runtime.jsx)(_components.td, {
-            children: (0,jsx_runtime.jsx)(_components.code, {
-              children: "POST"
-            })
-          }), (0,jsx_runtime.jsxs)(_components.td, {
-            children: ["Supported for ", (0,jsx_runtime.jsx)(_components.code, {
-              children: "openai"
-            }), " and ", (0,jsx_runtime.jsx)(_components.code, {
-              children: "openai-compatible"
-            })]
-          })]
-        })]
-      })]
-    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
-      id: "provider-support-matrix",
-      children: "Provider Support Matrix"
-    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
-      children: [(0,jsx_runtime.jsx)(_components.thead, {
-        children: (0,jsx_runtime.jsxs)(_components.tr, {
-          children: [(0,jsx_runtime.jsx)(_components.th, {
-            children: "Operation"
+            children: "Surface"
           }), (0,jsx_runtime.jsx)(_components.th, {
             children: (0,jsx_runtime.jsx)(_components.code, {
               children: "openai"
@@ -283,13 +130,13 @@ function _createMdxContent(props) {
               children: "GET /v1/models"
             })
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "Proxy-owned"
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "Proxy-owned"
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "Proxy-owned"
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "Proxy-owned"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -297,13 +144,27 @@ function _createMdxContent(props) {
               children: "GET /v1/billing/usage"
             })
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "Proxy-owned local usage accounting"
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "Proxy-owned local usage accounting"
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "Proxy-owned local usage accounting"
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "Proxy-owned local usage accounting"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "GET /metrics"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned Prometheus metrics"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned Prometheus metrics"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned Prometheus metrics"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned Prometheus metrics"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -311,13 +172,13 @@ function _createMdxContent(props) {
               children: "POST /v1/chat/completions"
             })
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "JSON and SSE"
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "JSON and SSE"
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "JSON and SSE translated"
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "JSON and SSE translated"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -339,13 +200,13 @@ function _createMdxContent(props) {
               children: "POST /v1/responses"
             })
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "JSON and SSE"
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "JSON and SSE"
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "JSON and SSE translated subset"
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Yes"
+            children: "JSON and SSE translated subset"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -391,6 +252,101 @@ function _createMdxContent(props) {
           })]
         })]
       })]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "provider-capability-defaults",
+      children: "Provider Capability Defaults"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Provider type"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Default capabilities when omitted"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Additional supported capabilities"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "openai"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "embeddings"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "images"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_transcriptions"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_speech"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "openai-compatible"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "embeddings"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "images"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_transcriptions"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_speech"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "anthropic"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "None"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "gemini"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "embeddings"
+            })
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["When a model omits ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "capabilities"
+      }), ", the provider-type defaults are used. Explicit\ncapabilities can narrow that default or opt into an additional supported\ncapability listed above."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "streaming",
       children: "Streaming"
@@ -446,6 +402,8 @@ function _createMdxContent(props) {
         }), ", results are scoped to that tenant"]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "Otherwise, results are scoped to the caller's client identity"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "This endpoint is local accounting only; it is not an external billing,\ninvoicing, or quota system"
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "error-behavior",
@@ -454,17 +412,29 @@ function _createMdxContent(props) {
       children: ["\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "Direct requests never fail over to another provider"
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["Alias requests retry the next target on transport errors and upstream ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "5xx"
+        children: ["Alias requests retry the next target on transport errors, timeouts, and status\ncodes listed in ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "retry_status_codes"
         })]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["Alias requests also retry on upstream ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "4xx"
-        }), " responses listed in ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ["The default ", (0,jsx_runtime.jsx)(_components.code, {
           children: "retry_status_codes"
-        }), " (default: ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "5xx"
-        }), " only)"]
+        }), " list is ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "500"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "502"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "503"
+        }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "504"
+        })]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Configured retry statuses may include ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "4xx"
+        }), " responses such as ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "429"
+        }), "; retryable\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "4xx"
+        }), " statuses do not mark providers unhealthy"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["Other upstream ", (0,jsx_runtime.jsx)(_components.code, {
           children: "4xx"
