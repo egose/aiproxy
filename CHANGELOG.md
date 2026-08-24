@@ -1,3 +1,9 @@
+## [0.18.1](https://github.com/egose/aiproxy/compare/v0.18.0...v0.18.1) (2026-08-24)
+
+### Bug Fixes
+
+* use raw image inspection for published config digest ([f4fc10f](https://github.com/egose/aiproxy/commit/f4fc10febf8842edfb82cc7770f1aa86158a6316))
+
 ## [0.18.0](https://github.com/egose/aiproxy/compare/v0.17.1...v0.18.0) (2026-08-24)
 
 ### Features
