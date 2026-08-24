@@ -6,6 +6,9 @@ runs:
   steps:
   - name: Setup Tools
     uses: egose/actions/asdf-tools@799b388fb3497236093c6eb7e3eac0b4c8f956ce
+    with:
+      plugins: |
+        docker-compose=https://github.com/egose/asdf-docker-compose.git
 
   - name: Install python tools
     run: |
