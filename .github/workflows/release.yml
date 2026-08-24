@@ -15,12 +15,12 @@ jobs:
     permissions:
       contents: read
 
-  release:
+  verify:
     needs: quality
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
-      contents: write
+      contents: read
       attestations: write
       id-token: write
 
@@ -85,6 +85,21 @@ jobs:
           dist/checksums.txt
           dist/*.spdx.json
 
+  release:
+    needs:
+    - verify
+    - publish-image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+    - name: Download verified release artifacts
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: aiproxy-${{ github.ref_name }}
+        path: dist
+
     - name: Release
       uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
       with:
@@ -93,3 +108,16 @@ jobs:
           dist/*.tar.gz
           dist/checksums.txt
           dist/*.spdx.json
+
+  publish-image:
+    needs: verify
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+      attestations: write
+      id-token: write
+    uses: ./.github/workflows/publish.yaml
+    with:
+      ref: ${{ github.sha }}
+      tag_name: ${{ github.ref_name }}
