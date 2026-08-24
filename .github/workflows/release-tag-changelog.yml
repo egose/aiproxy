@@ -9,6 +9,10 @@ on:
         required: false
         default: ''
 
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
 jobs:
   tag-changelog:
     runs-on: ubuntu-24.04
@@ -31,6 +35,15 @@ jobs:
 
     - name: Setup NPM Packages
       uses: ./.github/actions/setup-npm
+
+    - name: Validate requested version
+      if: github.event.inputs.tag != ''
+      env:
+        VERSION: ${{ github.event.inputs.tag }}
+      run: |
+        set -euo pipefail
+        identifier='(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
+        [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-${identifier}(\.${identifier})*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
 
     - name: Create Release Tag
       uses: egose/actions/release-tag@799b388fb3497236093c6eb7e3eac0b4c8f956ce

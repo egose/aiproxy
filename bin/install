@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set -euo pipefail
 
 tool_name="aiproxy"
 install_type="$ASDF_INSTALL_TYPE"
@@ -23,15 +23,41 @@ fi
     exit 1
   fi
 
-  mkdir -p "$install_path/bin"
-  tar -xzf "${archives[0]}" -C "$install_path/bin"
-
-  if [ ! -f "$install_path/bin/$tool_name" ] && [ ! -f "$install_path/bin/${tool_name}.exe" ]; then
-    echo "Release archive is missing the $tool_name binary." >&2
+  case "${archives[0]}" in
+    *-windows-*) expected="${tool_name}.exe" ;;
+    *) expected="$tool_name" ;;
+  esac
+  members=$(tar -tzf "${archives[0]}")
+  if [ "$members" != "$expected" ]; then
+    echo "Release archive must contain exactly one top-level $expected executable." >&2
     exit 1
   fi
+  details=$(tar -tvzf "${archives[0]}")
+  case "$details" in
+    -*) ;;
+    *) echo "Release archive member must be a regular file." >&2; exit 1 ;;
+  esac
 
-  chmod +x "$install_path/bin"/* 2>/dev/null || true
+  parent=${install_path%/*}
+  [ "$parent" != "$install_path" ] || parent=.
+  mkdir -p "$parent"
+  stage=$(mktemp -d "$parent/.${tool_name}.install.XXXXXX")
+  trap 'rm -rf "$stage"' EXIT
+  mkdir "$stage/bin"
+  tar --no-same-owner --no-same-permissions -xzf "${archives[0]}" -C "$stage/bin"
+  if [ ! -f "$stage/bin/$expected" ] || [ -L "$stage/bin/$expected" ]; then
+    echo "Release archive does not contain one regular $expected executable." >&2
+    exit 1
+  fi
+  chmod 0755 "$stage/bin/$expected"
+  if [ -d "$install_path" ]; then
+    rmdir "$install_path" || { echo "Install path already exists and is not empty: $install_path" >&2; exit 1; }
+  elif [ -e "$install_path" ]; then
+    echo "Install path already exists: $install_path" >&2
+    exit 1
+  fi
+  mv "$stage" "$install_path"
+  trap - EXIT
 
   echo "$tool_name v$version installation was successful!"
 ) || {
