@@ -5,44 +5,76 @@ on:
     tags:
     - v*.*.*
 
+concurrency:
+  group: release-publication
+  cancel-in-progress: false
+
 jobs:
   quality:
     uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
 
   release:
     needs: quality
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     permissions:
       contents: write
+      attestations: write
+      id-token: write
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        fetch-depth: 0
+        fetch-tags: true
+        persist-credentials: false
 
     - name: Setup Tools
       uses: ./.github/actions/setup-tools
 
+    - name: Validate release tag and source commit
+      run: ./scripts/validate-release-tag.sh "$RELEASE_TAG"
+      env:
+        RELEASE_TAG: ${{ github.ref_name }}
+
     - name: Normalize version
       id: version
-      run: |
-        set -euo pipefail
-        version="${GITHUB_REF_NAME#v}"
-        if [ -z "$version" ] || [ "$version" = "$GITHUB_REF_NAME" ]; then
-          echo "unexpected release tag $GITHUB_REF_NAME" >&2
-          exit 1
-        fi
-        echo "version=$version" >> "$GITHUB_OUTPUT"
+      run: printf 'version=%s\n' "${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+      env:
+        RELEASE_TAG: ${{ github.ref_name }}
 
     - name: Build
       run: |
-        make build-all VERSION=${{ steps.version.outputs.version }}
+        make build-all VERSION="$VERSION"
         make build-archive
         make validate-archives
+      env:
+        VERSION: ${{ steps.version.outputs.version }}
 
     - name: Generate checksums
       run: |
         set -euo pipefail
         cd dist
         sha256sum ./*.tar.gz > checksums.txt
+
+    - name: Generate SBOM
+      run: |
+        docker run --rm \
+          -v "$PWD:/workspace" \
+          anchore/syft:v1.38.0@sha256:825cad3a952c87676a6d07e9a3bb05ac9c401d598360070e970aa46d54c1727e \
+          dir:/workspace/dist \
+          -o spdx-json=/workspace/dist/aiproxy-sbom.spdx.json
+
+    - name: Attest release artifacts
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+      with:
+        subject-path: |
+          dist/*.tar.gz
+          dist/checksums.txt
+          dist/*.spdx.json
 
     - name: Upload Build Artifact
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -51,6 +83,7 @@ jobs:
         path: |
           dist/*.tar.gz
           dist/checksums.txt
+          dist/*.spdx.json
 
     - name: Release
       uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
@@ -59,3 +92,4 @@ jobs:
         files: |
           dist/*.tar.gz
           dist/checksums.txt
+          dist/*.spdx.json

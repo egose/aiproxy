@@ -6,23 +6,12 @@ runs:
   steps:
   - name: Setup Tools
     uses: egose/actions/asdf-tools@799b388fb3497236093c6eb7e3eac0b4c8f956ce
-
-  - name: Install Docker Compose v2
-    shell: bash
-    run: |
-      set -euo pipefail
-      DOCKER_CONFIG="${DOCKER_CONFIG:-$HOME/.docker}"
-      mkdir -p "$DOCKER_CONFIG/cli-plugins"
-
-      echo "Installing Docker Compose v5.3.1..."
-      curl -sSL "https://github.com/docker/compose/releases/download/v5.3.1/docker-compose-linux-x86_64" \
-        -o "$DOCKER_CONFIG/cli-plugins/docker-compose"
-
-      chmod +x "$DOCKER_CONFIG/cli-plugins/docker-compose"
-      docker compose version
+    with:
+      plugins: |
+        docker-compose=https://github.com/egose/asdf-docker-compose.git
 
   - name: Install python tools
     run: |
-      pip install -r requirements.txt
+      pip install --require-hashes -r requirements.txt
       asdf reshim
     shell: bash

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "dependencyDashboard": true,
+  "enabledManagers": ["asdf", "dockerfile", "github-actions", "gomod", "npm", "pip_requirements", "pre-commit"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github\\/.*\\.ya?ml$/"],
+      "matchStrings": [
+        "(?<depName>[a-z0-9./_-]+):(?<currentValue>v?[0-9][^@\\s]*)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Keep Docker image references digest-pinned",
+      "matchDatasources": ["docker"],
+      "pinDigests": true
+    }
+  ]
+}

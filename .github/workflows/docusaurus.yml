@@ -22,8 +22,11 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
 
     - name: Setup Tools
       uses: ./.github/actions/setup-tools
@@ -45,6 +48,7 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 

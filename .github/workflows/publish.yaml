@@ -5,6 +5,10 @@ on:
     tags:
     - v*.*.*
 
+concurrency:
+  group: image-publication
+  cancel-in-progress: false
+
 env:
   DOCKER_REGISTRY: ghcr.io
   IMAGE_NAME: egose/aiproxy
@@ -12,73 +16,155 @@ env:
 jobs:
   quality:
     uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
 
   build-push:
     needs: quality
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     permissions:
       contents: read
-      actions: read
       packages: write
       security-events: write
+      attestations: write
+      id-token: write
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-
-    - name: Setup Tools
-      uses: ./.github/actions/setup-tools
-
-    - name: Normalize version
-      id: version
-      run: |
-        set -euo pipefail
-        version="${GITHUB_REF_NAME#v}"
-        if [ -z "$version" ] || [ "$version" = "$GITHUB_REF_NAME" ]; then
-          echo "unexpected release tag $GITHUB_REF_NAME" >&2
-          exit 1
-        fi
-        major="${version%%.*}"
-        rest="${version#*.}"
-        minor="${rest%%.*}"
-        image="${DOCKER_REGISTRY}/${IMAGE_NAME}"
-        {
-          echo "version=$version"
-          echo "image=$image"
-          echo "verify_tag=aiproxy:release-verify-$GITHUB_SHA"
-          echo "major_tag=$image:$major"
-          echo "minor_tag=$image:$major.$minor"
-          echo "version_tag=$image:$version"
-        } >> "$GITHUB_OUTPUT"
-
-    - name: Build image for verification
-      run: |
-        set -euo pipefail
-        docker build \
-          --build-arg VERSION=${{ steps.version.outputs.version }} \
-          -t ${{ steps.version.outputs.verify_tag }} \
-          -f Dockerfile .
-
-    - name: Verify image version
-      run: |
-        set -euo pipefail
-        actual=$(docker run --rm --entrypoint /usr/local/bin/aiproxy ${{ steps.version.outputs.verify_tag }} version)
-        if [ "$actual" != "${{ steps.version.outputs.version }}" ]; then
-          echo "image reports version $actual, expected ${{ steps.version.outputs.version }}" >&2
-          exit 1
-        fi
-
-    - name: Build and push image
-      uses: egose/actions/docker-build-push@fbfffcb8803b91ff10096df512564a801173c24f
       with:
-        registry-url: ${{ env.DOCKER_REGISTRY }}
-        registry-username: ${{ github.actor }}
-        registry-password: ${{ secrets.GITHUB_TOKEN }}
-        image-name: ${{ env.IMAGE_NAME }}
-        metadata-tags: |
-          type=semver,pattern={{version}}
-          type=semver,pattern={{major}}.{{minor}}
-          type=semver,pattern={{major}}
-        docker-context: .
-        docker-file: Dockerfile
-        docker-args: |
-          VERSION=${{ steps.version.outputs.version }}
+        ref: ${{ github.sha }}
+        fetch-depth: 0
+        fetch-tags: true
+        persist-credentials: false
+
+    - name: Validate release tag and source commit
+      run: ./scripts/validate-release-tag.sh "$RELEASE_TAG"
+      env:
+        RELEASE_TAG: ${{ github.ref_name }}
+
+    - name: Derive image version and revision
+      id: release
+      run: |
+        printf 'version=%s\n' "${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+        printf 'revision=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      env:
+        RELEASE_TAG: ${{ github.ref_name }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+
+    - name: Extract image metadata
+      id: meta
+      uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302
+      with:
+        images: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=raw,value=${{ steps.release.outputs.version }}
+          type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }}
+          type=semver,pattern={{major}},value=${{ github.ref_name }}
+        labels: |
+          org.opencontainers.image.version=${{ github.ref_name }}
+          org.opencontainers.image.revision=${{ steps.release.outputs.revision }}
+
+    - name: Build local image for verification
+      uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+      with:
+        context: .
+        file: Dockerfile
+        load: true
+        push: false
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: VERSION=${{ steps.release.outputs.version }}
+
+    - name: Verify local image identity
+      id: image
+      run: |
+        set -euo pipefail
+        image_ref="${DOCKER_REGISTRY}/${IMAGE_NAME}:${VERSION}"
+        digest=$(docker image inspect "$image_ref" --format '{{.Id}}')
+        actual=$(docker run --rm --entrypoint /usr/local/bin/aiproxy "$image_ref" version)
+        version_label=$(docker image inspect "$image_ref" --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')
+        revision_label=$(docker image inspect "$image_ref" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')
+        [ "$actual" = "$VERSION" ] || { printf 'image version mismatch: %s\n' "$actual" >&2; exit 1; }
+        [ "$version_label" = "$RELEASE_TAG" ] || { printf 'image version label mismatch\n' >&2; exit 1; }
+        [ "$revision_label" = "$REVISION" ] || { printf 'image revision label mismatch\n' >&2; exit 1; }
+        printf 'ref=%s\n' "$image_ref" >> "$GITHUB_OUTPUT"
+        printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+      env:
+        VERSION: ${{ steps.release.outputs.version }}
+        REVISION: ${{ steps.release.outputs.revision }}
+        RELEASE_TAG: ${{ github.ref_name }}
+
+    - name: Scan image before publication
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+      with:
+        image-ref: ${{ steps.image.outputs.ref }}
+        format: sarif
+        output: trivy-results.sarif
+        exit-code: 1
+        ignore-unfixed: true
+        severity: HIGH,CRITICAL
+
+    - name: Generate image SBOM
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+      with:
+        image-ref: ${{ steps.image.outputs.ref }}
+        format: spdx-json
+        output: image-sbom.spdx.json
+        exit-code: 0
+
+    - name: Upload image scan results
+      if: always()
+      uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
+      with:
+        sarif_file: trivy-results.sarif
+
+    - name: Log in to GHCR
+      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+      with:
+        registry: ${{ env.DOCKER_REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Push verified image tags
+      run: |
+        set -euo pipefail
+        while IFS= read -r tag; do
+          [ -n "$tag" ] || continue
+          docker image push "$tag"
+        done <<< "$IMAGE_TAGS"
+      env:
+        IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+
+    - name: Verify published image identity
+      id: published
+      run: |
+        set -euo pipefail
+        manifest_digest=$(docker buildx imagetools inspect "$PRIMARY_REF" --format '{{.Manifest.Digest}}')
+        while IFS= read -r tag; do
+          [ -n "$tag" ] || continue
+          published_config=$(docker buildx imagetools inspect "$tag" --format '{{.Manifest.Config.Digest}}')
+          [ "$published_config" = "$LOCAL_DIGEST" ] || { printf 'published image differs from scanned image: %s\n' "$tag" >&2; exit 1; }
+        done <<< "$IMAGE_TAGS"
+        printf 'digest=%s\n' "$manifest_digest" >> "$GITHUB_OUTPUT"
+      env:
+        PRIMARY_REF: ${{ steps.image.outputs.ref }}
+        LOCAL_DIGEST: ${{ steps.image.outputs.digest }}
+        IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+
+    - name: Attest image provenance
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+      with:
+        subject-name: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}
+        subject-digest: ${{ steps.published.outputs.digest }}
+        push-to-registry: true
+
+    - name: Attest image SBOM
+      uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e
+      with:
+        subject-name: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}
+        subject-digest: ${{ steps.published.outputs.digest }}
+        sbom-path: image-sbom.spdx.json
+        push-to-registry: true
