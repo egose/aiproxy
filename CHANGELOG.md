@@ -1,3 +1,10 @@
+## [0.19.0](https://github.com/egose/aiproxy/compare/v0.18.1...v0.19.0) (2026-08-24)
+
+### Features
+
+* refactor release image publication into reusable workflow ([b4ba39a](https://github.com/egose/aiproxy/commit/b4ba39acb61c2abf9c775e89cde79896183f82e9))
+* split release verification from image publishing ([8abd417](https://github.com/egose/aiproxy/commit/8abd417fa3f84f3dbd43ca4452790471a7730101))
+
 ## [0.18.1](https://github.com/egose/aiproxy/compare/v0.18.0...v0.18.1) (2026-08-24)
 
 ### Bug Fixes
