@@ -1,3 +1,9 @@
+## [0.20.0](https://github.com/egose/aiproxy/compare/v0.19.0...v0.20.0) (2026-08-24)
+
+### Features
+
+* switch release workflows to repo-toolkit go release commands ([17a7f28](https://github.com/egose/aiproxy/commit/17a7f28f6ddc37efa07e70d32850b4c5b1dfeb86))
+
 ## [0.19.0](https://github.com/egose/aiproxy/compare/v0.18.1...v0.19.0) (2026-08-24)
 
 ### Features
