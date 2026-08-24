@@ -19,7 +19,7 @@ concurrency:
 jobs:
   vet-build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
@@ -31,25 +31,19 @@ jobs:
     - name: Setup Tools (asdf)
       uses: ./.github/actions/setup-tools
 
+    - name: Install npm dependencies
+      run: pnpm install --frozen-lockfile
+
     - name: go vet
       run: make vet
 
     - name: go build (host)
       run: make build
 
-    - name: go build (all targets)
-      run: make build-all
-
-    - name: validate build atomicity
-      run: make validate-build-atomicity
-
-    - name: validate release archives
+    - name: Build and verify release package
       run: |
-        make build-archive
-        make validate-archives
-
-    - name: validate reproducible archives
-      run: make check-reproducible-archives
+        pnpm release:build -- --version ci
+        pnpm release:verify -- --version ci --reproducibility
 
     - name: validate shell and workflows
       run: make lint-shell lint-workflows shell-test

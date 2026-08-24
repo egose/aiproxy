@@ -35,6 +35,9 @@ jobs:
     - name: Setup Tools
       uses: ./.github/actions/setup-tools
 
+    - name: Install npm dependencies
+      run: pnpm install --frozen-lockfile
+
     - name: Validate release tag and source commit
       run: ./scripts/validate-release-tag.sh "$RELEASE_TAG"
       env:
@@ -46,19 +49,12 @@ jobs:
       env:
         RELEASE_TAG: ${{ github.ref_name }}
 
-    - name: Build
+    - name: Build and verify release package
       run: |
-        make build-all VERSION="$VERSION"
-        make build-archive
-        make validate-archives
+        pnpm release:build -- --version "$VERSION"
+        pnpm release:verify -- --version "$VERSION"
       env:
         VERSION: ${{ steps.version.outputs.version }}
-
-    - name: Generate checksums
-      run: |
-        set -euo pipefail
-        cd dist
-        sha256sum ./*.tar.gz > checksums.txt
 
     - name: Generate SBOM
       run: |

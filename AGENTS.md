@@ -4,14 +4,16 @@ Operational guide for AI agents (and humans) working in this repo.
 
 ## Build & run
 
-| Command                                     | Effect                                                    |
-| ------------------------------------------- | --------------------------------------------------------- |
-| `make build`                                | Build `dist/aiproxy` for the host platform (CGO disabled) |
-| `make build-all`                            | Cross-compile for every `OS_ARCH_PAIRS`                   |
-| `make run CONFIG=path/to/config.hcl`        | `go run` the server against a config                      |
-| `make validate CONFIG=path/to/config.hcl`   | Load + validate config without serving                    |
-| `make docker-build`                         | Multi-stage container build as `aiproxy:$(VERSION)`       |
-| `make docker-run CONFIG=path/to/config.hcl` | Run the container image with a mounted config             |
+| Command                                                    | Effect                                                    |
+| ---------------------------------------------------------- | --------------------------------------------------------- |
+| `make build`                                               | Build `dist/aiproxy` for the host platform (CGO disabled) |
+| `pnpm release:build -- --version 1.2.3`                    | Build all release archives and `dist/checksums.txt`       |
+| `pnpm release:verify -- --version 1.2.3`                   | Verify release archives and checksums                     |
+| `pnpm release:verify -- --version 1.2.3 --reproducibility` | Verify two independent release builds are reproducible    |
+| `make run CONFIG=path/to/config.hcl`                       | `go run` the server against a config                      |
+| `make validate CONFIG=path/to/config.hcl`                  | Load + validate config without serving                    |
+| `make docker-build`                                        | Multi-stage container build as `aiproxy:$(VERSION)`       |
+| `make docker-run CONFIG=path/to/config.hcl`                | Run the container image with a mounted config             |
 
 The CLI defaults to `$XDG_CONFIG_HOME/aiproxy/config.hcl`, falling back to
 `~/.config/aiproxy/config.hcl` when `XDG_CONFIG_HOME` is unset. Pass
