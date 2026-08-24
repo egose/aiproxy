@@ -145,7 +145,7 @@ jobs:
         manifest_digest=$(docker buildx imagetools inspect "$PRIMARY_REF" --format '{{.Manifest.Digest}}')
         while IFS= read -r tag; do
           [ -n "$tag" ] || continue
-          published_config=$(docker buildx imagetools inspect "$tag" --format '{{.Manifest.Config.Digest}}')
+          published_config=$(docker buildx imagetools inspect "$tag" --raw | jq -r '.config.digest')
           [ "$published_config" = "$LOCAL_DIGEST" ] || { printf 'published image differs from scanned image: %s\n' "$tag" >&2; exit 1; }
         done <<< "$IMAGE_TAGS"
         printf 'digest=%s\n' "$manifest_digest" >> "$GITHUB_OUTPUT"
