@@ -34,6 +34,7 @@ const (
 type Resolver struct {
 	catalog   config.Catalog
 	selectors map[string]alias.Selector
+	cooldowns *CooldownStore
 }
 
 func New(rt *config.Runtime) *Resolver {
@@ -49,7 +50,22 @@ func NewWithPrevious(rt *config.Runtime, previous *Resolver) *Resolver {
 	return &Resolver{
 		catalog:   rt.Catalog,
 		selectors: selectors,
+		cooldowns: cooldownsForCatalog(rt.Catalog, previous),
 	}
+}
+
+func cooldownsForCatalog(catalog config.Catalog, previous *Resolver) *CooldownStore {
+	if previous == nil || previous.cooldowns == nil {
+		return NewCooldownStore()
+	}
+	return previous.cooldowns.cloneForCatalog(catalog)
+}
+
+func (r *Resolver) Cooldowns() *CooldownStore {
+	if r == nil || r.cooldowns == nil {
+		return NewCooldownStore()
+	}
+	return r.cooldowns
 }
 
 func selectorForAlias(name string, a config.Alias, previous *Resolver) alias.Selector {
