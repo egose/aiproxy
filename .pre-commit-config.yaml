@@ -28,6 +28,7 @@ repos:
       (?x)^(
           pnpm-lock\.yaml$ |
           .*/pnpm-lock\.yaml$ |
+          helm/.*\.(yaml|yml)$ |
           .*_test\.go$
       )
 - repo: local
