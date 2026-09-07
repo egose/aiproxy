@@ -259,13 +259,11 @@ func applyOpenCodeHeaders(req *http.Request, r Request) error {
 	req.Header.Set("Authorization", "Bearer "+r.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", openCodeUserAgent(r.Version))
-	if r.ProviderType == config.ProviderTypeOpenCodeGo {
-		session, err := openCodeSessionValue(r)
-		if err != nil {
-			return err
-		}
-		req.Header.Set(openCodeSessionHeader, session)
+	session, err := openCodeSessionValue(r)
+	if err != nil {
+		return err
 	}
+	req.Header.Set(openCodeSessionHeader, session)
 	return nil
 }
 

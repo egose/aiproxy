@@ -159,8 +159,8 @@ provider "opencode-go" "go" {
 	if zc.UserAgent != "aiproxy/test" {
 		t.Fatalf("zen user-agent = %q", zc.UserAgent)
 	}
-	if zc.Session != "" {
-		t.Fatalf("zen session = %q, want empty", zc.Session)
+	if zc.Session == "" {
+		t.Fatal("zen chat request missing generated session header")
 	}
 	if zc.Cookie != "" || zc.Custom != "" || zc.APIKey != "" {
 		t.Fatalf("zen leaked inbound headers cookie=%q custom=%q apikey=%q", zc.Cookie, zc.Custom, zc.APIKey)
@@ -279,8 +279,8 @@ provider "opencode-zen" "zen" {
 	if gcalls[0].Authorization != "Bearer sk-zen" {
 		t.Fatalf("gemini authorization = %q", gcalls[0].Authorization)
 	}
-	if gcalls[0].Session != "" {
-		t.Fatalf("zen gemini request must not carry session header, got %q", gcalls[0].Session)
+	if gcalls[0].Session == "" {
+		t.Fatal("zen gemini request missing generated session header")
 	}
 }
 
@@ -483,8 +483,8 @@ alias "fallback" {
 		t.Fatalf("go failover request missing session header")
 	}
 	zc := zen.Calls()[0]
-	if zc.Session != "" {
-		t.Fatalf("zen request must not carry session header, got %q", zc.Session)
+	if zc.Session == "" {
+		t.Fatal("zen failover request missing generated session header")
 	}
 }
 

@@ -141,7 +141,7 @@ from the model name. There is no generic `opencode` type.
 
 Every upstream request sends `User-Agent: aiproxy/<version>`; the inbound
 `User-Agent` is never forwarded and the proxy never impersonates the OpenCode
-client IDs. Only `opencode-go` additionally sends `x-opencode-session` for
+client IDs. Both `opencode-zen` and `opencode-go` additionally send `x-opencode-session` for
 prompt caching: a caller-supplied value is forwarded as-is when it is 1-128
 characters of `[A-Za-z0-9_-]`; otherwise the proxy generates a fresh
 per-request `ses_` + 128-bit hex ID. Missing or invalid values never fail the

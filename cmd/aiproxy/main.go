@@ -37,6 +37,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newValidateCommand())
 	rootCmd.AddCommand(newPathsCommand())
 	rootCmd.AddCommand(newConfigureCommand())
+	rootCmd.AddCommand(newModelsCommand())
 	rootCmd.AddCommand(newExamplesCommand())
 	rootCmd.AddCommand(newVersionCommand())
 	rootCmd.AddCommand(newDashboardCommand())
@@ -221,6 +222,8 @@ aiproxy paths
 aiproxy configure
 aiproxy configure provider
 aiproxy configure provider --config /etc/aiproxy/config.hcl --non-interactive --name backup --type openai-compatible --base-url https://llm.internal/v1 --secrets-key localai --api-key "$LOCALAI_API_KEY" --model qwen3-32b
+aiproxy models
+aiproxy models --provider openai
 aiproxy version`)
 }
 

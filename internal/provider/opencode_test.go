@@ -108,7 +108,7 @@ func openCodeDo(t *testing.T, upstream *httptest.Server, providerType config.Pro
 	return res, cap, inbound
 }
 
-func checkOpenCodeCommonHeaders(t *testing.T, cap *openCodeCapture, wantSession bool) (auth, userAgent, session, body string) {
+func checkOpenCodeCommonHeaders(t *testing.T, cap *openCodeCapture) (auth, userAgent, session, body string) {
 	t.Helper()
 	calls, _, _, _, auth, userAgent, session, body := cap.snapshot()
 	if calls != 1 {
@@ -120,12 +120,8 @@ func checkOpenCodeCommonHeaders(t *testing.T, cap *openCodeCapture, wantSession 
 	if userAgent != "aiproxy/1.2.3-test" {
 		t.Fatalf("User-Agent = %q", userAgent)
 	}
-	if wantSession {
-		if session == "" {
-			t.Fatal("missing x-opencode-session on opencode-go request")
-		}
-	} else if session != "" {
-		t.Fatalf("unexpected x-opencode-session on opencode-zen request: %q", session)
+	if session == "" {
+		t.Fatal("missing x-opencode-session on upstream request")
 	}
 	cap.mu.Lock()
 	defer cap.mu.Unlock()
@@ -206,7 +202,7 @@ func TestOpenCodeChatJSON(t *testing.T) {
 			upstream := openCodeUpstream(t, cap, openCodeJSONResponder(`{"id":"chatcmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}}`))
 			defer upstream.Close()
 			res, _, _ := openCodeDo(t, upstream, providerType, config.ModelProtocolChat, OpChatCompletions, "test/glm", "glm-5.3", `{"model":"test/glm","messages":[{"role":"user","content":"hi"}]}`)
-			_, _, _, body := checkOpenCodeCommonHeaders(t, cap, providerType == config.ProviderTypeOpenCodeGo)
+			_, _, _, body := checkOpenCodeCommonHeaders(t, cap)
 			_, method, path, _, _, _, _, _ := cap.snapshot()
 			if method != http.MethodPost || path != "/v1/chat/completions" {
 				t.Fatalf("method/path = %s %s", method, path)
@@ -260,7 +256,7 @@ func TestOpenCodeChatSSEPassthrough(t *testing.T) {
 	if usage := res.Stream.Wait().Usage; usage.PromptTokens != 2 {
 		t.Fatalf("stream usage = %+v", usage)
 	}
-	checkOpenCodeCommonHeaders(t, cap, true)
+	checkOpenCodeCommonHeaders(t, cap)
 }
 
 func TestOpenCodeChatPreservesTools(t *testing.T) {
@@ -269,7 +265,7 @@ func TestOpenCodeChatPreservesTools(t *testing.T) {
 	defer upstream.Close()
 	body := `{"model":"zen/m","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"f"}}],"tool_choice":"auto"}`
 	openCodeDo(t, upstream, config.ProviderTypeOpenCodeZen, config.ModelProtocolChat, OpChatCompletions, "zen/m", "upstream-m", body)
-	_, _, _, seen := checkOpenCodeCommonHeaders(t, cap, false)
+	_, _, _, seen := checkOpenCodeCommonHeaders(t, cap)
 	if !strings.Contains(seen, `"tool_choice":"auto"`) || !strings.Contains(seen, `"name":"f"`) {
 		t.Fatalf("tools not preserved: %s", seen)
 	}
@@ -292,7 +288,7 @@ func TestOpenCodeResponsesJSON(t *testing.T) {
 			if res.Usage.PromptTokens != 4 || res.Usage.CompletionTokens != 6 || res.Usage.TotalTokens != 10 {
 				t.Fatalf("usage = %+v", res.Usage)
 			}
-			checkOpenCodeCommonHeaders(t, cap, providerType == config.ProviderTypeOpenCodeGo)
+			checkOpenCodeCommonHeaders(t, cap)
 		})
 	}
 }
@@ -315,7 +311,7 @@ func TestOpenCodeMessagesChatJSON(t *testing.T) {
 	if res.Usage.PromptTokens != 9 || res.Usage.CompletionTokens != 6 {
 		t.Fatalf("usage = %+v", res.Usage)
 	}
-	checkOpenCodeCommonHeaders(t, cap, true)
+	checkOpenCodeCommonHeaders(t, cap)
 }
 
 func TestOpenCodeMessagesStreamingTranslation(t *testing.T) {
@@ -355,7 +351,7 @@ func TestOpenCodeMessagesStreamingTranslation(t *testing.T) {
 	if !strings.Contains(text, `"content":"Hello"`) || !strings.Contains(text, "data: [DONE]") {
 		t.Fatalf("stream = %q", text)
 	}
-	checkOpenCodeCommonHeaders(t, cap, false)
+	checkOpenCodeCommonHeaders(t, cap)
 }
 
 func TestOpenCodeMessagesResponsesJSON(t *testing.T) {
@@ -369,7 +365,7 @@ func TestOpenCodeMessagesResponsesJSON(t *testing.T) {
 	if res.Usage.PromptTokens != 9 || res.Usage.CompletionTokens != 6 {
 		t.Fatalf("usage = %+v", res.Usage)
 	}
-	checkOpenCodeCommonHeaders(t, cap, false)
+	checkOpenCodeCommonHeaders(t, cap)
 }
 
 func TestOpenCodeMessagesRejectsToolsBeforeIO(t *testing.T) {
@@ -405,8 +401,8 @@ func TestOpenCodeGeminiChatJSON(t *testing.T) {
 	if calls != 1 || method != http.MethodPost || path != "/models/gemini-3.8-flash:generateContent" || query != "" {
 		t.Fatalf("target = %s %s?%s", method, path, query)
 	}
-	if auth != "Bearer sk-opencode" || session != "" {
-		t.Fatalf("auth=%q session=%q", auth, session)
+	if auth != "Bearer sk-opencode" || session == "" {
+		t.Fatalf("auth=%q session=%q, want generated session", auth, session)
 	}
 	cap.mu.Lock()
 	apiKey := cap.apiKey
@@ -542,8 +538,8 @@ func TestOpenCodeSameModelDifferentProtocol(t *testing.T) {
 	if goPath != "/messages" {
 		t.Fatalf("go path = %q", goPath)
 	}
-	if zenSession != "" {
-		t.Fatalf("zen sent session: %q", zenSession)
+	if zenSession == "" {
+		t.Fatal("zen missing generated session")
 	}
 	if goSession == "" {
 		t.Fatal("go missing session")
@@ -605,6 +601,14 @@ func TestOpenCodeUnsupportedCombosMakeZeroUpstreamCalls(t *testing.T) {
 }
 
 func TestOpenCodeSessionForwardingPolicy(t *testing.T) {
+	for _, providerType := range []config.ProviderType{config.ProviderTypeOpenCodeGo, config.ProviderTypeOpenCodeZen} {
+		t.Run(string(providerType), func(t *testing.T) {
+			testOpenCodeSessionForwardingPolicy(t, providerType)
+		})
+	}
+}
+
+func testOpenCodeSessionForwardingPolicy(t *testing.T, providerType config.ProviderType) {
 	valid := []string{"a", "ses_abc-XYZ_019", strings.Repeat("x", 128)}
 	for _, v := range valid {
 		cap := &openCodeCapture{}
@@ -612,7 +616,7 @@ func TestOpenCodeSessionForwardingPolicy(t *testing.T) {
 		inbound := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"model":"m","messages":[]}`))
 		inbound.Header.Set("x-opencode-session", v)
 		_, err := New().Do(context.Background(), Request{
-			Operation: OpChatCompletions, ProviderType: config.ProviderTypeOpenCodeGo,
+			Operation: OpChatCompletions, ProviderType: providerType,
 			PublicModel: "go/m", BaseURL: upstream.URL, APIKey: "k",
 			UpstreamModel: "m", ModelProtocol: config.ModelProtocolChat,
 			Body: []byte(`{"model":"m","messages":[]}`), Inbound: inbound, Client: upstream.Client(),
@@ -638,7 +642,7 @@ func TestOpenCodeSessionForwardingPolicy(t *testing.T) {
 			inbound.Header.Set("x-opencode-session", v)
 		}
 		_, err := New().Do(context.Background(), Request{
-			Operation: OpChatCompletions, ProviderType: config.ProviderTypeOpenCodeGo,
+			Operation: OpChatCompletions, ProviderType: providerType,
 			PublicModel: "go/m", BaseURL: upstream.URL, APIKey: "k",
 			UpstreamModel: "m", ModelProtocol: config.ModelProtocolChat,
 			Body: []byte(`{"model":"m","messages":[]}`), Inbound: inbound, Client: upstream.Client(),
