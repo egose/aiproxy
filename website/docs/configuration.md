@@ -231,7 +231,8 @@ each; `messages` and `gemini` serve `chat` and `responses` through the
 existing conservative translation subsets. Anything else, including
 `embeddings`, `images`, and audio on both OpenCode types, is rejected before
 upstream I/O. `opencode-zen` and `opencode-go` send `x-opencode-session` on every upstream
-request (caller values are forwarded only when valid, otherwise a fresh
+request (caller values are forwarded only when valid, falling back to a valid
+caller `X-Session-Id`, otherwise a fresh
 per-request ID is generated); direct requests never cross services, and only
 explicitly configured aliases retry another target. See
 [Providers and Routing](providers-and-routing.md) for the full contract and

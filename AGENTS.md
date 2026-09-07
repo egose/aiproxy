@@ -156,7 +156,7 @@ matrices.
   upstream I/O. `base_url` is an optional transport override only. Every
   upstream request sends `User-Agent: aiproxy/<version>`; `opencode-zen` and
   `opencode-go` additionally send `x-opencode-session` (a caller value is forwarded only
-  when valid, otherwise a fresh per-request ID is generated). No other inbound
+  when valid, falling back to a valid caller `X-Session-Id`, otherwise a fresh per-request ID is generated). No other inbound
   headers or credentials are forwarded. Direct requests never cross services;
   Zen/Go mixing happens only through explicitly configured aliases, and the
   upstream "spend Zen balance past Go limits" console setting never permits
