@@ -3,6 +3,9 @@ SHELL := /usr/bin/env bash
 NAME := aiproxy
 NAMESPACE =
 IMAGE_TAG =
+SUFFIX =
+
+SECRET_FILE = values-$(NAMESPACE)$(if $(strip $(SUFFIX)),-$(strip $(SUFFIX))).secret.yaml
 
 ifndef NAME
     $(error NAME is not set)
@@ -18,7 +21,7 @@ define arguments
     "${NAME}" . \
     -n "${NAMESPACE}" \
     -f values.yaml \
-    -f "values-${NAMESPACE}.secret.yaml" \
+    -f "${SECRET_FILE}" \
     --set api.image.tag="${IMAGE_TAG}"
 endef
 
