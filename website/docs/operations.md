@@ -242,6 +242,10 @@ build` from the `website` directory.
 If rate-limit settings are unchanged, reload preserves existing limiter buckets.
 Changing rate-limit settings creates a fresh limiter and resets bucket state.
 
+Alias cooldown deadlines survive reload only for fingerprint-unchanged targets
+(resolved `base_url`, credential, upstream model, protocol); removed or changed
+targets are dropped, and failed reloads leave state untouched.
+
 These changes still require a restart:
 
 - listener address changes
@@ -282,6 +286,12 @@ tokens; API clients cannot scrape `/metrics` with their own credentials. An
 empty or missing token is rejected at config validation.
 
 Transient transport failures, upstream request errors, and upstream `5xx` responses can mark a provider unhealthy for routing and readiness decisions. Configured retryable `4xx` statuses can trigger alias failover but do not mark providers unhealthy.
+
+Alias upstream retry advice (`retry-after-ms`, else `Retry-After`) is tracked
+separately from provider health as process-local per-target cooldown deadlines.
+It is never shared across processes or via Redis, never marks providers
+unhealthy, and leaves skipped targets out of upstream attribution while the
+client-facing `429` stays visible in HTTP accounting and metrics.
 
 This health state is shared across requests within the same process.
 

@@ -86,6 +86,52 @@ This avoids masking client-side request problems as routing problems.
 
 Retryable `4xx` statuses are an alias failover policy only. They do not mark the provider unhealthy; provider health is mutated by transport/upstream request errors and upstream `5xx` responses.
 
+## Upstream Retry Cooldown
+
+Alias targets additionally honor upstream retry advice as a cross-request cooldown, so a throttled upstream is not called again until its deadline expires.
+
+- Identity: each deadline is keyed by `(alias, provider, model)`, alias-local
+  and shared across that alias's operations. Direct `<provider>/<model>`
+  requests never consult or populate cooldown state and never fail over.
+- Triggers: any alias-target response carrying valid advice records or extends
+  a deadline, regardless of status. Successes are still returned normally;
+  advice affects future selection only. Transport errors without a response,
+  pre-I/O validation errors, and client-canceled contexts record nothing.
+- Parsing and precedence: a valid positive-integer `retry-after-ms` wins;
+  otherwise standard `Retry-After` (delay-seconds, then HTTP-date) is used.
+  Header names are case-insensitive; the first valid value wins per header.
+  Zero, malformed, past, or unrepresentable (overflow) values record no
+  cooldown from that header, with `retry-after-ms` falling back to
+  `Retry-After`. There is no configured maximum duration, only overflow
+  protection.
+- Selection: cooling targets are excluded alongside already-tried targets for
+  both `round_robin` and `least_connections`, rechecked before dispatch.
+  Expired advice no longer excludes a target.
+- All-cooling response: when every pool target has an active cooldown and no
+  response has been committed, the proxy returns a generated JSON `429`
+  (`type: upstream_rate_limited`) with both `Retry-After` (ceiling seconds,
+  min 1) and `retry-after-ms` (ceiling milliseconds, min 1) computed from the
+  same earliest _remaining_ delay (`deadline - now`), so clients are never told
+  to retry early. The stored deadline uses the original delay; the response
+  uses the remaining delay. Zero upstream calls occur and skipped targets gain
+  no upstream attribution. A mixed pool of cooling plus otherwise-unhealthy
+  targets keeps the existing exhaustion behavior instead of synthetic `429`.
+- Terminal policy: a retryable failure (per that alias's `retry_status_codes`)
+  that newly cools the last eligible target is discarded and becomes synthetic
+  `429` immediately. A success or non-retryable error is always returned
+  verbatim even when its advice completes all-cooling coverage; only subsequent
+  requests observe synthetic `429`.
+- Lifetime and reload: cooldown state is process-local with no Redis sharing,
+  persistence, or cross-process coordination (like `least_connections`, each
+  instance decides locally). Effective identity additionally includes resolved
+  `base_url`, credential, upstream model, and protocol; deadlines survive
+  `SIGHUP` for fingerprint-unchanged targets (algorithm and
+  `retry_status_codes` changes do not invalidate them), are dropped for
+  removed/changed targets, and are untouched by failed reloads. In-flight
+  requests admitted before advice arrives cannot be retroactively prevented.
+- Cooldown never marks providers unhealthy and never adds `429` to
+  `retry_status_codes` on its own.
+
 ## Provider Types
 
 | Provider type       | Behavior                           | Notes                                                   |

@@ -602,6 +602,26 @@ provider "openai" "backup" {
   configured `retry_status_codes` in the `400`-`599` range. The default list is
   `500`, `502`, `503`, and `504`; other upstream `4xx` responses are returned to
   the client verbatim.
+- Alias targets honor upstream retry advice (`retry-after-ms` / `Retry-After`)
+  as a cross-request cooldown. Any alias-target response carrying valid advice
+  records a deadline under the identity `(alias, provider, model)`; later alias
+  requests skip cooling targets until expiry. A valid positive-integer
+  `retry-after-ms` wins, otherwise standard `Retry-After` delay-seconds then
+  HTTP-date is used. Malformed, zero, past, or unrepresentable values record
+  nothing. When every pool target is actively cooling, the proxy returns a
+  generated JSON `429`
+  (`{"error":{"type":"upstream_rate_limited","message":"all alias targets cooling, retry after <N>ms"}}`)
+  with `Retry-After` (ceiling seconds, min 1) and `retry-after-ms` (ceiling
+  milliseconds, min 1) computed from the same earliest _remaining_ delay, with
+  zero upstream calls. Cooldown state is process-local (not shared with other
+  processes or Redis), shared across that alias's operations, retained across
+  `SIGHUP` only for fingerprint-unchanged targets
+  (`base_url`, credential, upstream model, protocol), and never consulted or
+  populated by direct requests. A retryable failure that newly cools the last
+  eligible target becomes synthetic `429` immediately; successes and
+  non-retryable errors are returned verbatim and cool only future requests.
+  Requests already admitted before advice arrives are not retroactively
+  prevented.
 - Anthropic providers are translated through the Messages API for both JSON and
   SSE streaming chat completions.
 - Gemini providers are translated through `generateContent` and
