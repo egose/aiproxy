@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/copilotlogin"
@@ -39,14 +40,16 @@ type Request struct {
 }
 
 type Result struct {
-	StatusCode int
-	Header     http.Header
-	Body       []byte
-	StreamBody io.ReadCloser
-	Streaming  bool
-	OnClose    func()
-	Usage      Usage
-	Stream     *StreamCompletion
+	StatusCode    int
+	Header        http.Header
+	Body          []byte
+	StreamBody    io.ReadCloser
+	Streaming     bool
+	OnClose       func()
+	Usage         Usage
+	Stream        *StreamCompletion
+	RetryDelay    time.Duration
+	HasRetryDelay bool
 }
 
 type Usage struct {
@@ -277,6 +280,16 @@ func openAIPathForOperation(op Operation) (string, error) {
 	return "", ErrUnsupportedOperation{ProviderType: config.ProviderTypeOpenAICompatible, Operation: op}
 }
 
+func EffectiveBaseURL(providerType config.ProviderType, baseURL string) string {
+	if baseURL != "" {
+		return baseURL
+	}
+	if desc, ok := providerDescriptors[providerType]; ok {
+		return desc.defaultBaseURL
+	}
+	return ""
+}
+
 func clientFor(r Request) *http.Client {
 	if r.Client != nil {
 		return r.Client
@@ -332,34 +345,39 @@ func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHand
 	if err != nil {
 		return nil, fmt.Errorf("upstream call: %w", err)
 	}
+	delay, hasDelay := ParseRetryCooldown(resp.Header, time.Now())
 	isStreaming := handlers.IsStreaming != nil && handlers.IsStreaming(resp)
 	if handlers.PreferStreaming && isStreaming {
-		return handlers.OnStream(resp)
+		res, streamErr := handlers.OnStream(resp)
+		return attachCooldownDelay(res, delay, hasDelay), withCooldownError(streamErr, delay, hasDelay)
 	}
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
 		body, err := readUpstreamBody(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("read error body: %w", err)
+			return nil, withCooldownError(fmt.Errorf("read error body: %w", err), delay, hasDelay)
 		}
 		if handlers.OnError == nil {
-			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil
+			return attachCooldownDelay(&Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, delay, hasDelay), nil
 		}
-		return handlers.OnError(resp, body)
+		res, handlerErr := handlers.OnError(resp, body)
+		return attachCooldownDelay(res, delay, hasDelay), withCooldownError(handlerErr, delay, hasDelay)
 	}
 	if isStreaming {
-		return handlers.OnStream(resp)
+		res, streamErr := handlers.OnStream(resp)
+		return attachCooldownDelay(res, delay, hasDelay), withCooldownError(streamErr, delay, hasDelay)
 	}
 	if handlers.StreamSuccess {
-		return &Result{StatusCode: resp.StatusCode, Header: resp.Header, StreamBody: resp.Body, Streaming: true}, nil
+		return attachCooldownDelay(&Result{StatusCode: resp.StatusCode, Header: resp.Header, StreamBody: resp.Body, Streaming: true}, delay, hasDelay), nil
 	}
 	defer resp.Body.Close()
 	body, err := readUpstreamBody(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read upstream body: %w", err)
+		return nil, withCooldownError(fmt.Errorf("read upstream body: %w", err), delay, hasDelay)
 	}
 	if handlers.OnSuccess == nil {
-		return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil
+		return attachCooldownDelay(&Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, delay, hasDelay), nil
 	}
-	return handlers.OnSuccess(resp, body)
+	res, handlerErr := handlers.OnSuccess(resp, body)
+	return attachCooldownDelay(res, delay, hasDelay), withCooldownError(handlerErr, delay, hasDelay)
 }

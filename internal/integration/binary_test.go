@@ -29,6 +29,7 @@ type upstreamResponse struct {
 	Status      int
 	ContentType string
 	Body        string
+	Headers     map[string]string
 	Hold        <-chan struct{}
 }
 
@@ -74,6 +75,9 @@ func newUpstreamStub(t *testing.T, responses ...upstreamResponse) *upstreamStub 
 			return
 		}
 		w.Header().Set("Content-Type", resp.ContentType)
+		for key, value := range resp.Headers {
+			w.Header().Set(key, value)
+		}
 		w.WriteHeader(resp.Status)
 		_, _ = w.Write([]byte(resp.Body))
 		if flusher, ok := w.(http.Flusher); ok {
@@ -382,6 +386,80 @@ func TestBinaryAliasRoutingAndRetrySemantics(t *testing.T) {
 	})
 }
 
+func TestBinaryAliasCooldownExclusionAndSynthetic(t *testing.T) {
+	a := newUpstreamStub(t,
+		upstreamResponse{Status: http.StatusTooManyRequests, Body: `{"error":{"type":"upstream_rate_limited","message":"slow down"}}`, Headers: map[string]string{"retry-after-ms": "120000"}},
+	)
+	b := newUpstreamStub(t,
+		upstreamResponse{Body: `{"id":"b-first","object":"chat.completion","choices":[]}`},
+		upstreamResponse{Body: `{"id":"b-second","object":"chat.completion","choices":[]}`, Headers: map[string]string{"retry-after-ms": "120000"}},
+	)
+	srv := startRoutingServer(t, routingConfig(t, "round_robin", []int{429}, a.URL(), b.URL()))
+
+	status, body := postChat(t, srv, "", `{"model":"alias/route","messages":[]}`)
+	if status != http.StatusOK || !strings.Contains(body, "b-first") {
+		t.Fatalf("request 1 status = %d body=%s, want 200 b-first", status, body)
+	}
+	if got := len(a.Calls()); got != 1 {
+		t.Fatalf("provider a calls after request 1 = %d, want 1", got)
+	}
+	if got := len(b.Calls()); got != 1 {
+		t.Fatalf("provider b calls after request 1 = %d, want 1", got)
+	}
+
+	status, body = postChat(t, srv, "", `{"model":"alias/route","messages":[]}`)
+	if status != http.StatusOK || !strings.Contains(body, "b-second") {
+		t.Fatalf("request 2 status = %d body=%s, want 200 b-second", status, body)
+	}
+	if got := len(a.Calls()); got != 1 {
+		t.Fatalf("provider a calls after request 2 = %d, want still 1 (cooling exclusion)", got)
+	}
+	if got := len(b.Calls()); got != 2 {
+		t.Fatalf("provider b calls after request 2 = %d, want 2", got)
+	}
+
+	aBefore, bBefore := len(a.Calls()), len(b.Calls())
+	status, header, respBody := postChatFull(t, srv, "", `{"model":"alias/route","messages":[]}`)
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("request 3 status = %d body=%s, want 429", status, respBody)
+	}
+	if got := len(a.Calls()); got != aBefore {
+		t.Fatalf("provider a calls after request 3 = %d, want still %d (zero upstream calls)", got, aBefore)
+	}
+	if got := len(b.Calls()); got != bBefore {
+		t.Fatalf("provider b calls after request 3 = %d, want still %d (zero upstream calls)", got, bBefore)
+	}
+	if got := header.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	msText := header.Get("Retry-After-Ms")
+	if msText == "" {
+		t.Fatalf("missing retry-after-ms header")
+	}
+	secText := header.Get("Retry-After")
+	if secText == "" {
+		t.Fatalf("missing Retry-After header")
+	}
+	var msValue int64
+	if _, err := fmt.Sscanf(msText, "%d", &msValue); err != nil || msValue < 1 {
+		t.Fatalf("retry-after-ms = %q, want positive integer", msText)
+	}
+	var secValue int64
+	if _, err := fmt.Sscanf(secText, "%d", &secValue); err != nil || secValue < 1 {
+		t.Fatalf("Retry-After = %q, want positive integer", secText)
+	}
+	wantSec := (msValue + 999) / 1000
+	if secValue != wantSec {
+		t.Fatalf("Retry-After = %d, want ceil(%dms/1000) = %d", secValue, msValue, wantSec)
+	}
+	if !strings.Contains(respBody, `"type":"upstream_rate_limited"`) {
+		t.Fatalf("body = %s, want upstream_rate_limited type", respBody)
+	}
+	if want := "retry after " + msText + "ms"; !strings.Contains(respBody, want) {
+		t.Fatalf("body = %s, want %q", respBody, want)
+	}
+}
+
 func startRoutingServer(t *testing.T, config string) *binaryServer {
 	t.Helper()
 	addr := freeAddr(t)
@@ -521,6 +599,28 @@ func postChat(t *testing.T, srv *binaryServer, token, body string) (int, string)
 		t.Fatalf("read chat response: %v", err)
 	}
 	return resp.StatusCode, string(out)
+}
+
+func postChatFull(t *testing.T, srv *binaryServer, token, body string) (int, http.Header, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, srv.baseURL+"/v1/chat/completions", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new chat request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := srv.client.Do(req)
+	if err != nil {
+		t.Fatalf("post chat: %v", err)
+	}
+	defer resp.Body.Close()
+	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read chat response: %v", err)
+	}
+	return resp.StatusCode, resp.Header, string(out)
 }
 
 func postChatStreaming(t *testing.T, srv *binaryServer, body string) *http.Response {

@@ -106,10 +106,25 @@ matrices.
   `api_key_ref` (exactly one, except `opencode-zen` derivatives which may omit
   it for keyless access); the base must be enabled, concrete, and the same type.
 - Direct (`<provider>/<model>`) requests never fail over to a different
-  target. Alias requests retry the next target on transport errors, timeouts,
+  target and never consult or populate alias cooldown state. Alias requests retry the next target on transport errors, timeouts,
   and configured `retry_status_codes` in the `400`-`599` range. The default list
   is `500`, `502`, `503`, and `504`; other upstream `4xx` responses are returned
   verbatim. Retryable `4xx` statuses do not mark providers unhealthy.
+- Alias targets honor upstream retry advice (`retry-after-ms` wins, else
+  `Retry-After` delay-seconds then HTTP-date; first valid value wins; zero,
+  malformed, past, or overflow values record nothing) as a process-local
+  cross-request cooldown keyed by `(alias, provider, model)` and shared across
+  that alias's operations. Cooling targets are excluded until expiry; when all
+  pool targets actively cool, dispatch returns a generated JSON `429`
+  (`upstream_rate_limited`) with ceiling `Retry-After` (min 1) and
+  `retry-after-ms` (min 1) from the same earliest remaining delay and zero
+  upstream calls. A retryable failure newly cooling the last target becomes
+  synthetic `429` immediately; successes and non-retryable errors return
+  verbatim and cool future requests only. Deadlines survive `SIGHUP` for
+  fingerprint-unchanged targets (`base_url`, credential, upstream model,
+  protocol) and are dropped otherwise; failed reloads leave state untouched.
+  Another process and previously admitted in-flight requests are not
+  coordinated, and cooldown never mutates provider health.
 - The optional `auth.rate_limit` block applies a local in-memory request rate
   limit. In `bearer_static` mode it is keyed per authenticated client; in
   `none` mode it uses a shared anonymous bucket.

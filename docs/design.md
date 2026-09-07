@@ -555,6 +555,46 @@ Retryable `4xx` statuses are an alias-routing decision only. They do not mark a
 provider unhealthy; provider-health mutation remains tied to transport/upstream
 request errors and upstream `5xx` responses.
 
+### Upstream Retry Cooldown
+
+Alias targets honor upstream retry advice (`retry-after-ms`, else
+`Retry-After`) as cross-request cooldown advice. Any alias-target response
+carrying valid advice records a deadline stored at observation time; later
+alias requests exclude cooling targets (combined with already-tried targets
+for both algorithms) until expiry, rechecked before dispatch without holding
+state locks during I/O. Successes and non-retryable errors are returned
+verbatim while recording advice for future selection; an uncommitted retryable
+failure (per that alias's `retry_status_codes`) that newly cools the last
+eligible target is discarded (body closed, lease released exactly once) and
+becomes a proxy-generated JSON `429` immediately.
+
+Identity is `(alias, provider, model)`, alias-local and shared across that
+alias's operations; direct requests neither consult nor populate it. Effective
+reload identity additionally includes resolved `base_url`, credential,
+upstream model, and protocol. Parsing: valid positive-integer
+`retry-after-ms` wins, otherwise `Retry-After` delay-seconds then HTTP-date;
+case-insensitive names, first valid value wins, strict ASCII-digits format,
+and zero/malformed/past/overflow values record nothing (no silent maximum,
+only overflow protection). The synthetic response reuses the `429`
+`upstream_rate_limited` error type with `Retry-After` (ceiling seconds, min 1)
+and `retry-after-ms` (ceiling milliseconds, min 1) computed from the same
+earliest remaining deadline at response time — the stored deadline uses the
+original delay, the response uses `deadline - now` rounded up. It performs
+zero upstream calls, leaves skipped targets out of upstream-attempt, selection,
+retry, and usage attribution (client-facing status stays visible in HTTP
+accounting/metrics), and never mutates provider health. A mixed pool of
+cooling plus otherwise-unhealthy targets keeps the existing exhaustion path,
+not synthetic `429`.
+
+Cooldown state is runtime-owned and process-local: no Redis sharing,
+persistence, new dashboard, or configuration surface. It is retained across
+`SIGHUP` for fingerprint-unchanged targets (algorithm and `retry_status_codes`
+changes do not invalidate), dropped for removed/changed/expired entries,
+untouched by failed reloads, and isolated so old in-flight completions cannot
+write to replacement identities. Another proxy process is never coordinated,
+and requests admitted before advice arrives cannot be retroactively prevented.
+Dispatch never sleeps.
+
 Direct provider model requests do not fail over to a different provider or
 model, because the client selected a specific target explicitly.
 

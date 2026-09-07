@@ -84,6 +84,116 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 	return result, err
 }
 
+type aliasPoolTarget struct {
+	target      alias.Target
+	provider    config.Provider
+	model       config.Model
+	fingerprint modelresolver.CooldownFingerprint
+	ok          bool
+}
+
+func resolveAliasPool(deps Dependencies, aliasName string, targets []config.AliasTarget) []aliasPoolTarget {
+	pool := make([]aliasPoolTarget, 0, len(targets))
+	for _, target := range targets {
+		entry := aliasPoolTarget{target: alias.Target{Provider: target.Provider, Model: target.Model}}
+		if deps.Resolver != nil {
+			prov, model, ok := deps.Resolver.Model(target.Provider, target.Model)
+			if ok {
+				entry.provider = prov
+				entry.model = model
+				entry.fingerprint = modelresolver.CooldownFingerprintFor(aliasName, prov, model)
+				entry.ok = true
+			}
+		}
+		pool = append(pool, entry)
+	}
+	return pool
+}
+
+func poolTargetFor(pool []aliasPoolTarget, t alias.Target) *aliasPoolTarget {
+	for i := range pool {
+		if pool[i].target == t {
+			return &pool[i]
+		}
+	}
+	return nil
+}
+
+func allCoolingRemaining(cooldowns *modelresolver.CooldownStore, pool []aliasPoolTarget) (time.Duration, bool) {
+	if len(pool) == 0 {
+		return 0, false
+	}
+	var earliest time.Duration
+	for i, entry := range pool {
+		if !entry.ok {
+			return 0, false
+		}
+		remaining, ok := cooldowns.Remaining(entry.fingerprint)
+		if !ok {
+			return 0, false
+		}
+		if i == 0 || remaining < earliest {
+			earliest = remaining
+		}
+	}
+	return earliest, true
+}
+
+func coolingExclusions(cooldowns *modelresolver.CooldownStore, pool []aliasPoolTarget, tried map[alias.Target]bool) map[alias.Target]bool {
+	exclude := make(map[alias.Target]bool, len(pool))
+	for target := range tried {
+		exclude[target] = true
+	}
+	for _, entry := range pool {
+		if !entry.ok {
+			continue
+		}
+		if _, cooling := cooldowns.Remaining(entry.fingerprint); cooling {
+			exclude[entry.target] = true
+		}
+	}
+	return exclude
+}
+
+func hasUntriedTarget(pool []aliasPoolTarget, tried map[alias.Target]bool) bool {
+	for _, entry := range pool {
+		if !tried[entry.target] {
+			return true
+		}
+	}
+	return false
+}
+
+func observeCooldownResult(cooldowns *modelresolver.CooldownStore, ctx context.Context, fp modelresolver.CooldownFingerprint, result *provider.Result) {
+	if cooldowns == nil || result == nil || !result.HasRetryDelay {
+		return
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return
+	}
+	cooldowns.Observe(fp, result.RetryDelay)
+}
+
+func observeCooldownError(cooldowns *modelresolver.CooldownStore, ctx context.Context, fp modelresolver.CooldownFingerprint, err error) {
+	if cooldowns == nil || err == nil {
+		return
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return
+	}
+	var invalid provider.ErrInvalidRequest
+	if errors.As(err, &invalid) {
+		return
+	}
+	var unsupported provider.ErrUnsupportedOperation
+	if errors.As(err, &unsupported) {
+		return
+	}
+	if delay, ok := provider.CooldownDelayFromError(err); ok {
+		cooldowns.Observe(fp, delay)
+	}
+}
+
 func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provider.Operation, r modelresolver.ResolveResult, inbound *http.Request, body []byte, logger *slog.Logger) (*provider.Result, error) {
 	var lastErr error
 	tried := make(map[alias.Target]bool, len(r.Alias.Targets))
@@ -91,19 +201,45 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 	for _, code := range r.Alias.RetryStatusCodes {
 		retryCodes[code] = true
 	}
-	for i := 0; i < len(r.Alias.Targets); i++ {
-		t, releaseLease := r.Selector.Acquire(tried)
+	pool := resolveAliasPool(deps, r.Alias.Name, r.Alias.Targets)
+	var cooldowns *modelresolver.CooldownStore
+	if deps.Resolver != nil {
+		cooldowns = deps.Resolver.Cooldowns()
+	}
+	if remaining, ok := allCoolingRemaining(cooldowns, pool); ok {
+		return provider.SyntheticCooldownResult(remaining), nil
+	}
+	for {
+		t, releaseLease := r.Selector.Acquire(coolingExclusions(cooldowns, pool, tried))
 		if t.Provider == "" && t.Model == "" {
-			continue
+			break
 		}
 		tried[t] = true
-		prov, model, ok := deps.Resolver.Model(t.Provider, t.Model)
+		entry := poolTargetFor(pool, t)
+		var prov config.Provider
+		var model config.Model
+		var fp modelresolver.CooldownFingerprint
+		var ok bool
+		if entry != nil && entry.ok {
+			prov, model, fp, ok = entry.provider, entry.model, entry.fingerprint, true
+		} else if deps.Resolver != nil {
+			prov, model, ok = deps.Resolver.Model(t.Provider, t.Model)
+			if ok {
+				fp = modelresolver.CooldownFingerprintFor(r.Alias.Name, prov, model)
+			}
+		}
 		if !ok {
-			if _, providerOK := deps.Resolver.Provider(t.Provider); !providerOK {
+			if deps.Resolver == nil {
+				lastErr = fmt.Errorf("alias target provider %q not found", t.Provider)
+			} else if _, providerOK := deps.Resolver.Provider(t.Provider); !providerOK {
 				lastErr = fmt.Errorf("alias target provider %q not found", t.Provider)
 			} else {
 				lastErr = fmt.Errorf("alias target model %q not found on provider %q", t.Model, t.Provider)
 			}
+			releaseLease()
+			continue
+		}
+		if _, cooling := cooldowns.Remaining(fp); cooling {
 			releaseLease()
 			continue
 		}
@@ -191,13 +327,15 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			if errors.As(err, &invalid) {
 				return nil, err
 			}
+			observeCooldownError(cooldowns, ctx, fp, err)
 			lastErr = err
-			if i+1 < len(r.Alias.Targets) && deps.Metrics != nil {
+			if hasUntriedTarget(pool, tried) && deps.Metrics != nil {
 				deps.Metrics.RecordAliasRetry(r.Alias.Name, t.Provider, t.Model, "error")
 			}
 			targetLogger.Warn("alias target failed", "error", err)
 			continue
 		}
+		observeCooldownResult(cooldowns, ctx, fp, result)
 		existingClose := result.OnClose
 		result.OnClose = func() {
 			if existingClose != nil {
@@ -205,7 +343,14 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			}
 			releaseTarget()
 		}
-		if retryCodes[result.StatusCode] && i+1 < len(r.Alias.Targets) {
+		if retryCodes[result.StatusCode] {
+			if remaining, ok := allCoolingRemaining(cooldowns, pool); ok {
+				closeResult(result)
+				return provider.SyntheticCooldownResult(remaining), nil
+			}
+			if !hasUntriedTarget(pool, tried) {
+				return result, nil
+			}
 			closeResult(result)
 			lastErr = fmt.Errorf("upstream returned status %d", result.StatusCode)
 			if deps.Metrics != nil {

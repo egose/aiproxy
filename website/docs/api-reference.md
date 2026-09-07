@@ -91,6 +91,14 @@ proxy's rolling 24-hour accounting window.
   `4xx` statuses do not mark providers unhealthy
 - Other upstream `4xx` responses are returned verbatim
 - Unsupported operations return client-visible proxy errors
+- Alias targets carrying valid upstream retry advice (`retry-after-ms`, else
+  `Retry-After`) cool down across requests: later alias requests skip cooling
+  targets until expiry. When every pool target is actively cooling, the proxy
+  returns a generated JSON `429`
+  (`{"error":{"type":"upstream_rate_limited","message":"all alias targets cooling, retry after <N>ms"}}`)
+  with `Retry-After` (ceiling seconds, min 1) and `retry-after-ms` (ceiling
+  milliseconds, min 1) from the same earliest remaining delay, without upstream
+  calls. Direct requests never consult or populate this state.
 
 This behavior is deliberate: direct model requests are explicit, while alias requests are the only place where the proxy is allowed to choose another target.
 
