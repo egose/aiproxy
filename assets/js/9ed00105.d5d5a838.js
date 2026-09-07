@@ -86,6 +86,10 @@ const toc = [{
   "id": "api_key_ref",
   "level": 2
 }, {
+  "value": "<code>credential_ref</code> (GitHub Copilot)",
+  "id": "credential_ref-github-copilot",
+  "level": 3
+}, {
   "value": "Naming Rules",
   "id": "naming-rules",
   "level": 2
@@ -353,6 +357,12 @@ function _createMdxContent(props) {
         children: (0,jsx_runtime.jsx)(_components.code, {
           children: "api_key_ref"
         })
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "credential_ref"
+        }), " for ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "github-copilot"
+        }), " only (saved device-flow login)"]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: (0,jsx_runtime.jsx)(_components.code, {
           children: "upstream_header_timeout"
@@ -382,6 +392,39 @@ function _createMdxContent(props) {
       }), "\nheader. To\nintentionally disable a provider, declare ", (0,jsx_runtime.jsx)(_components.code, {
         children: "enabled = false"
       }), "; disabled\nproviders are still validated for structure, URL, models, and capabilities,\nbut they do not require a usable credential."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "github-copilot"
+      }), " never uses ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key_ref"
+      }), ". Provision with\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy login github-copilot --client-id <id> --credential <name>"
+      }), " (your own\npublic OAuth client ID, no secret), then reference the saved login:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "provider \"github-copilot\" \"copilot\" {\n  credential_ref {\n    name = \"copilot-main\"\n  }\n\n  model \"gpt-5.4-nano\" {}\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "credential_ref.path"
+      }), " is optional and defaults to the shared secrets path so\nthe ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "copilot-<name>.json"
+      }), " sidecar is found next to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "keys.json"
+      }), ". Derived\nCopilot providers require their own local ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "credential_ref"
+      }), ". The token\nactivates on restart/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), "; re-run ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "login"
+      }), " with the same client ID/name\nand reload on ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "401"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "403"
+      }), ", revocation, or expiry."]
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
@@ -414,7 +457,13 @@ function _createMdxContent(props) {
         children: "https://opencode.ai/zen/go/v1"
       }), ") and accept\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "base_url"
-      }), " only as a transport override for tests and custom gateways. An\noverride never changes service selection, auth, or header behavior."]
+      }), " only as a transport override for tests and custom gateways. An\noverride never changes service selection, auth, or header behavior.\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "github-copilot"
+      }), " defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https://api.githubcopilot.com"
+      }), " with the same\ntransport-override-only ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " rule."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Provider names are part of the public model string, so keep them stable and machine-friendly."
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
@@ -504,6 +553,20 @@ function _createMdxContent(props) {
       }), ". It inherits the base provider type, ", (0,jsx_runtime.jsx)(_components.code, {
         children: "base_url"
       }), ", effective upstream header timeout, enabled state, and all model blocks."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "github-copilot"
+      }), " derivatives instead require a local ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "credential_ref"
+      }), " and stay compact (no ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), "/models); ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "credential_ref"
+      }), " is rejected on all other types, and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key_ref"
+      }), " are rejected on Copilot blocks."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["The type label remains required and must match the base. The base must exist, be enabled, and must not itself use ", (0,jsx_runtime.jsx)(_components.code, {
         children: "extends"
@@ -695,6 +758,32 @@ function _createMdxContent(props) {
       children: ["Use ", (0,jsx_runtime.jsx)(_components.code, {
         children: "api_key_ref"
       }), " when you want provider secrets stored outside the main HCL file."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.h3, {
+      id: "credential_ref-github-copilot",
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "credential_ref"
+      }), " (GitHub Copilot)"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "credential_ref"
+      }), " references a structured sidecar written by ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy login github-copilot"
+      }), ":"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "credential_ref {\n  name = \"copilot-main\"\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The sidecar lives at ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "<secrets-dir>/copilot-<name>.json"
+      }), " (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "0600"
+      }), "). ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "path"
+      }), " is\noptional and defaults to the shared secrets path. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "configure provider --credential/--credential-path"
+      }), " writes this block without OAuth networking or\ntoken display."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "naming-rules",
       children: "Naming Rules"
@@ -777,11 +866,27 @@ function _createMdxContent(props) {
           children: "protocol"
         }), " on any other provider type"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "user_agent"
+        }), " on any non-OpenCode provider type (including ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "github-copilot"
+        }), ")"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["providers with both ", (0,jsx_runtime.jsx)(_components.code, {
           children: "api_key"
         }), " and ", (0,jsx_runtime.jsx)(_components.code, {
           children: "api_key_ref"
         })]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "github-copilot"
+        }), " providers with ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "api_key"
+        }), "/", (0,jsx_runtime.jsx)(_components.code, {
+          children: "api_key_ref"
+        }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "credential_ref"
+        }), "\non any other provider type; enabled Copilot providers without a resolvable\nsidecar credential"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["enabled providers with no resolved credential, including an empty\n", (0,jsx_runtime.jsx)(_components.code, {
           children: "api_key = env(\"...\")"

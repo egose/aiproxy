@@ -130,6 +130,10 @@ function _createMdxContent(props) {
             children: (0,jsx_runtime.jsx)(_components.code, {
               children: "opencode-go"
             })
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "github-copilot"
+            })
           })]
         })
       }), (0,jsx_runtime.jsxs)(_components.tbody, {
@@ -138,6 +142,8 @@ function _createMdxContent(props) {
             children: (0,jsx_runtime.jsx)(_components.code, {
               children: "GET /v1/models"
             })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Proxy-owned"
           }), (0,jsx_runtime.jsx)(_components.td, {
@@ -168,12 +174,16 @@ function _createMdxContent(props) {
             children: "Proxy-owned local usage accounting"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Proxy-owned local usage accounting"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned local usage accounting"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
             children: (0,jsx_runtime.jsx)(_components.code, {
               children: "GET /metrics"
             })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned Prometheus metrics"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Proxy-owned Prometheus metrics"
           }), (0,jsx_runtime.jsx)(_components.td, {
@@ -204,6 +214,8 @@ function _createMdxContent(props) {
             children: "JSON and SSE native or translated subset"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "JSON and SSE native or translated subset"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "JSON and SSE"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -218,6 +230,8 @@ function _createMdxContent(props) {
             children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Yes"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
@@ -240,6 +254,8 @@ function _createMdxContent(props) {
             children: "JSON and SSE native or translated subset"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "JSON and SSE native or translated subset"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -250,6 +266,8 @@ function _createMdxContent(props) {
             children: "Yes"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Yes"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
@@ -276,6 +294,8 @@ function _createMdxContent(props) {
             children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "No"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -286,6 +306,8 @@ function _createMdxContent(props) {
             children: "Yes"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Yes"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
@@ -411,6 +433,18 @@ function _createMdxContent(props) {
             }), ", ", (0,jsx_runtime.jsx)(_components.code, {
               children: "responses"
             }), ", or both (by protocol)"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "None"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "github-copilot"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            })
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "None"
           })]
@@ -576,6 +610,22 @@ function _createMdxContent(props) {
           href: "/docs/providers-and-routing",
           children: "Providers and Routing"
         }), " for the protocol\ncontract."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "github-copilot"
+        }), " is chat-only pass-through: ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "POST /v1/chat/completions"
+        }), "\nserves JSON and SSE, and every other operation (including ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "responses"
+        }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "embeddings"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "images"
+        }), ", and audio) is rejected before upstream I/O.\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "GET /v1/models"
+        }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "GET /v1/billing/usage"
+        }), " stay proxy-owned with no\nupstream calls."]
       }), "\n"]
     })]
   });

@@ -122,7 +122,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-sh",
-        children: "aiproxy serve\naiproxy validate\naiproxy paths\naiproxy examples\naiproxy configure\naiproxy configure provider\naiproxy serve --config /etc/aiproxy/config.hcl\naiproxy validate --config /etc/aiproxy/config.hcl\naiproxy version\n"
+        children: "aiproxy serve\naiproxy validate\naiproxy login github-copilot --client-id YOUR_GITHUB_OAUTH_CLIENT_ID --credential copilot-main\naiproxy paths\naiproxy examples\naiproxy configure\naiproxy configure provider\naiproxy serve --config /etc/aiproxy/config.hcl\naiproxy validate --config /etc/aiproxy/config.hcl\naiproxy version\n"
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Without ", (0,jsx_runtime.jsx)(_components.code, {
@@ -231,6 +231,29 @@ function _createMdxContent(props) {
         className: "language-sh",
         children: "aiproxy configure provider \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name zen \\\n  --type opencode-zen \\\n  --api-key-env OPENCODE_ZEN_API_KEY \\\n  --model glm-5.3 \\\n  --model-protocol glm-5.3=chat\n\naiproxy configure provider \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name go \\\n  --type opencode-go \\\n  --api-key-env OPENCODE_GO_API_KEY \\\n  --model minimax-m3 \\\n  --model-protocol minimax-m3=messages\n"
       })
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "GitHub Copilot providers reference a saved device-flow login (no API-key\nflags, no OAuth networking here, no token display):"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "aiproxy login github-copilot --client-id YOUR_GITHUB_OAUTH_CLIENT_ID --credential copilot-main\n\naiproxy configure provider \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name copilot \\\n  --type github-copilot \\\n  --credential copilot-main \\\n  --model gpt-5.4-nano\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "login"
+      }), " prints the verification URI and user code, then writes\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "<secrets-dir>/copilot-<name>.json"
+      }), " (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "0600"
+      }), "). It never edits HCL or signals a\nserver: restart or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), " to activate, and re-run the same ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "login"
+      }), " + reload\non upstream ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "401"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "403"
+      }), ", revocation, or expiry. Use your own public OAuth\nclient ID; never reuse another application's client ID."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Root upstream timeout example:"
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
@@ -496,6 +519,20 @@ function _createMdxContent(props) {
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Mount this file read-only in production deployments."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["GitHub Copilot logins live beside that file as ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "copilot-<name>.json"
+      }), "\nsidecars (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "0600"
+      }), ", restrictive parent directory). ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "credential_ref.path"
+      }), "\ndefaults to the same secrets path; mount the secrets directory (not just\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "keys.json"
+      }), ") when Copilot providers are configured, and reload with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), "\nor a restart after every ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "login"
+      }), " or sidecar rotation."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "production-checklist",
       children: "Production Checklist"

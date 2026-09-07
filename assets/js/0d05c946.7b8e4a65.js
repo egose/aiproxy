@@ -50,6 +50,10 @@ const toc = [{
   "id": "opencode-zen-and-go",
   "level": 2
 }, {
+  "value": "GitHub Copilot Chat",
+  "id": "github-copilot-chat",
+  "level": 2
+}, {
   "value": "Multi-Provider Chat Pool With Tenant-Aware Auth",
   "id": "multi-provider-chat-pool-with-tenant-aware-auth",
   "level": 2
@@ -178,6 +182,55 @@ function _createMdxContent(props) {
         children: "the same model name needs different protocols per service"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "you want explicit alias failover without implicit cross-service rerouting"
+      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "github-copilot-chat",
+      children: "GitHub Copilot Chat"
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "This setup exposes a chat-only Copilot model backed by a device-flow login.\nProvision first (your own public OAuth client ID, no secret), then serve; the\nconfig validates only after the sidecar exists."
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "aiproxy login github-copilot --client-id YOUR_GITHUB_OAUTH_CLIENT_ID --credential copilot-main\n"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "listener \"http\" \"public\" {\n  address = \":8080\"\n}\n\nauth \"main\" {\n  mode = \"none\"\n}\n\nprovider \"github-copilot\" \"copilot\" {\n  credential_ref {\n    name = \"copilot-main\"\n  }\n\n  model \"gpt-5.4-nano\" {\n    display_name = \"Copilot Nano\"\n  }\n}\n\nalias \"copilot_chat\" {\n  algorithm = \"round_robin\"\n\n  target {\n    provider = \"copilot\"\n    model    = \"gpt-5.4-nano\"\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Public model names are ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "copilot/gpt-5.4-nano"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "alias/copilot_chat"
+      }), ". Only\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/chat/completions"
+      }), " (JSON and SSE) is served; every other operation is\nrejected before upstream I/O. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "GET /v1/models"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "GET /v1/billing/usage"
+      }), "\nstay proxy-owned. Restart or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), " after ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "login"
+      }), "; re-run ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "login"
+      }), " + reload\non upstream ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "401"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "403"
+      }), ", revocation, or expiry. The complete validated\nversion of this block lives in ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "examples/github-copilot.hcl"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Use this when:"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "you want Copilot chat completions behind the same OpenAI-compatible API"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "operators can run an explicit headless-friendly login per credential name"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "all other operations must stay rejected rather than translated"
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "multi-provider-chat-pool-with-tenant-aware-auth",

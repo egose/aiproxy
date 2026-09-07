@@ -74,6 +74,10 @@ const toc = [{
   "id": "quota-errors-failover-and-static-catalogs",
   "level": 3
 }, {
+  "value": "GitHub Copilot",
+  "id": "github-copilot",
+  "level": 2
+}, {
   "value": "Model Capabilities",
   "id": "model-capabilities",
   "level": 2
@@ -323,6 +327,18 @@ function _createMdxContent(props) {
               children: "protocol"
             }), "; Go service"]
           })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "github-copilot"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Pass-through chat-only adapter"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Device-flow login; ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "credential_ref"
+            }), "; chat JSON/SSE only"]
+          })]
         })]
       })]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
@@ -559,6 +575,75 @@ function _createMdxContent(props) {
         children: "go"
       }), " targets. The upstream console setting that spends Zen\nbalance past Go limits is an account setting, not permission for the proxy to\nreroute requests. Model catalogs are static configuration validated at load;\nthe proxy performs no runtime catalog sync and advertises no universal model\nsupport beyond what is configured."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "github-copilot",
+      children: "GitHub Copilot"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "github-copilot"
+      }), " is a chat-only provider backed by a device-flow login. It\nserves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/chat/completions"
+      }), " (JSON and SSE); ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "embeddings"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "images"
+      }), ", and audio are rejected before upstream I/O. The default origin is\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https://api.githubcopilot.com"
+      }), "; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " is an optional transport override\nonly and never changes auth or header behavior."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Provisioning uses your own public OAuth client ID (no secret):"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "aiproxy login github-copilot --client-id YOUR_GITHUB_OAUTH_CLIENT_ID --credential copilot-main\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The command prints the verification URI and user code, waits for\nauthorization, then writes ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "<secrets-dir>/copilot-<name>.json"
+      }), " (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "0600"
+      }), ")\nwithout editing HCL or signaling a server. It is headless-friendly over SSH:\ncopy the URI/code to a browser, authorize, and return. Never reuse another\napplication's client ID."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Reference the saved login from config:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "provider \"github-copilot\" \"copilot\" {\n  credential_ref {\n    name = \"copilot-main\"\n  }\n\n  model \"gpt-5.4-nano\" {}\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "credential_ref.path"
+      }), " defaults to the shared secrets path. Derived Copilot\nproviders require their own local ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "credential_ref"
+      }), ". The token activates on\nrestart/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), "; sidecar-only changes are inert until reload, failed reloads\nkeep the old runtime, and upstream ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "401"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "403"
+      }), " means re-run ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "login"
+      }), " with the\nsame client ID/name and reload. Upstream headers are an allowlist only\n(", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Authorization"
+      }), " from the stored login, proxy ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "User-Agent"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-GitHub-Api-Version"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Openai-Intent"
+      }), ", derived ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "x-initiator: user"
+      }), ", vision\nonly on image bodies); inbound auth/cookies/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "x-api-key"
+      }), "/caller Copilot\nmetadata are stripped. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "GET {base}/models"
+      }), " listing shares the same auth\nwithout changing the static proxy inventory. See ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "examples/github-copilot.hcl"
+      }), "\nfor a complete config."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "model-capabilities",
       children: "Model Capabilities"
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
@@ -706,6 +791,18 @@ function _createMdxContent(props) {
             }), ", ", (0,jsx_runtime.jsx)(_components.code, {
               children: "responses"
             }), ", or both (by protocol)"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "None"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "github-copilot"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            })
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "None"
           })]
