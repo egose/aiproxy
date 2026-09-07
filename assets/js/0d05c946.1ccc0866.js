@@ -162,9 +162,7 @@ function _createMdxContent(props) {
         children: "gemini"
       }), ", Zen only) serve both through the conservative\ntranslation subsets. Direct requests never cross services; only the explicit\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "chat_fallback"
-      }), " alias above may retry across them. ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "opencode-go"
-      }), " sends\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), " alias above may retry across them. Both services send\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "x-opencode-session"
       }), " on every upstream request. Complete validated versions of\nthese blocks live in ", (0,jsx_runtime.jsx)(_components.code, {
         children: "examples/opencode-zen.hcl"

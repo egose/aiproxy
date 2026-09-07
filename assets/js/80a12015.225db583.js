@@ -522,9 +522,11 @@ function _createMdxContent(props) {
         children: "User-Agent: aiproxy/<version>"
       }), "; the inbound\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "User-Agent"
-      }), " is never forwarded and the proxy never impersonates the OpenCode\nclient IDs. Only ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " is never forwarded and the proxy never impersonates the OpenCode\nclient IDs. Both ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-zen"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "opencode-go"
-      }), " additionally sends ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " additionally send ", (0,jsx_runtime.jsx)(_components.code, {
         children: "x-opencode-session"
       }), " for\nprompt caching: a caller-supplied value is forwarded as-is when it is 1-128\ncharacters of ", (0,jsx_runtime.jsx)(_components.code, {
         children: "[A-Za-z0-9_-]"

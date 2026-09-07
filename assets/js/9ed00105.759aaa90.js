@@ -449,8 +449,10 @@ function _createMdxContent(props) {
       }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "images"
       }), ", and audio on both OpenCode types, is rejected before\nupstream I/O. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-zen"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "opencode-go"
-      }), " sends ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " send ", (0,jsx_runtime.jsx)(_components.code, {
         children: "x-opencode-session"
       }), " on every upstream\nrequest (caller values are forwarded only when valid, otherwise a fresh\nper-request ID is generated); direct requests never cross services, and only\nexplicitly configured aliases retry another target. See\n", (0,jsx_runtime.jsx)(_components.a, {
         href: "/docs/providers-and-routing",
