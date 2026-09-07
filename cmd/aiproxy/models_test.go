@@ -33,7 +33,7 @@ provider "anthropic" "anthropic" {
 }
 `)
 	var stdout, stderr bytes.Buffer
-	if err := runModels(cfg, "anthropic", &stdout, &stderr); err != nil {
+	if err := runModels(context.Background(), cfg, "anthropic", false, &stdout, &stderr); err != nil {
 		t.Fatalf("runModels: %v", err)
 	}
 	out := stdout.String()
@@ -57,7 +57,7 @@ provider "openai" "openai" {
 }
 `)
 	var stdout, stderr bytes.Buffer
-	err := runModels(cfg, "nope", &stdout, &stderr)
+	err := runModels(context.Background(), cfg, "nope", false, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected error for unknown provider")
 	}
@@ -76,7 +76,7 @@ provider "openai" "openai" {
 }
 `)
 	var stdout, stderr bytes.Buffer
-	err := runModels(cfg, "", &stdout, &stderr)
+	err := runModels(context.Background(), cfg, "", false, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected error when no provider given without a terminal")
 	}
