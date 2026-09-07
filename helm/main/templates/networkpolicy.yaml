@@ -25,10 +25,6 @@ spec:
         - protocol: TCP
           port: {{ dig "service" "port" 8080 .Values.api }}
       from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: {{ ((.Values.app | default dict).nameOverride | default "app") }}
-              app.kubernetes.io/instance: {{ .Release.Name }}
         {{- if .Values.networkPolicy.allowSameNamespace }}
         - podSelector:
             matchLabels:

@@ -21,11 +21,11 @@ api:
 
   resources:
     requests:
+      cpu: 50m          # 0.05 CPU core
+      memory: 64Mi      # 64 MB RAM
+    limits:
       cpu: 250m         # 0.25 CPU core
       memory: 256Mi     # 256 MB RAM
-    limits:
-      cpu: 500m         # 0.5 CPU core
-      memory: 512Mi     # 512 MB RAM
 
   # Extra CLI args. Empty means ["serve", "--config", "/etc/aiproxy/config.hcl"]
   # once a config Secret is in use.
