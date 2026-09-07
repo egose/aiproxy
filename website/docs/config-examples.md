@@ -165,7 +165,7 @@ Public model names are `zen/glm-5.3` and `go/minimax-m3`. `chat` and
 `responses` protocols are native pass-through for one public operation each,
 while `messages` (and `gemini`, Zen only) serve both through the conservative
 translation subsets. Direct requests never cross services; only the explicit
-`chat_fallback` alias above may retry across them. `opencode-go` sends
+`chat_fallback` alias above may retry across them. Both services send
 `x-opencode-session` on every upstream request. Complete validated versions of
 these blocks live in `examples/opencode-zen.hcl` and
 `examples/opencode-go.hcl`.

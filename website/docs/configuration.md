@@ -227,7 +227,7 @@ Public model names are `zen/glm-5.3` and `go/minimax-m3`. `chat` and
 each; `messages` and `gemini` serve `chat` and `responses` through the
 existing conservative translation subsets. Anything else, including
 `embeddings`, `images`, and audio on both OpenCode types, is rejected before
-upstream I/O. `opencode-go` sends `x-opencode-session` on every upstream
+upstream I/O. `opencode-zen` and `opencode-go` send `x-opencode-session` on every upstream
 request (caller values are forwarded only when valid, otherwise a fresh
 per-request ID is generated); direct requests never cross services, and only
 explicitly configured aliases retry another target. See

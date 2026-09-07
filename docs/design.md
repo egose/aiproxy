@@ -329,7 +329,7 @@ performed. The same model name may use different protocols on each service
 never from the model name.
 
 Every upstream request sends `User-Agent: aiproxy/<version>` and
-`Authorization: Bearer <key>`. Only `opencode-go` additionally sends
+`Authorization: Bearer <key>`. Both services additionally send
 `x-opencode-session` for prompt caching: a caller-supplied inbound value is
 forwarded as-is when it is 1-128 characters of `[A-Za-z0-9_-]`; otherwise the
 proxy generates a fresh per-request `ses_` + 128-bit hex ID. Missing or

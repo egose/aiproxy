@@ -1,5 +1,7 @@
 # Standalone opencode-zen setup with explicit per-model protocols.
-# Combined Zen-plus-Go setup: opencode.hcl.
+# Every upstream request carries x-opencode-session (forwarded when the
+# caller supplies a valid value, generated otherwise). Combined Zen-plus-Go
+# setup: opencode.hcl.
 listener "http" "public" {
   address = ":8080"
 }

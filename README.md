@@ -89,8 +89,8 @@ operation; `messages` and `gemini` serve `chat` and `responses` through the
 existing conservative translation subsets. A public operation the model's
 protocol does not serve is rejected before any upstream I/O. `base_url` is an
 optional transport override only and never reclassifies the service. Every
-upstream request sends `User-Agent: aiproxy/<version>`; `opencode-go`
-additionally sends `x-opencode-session` (a caller-supplied value is forwarded
+upstream request sends `User-Agent: aiproxy/<version>`; `opencode-zen` and
+`opencode-go` additionally send `x-opencode-session` (a caller-supplied value is forwarded
 only when it is 1-128 `[A-Za-z0-9_-]` characters, otherwise a fresh per-request
 ID is generated). No other inbound headers or credentials are forwarded.
 Public model names look like `zen/glm-5.3` and `go/minimax-m3`:
@@ -560,10 +560,10 @@ provider "openai" "backup" {
   `gemini` (Zen only) serve both through the existing conservative translation
   subsets. Any other operation/protocol combination, including `embeddings`,
   `images`, and audio on both OpenCode types, is rejected before upstream I/O.
-- `opencode-go` sends `x-opencode-session` on every upstream request for prompt
+- `opencode-zen` and `opencode-go` send `x-opencode-session` on every upstream request for prompt
   caching. Callers may supply their own session value (1-128 characters of
   `[A-Za-z0-9_-]`); missing or invalid values get a fresh per-request ID, never
-  a shared global session. `opencode-zen` sends no session header.
+  a shared global session.
 - Direct `<provider>/<model>` requests never cross OpenCode services. Upstream
   Go quota/limit errors are returned to the client like any other upstream
   error; only explicitly configured aliases retry another target, and the proxy
