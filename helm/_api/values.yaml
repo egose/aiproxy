@@ -37,9 +37,34 @@ serviceAccount:
 
 serviceAccountName:
 
-# Required external Secret consumed with envFrom. It must provide DATABASE_URL,
-# SESSION_SECRET_KEY, APP_TOKEN_SECRET_KEY, KEYCLOAK_CLIENT_ID,
-# KEYCLOAK_CLIENT_SECRET, KEYCLOAK_META_ENDPOINT, and APP_URL.
+# Optional extra CLI args for the container. When empty and a config Secret
+# is in use, defaults to ["serve", "--config", "<mountPath>/<configKey>"].
+args: []
+
+# aiproxy config.hcl / keys.json handling. Set config.content and/or
+# secrets.keysJson (or secrets.keysJsonRaw) to have the chart generate an
+# Opaque Secret mounted at config.mountPath. Or set config.existingSecret
+# to mount a pre-created Secret you manage yourself (it must contain the
+# configKey entry, plus the keysKey entry when api_key_ref without an
+# explicit path is used).
+config:
+  content: ''
+  existingSecret: ''
+  secretNameOverride: ''
+  configKey: config.hcl
+  mountPath: /etc/aiproxy
+
+secrets:
+  # Map rendered to JSON, e.g. { openai: "sk-...", localai: "secret" }.
+  keysJson: {}
+  # Raw JSON string alternative; takes precedence over keysJson when set.
+  keysJsonRaw: ''
+  keysKey: keys.json
+
+# Optional external Secret consumed with envFrom. Use it to provide the
+# environment variables referenced by env("VAR") expressions in config.hcl
+# (e.g. OPENAI_API_KEY, AIPROXY_CLIENT_TOKEN) so credentials never live in
+# the chart values. When empty, no envFrom entry is rendered.
 envSecretName: ''
 env: {}
 
@@ -82,7 +107,8 @@ service:
   # This sets the service type more information can be found here: https://kubernetes.io/docs/concepts/services-networking/service/#publishing-services-service-types
   type: ClusterIP
   # This sets the ports more information can be found here: https://kubernetes.io/docs/concepts/services-networking/service/#field-spec-ports
-  port: 8000
+  # Must match the port in the listener address inside config.content.
+  port: 8080
 
 # This block is for setting up the ingress for more information can be found here: https://kubernetes.io/docs/concepts/services-networking/ingress/
 ingress:
@@ -156,23 +182,24 @@ resources: {}
   #   memory: 128Mi
 
 # This is to setup the liveness and readiness probes more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+# aiproxy serves /healthz (liveness) and /readyz (readiness).
 livenessProbe:
   httpGet:
-    path: /health/live
+    path: /healthz
     port: http
   periodSeconds: 10
   timeoutSeconds: 2
   failureThreshold: 3
 readinessProbe:
   httpGet:
-    path: /health/ready
+    path: /readyz
     port: http
   periodSeconds: 10
   timeoutSeconds: 2
   failureThreshold: 3
 startupProbe:
   httpGet:
-    path: /health/live
+    path: /healthz
     port: http
   periodSeconds: 5
   timeoutSeconds: 2

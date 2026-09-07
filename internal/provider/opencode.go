@@ -281,6 +281,9 @@ func openCodeSessionValue(r Request) (string, error) {
 		if v := r.Inbound.Header.Get(openCodeSessionHeader); isValidOpenCodeSessionID(v) {
 			return v, nil
 		}
+		if v := r.Inbound.Header.Get("X-Session-Id"); isValidOpenCodeSessionID(v) {
+			return v, nil
+		}
 	}
 	var entropy [16]byte
 	if _, err := rand.Read(entropy[:]); err != nil {

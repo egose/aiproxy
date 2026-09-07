@@ -689,6 +689,31 @@ func testOpenCodeSessionForwardingPolicy(t *testing.T, providerType config.Provi
 	}
 }
 
+func TestOpenCodeSessionFallsBackToClientSessionID(t *testing.T) {
+	for _, providerType := range []config.ProviderType{config.ProviderTypeOpenCodeGo, config.ProviderTypeOpenCodeZen} {
+		t.Run(string(providerType), func(t *testing.T) {
+			cap := &openCodeCapture{}
+			upstream := openCodeUpstream(t, cap, openCodeJSONResponder(`{}`))
+			defer upstream.Close()
+			inbound := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"model":"m","messages":[]}`))
+			inbound.Header.Set("X-Session-Id", "client-session_1")
+			_, err := New().Do(context.Background(), Request{
+				Operation: OpChatCompletions, ProviderType: providerType,
+				PublicModel: "test/m", BaseURL: upstream.URL, APIKey: "k",
+				UpstreamModel: "m", ModelProtocol: config.ModelProtocolChat,
+				Body: []byte(`{"model":"m","messages":[]}`), Inbound: inbound, Client: upstream.Client(),
+			})
+			if err != nil {
+				t.Fatalf("do: %v", err)
+			}
+			_, _, _, _, _, _, session, _ := cap.snapshot()
+			if session != "client-session_1" {
+				t.Fatalf("session = %q, want forwarded X-Session-Id", session)
+			}
+		})
+	}
+}
+
 func TestOpenCodeUserAgentPolicy(t *testing.T) {
 	cap := &openCodeCapture{}
 	upstream := openCodeUpstream(t, cap, openCodeJSONResponder(`{}`))

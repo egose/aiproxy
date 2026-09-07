@@ -331,8 +331,9 @@ never from the model name.
 Every upstream request sends `User-Agent: aiproxy/<version>` and
 `Authorization: Bearer <key>`. Both services additionally send
 `x-opencode-session` for prompt caching: a caller-supplied inbound value is
-forwarded as-is when it is 1-128 characters of `[A-Za-z0-9_-]`; otherwise the
-proxy generates a fresh per-request `ses_` + 128-bit hex ID. Missing or
+forwarded as-is when it is 1-128 characters of `[A-Za-z0-9_-]`; otherwise a
+valid caller `X-Session-Id` is adopted when present, and only then does the
+proxy generate a fresh per-request `ses_` + 128-bit hex ID. Missing or
 invalid values never fail the request and never create shared cross-client
 state. No other inbound headers or credentials are forwarded, and secrets
 never appear in errors or logs.
