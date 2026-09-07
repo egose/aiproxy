@@ -24,6 +24,7 @@ type openCodeCapture struct {
 	auth        string
 	userAgent   string
 	session     string
+	client      string
 	apiKey      string
 	cookie      string
 	custom      string
@@ -42,6 +43,7 @@ func (c *openCodeCapture) record(r *http.Request) {
 	c.auth = r.Header.Get("Authorization")
 	c.userAgent = r.Header.Get("User-Agent")
 	c.session = r.Header.Get("x-opencode-session")
+	c.client = r.Header.Get("x-opencode-client")
 	c.apiKey = r.Header.Get("x-api-key")
 	c.cookie = r.Header.Get("Cookie")
 	c.custom = r.Header.Get("X-Custom")
@@ -689,6 +691,72 @@ func testOpenCodeSessionForwardingPolicy(t *testing.T, providerType config.Provi
 	}
 }
 
+func TestOpenCodeUserAgentOverride(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ua   string
+		want string
+	}{
+		{"override honored", "opencode/local", "opencode/local"},
+		{"default without override", "", "aiproxy/1.2.3-test"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &openCodeCapture{}
+			srv := openCodeUpstream(t, c, openCodeJSONResponder(`{}`))
+			defer srv.Close()
+			inbound := openCodeInbound(http.MethodPost, "/v1/chat/completions", `{"model":"m","messages":[]}`)
+			_, err := New().Do(context.Background(), Request{
+				Operation: OpChatCompletions, ProviderType: config.ProviderTypeOpenCodeZen,
+				PublicModel: "zen/m", BaseURL: srv.URL, APIKey: "k",
+				UpstreamModel: "m", ModelProtocol: config.ModelProtocolChat, UserAgent: tc.ua, Version: "1.2.3-test",
+				Body: []byte(`{"model":"m","messages":[]}`), Inbound: inbound, Client: srv.Client(),
+			})
+			if err != nil {
+				t.Fatalf("do: %v", err)
+			}
+			_, _, _, _, _, userAgent, _, _ := c.snapshot()
+			if userAgent != tc.want {
+				t.Fatalf("User-Agent = %q, want %q", userAgent, tc.want)
+			}
+		})
+	}
+}
+
+func TestOpenCodeClientHeaderForwardingPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		inbound string
+		want    string
+	}{
+		{"valid forwarded", "cli", "cli"},
+		{"invalid dropped", "has space", ""},
+		{"missing dropped", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &openCodeCapture{}
+			srv := openCodeUpstream(t, c, openCodeJSONResponder(`{}`))
+			defer srv.Close()
+			inbound := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"model":"m","messages":[]}`))
+			if tc.inbound != "" {
+				inbound.Header.Set("x-opencode-client", tc.inbound)
+			}
+			_, err := New().Do(context.Background(), Request{
+				Operation: OpChatCompletions, ProviderType: config.ProviderTypeOpenCodeZen,
+				PublicModel: "zen/m", BaseURL: srv.URL, APIKey: "k",
+				UpstreamModel: "m", ModelProtocol: config.ModelProtocolChat, Version: "v",
+				Body: []byte(`{"model":"m","messages":[]}`), Inbound: inbound, Client: srv.Client(),
+			})
+			if err != nil {
+				t.Fatalf("do: %v", err)
+			}
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			if c.client != tc.want {
+				t.Fatalf("x-opencode-client upstream = %q, want %q", c.client, tc.want)
+			}
+		})
+	}
+}
 func TestOpenCodeSessionFallsBackToClientSessionID(t *testing.T) {
 	for _, providerType := range []config.ProviderType{config.ProviderTypeOpenCodeGo, config.ProviderTypeOpenCodeZen} {
 		t.Run(string(providerType), func(t *testing.T) {

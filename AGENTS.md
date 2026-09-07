@@ -102,8 +102,9 @@ matrices.
 - Providers may declare `extends = "<base-provider-name>"` to inherit the base
   provider type, endpoint, timeout, enabled state, and models while using their
   own provider name and local credential. Derived providers may only declare
-  `extends`, optional `display_name`, and exactly one local `api_key` or
-  `api_key_ref`; the base must be enabled, concrete, and the same type.
+  `extends`, optional `display_name`, and at most one local `api_key` or
+  `api_key_ref` (exactly one, except `opencode-zen` derivatives which may omit
+  it for keyless access); the base must be enabled, concrete, and the same type.
 - Direct (`<provider>/<model>`) requests never fail over to a different
   target. Alias requests retry the next target on transport errors, timeouts,
   and configured `retry_status_codes` in the `400`-`599` range. The default list
@@ -154,9 +155,12 @@ matrices.
   serve `chat` and `responses` through the existing conservative translation
   subsets. Unsupported operation/protocol combinations are rejected before
   upstream I/O. `base_url` is an optional transport override only. Every
-  upstream request sends `User-Agent: aiproxy/<version>`; `opencode-zen` and
+  upstream request sends `User-Agent: aiproxy/<version>` unless the provider
+  declares a `user_agent` override (Zen/Go only); `opencode-zen` and
   `opencode-go` additionally send `x-opencode-session` (a caller value is forwarded only
-  when valid, falling back to a valid caller `X-Session-Id`, otherwise a fresh per-request ID is generated). No other inbound
+  when valid, falling back to a valid caller `X-Session-Id`, otherwise a fresh per-request ID is generated)
+  and forward a caller-supplied `x-opencode-client` under the same validity
+  rule. No other inbound
   headers or credentials are forwarded. Direct requests never cross services;
   Zen/Go mixing happens only through explicitly configured aliases, and the
   upstream "spend Zen balance past Go limits" console setting never permits

@@ -29,6 +29,7 @@ type Request struct {
 	APIKey        string
 	UpstreamModel string
 	ModelProtocol config.ModelProtocol
+	UserAgent     string
 	Version       string
 	Body          []byte
 	Inbound       *http.Request

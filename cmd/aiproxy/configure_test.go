@@ -314,6 +314,53 @@ func TestConfigureProviderNonInteractiveKeylessZen(t *testing.T) {
 	}
 }
 
+func TestConfigureProviderNonInteractiveUserAgent(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := "listener \"http\" \"public\" { address = \":8080\" }\nauth \"main\" { mode = \"none\" }\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+
+	stdout, stderr, err := executeRootCommand(
+		"",
+		"configure", "provider",
+		"--config", configPath,
+		"--non-interactive",
+		"--type", "opencode-zen",
+		"--name", "zen",
+		"--api-key-env", "OPENCODE_ZEN_API_KEY",
+		"--user-agent", "opencode/local",
+		"--model", "glm-5.3",
+		"--model-protocol", "glm-5.3=chat",
+	)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	if !strings.Contains(string(configData), `user_agent = "opencode/local"`) {
+		t.Fatalf("config output missing user_agent:\n%s", string(configData))
+	}
+
+	_, stderr, err = executeRootCommand(
+		"",
+		"configure", "provider",
+		"--config", configPath,
+		"--non-interactive",
+		"--type", "openai",
+		"--name", "other",
+		"--api-key", "k",
+		"--user-agent", "opencode/local",
+		"--model", "m",
+	)
+	if err == nil || !strings.Contains(stderr+err.Error(), "--user-agent is only supported") {
+		t.Fatalf("expected user-agent type error, got err=%v stderr=%s", err, stderr)
+	}
+}
+
 func TestConfigureProviderNonInteractiveCreatesDerivedProvider(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.hcl")

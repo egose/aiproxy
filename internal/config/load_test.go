@@ -860,6 +860,65 @@ provider "opencode-zen" "zen" {
 	}
 }
 
+func TestLoadUserAgentOverride(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "opencode-zen" "zen" {
+  api_key = "k"
+  user_agent = "opencode/local"
+  model "m" {
+    protocol = "chat"
+  }
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("user_agent override should load: %v", err)
+	}
+	p, ok := rt.Catalog.Provider("zen")
+	if !ok {
+		t.Fatal("zen provider missing from catalog")
+	}
+	if p.UserAgent != "opencode/local" {
+		t.Fatalf("zen UserAgent = %q, want override", p.UserAgent)
+	}
+}
+
+func TestLoadRejectsUserAgentOnNonOpenCodeProvider(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "k"
+  user_agent = "opencode/local"
+  model "m" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "user_agent is only supported") {
+		t.Fatalf("expected user_agent type error, got %v", err)
+	}
+}
+
+func TestLoadRejectsUserAgentWithNewline(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "opencode-zen" "zen" {
+  api_key = "k"
+  user_agent = "bad\nagent"
+  model "m" {
+    protocol = "chat"
+  }
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "user_agent must be") {
+		t.Fatalf("expected user_agent charset error, got %v", err)
+	}
+}
+
 func TestLoadRejectsKeylessEnabledGoProvider(t *testing.T) {
 	cfg := `
 listener "http" "public" { address = ":8080" }

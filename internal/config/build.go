@@ -177,7 +177,7 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 }
 
 func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderSyntax) error {
-	for _, name := range []string{"base_url", "upstream_header_timeout", "enabled"} {
+	for _, name := range []string{"base_url", "upstream_header_timeout", "user_agent", "enabled"} {
 		if syntax.Attrs[name] {
 			return fmt.Errorf("derived provider cannot declare %s", name)
 		}
@@ -291,6 +291,7 @@ func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Durat
 		DisplayName:           rawProvider.DisplayName,
 		BaseURL:               rawProvider.BaseURL,
 		UpstreamHeaderTimeout: rootUpstreamHeaderTimeout,
+		UserAgent:             rawProvider.UserAgent,
 		APIKey:                rawProvider.APIKey,
 		Enabled:               true,
 		ModelByName:           make(map[string]Model),

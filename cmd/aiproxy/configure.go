@@ -72,6 +72,7 @@ type providerOptions struct {
 	DisplayName           string
 	BaseURL               string
 	UpstreamHeaderTimeout string
+	UserAgent             string
 	APIKey                string
 	APIKeyEnv             string
 	SecretsPath           string
@@ -254,6 +255,7 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().StringVar(&options.DisplayName, "display-name", "", "provider display_name")
 	cmd.Flags().StringVar(&options.BaseURL, "base-url", "", "provider base_url")
 	cmd.Flags().StringVar(&options.UpstreamHeaderTimeout, "upstream-header-timeout", "", "provider upstream_header_timeout")
+	cmd.Flags().StringVar(&options.UserAgent, "user-agent", "", "provider user_agent override (opencode-zen and opencode-go only)")
 	cmd.Flags().StringVar(&options.APIKey, "api-key", "", "provider API key or secret value")
 	cmd.Flags().StringVar(&options.APIKeyEnv, "api-key-env", "", "provider API key environment variable name")
 	cmd.Flags().StringVar(&options.SecretsPath, "secrets-path", "", "secrets file path for api_key_ref")
@@ -1594,7 +1596,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if options.DisplayName != "" {
 		defaults.DisplayName = options.DisplayName
 	}
-	if defaults.Extends != "" && (options.BaseURL != "" || options.UpstreamHeaderTimeout != "" || options.HasEnabled || hasProviderModelOptions(options)) {
+	if defaults.Extends != "" && (options.BaseURL != "" || options.UpstreamHeaderTimeout != "" || options.UserAgent != "" || options.HasEnabled || hasProviderModelOptions(options)) {
 		return providerInput{}, secretsUpdate{}, fmt.Errorf("--extends cannot be combined with inherited-field flags")
 	}
 	if options.BaseURL != "" {
@@ -1605,6 +1607,15 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("invalid upstream-header-timeout: %w", err)
 		}
 		defaults.UpstreamHeaderTimeout = options.UpstreamHeaderTimeout
+	}
+	if options.UserAgent != "" {
+		if validateOptionalUserAgent(options.UserAgent) != nil {
+			return providerInput{}, secretsUpdate{}, fmt.Errorf("invalid user-agent: must be 1-256 printable ASCII characters without newlines")
+		}
+		if defaults.ProviderType != "opencode-zen" && defaults.ProviderType != "opencode-go" {
+			return providerInput{}, secretsUpdate{}, fmt.Errorf("--user-agent is only supported for opencode-zen and opencode-go providers")
+		}
+		defaults.UserAgent = options.UserAgent
 	}
 	if err := applyProviderCredentialOptions(&defaults, options); err != nil {
 		return providerInput{}, secretsUpdate{}, err
@@ -1640,6 +1651,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			}
 			defaults.BaseURL = ""
 			defaults.UpstreamHeaderTimeout = ""
+			defaults.UserAgent = ""
 			defaults.Enabled = nil
 			defaults.Models = nil
 			return defaults, providerSecretsUpdate(defaults, options), nil
@@ -1690,6 +1702,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			return providerInput{}, secretsUpdate{}, err
 		}
 		extends = extendsFromChoice(extendsChoice)
+		userAgent := defaults.UserAgent
 		if strings.TrimSpace(extends) == "" {
 			if err := prompts.runHuhForm(
 				huh.NewGroup(
@@ -1698,6 +1711,19 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			); err != nil {
 				return providerInput{}, secretsUpdate{}, err
 			}
+			if isOpenCodeProviderType(providerType) {
+				if err := prompts.runHuhForm(
+					huh.NewGroup(
+						huh.NewInput().Title("User agent override").Description(userAgentDescription()).Value(&userAgent).Validate(validateOptionalUserAgent),
+					).Title("User Agent"),
+				); err != nil {
+					return providerInput{}, secretsUpdate{}, err
+				}
+			} else {
+				userAgent = ""
+			}
+		} else {
+			userAgent = ""
 		}
 		baseURL := defaults.BaseURL
 		if strings.TrimSpace(extends) != "" {
@@ -1810,6 +1836,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			DisplayName:           strings.TrimSpace(displayName),
 			BaseURL:               strings.TrimSpace(baseURL),
 			UpstreamHeaderTimeout: strings.TrimSpace(upstreamHeaderTimeout),
+			UserAgent:             strings.TrimSpace(userAgent),
 			Credential:            credential,
 			Enabled:               defaults.Enabled,
 			Models:                models,
@@ -1835,11 +1862,22 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	}
 	extends = extendsFromChoice(extendsChoice)
 	upstreamHeaderTimeout := defaults.UpstreamHeaderTimeout
+	userAgent := defaults.UserAgent
 	if strings.TrimSpace(extends) == "" {
 		upstreamHeaderTimeout, err = prompts.askValidated("Upstream header timeout", defaults.UpstreamHeaderTimeout, validateOptionalPositiveDuration)
 		if err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
+		if isOpenCodeProviderType(providerType) {
+			userAgent, err = prompts.askValidated("User agent override", defaults.UserAgent, validateOptionalUserAgent)
+			if err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
+		} else {
+			userAgent = ""
+		}
+	} else {
+		userAgent = ""
 	}
 	baseURL := defaults.BaseURL
 	if strings.TrimSpace(extends) != "" {
@@ -1929,6 +1967,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		DisplayName:           displayName,
 		BaseURL:               baseURL,
 		UpstreamHeaderTimeout: upstreamHeaderTimeout,
+		UserAgent:             userAgent,
 		Credential:            credential,
 		Enabled:               defaults.Enabled,
 		Models:                models,
@@ -2712,6 +2751,26 @@ func upstreamHeaderTimeoutDescription() string {
 	return "Optional Go duration for waiting on upstream response headers. Leave blank to inherit the root value or 90s default. Does not limit streaming bodies after headers arrive."
 }
 
+func validateOptionalUserAgent(value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	if len(trimmed) > 256 {
+		return errors.New("user agent must be 1-256 characters")
+	}
+	for i := 0; i < len(trimmed); i++ {
+		if trimmed[i] < 0x20 || trimmed[i] > 0x7e {
+			return errors.New("user agent must be printable ASCII without newlines")
+		}
+	}
+	return nil
+}
+
+func userAgentDescription() string {
+	return "Optional upstream User-Agent override for opencode-zen and opencode-go providers. Leave blank to send aiproxy/<version>."
+}
+
 func rateLimitRPMDescription() string {
 	return "Positive integer requests-per-minute limit applied per authenticated client."
 }
@@ -3339,6 +3398,7 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 	input.Extends = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "extends"))
 	input.BaseURL = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "base_url"))
 	input.UpstreamHeaderTimeout = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "upstream_header_timeout"))
+	input.UserAgent = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "user_agent"))
 	if enabledExpr := parseLiteralOrExpression(attributeExpr(src, parsed.Body, "enabled")); enabledExpr != "" {
 		boolVal := enabledExpr == "true" || enabledExpr == "1"
 		input.Enabled = &boolVal

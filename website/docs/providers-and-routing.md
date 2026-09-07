@@ -139,13 +139,17 @@ from the model name. There is no generic `opencode` type.
 
 ### Session And Client Requirements
 
-Every upstream request sends `User-Agent: aiproxy/<version>`; the inbound
-`User-Agent` is never forwarded and the proxy never impersonates the OpenCode
-client IDs. Both `opencode-zen` and `opencode-go` additionally send `x-opencode-session` for
+Every upstream request sends `User-Agent: aiproxy/<version>` unless the
+provider declares a `user_agent` override (supported on `opencode-zen` and
+`opencode-go` only, validated as 1-256 printable ASCII characters); the
+inbound `User-Agent` is never forwarded implicitly, so matching a first-party
+client fingerprint is always an explicit operator choice. Both
+`opencode-zen` and `opencode-go` additionally send `x-opencode-session` for
 prompt caching: a caller-supplied `x-opencode-session` is forwarded as-is when it is 1-128
 characters of `[A-Za-z0-9_-]`; otherwise the caller's `X-Session-Id` is adopted
 when valid, and only then does the proxy generate a fresh
-per-request `ses_` + 128-bit hex ID. Missing or invalid values never fail the
+per-request `ses_` + 128-bit hex ID. A caller-supplied `x-opencode-client`
+is forwarded under the same validity rule and omitted otherwise. Missing or invalid values never fail the
 request and never create shared cross-client state. No other inbound headers
 or credentials are forwarded.
 

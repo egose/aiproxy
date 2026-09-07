@@ -132,6 +132,7 @@ type Provider struct {
 	DisplayName           string
 	BaseURL               string
 	UpstreamHeaderTimeout time.Duration
+	UserAgent             string
 	APIKey                string
 	APIKeyRef             *APIKeyRef
 	Enabled               bool
