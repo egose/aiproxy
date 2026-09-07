@@ -4,7 +4,7 @@
 {{- $serviceAccountName := .Values.serviceAccountName | default ($global.serviceAccountName | default (include "_.serviceAccountName" .)) -}}
 {{- $configSecretName := "" -}}
 {{- if or .Values.config.existingSecret .Values.config.content (not (empty .Values.secrets.keysJson)) .Values.secrets.keysJsonRaw }}
-{{- $configSecretName = include "_.configSecretName" . }} # pragma: allowlist secret
+{{- $configSecretName = include "_.configSecretName" . }}
 {{- end }}
 {{- $configMountPath := .Values.config.mountPath | default "/etc/aiproxy" -}}
 {{- $configKey := .Values.config.configKey | default "config.hcl" -}}
