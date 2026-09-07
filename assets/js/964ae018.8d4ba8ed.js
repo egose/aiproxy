@@ -68,6 +68,7 @@ const toc = [{
 }];
 function _createMdxContent(props) {
   const _components = {
+    a: "a",
     code: "code",
     h1: "h1",
     h2: "h2",
@@ -121,6 +122,14 @@ function _createMdxContent(props) {
             children: (0,jsx_runtime.jsx)(_components.code, {
               children: "gemini"
             })
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-zen"
+            })
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-go"
+            })
           })]
         })
       }), (0,jsx_runtime.jsxs)(_components.tbody, {
@@ -129,6 +138,10 @@ function _createMdxContent(props) {
             children: (0,jsx_runtime.jsx)(_components.code, {
               children: "GET /v1/models"
             })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Proxy-owned"
           }), (0,jsx_runtime.jsx)(_components.td, {
@@ -151,12 +164,20 @@ function _createMdxContent(props) {
             children: "Proxy-owned local usage accounting"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Proxy-owned local usage accounting"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned local usage accounting"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned local usage accounting"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
             children: (0,jsx_runtime.jsx)(_components.code, {
               children: "GET /metrics"
             })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned Prometheus metrics"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned Prometheus metrics"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Proxy-owned Prometheus metrics"
           }), (0,jsx_runtime.jsx)(_components.td, {
@@ -179,6 +200,10 @@ function _createMdxContent(props) {
             children: "JSON and SSE translated"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "JSON and SSE translated"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "JSON and SSE native or translated subset"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "JSON and SSE native or translated subset"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -193,6 +218,10 @@ function _createMdxContent(props) {
             children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Yes"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -207,6 +236,10 @@ function _createMdxContent(props) {
             children: "JSON and SSE translated subset"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "JSON and SSE translated subset"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "JSON and SSE native or translated subset"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "JSON and SSE native or translated subset"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -217,6 +250,10 @@ function _createMdxContent(props) {
             children: "Yes"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Yes"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
@@ -235,6 +272,10 @@ function _createMdxContent(props) {
             children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "No"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -245,6 +286,10 @@ function _createMdxContent(props) {
             children: "Yes"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Yes"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
@@ -341,12 +386,60 @@ function _createMdxContent(props) {
               children: "embeddings"
             })
           })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-zen"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", or both (by protocol)"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "None"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-go"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", or both (by protocol)"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "None"
+          })]
         })]
       })]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["When a model omits ", (0,jsx_runtime.jsx)(_components.code, {
         children: "capabilities"
-      }), ", the provider-type defaults are used. Explicit\ncapabilities can narrow that default or opt into an additional supported\ncapability listed above."]
+      }), ", the provider-type defaults are used. Explicit\ncapabilities can narrow that default or opt into an additional supported\ncapability listed above. On ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-zen"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-go"
+      }), " the omitted\ndefault is protocol-aware: ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), " models default to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), " models\nto ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "messages"
+      }), " (both services) plus ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gemini"
+      }), " (Zen only) models\nto ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "streaming",
       children: "Streaming"
@@ -464,6 +557,25 @@ function _createMdxContent(props) {
         children: ["translated ", (0,jsx_runtime.jsx)(_components.code, {
           children: "/v1/responses"
         }), " support is intentionally conservative compared with the full upstream provider-native feature set"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "opencode-zen"
+        }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "opencode-go"
+        }), " mix native and translated handling per\nmodel ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "protocol"
+        }), ": ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "chat"
+        }), "/", (0,jsx_runtime.jsx)(_components.code, {
+          children: "responses"
+        }), " protocols are native pass-through for\none public operation each, while ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "messages"
+        }), "/", (0,jsx_runtime.jsx)(_components.code, {
+          children: "gemini"
+        }), " use the conservative\ntranslation subsets. Operations a protocol does not serve, and\nembeddings/images/audio on both OpenCode types, are rejected before upstream\nI/O. See ", (0,jsx_runtime.jsx)(_components.a, {
+          href: "/docs/providers-and-routing",
+          children: "Providers and Routing"
+        }), " for the protocol\ncontract."]
       }), "\n"]
     })]
   });

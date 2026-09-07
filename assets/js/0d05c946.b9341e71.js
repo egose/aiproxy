@@ -46,6 +46,10 @@ const toc = [{
   "id": "openai-plus-openai-compatible-fallback",
   "level": 2
 }, {
+  "value": "OpenCode Zen And Go",
+  "id": "opencode-zen-and-go",
+  "level": 2
+}, {
   "value": "Multi-Provider Chat Pool With Tenant-Aware Auth",
   "id": "multi-provider-chat-pool-with-tenant-aware-auth",
   "level": 2
@@ -130,6 +134,52 @@ function _createMdxContent(props) {
         children: "you want simple balancing across two backends"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "you want alias retry behavior on transport failures, timeouts, and configured retryable upstream statuses"
+      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "opencode-zen-and-go",
+      children: "OpenCode Zen And Go"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["This setup exposes Zen and Go models side by side with explicit per-model\nprotocols. Base URLs are omitted so each type uses its service default; an\noptional ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " would only override transport, never service selection."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "listener \"http\" \"public\" {\n  address = \":8080\"\n}\n\nauth \"main\" {\n  mode = \"none\"\n}\n\nprovider \"opencode-zen\" \"zen\" {\n  api_key = env(\"OPENCODE_ZEN_API_KEY\")\n\n  model \"glm-5.3\" {\n    protocol     = \"chat\"\n    capabilities = [\"chat\"]\n  }\n\n  model \"claude-sonnet-5\" {\n    protocol = \"messages\"\n  }\n}\n\nprovider \"opencode-go\" \"go\" {\n  api_key = env(\"OPENCODE_GO_API_KEY\")\n\n  model \"minimax-m3\" {\n    protocol = \"messages\"\n  }\n\n  model \"glm-5.3\" {\n    protocol = \"chat\"\n  }\n}\n\nalias \"chat_fallback\" {\n  algorithm = \"round_robin\"\n\n  target {\n    provider = \"zen\"\n    model    = \"glm-5.3\"\n  }\n\n  target {\n    provider = \"go\"\n    model    = \"glm-5.3\"\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Public model names are ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "zen/glm-5.3"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "go/minimax-m3"
+      }), ". ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), " protocols are native pass-through for one public operation each,\nwhile ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "messages"
+      }), " (and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gemini"
+      }), ", Zen only) serve both through the conservative\ntranslation subsets. Direct requests never cross services; only the explicit\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat_fallback"
+      }), " alias above may retry across them. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-go"
+      }), " sends\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "x-opencode-session"
+      }), " on every upstream request. Complete validated versions of\nthese blocks live in ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "examples/opencode-zen.hcl"
+      }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "examples/opencode-go.hcl"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Use this when:"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "you serve OpenCode models through the proxy with static, reviewable routing"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "the same model name needs different protocols per service"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "you want explicit alias failover without implicit cross-service rerouting"
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "multi-provider-chat-pool-with-tenant-aware-auth",

@@ -62,6 +62,18 @@ const toc = [{
   "id": "provider-types",
   "level": 2
 }, {
+  "value": "OpenCode Zen And Go",
+  "id": "opencode-zen-and-go",
+  "level": 2
+}, {
+  "value": "Session And Client Requirements",
+  "id": "session-and-client-requirements",
+  "level": 3
+}, {
+  "value": "Quota Errors, Failover, And Static Catalogs",
+  "id": "quota-errors-failover-and-static-catalogs",
+  "level": 3
+}, {
   "value": "Model Capabilities",
   "id": "model-capabilities",
   "level": 2
@@ -75,6 +87,7 @@ function _createMdxContent(props) {
     code: "code",
     h1: "h1",
     h2: "h2",
+    h3: "h3",
     header: "header",
     li: "li",
     p: "p",
@@ -286,6 +299,30 @@ function _createMdxContent(props) {
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Supports chat, responses, and embeddings"
           })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-zen"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Native or translated, per protocol"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Requires per-model ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "protocol"
+            }), "; Zen service"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-go"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Native or translated, per protocol"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Requires per-model ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "protocol"
+            }), "; Go service"]
+          })]
         })]
       })]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
@@ -358,6 +395,155 @@ function _createMdxContent(props) {
       }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "dimensions"
       }), ". Input may be a string or an array of strings."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "opencode-zen-and-go",
+      children: "OpenCode Zen And Go"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-zen"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-go"
+      }), " share one adapter behind two explicit types.\nThe type selects the service, never the URL or credential:"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "opencode-zen"
+        }), " defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "https://opencode.ai/zen/v1"
+        })]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "opencode-go"
+        }), " defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "https://opencode.ai/zen/go/v1"
+        })]
+      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " is an optional transport override only (same absolute-URL and\nloopback rules as other providers). An override never reclassifies the\nservice: auth, header, and protocol behavior stay type-driven."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Every model declares a required ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "protocol"
+      }), ":"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "protocol"
+            })
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Upstream request"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Serves public operations"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "POST <base>/chat/completions"
+            }), ", model rewrite, JSON/SSE pass-through"]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), " only"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "POST <base>/responses"
+            }), ", model rewrite, JSON/SSE pass-through"]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), " only"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "messages"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "POST <base>/messages"
+            }), ", existing Messages translation subset"]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "gemini"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "POST <base>/models/<upstream>:generateContent"
+            }), " (JSON) / ", (0,jsx_runtime.jsx)(_components.code, {
+              children: ":streamGenerateContent?alt=sse"
+            }), " (SSE); Zen only"]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            })]
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["A public operation the model's protocol does not serve is rejected before any\nupstream I/O, as are ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "embeddings"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "images"
+      }), ", and audio operations on both\nOpenCode types. The same model name may use different protocols per service\n(for example ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "minimax-m3"
+      }), ", which is chat-protocol on Zen but\nmessages-protocol on Go), so routing comes from explicit configuration, never\nfrom the model name. There is no generic ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode"
+      }), " type."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "session-and-client-requirements",
+      children: "Session And Client Requirements"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Every upstream request sends ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "User-Agent: aiproxy/<version>"
+      }), "; the inbound\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "User-Agent"
+      }), " is never forwarded and the proxy never impersonates the OpenCode\nclient IDs. Only ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-go"
+      }), " additionally sends ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "x-opencode-session"
+      }), " for\nprompt caching: a caller-supplied value is forwarded as-is when it is 1-128\ncharacters of ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "[A-Za-z0-9_-]"
+      }), "; otherwise the proxy generates a fresh\nper-request ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "ses_"
+      }), " + 128-bit hex ID. Missing or invalid values never fail the\nrequest and never create shared cross-client state. No other inbound headers\nor credentials are forwarded."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "quota-errors-failover-and-static-catalogs",
+      children: "Quota Errors, Failover, And Static Catalogs"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Direct ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "<provider>/<model>"
+      }), " requests never cross services: a request for\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "zen/glm-5.3"
+      }), " either reaches Zen or fails with a clear error. Upstream Go\nquota/limit errors are returned to the client like any other upstream error;\nonly explicitly configured aliases retry another target, for example an alias\nspanning ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "zen"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "go"
+      }), " targets. The upstream console setting that spends Zen\nbalance past Go limits is an account setting, not permission for the proxy to\nreroute requests. Model catalogs are static configuration validated at load;\nthe proxy performs no runtime catalog sync and advertises no universal model\nsupport beyond what is configured."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "model-capabilities",
       children: "Model Capabilities"
@@ -481,10 +667,54 @@ function _createMdxContent(props) {
               children: "embeddings"
             })
           })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-zen"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", or both (by protocol)"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "None"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-go"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", or both (by protocol)"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "None"
+          })]
         })]
       })]
-    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
-      children: "Set explicit capabilities when you want the public catalog to reflect a narrower contract than the provider's default behavior, or to opt into one of the additional supported capabilities for that provider type."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Set explicit capabilities when you want the public catalog to reflect a narrower contract than the provider's default behavior, or to opt into one of the additional supported capabilities for that provider type. On ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-zen"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-go"
+      }), " the omitted default is protocol-aware (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), " serves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), " serves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "messages"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gemini"
+      }), " serve both), and capabilities outside the protocol-served set fail validation."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.h2, {
       id: "get-v1models-metadata",
       children: [(0,jsx_runtime.jsx)(_components.code, {

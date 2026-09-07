@@ -212,6 +212,25 @@ function _createMdxContent(props) {
         className: "language-sh",
         children: "aiproxy configure provider \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name backup \\\n  --type openai-compatible \\\n  --display-name \"Backup provider\" \\\n  --base-url https://llm.internal/v1 \\\n  --upstream-header-timeout 180s \\\n  --secrets-path /etc/aiproxy/keys.json \\\n  --secrets-key localai \\\n  --api-key \"$LOCALAI_API_KEY\" \\\n  --model qwen3-32b=qwen/qwen3-32b \\\n  --model-capabilities qwen3-32b=chat,responses\n\naiproxy configure provider \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name backup-2 \\\n  --type openai-compatible \\\n  --extends backup \\\n  --display-name \"Backup provider 2\" \\\n  --secrets-key backup-2 \\\n  --api-key \"$BACKUP_2_API_KEY\"\n"
       })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["OpenCode providers use explicit types with per-model protocols (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "messages"
+      }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gemini"
+      }), "; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gemini"
+      }), " is Zen-only). Base URLs are\nomitted to use the service defaults; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--base-url"
+      }), " remains available as a\ntransport-only override."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "aiproxy configure provider \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name zen \\\n  --type opencode-zen \\\n  --api-key-env OPENCODE_ZEN_API_KEY \\\n  --model glm-5.3 \\\n  --model-protocol glm-5.3=chat\n\naiproxy configure provider \\\n  --config /etc/aiproxy/config.hcl \\\n  --non-interactive \\\n  --name go \\\n  --type opencode-go \\\n  --api-key-env OPENCODE_GO_API_KEY \\\n  --model minimax-m3 \\\n  --model-protocol minimax-m3=messages\n"
+      })
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Root upstream timeout example:"
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {

@@ -62,6 +62,10 @@ const toc = [{
   "id": "providers",
   "level": 2
 }, {
+  "value": "OpenCode Zen And Go",
+  "id": "opencode-zen-and-go",
+  "level": 3
+}, {
   "value": "Provider Inheritance",
   "id": "provider-inheritance",
   "level": 3
@@ -104,6 +108,7 @@ const toc = [{
 }];
 function _createMdxContent(props) {
   const _components = {
+    a: "a",
     code: "code",
     h1: "h1",
     h2: "h2",
@@ -319,6 +324,10 @@ function _createMdxContent(props) {
           children: "base_url"
         }), " for ", (0,jsx_runtime.jsx)(_components.code, {
           children: "openai-compatible"
+        }), " (required), and as an optional transport\noverride for ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "opencode-zen"
+        }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "opencode-go"
         })]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
@@ -345,7 +354,9 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["nested ", (0,jsx_runtime.jsx)(_components.code, {
           children: "model"
-        }), " blocks"]
+        }), " blocks (OpenCode models additionally require ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "protocol"
+        }), ")"]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Providers normally declare exactly one of ", (0,jsx_runtime.jsx)(_components.code, {
@@ -373,9 +384,82 @@ function _createMdxContent(props) {
         children: "127.0.0.1"
       }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
         children: "::1"
-      }), "."]
+      }), ". ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "openai-compatible"
+      }), " requires ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), ";\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-zen"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-go"
+      }), " default to their service prefixes\n(", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https://opencode.ai/zen/v1"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https://opencode.ai/zen/go/v1"
+      }), ") and accept\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " only as a transport override for tests and custom gateways. An\noverride never changes service selection, auth, or header behavior."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Provider names are part of the public model string, so keep them stable and machine-friendly."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "opencode-zen-and-go",
+      children: "OpenCode Zen And Go"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-zen"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-go"
+      }), " share one adapter behind two explicit types;\nthe type selects the service, never the URL or credential. Every model\ndeclares a required ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "protocol"
+      }), " (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "messages"
+      }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gemini"
+      }), ";\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gemini"
+      }), " is Zen-only):"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "provider \"opencode-zen\" \"zen\" {\n  api_key = env(\"OPENCODE_ZEN_API_KEY\")\n\n  model \"glm-5.3\" {\n    protocol     = \"chat\"\n    capabilities = [\"chat\"]\n  }\n\n  model \"claude-sonnet-5\" {\n    protocol = \"messages\"\n  }\n}\n\nprovider \"opencode-go\" \"go\" {\n  api_key = env(\"OPENCODE_GO_API_KEY\")\n\n  model \"minimax-m3\" {\n    protocol = \"messages\"\n  }\n\n  model \"glm-5.3\" {\n    protocol = \"chat\"\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Public model names are ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "zen/glm-5.3"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "go/minimax-m3"
+      }), ". ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), " protocols are native pass-through serving one public operation\neach; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "messages"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gemini"
+      }), " serve ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), " through the\nexisting conservative translation subsets. Anything else, including\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "embeddings"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "images"
+      }), ", and audio on both OpenCode types, is rejected before\nupstream I/O. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-go"
+      }), " sends ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "x-opencode-session"
+      }), " on every upstream\nrequest (caller values are forwarded only when valid, otherwise a fresh\nper-request ID is generated); direct requests never cross services, and only\nexplicitly configured aliases retry another target. See\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/providers-and-routing",
+        children: "Providers and Routing"
+      }), " for the full contract and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "examples/opencode-zen.hcl"
+      }), " / ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "examples/opencode-go.hcl"
+      }), " for complete\nvalidated configs."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "provider-inheritance",
       children: "Provider Inheritance"
@@ -463,6 +547,24 @@ function _createMdxContent(props) {
         }), " lets the upstream identifier differ from the public name"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "protocol"
+        }), " is required on ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "opencode-zen"
+        }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "opencode-go"
+        }), " models (", (0,jsx_runtime.jsx)(_components.code, {
+          children: "chat"
+        }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "responses"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "messages"
+        }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "gemini"
+        }), "; ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "gemini"
+        }), " is Zen-only) and rejected on\nother provider types"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "capabilities"
         }), " narrows the operations exposed through the proxy"]
       }), "\n"]
@@ -498,6 +600,22 @@ function _createMdxContent(props) {
           children: "audio_speech"
         })
       }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Omitted ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "capabilities"
+      }), " default to the provider-type defaults, except on\nOpenCode providers where the default is protocol-aware (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), " serves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), " serves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "messages"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gemini"
+      }), " serve both)."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "secrets-and-environment-variables",
       children: "Secrets And Environment Variables"
@@ -624,6 +742,20 @@ function _createMdxContent(props) {
         }), " values, and non-loopback ", (0,jsx_runtime.jsx)(_components.code, {
           children: "http"
         }), " base URLs"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "opencode-zen"
+        }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "opencode-go"
+        }), " models missing ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "protocol"
+        }), ", using an unknown\nprotocol, using ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "gemini"
+        }), " on ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "opencode-go"
+        }), ", or declaring a capability the\nprotocol does not serve; ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "protocol"
+        }), " on any other provider type"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["providers with both ", (0,jsx_runtime.jsx)(_components.code, {
           children: "api_key"
