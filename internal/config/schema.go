@@ -93,6 +93,7 @@ type rawModel struct {
 	Name         string   `hcl:"name,label"`
 	DisplayName  string   `hcl:"display_name,optional"`
 	UpstreamName string   `hcl:"upstream_name,optional"`
+	Protocol     string   `hcl:"protocol,optional"`
 	Capabilities []string `hcl:"capabilities,optional"`
 }
 

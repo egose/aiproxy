@@ -30,6 +30,16 @@ func TestProviderTypePoliciesCoverCapabilityMatrix(t *testing.T) {
 			defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
 			supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings},
 		},
+		{
+			providerType:          ProviderTypeOpenCodeZen,
+			defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
+			supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses},
+		},
+		{
+			providerType:          ProviderTypeOpenCodeGo,
+			defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
+			supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses},
+		},
 	}
 
 	if got := ProviderTypes(); len(got) != len(tests) {

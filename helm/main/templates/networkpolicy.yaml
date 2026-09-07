@@ -1,0 +1,81 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "_.fullname" . }}-default-deny
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "_.fullname" . }}-api-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.api.nameOverride | default "api" }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: {{ dig "service" "port" 8000 .Values.api }}
+      from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Values.app.nameOverride | default "app" }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- if .Values.networkPolicy.allowSameNamespace }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- end }}
+        {{- if .Values.networkPolicy.allowOpenShiftIngress }}
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: ingress
+        {{- end }}
+        {{- with .Values.networkPolicy.api.ingressFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "_.fullname" . }}-api-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.api.nameOverride | default "api" }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  egress:
+    - to:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.dns.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.dns.podSelector | nindent 12 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- range .Values.networkPolicy.api.idpEgressIpBlocks }}
+    - to:
+        - ipBlock:
+            {{- toYaml . | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: 443
+    {{- end }}
+    {{- with .Values.networkPolicy.api.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  policyTypes:
+    - Egress
+{{- end }}

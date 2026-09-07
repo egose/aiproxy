@@ -61,7 +61,7 @@ jobs:
         RELEASE_TAG: ${{ inputs.tag_name }}
 
     - name: Build, scan, and publish verified image
-      uses: egose/actions/docker-build-push@0802d5eb78229994c066ea07b8c576dd38adfb5b
+      uses: egose/actions/docker-build-push@6e49f5129448cff1d901b16032c09445bd49dde1
       env:
         RELEASE_TAG: ${{ inputs.tag_name }}
         REVISION: ${{ steps.release.outputs.revision }}
@@ -72,6 +72,7 @@ jobs:
         registry-password: ${{ secrets.GITHUB_TOKEN }}
         image-name: ${{ env.IMAGE_NAME }}
         metadata-tags: |
+          type=raw,value=latest
           type=raw,value=${{ steps.release.outputs.image-version }}
           type=raw,value=${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }},enable=${{ steps.release.outputs.stable }}
           type=raw,value=${{ steps.release.outputs.major }},enable=${{ steps.release.outputs.stable }}

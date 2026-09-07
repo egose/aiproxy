@@ -102,6 +102,31 @@ aiproxy configure provider \
   --api-key "$BACKUP_2_API_KEY"
 ```
 
+OpenCode providers use explicit types with per-model protocols (`chat`,
+`responses`, `messages`, or `gemini`; `gemini` is Zen-only). Base URLs are
+omitted to use the service defaults; `--base-url` remains available as a
+transport-only override.
+
+```sh
+aiproxy configure provider \
+  --config /etc/aiproxy/config.hcl \
+  --non-interactive \
+  --name zen \
+  --type opencode-zen \
+  --api-key-env OPENCODE_ZEN_API_KEY \
+  --model glm-5.3 \
+  --model-protocol glm-5.3=chat
+
+aiproxy configure provider \
+  --config /etc/aiproxy/config.hcl \
+  --non-interactive \
+  --name go \
+  --type opencode-go \
+  --api-key-env OPENCODE_GO_API_KEY \
+  --model minimax-m3 \
+  --model-protocol minimax-m3=messages
+```
+
 Root upstream timeout example:
 
 ```sh

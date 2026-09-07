@@ -1,0 +1,33 @@
+global:
+  env:
+    Env: dev
+
+api:
+  enabled: true
+  envSecretName: example-api-env # pragma: allowlist secret
+  replicaCount: 2
+  topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: api
+
+# Generic Kubernetes Ingress is configured through the app/api subcharts.
+# api:
+#   ingress:
+#     enabled: true
+#     hosts:
+#       - host: api.example.invalid
+#         paths:
+#           - path: /
+#             pathType: Prefix
+
+# Standard NetworkPolicy cannot match DNS names. Add the CIDR ranges used by
+# your IdP or external secret provider, and configure ingress controller sources.
+networkPolicy:
+  allowOpenShiftIngress: false
+  api:
+    idpEgressIpBlocks:
+    - cidr: 203.0.113.10/32

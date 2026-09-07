@@ -43,6 +43,7 @@ type Dependencies struct {
 	HasAccessLog      bool
 	Logger            *slog.Logger
 	Dashboard         dashrpc.Source
+	Version           string
 }
 
 const maxRequestBodyBytes int64 = 8 << 20

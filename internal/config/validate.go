@@ -169,6 +169,10 @@ func validateProviders(providers []Provider, requireCredential bool) error {
 			if m.UpstreamName == "" {
 				return fmt.Errorf("provider %q: model %q has empty upstream_name", p.Name, m.Name)
 			}
+			if err := validateModelProtocol(p.Type, p.Name, m); err != nil {
+				return err
+			}
+			served := OpenCodeProtocolCapabilities(m.Protocol)
 			seenCaps := make(map[Capability]bool)
 			for _, c := range m.Capabilities {
 				if !isValidCapability(c) {
@@ -177,12 +181,33 @@ func validateProviders(providers []Provider, requireCredential bool) error {
 				if !providerSupportsCapability(p.Type, c) {
 					return fmt.Errorf("provider %q: model %q capability %q is not supported by provider type %q", p.Name, m.Name, c, p.Type)
 				}
+				if IsOpenCodeProviderType(p.Type) && !HasCapability(served, c) {
+					return fmt.Errorf("provider %q: model %q capability %q is not served by protocol %q", p.Name, m.Name, c, m.Protocol)
+				}
 				if seenCaps[c] {
 					return fmt.Errorf("provider %q: model %q has duplicate capability %q", p.Name, m.Name, c)
 				}
 				seenCaps[c] = true
 			}
 		}
+	}
+	return nil
+}
+
+func validateModelProtocol(providerType ProviderType, providerName string, m Model) error {
+	if !IsOpenCodeProviderType(providerType) {
+		if m.Protocol != "" {
+			return fmt.Errorf("provider %q: model %q protocol is only supported by opencode-zen and opencode-go", providerName, m.Name)
+		}
+		return nil
+	}
+	switch m.Protocol {
+	case ModelProtocolChat, ModelProtocolResponses, ModelProtocolMessages, ModelProtocolGemini:
+	default:
+		return fmt.Errorf("provider %q: model %q has invalid protocol %q (must be chat, responses, messages, or gemini)", providerName, m.Name, m.Protocol)
+	}
+	if providerType == ProviderTypeOpenCodeGo && m.Protocol == ModelProtocolGemini {
+		return fmt.Errorf("provider %q: model %q protocol %q is not supported by provider type %q", providerName, m.Name, m.Protocol, providerType)
 	}
 	return nil
 }

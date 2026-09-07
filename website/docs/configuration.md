@@ -156,13 +156,14 @@ provider "<type>" "<name>" {}
 Common attributes:
 
 - `display_name`
-- `base_url` for `openai-compatible`
+- `base_url` for `openai-compatible` (required), and as an optional transport
+  override for `opencode-zen` and `opencode-go`
 - `extends` for restricted provider inheritance
 - `api_key`
 - `api_key_ref`
 - `upstream_header_timeout`
 - `enabled` (optional, default `true`)
-- nested `model` blocks
+- nested `model` blocks (OpenCode models additionally require `protocol`)
 
 Providers normally declare exactly one of `api_key` or `api_key_ref`. Enabled
 providers with unresolved, empty, or missing credentials fail validation. To
@@ -179,9 +180,60 @@ provider "openai" "backup" {
 
 Provider `base_url` values must be absolute `https` URLs for remote upstreams.
 Plain `http` is accepted only for loopback development endpoints such as
-`localhost`, `127.0.0.1`, or `::1`.
+`localhost`, `127.0.0.1`, or `::1`. `openai-compatible` requires `base_url`;
+`opencode-zen` and `opencode-go` default to their service prefixes
+(`https://opencode.ai/zen/v1` and `https://opencode.ai/zen/go/v1`) and accept
+`base_url` only as a transport override for tests and custom gateways. An
+override never changes service selection, auth, or header behavior.
 
 Provider names are part of the public model string, so keep them stable and machine-friendly.
+
+### OpenCode Zen And Go
+
+`opencode-zen` and `opencode-go` share one adapter behind two explicit types;
+the type selects the service, never the URL or credential. Every model
+declares a required `protocol` (`chat`, `responses`, `messages`, or `gemini`;
+`gemini` is Zen-only):
+
+```hcl
+provider "opencode-zen" "zen" {
+  api_key = env("OPENCODE_ZEN_API_KEY")
+
+  model "glm-5.3" {
+    protocol     = "chat"
+    capabilities = ["chat"]
+  }
+
+  model "claude-sonnet-5" {
+    protocol = "messages"
+  }
+}
+
+provider "opencode-go" "go" {
+  api_key = env("OPENCODE_GO_API_KEY")
+
+  model "minimax-m3" {
+    protocol = "messages"
+  }
+
+  model "glm-5.3" {
+    protocol = "chat"
+  }
+}
+```
+
+Public model names are `zen/glm-5.3` and `go/minimax-m3`. `chat` and
+`responses` protocols are native pass-through serving one public operation
+each; `messages` and `gemini` serve `chat` and `responses` through the
+existing conservative translation subsets. Anything else, including
+`embeddings`, `images`, and audio on both OpenCode types, is rejected before
+upstream I/O. `opencode-go` sends `x-opencode-session` on every upstream
+request (caller values are forwarded only when valid, otherwise a fresh
+per-request ID is generated); direct requests never cross services, and only
+explicitly configured aliases retry another target. See
+[Providers and Routing](providers-and-routing.md) for the full contract and
+`examples/opencode-zen.hcl` / `examples/opencode-go.hcl` for complete
+validated configs.
 
 ### Provider Inheritance
 
@@ -249,6 +301,9 @@ model "gpt-4.1" {
 - The block label is the proxy-visible model name
 - `display_name` is optional metadata
 - `upstream_name` lets the upstream identifier differ from the public name
+- `protocol` is required on `opencode-zen` and `opencode-go` models (`chat`,
+  `responses`, `messages`, or `gemini`; `gemini` is Zen-only) and rejected on
+  other provider types
 - `capabilities` narrows the operations exposed through the proxy
 
 Use `upstream_name` when you want a cleaner or more stable public model name than the exact upstream identifier.
@@ -261,6 +316,10 @@ Supported capability values:
 - `images`
 - `audio_transcriptions`
 - `audio_speech`
+
+Omitted `capabilities` default to the provider-type defaults, except on
+OpenCode providers where the default is protocol-aware (`chat` serves `chat`,
+`responses` serves `responses`, `messages` and `gemini` serve both).
 
 ## Secrets And Environment Variables
 
@@ -328,6 +387,9 @@ Startup fails on invalid configuration. Important checks include:
 - model names with invalid slash-separated segments
 - `openai-compatible` providers missing `base_url`
 - malformed provider `base_url` values, and non-loopback `http` base URLs
+- `opencode-zen` or `opencode-go` models missing `protocol`, using an unknown
+  protocol, using `gemini` on `opencode-go`, or declaring a capability the
+  protocol does not serve; `protocol` on any other provider type
 - providers with both `api_key` and `api_key_ref`
 - enabled providers with no resolved credential, including an empty
   `api_key = env("...")`; missing or empty credentials fail validation unless

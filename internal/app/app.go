@@ -316,6 +316,7 @@ func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, log
 		HasAccessLog:      true,
 		Logger:            logger,
 		Dashboard:         dashrpc.NewRuntimeSource(rt.Dashboard, version, rt.Listener.Address, string(rt.Auth.Mode), startTime, rt.Catalog, aOrAggregator(usage), health, logs),
+		Version:           version,
 	}
 }
 

@@ -28,6 +28,8 @@ type Request struct {
 	BaseURL       string
 	APIKey        string
 	UpstreamModel string
+	ModelProtocol config.ModelProtocol
+	Version       string
 	Body          []byte
 	Inbound       *http.Request
 	Client        *http.Client
@@ -152,6 +154,16 @@ var providerDescriptors = map[config.ProviderType]providerDescriptor{
 		defaultBaseURL: defaultGeminiBaseURL,
 		do:             (*adapter).doGemini,
 	},
+	config.ProviderTypeOpenCodeZen: {
+		providerType:   config.ProviderTypeOpenCodeZen,
+		defaultBaseURL: defaultOpenCodeZenBaseURL,
+		do:             (*adapter).doOpenCode,
+	},
+	config.ProviderTypeOpenCodeGo: {
+		providerType:   config.ProviderTypeOpenCodeGo,
+		defaultBaseURL: defaultOpenCodeGoBaseURL,
+		do:             (*adapter).doOpenCode,
+	},
 }
 
 type ErrUnsupportedOperation struct {
@@ -184,12 +196,14 @@ func (o Operation) String() string {
 }
 
 const (
-	defaultOpenAIBaseURL    = "https://api.openai.com"
-	defaultAnthropicBaseURL = "https://api.anthropic.com"
-	defaultGeminiBaseURL    = "https://generativelanguage.googleapis.com"
-	anthropicVersion        = "2023-06-01"
-	defaultMaxTokens        = 1024
-	maxUpstreamBodyBytes    = 32 << 20
+	defaultOpenAIBaseURL      = "https://api.openai.com"
+	defaultAnthropicBaseURL   = "https://api.anthropic.com"
+	defaultGeminiBaseURL      = "https://generativelanguage.googleapis.com"
+	defaultOpenCodeZenBaseURL = "https://opencode.ai/zen/v1"
+	defaultOpenCodeGoBaseURL  = "https://opencode.ai/zen/go/v1"
+	anthropicVersion          = "2023-06-01"
+	defaultMaxTokens          = 1024
+	maxUpstreamBodyBytes      = 32 << 20
 )
 
 func (a *adapter) Do(ctx context.Context, r Request) (*Result, error) {

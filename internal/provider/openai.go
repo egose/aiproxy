@@ -41,7 +41,11 @@ func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
 	}
 
 	streaming := (r.Operation == OpChatCompletions || r.Operation == OpResponses) && isStream(body)
-	return executeUpstream(r, req, upstreamResponseHandlers{
+	return executeUpstream(r, req, openAIPassthroughHandlers(r, streaming))
+}
+
+func openAIPassthroughHandlers(r Request, streaming bool) upstreamResponseHandlers {
+	return upstreamResponseHandlers{
 		PreferStreaming: true,
 		StreamSuccess:   streamsOpaqueSuccess(r.Operation),
 		IsStreaming: func(resp *http.Response) bool {
@@ -57,7 +61,7 @@ func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
 		OnError: func(resp *http.Response, body []byte) (*Result, error) {
 			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil
 		},
-	})
+	}
 }
 
 type openAIStreamUsageReadCloser struct {

@@ -36,6 +36,8 @@ It lets the proxy own:
 - `openai-compatible`
 - `anthropic`
 - `gemini`
+- `opencode-zen`
+- `opencode-go`
 
 ## Supported Public API
 

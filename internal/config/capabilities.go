@@ -6,7 +6,34 @@ func EffectiveCapabilities(providerType ProviderType, model Model) []Capability 
 		copy(out, model.Capabilities)
 		return out
 	}
+	if IsOpenCodeProviderType(providerType) {
+		return defaultCapabilitiesForOpenCodeProtocol(model.Protocol)
+	}
 	return defaultCapabilitiesForProvider(providerType)
+}
+
+func IsOpenCodeProviderType(providerType ProviderType) bool {
+	return providerType == ProviderTypeOpenCodeZen || providerType == ProviderTypeOpenCodeGo
+}
+
+func OpenCodeProtocolCapabilities(protocol ModelProtocol) []Capability {
+	switch protocol {
+	case ModelProtocolChat:
+		return []Capability{CapabilityChat}
+	case ModelProtocolResponses:
+		return []Capability{CapabilityResponses}
+	case ModelProtocolMessages, ModelProtocolGemini:
+		return []Capability{CapabilityChat, CapabilityResponses}
+	default:
+		return nil
+	}
+}
+
+func defaultCapabilitiesForOpenCodeProtocol(protocol ModelProtocol) []Capability {
+	caps := OpenCodeProtocolCapabilities(protocol)
+	out := make([]Capability, len(caps))
+	copy(out, caps)
+	return out
 }
 
 func ProviderTypes() []ProviderType {
@@ -45,6 +72,8 @@ var providerTypeOrder = []ProviderType{
 	ProviderTypeOpenAICompatible,
 	ProviderTypeAnthropic,
 	ProviderTypeGemini,
+	ProviderTypeOpenCodeZen,
+	ProviderTypeOpenCodeGo,
 }
 
 var providerTypePolicies = map[ProviderType]providerTypePolicy{
@@ -64,6 +93,14 @@ var providerTypePolicies = map[ProviderType]providerTypePolicy{
 	ProviderTypeGemini: {
 		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
 		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings},
+	},
+	ProviderTypeOpenCodeZen: {
+		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
+		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses},
+	},
+	ProviderTypeOpenCodeGo: {
+		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
+		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses},
 	},
 }
 
