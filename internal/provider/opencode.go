@@ -256,7 +256,9 @@ func newOpenCodeGeminiRequest(ctx context.Context, r Request, translated []byte,
 }
 
 func applyOpenCodeHeaders(req *http.Request, r Request) error {
-	req.Header.Set("Authorization", "Bearer "+r.APIKey)
+	if r.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+r.APIKey)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", openCodeUserAgent(r.Version))
 	session, err := openCodeSessionValue(r)

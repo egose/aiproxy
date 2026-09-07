@@ -133,7 +133,7 @@ func TestLoadOpenCodeRejectsProtocols(t *testing.T) {
 		},
 		{
 			name:     "missing credential",
-			provider: "provider \"opencode-zen\" \"zen\" {\n  api_key = \"\"\n  model \"m\" {\n    protocol = \"chat\"\n  }\n}",
+			provider: "provider \"opencode-go\" \"go\" {\n  api_key = \"\"\n  model \"m\" {\n    protocol = \"messages\"\n  }\n}",
 			want:     `require a non-empty api_key`,
 		},
 		{

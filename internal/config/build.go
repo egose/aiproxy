@@ -187,7 +187,10 @@ func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderS
 	}
 	hasAPIKey := syntax.Attrs["api_key"]
 	hasAPIKeyRef := syntax.Blocks["api_key_ref"] > 0
-	if hasAPIKey == hasAPIKeyRef { // pragma: allowlist secret
+	if hasAPIKey && hasAPIKeyRef { // pragma: allowlist secret
+		return fmt.Errorf("derived provider requires exactly one local credential: api_key or api_key_ref")
+	}
+	if !hasAPIKey && !hasAPIKeyRef && rawProvider.Type != string(ProviderTypeOpenCodeZen) {
 		return fmt.Errorf("derived provider requires exactly one local credential: api_key or api_key_ref")
 	}
 	return nil

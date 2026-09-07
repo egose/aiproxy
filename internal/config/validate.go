@@ -156,8 +156,8 @@ func validateProviders(providers []Provider, requireCredential bool) error {
 		if err := validateProviderBaseURL(p); err != nil {
 			return err
 		}
-		if requireCredential && p.APIKey == "" {
-			return fmt.Errorf("provider %q: enabled providers require a non-empty api_key or a resolvable api_key_ref (set enabled = false to disable a provider intentionally)", p.Name)
+		if requireCredential && p.APIKey == "" && p.Type != ProviderTypeOpenCodeZen {
+			return fmt.Errorf("provider %q: enabled providers require a non-empty api_key or a resolvable api_key_ref (set enabled = false to disable a provider intentionally; opencode-zen providers may omit the credential for keyless upstream access)", p.Name)
 		}
 		if len(p.Models) == 0 {
 			return fmt.Errorf("provider %q: at least one model is required", p.Name)

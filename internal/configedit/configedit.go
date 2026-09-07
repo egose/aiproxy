@@ -305,6 +305,8 @@ func renderProviderCredential(b *strings.Builder, input ProviderInput, defaultSe
 		b.WriteString("\n")
 		b.WriteString("  }\n")
 	case "disabled":
+	case "none":
+	case "":
 	default:
 		b.WriteString("  api_key = ")
 		b.WriteString(RenderStringOrExpression(input.Credential.APIKeyValue))
