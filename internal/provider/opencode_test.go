@@ -600,6 +600,33 @@ func TestOpenCodeUnsupportedCombosMakeZeroUpstreamCalls(t *testing.T) {
 	}
 }
 
+func TestOpenCodeZenKeylessOmitsAuthorization(t *testing.T) {
+	cap := &openCodeCapture{}
+	upstream := openCodeUpstream(t, cap, openCodeJSONResponder(`{"id":"1","choices":[]}`))
+	defer upstream.Close()
+	inbound := openCodeInbound(http.MethodPost, "/v1/chat/completions", `{"model":"zen/m","messages":[]}`)
+	res, err := New().Do(context.Background(), Request{
+		Operation: OpChatCompletions, ProviderType: config.ProviderTypeOpenCodeZen,
+		PublicModel: "zen/m", BaseURL: upstream.URL, APIKey: "",
+		UpstreamModel: "m", ModelProtocol: config.ModelProtocolChat, Version: "1.2.3-test",
+		Body: []byte(`{"model":"zen/m","messages":[]}`), Inbound: inbound, Client: upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	_ = res
+	calls, _, _, _, auth, _, session, _ := cap.snapshot()
+	if calls != 1 {
+		t.Fatalf("upstream calls = %d, want 1", calls)
+	}
+	if auth != "" {
+		t.Fatalf("Authorization = %q, want empty for keyless zen", auth)
+	}
+	if session == "" {
+		t.Fatal("keyless zen request missing session header")
+	}
+}
+
 func TestOpenCodeSessionForwardingPolicy(t *testing.T) {
 	for _, providerType := range []config.ProviderType{config.ProviderTypeOpenCodeGo, config.ProviderTypeOpenCodeZen} {
 		t.Run(string(providerType), func(t *testing.T) {

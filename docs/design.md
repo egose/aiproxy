@@ -1102,7 +1102,8 @@ The chosen design allows fallback only for alias-based requests.
   override, and every OpenCode model declares a required `protocol`
 - providers normally declare exactly one of `api_key` or `api_key_ref`;
   missing or empty credentials fail validation unless `enabled = false` is
-  declared explicitly
+  declared explicitly or the provider type is `opencode-zen` (keyless upstream
+  access sends no `Authorization` header)
 - `api_key_ref.path` defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json` and falls back to `~/.config/aiproxy/keys.json`
 - aliases support `round_robin` and `least_connections`
 - alias retry happens for transport errors, timeouts, and configured

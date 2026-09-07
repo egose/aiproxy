@@ -837,6 +837,45 @@ provider "openai" "openai" {
 	}
 }
 
+func TestLoadAcceptsKeylessEnabledZenProvider(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "opencode-zen" "zen" {
+  model "mimo-v2.5-free" {
+    protocol = "chat"
+  }
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("keyless zen provider should load: %v", err)
+	}
+	p, ok := rt.Catalog.Provider("zen")
+	if !ok {
+		t.Fatal("zen provider missing from catalog")
+	}
+	if p.APIKey != "" {
+		t.Fatalf("zen APIKey = %q, want empty", p.APIKey)
+	}
+}
+
+func TestLoadRejectsKeylessEnabledGoProvider(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "opencode-go" "go" {
+  model "minimax-m3" {
+    protocol = "messages"
+  }
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "enabled providers require a non-empty api_key") {
+		t.Fatalf("expected enabled provider credential error, got %v", err)
+	}
+}
+
 func TestLoadAcceptsDisabledProviderWithoutCredential(t *testing.T) {
 	cfg := `
 listener "http" "public" { address = ":8080" }

@@ -481,7 +481,8 @@ Use the optional `enabled` field on a `provider` block to intentionally disable
 a provider. Disabled providers are structurally validated (name, type, base
 URL, models, capabilities) but do not require a usable `api_key` or
 `api_key_ref`. Enabled providers with an unresolved, empty, or missing
-credential fail validation.
+credential fail validation, except `opencode-zen` providers, which may omit
+the credential for keyless upstream access (no `Authorization` header is sent).
 
 ```hcl
 provider "openai" "backup" {

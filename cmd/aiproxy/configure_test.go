@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/egose/aiproxy/internal/config"
 )
 
 func TestConfigureProviderCreatesConfigAndSecrets(t *testing.T) {
@@ -265,6 +267,50 @@ func TestConfigureProviderNonInteractiveFlags(t *testing.T) {
 	}
 	if !strings.Contains(string(secretsData), `"localai": "secret-value"`) {
 		t.Fatalf("secrets output missing expected value:\n%s", string(secretsData))
+	}
+}
+
+func TestConfigureProviderNonInteractiveKeylessZen(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := "listener \"http\" \"public\" { address = \":8080\" }\nauth \"main\" { mode = \"none\" }\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+
+	stdout, stderr, err := executeRootCommand(
+		"",
+		"configure", "provider",
+		"--config", configPath,
+		"--non-interactive",
+		"--type", "opencode-zen",
+		"--name", "zen",
+		"--model", "mimo-v2.5-free",
+		"--model-protocol", "mimo-v2.5-free=chat",
+	)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	for _, check := range []string{
+		`provider "opencode-zen" "zen" {`,
+		`model "mimo-v2.5-free" {`,
+		`protocol = "chat"`,
+	} {
+		if !strings.Contains(configText, check) {
+			t.Fatalf("config output missing %q:\n%s", check, configText)
+		}
+	}
+	if strings.Contains(configText, "api_key") {
+		t.Fatalf("keyless zen config must not contain api_key:\n%s", configText)
+	}
+	if _, err := config.LoadFile(configPath); err != nil {
+		t.Fatalf("generated config does not validate: %v", err)
 	}
 }
 

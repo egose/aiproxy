@@ -94,7 +94,9 @@ matrices.
 - Public model strings: `<provider-name>/<model-name>` or `alias/<alias-name>`.
 - Providers normally declare exactly one of `api_key` or `api_key_ref`;
   enabled providers with unresolved, empty, or missing credentials fail
-  validation. To intentionally disable a provider, set `enabled = false`.
+  validation, except `opencode-zen` providers, which may omit the credential
+  for keyless upstream access (no `Authorization` header is sent). To intentionally
+  disable a provider, set `enabled = false`.
   `api_key_ref.path` defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json`, falling
   back to `~/.config/aiproxy/keys.json`.
 - Providers may declare `extends = "<base-provider-name>"` to inherit the base

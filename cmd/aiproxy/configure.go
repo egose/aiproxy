@@ -1635,7 +1635,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider requires type and name in non-interactive mode")
 		}
 		if defaults.Extends != "" {
-			if defaults.Credential.Mode == "" {
+			if defaults.Credential.Mode == "" && defaults.ProviderType != "opencode-zen" {
 				return providerInput{}, secretsUpdate{}, fmt.Errorf("derived provider requires local credential flags in non-interactive mode")
 			}
 			defaults.BaseURL = ""
@@ -1650,7 +1650,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if defaults.ProviderType == "openai-compatible" && defaults.BaseURL == "" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider type openai-compatible requires --base-url in non-interactive mode")
 		}
-		if defaults.Credential.Mode == "" {
+		if defaults.Credential.Mode == "" && defaults.ProviderType != "opencode-zen" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider requires credential flags or existing credentials in non-interactive mode")
 		}
 		if len(defaults.Models) == 0 {
@@ -1727,13 +1727,21 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		credentialMode := "secrets_file"
 		if defaults.Credential.Mode != "" {
 			credentialMode = defaults.Credential.Mode
+		} else if providerType == "opencode-zen" {
+			credentialMode = "none"
+		}
+		credentialOptions := []huh.Option[string]{
+			huh.NewOption("Secrets file", "secrets_file"),
+			huh.NewOption(`env("VAR") expression`, "env_expression"),
+			huh.NewOption("Inline value", "inline"),
+		}
+		if providerType == "opencode-zen" {
+			credentialOptions = append(credentialOptions, huh.NewOption("No credential (keyless upstream access)", "none"))
 		}
 		if err := prompts.runHuhForm(
 			huh.NewGroup(
 				huh.NewSelect[string]().Title("Credential storage").Description(credentialStorageDescription()).Options(
-					huh.NewOption("Secrets file", "secrets_file"),
-					huh.NewOption(`env("VAR") expression`, "env_expression"),
-					huh.NewOption("Inline value", "inline"),
+					credentialOptions...,
 				).Value(&credentialMode),
 			).Title("Credentials"),
 		); err != nil {
@@ -1856,8 +1864,14 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	credentialDefault := "secrets_file"
 	if defaults.Credential.Mode != "" {
 		credentialDefault = defaults.Credential.Mode
+	} else if providerType == "opencode-zen" {
+		credentialDefault = "none"
 	}
-	credentialMode, err := prompts.askChoiceWithDescription("Credential storage", credentialStorageDescription(), []string{"secrets_file", "env_expression", "inline"}, credentialDefault)
+	credentialChoices := []string{"secrets_file", "env_expression", "inline"}
+	if providerType == "opencode-zen" {
+		credentialChoices = append(credentialChoices, "none")
+	}
+	credentialMode, err := prompts.askChoiceWithDescription("Credential storage", credentialStorageDescription(), credentialChoices, credentialDefault)
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}

@@ -166,7 +166,10 @@ Common attributes:
 - nested `model` blocks (OpenCode models additionally require `protocol`)
 
 Providers normally declare exactly one of `api_key` or `api_key_ref`. Enabled
-providers with unresolved, empty, or missing credentials fail validation. To
+providers with unresolved, empty, or missing credentials fail validation, with
+one exception: `opencode-zen` providers may omit the credential entirely for
+keyless upstream access, in which case the proxy sends no `Authorization`
+header. To
 intentionally disable a provider, declare `enabled = false`; disabled
 providers are still validated for structure, URL, models, and capabilities,
 but they do not require a usable credential.
@@ -393,7 +396,8 @@ Startup fails on invalid configuration. Important checks include:
 - providers with both `api_key` and `api_key_ref`
 - enabled providers with no resolved credential, including an empty
   `api_key = env("...")`; missing or empty credentials fail validation unless
-  `enabled = false` is declared explicitly
+  `enabled = false` is declared explicitly or the provider type is
+  `opencode-zen`
 - providers without any models
 - aliases without any targets
 - alias targets that reference unknown providers or models
