@@ -27,7 +27,36 @@ api:
       cpu: 500m         # 0.5 CPU core
       memory: 512Mi     # 512 MB RAM
 
+  # Extra CLI args. Empty means ["serve", "--config", "/etc/aiproxy/config.hcl"]
+  # once a config Secret is in use.
+  args: []
+
+  # config.hcl rendered into a managed Secret and mounted at
+  # config.mountPath. Keep the listener address port in sync with the
+  # Service port (default 8080). Prefer env("VAR") expressions for secrets
+  # and supply the values via env / envSecretName so credentials never live
+  # in chart values.
+  config:
+    content: ""
+    existingSecret: ""
+    secretNameOverride: ""
+    configKey: config.hcl
+    mountPath: /etc/aiproxy
+
+  # keys.json rendered into the same Secret. Prefer the map form; the raw
+  # string form takes precedence when both are set. Only needed for
+  # api_key_ref blocks, which must then declare an explicit
+  # path = "/etc/aiproxy/keys.json" (the chart redirects XDG_CONFIG_HOME to
+  # a writable tmp dir, so the default keys path does not point here).
+  # env("VAR") credentials need no file at all.
+  secrets:
+    keysJson: {}
+    keysJsonRaw: ""
+    keysKey: keys.json
+
   env: {}
+  # Optional external Secret name injected via envFrom, e.g. holding
+  # OPENAI_API_KEY / AIPROXY_CLIENT_TOKEN referenced by env("VAR").
   envSecretName: ""
 
 networkPolicy:

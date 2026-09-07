@@ -4,6 +4,11 @@ global:
 
 api:
   enabled: true
+  # External Secret providing env("VAR") values referenced below, e.g.
+  # OPENAI_API_KEY and AIPROXY_CLIENT_TOKEN. Create it out of band:
+  # kubectl create secret generic example-api-env \
+  #   --from-literal=OPENAI_API_KEY='sk-...' \
+  #   --from-literal=AIPROXY_CLIENT_TOKEN='secret'
   envSecretName: example-api-env # pragma: allowlist secret
   replicaCount: 2
   topologySpreadConstraints:
@@ -13,6 +18,42 @@ api:
     labelSelector:
       matchLabels:
         app.kubernetes.io/name: api
+
+  # Preferred pattern: credentials via env("VAR"), no keys.json needed.
+  config:
+    content: |
+      listener "http" "public" {
+        address = ":8080"
+      }
+
+      auth "main" {
+        mode = "bearer_static"
+
+        client "internal-app" {
+          token = env("AIPROXY_CLIENT_TOKEN")
+        }
+      }
+
+      logging {
+        level      = "info"
+        access_log = true
+      }
+
+      provider "openai" "primary" {
+        api_key = env("OPENAI_API_KEY")
+
+        model "gpt-4o-mini" {}
+      }
+
+  # File-based alternative for api_key_ref blocks. Values here are rendered
+  # as keys.json in the same Secret; reference it with an explicit path:
+  #   api_key_ref {
+  #     path = "/etc/aiproxy/keys.json"
+  #     key  = "localai"
+  #   }
+  # secrets:
+  #   keysJson:
+  #     localai: "secret"
 
 # Generic Kubernetes Ingress is configured through the app/api subcharts.
 # api:

@@ -1,7 +1,14 @@
 {{- $deploymentTag := .Values.image.tag | default .Chart.AppVersion -}}
 {{- $global := .Values.global | default dict -}}
-{{- $envSecretName := required "api.envSecretName is required; create an external Secret containing DATABASE_URL, SESSION_SECRET_KEY, APP_TOKEN_SECRET_KEY, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET, KEYCLOAK_META_ENDPOINT, and APP_URL, then set api.envSecretName or envSecretName." .Values.envSecretName -}}
+{{- $envSecretName := .Values.envSecretName | default "" -}}
 {{- $serviceAccountName := .Values.serviceAccountName | default ($global.serviceAccountName | default (include "_.serviceAccountName" .)) -}}
+{{- $configSecretName := "" -}}
+{{- if or .Values.config.existingSecret .Values.config.content (not (empty .Values.secrets.keysJson)) .Values.secrets.keysJsonRaw -}}
+{{- $configSecretName = include "_.configSecretName" . -}} # pragma: allowlist secret
+{{- end -}}
+{{- $configMountPath := .Values.config.mountPath | default "/etc/aiproxy" -}}
+{{- $configKey := .Values.config.configKey | default "config.hcl" -}}
+{{- $configFile := printf "%s/%s" ($configMountPath | trimSuffix "/") $configKey -}}
 
 apiVersion: apps/v1
 kind: Deployment
@@ -48,6 +55,15 @@ spec:
           {{- end }}
           image: "{{ .Values.image.repository }}:{{ $deploymentTag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.args }}
+          args:
+            {{- toYaml .Values.args | nindent 12 }}
+          {{- else if $configSecretName }}
+          args:
+            - serve
+            - --config
+            - {{ $configFile }}
+          {{- end }}
           env:
             - name: DEPLOYMENT_TAG
               value: {{ $deploymentTag | quote }}
@@ -56,9 +72,15 @@ spec:
             - name: {{ $k | quote }}
               value: {{ $v | quote }}
             {{- end }}
+          {{- if not (hasKey $env "XDG_CONFIG_HOME") }}
+            - name: XDG_CONFIG_HOME
+              value: /tmp/aiproxy-xdg
+          {{- end }}
+          {{- if $envSecretName }}
           envFrom:
             - secretRef:
                 name: {{ $envSecretName }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
@@ -82,12 +104,23 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if $configSecretName }}
+            - name: aiproxy-config
+              mountPath: {{ $configMountPath }}
+              readOnly: true
+            {{- end }}
           {{- with .Values.volumeMounts }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if $configSecretName }}
+        - name: aiproxy-config
+          secret:
+            secretName: {{ $configSecretName }}
+            defaultMode: 0400
+        {{- end }}
       {{- with .Values.volumes }}
         {{- toYaml . | nindent 8 }}
       {{- end }}

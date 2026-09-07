@@ -51,6 +51,21 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Name of the Secret holding config.hcl / keys.json.
+Prefers config.existingSecret, then config.secretNameOverride,
+otherwise "<fullname>-config".
+*/}}
+{{- define "_.configSecretName" -}}
+{{- if .Values.config.existingSecret }}
+{{- .Values.config.existingSecret }}
+{{- else if .Values.config.secretNameOverride }}
+{{- .Values.config.secretNameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-config" (include "_.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+
+{{/*
 Create the name of the service account to use
 */}}
 {{- define "_.serviceAccountName" -}}
