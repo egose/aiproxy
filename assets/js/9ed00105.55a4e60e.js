@@ -363,7 +363,11 @@ function _createMdxContent(props) {
         children: "api_key"
       }), " or ", (0,jsx_runtime.jsx)(_components.code, {
         children: "api_key_ref"
-      }), ". Enabled\nproviders with unresolved, empty, or missing credentials fail validation. To\nintentionally disable a provider, declare ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ". Enabled\nproviders with unresolved, empty, or missing credentials fail validation, with\none exception: ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-zen"
+      }), " providers may omit the credential entirely for\nkeyless upstream access, in which case the proxy sends no ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Authorization"
+      }), "\nheader. To\nintentionally disable a provider, declare ", (0,jsx_runtime.jsx)(_components.code, {
         children: "enabled = false"
       }), "; disabled\nproviders are still validated for structure, URL, models, and capabilities,\nbut they do not require a usable credential."]
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
@@ -769,7 +773,9 @@ function _createMdxContent(props) {
           children: "api_key = env(\"...\")"
         }), "; missing or empty credentials fail validation unless\n", (0,jsx_runtime.jsx)(_components.code, {
           children: "enabled = false"
-        }), " is declared explicitly"]
+        }), " is declared explicitly or the provider type is\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "opencode-zen"
+        })]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "providers without any models"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
