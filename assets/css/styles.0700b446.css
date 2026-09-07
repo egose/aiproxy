@@ -3666,6 +3666,9 @@ video {
   .container {
   max-width: 80rem;
 }
+.visible {
+  visibility: visible;
+}
 .collapse {
   visibility: collapse;
 }

@@ -58,6 +58,10 @@ const toc = [{
   "id": "failover-rules",
   "level": 2
 }, {
+  "value": "Upstream Retry Cooldown",
+  "id": "upstream-retry-cooldown",
+  "level": 2
+}, {
   "value": "Provider Types",
   "id": "provider-types",
   "level": 2
@@ -89,6 +93,7 @@ const toc = [{
 function _createMdxContent(props) {
   const _components = {
     code: "code",
+    em: "em",
     h1: "h1",
     h2: "h2",
     h3: "h3",
@@ -246,6 +251,77 @@ function _createMdxContent(props) {
       }), " statuses are an alias failover policy only. They do not mark the provider unhealthy; provider health is mutated by transport/upstream request errors and upstream ", (0,jsx_runtime.jsx)(_components.code, {
         children: "5xx"
       }), " responses."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "upstream-retry-cooldown",
+      children: "Upstream Retry Cooldown"
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Alias targets additionally honor upstream retry advice as a cross-request cooldown, so a throttled upstream is not called again until its deadline expires."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Identity: each deadline is keyed by ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "(alias, provider, model)"
+        }), ", alias-local\nand shared across that alias's operations. Direct ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "<provider>/<model>"
+        }), "\nrequests never consult or populate cooldown state and never fail over."]
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "Triggers: any alias-target response carrying valid advice records or extends\na deadline, regardless of status. Successes are still returned normally;\nadvice affects future selection only. Transport errors without a response,\npre-I/O validation errors, and client-canceled contexts record nothing."
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Parsing and precedence: a valid positive-integer ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "retry-after-ms"
+        }), " wins;\notherwise standard ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "Retry-After"
+        }), " (delay-seconds, then HTTP-date) is used.\nHeader names are case-insensitive; the first valid value wins per header.\nZero, malformed, past, or unrepresentable (overflow) values record no\ncooldown from that header, with ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "retry-after-ms"
+        }), " falling back to\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "Retry-After"
+        }), ". There is no configured maximum duration, only overflow\nprotection."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Selection: cooling targets are excluded alongside already-tried targets for\nboth ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "round_robin"
+        }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "least_connections"
+        }), ", rechecked before dispatch.\nExpired advice no longer excludes a target."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["All-cooling response: when every pool target has an active cooldown and no\nresponse has been committed, the proxy returns a generated JSON ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "429"
+        }), "\n(", (0,jsx_runtime.jsx)(_components.code, {
+          children: "type: upstream_rate_limited"
+        }), ") with both ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "Retry-After"
+        }), " (ceiling seconds,\nmin 1) and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "retry-after-ms"
+        }), " (ceiling milliseconds, min 1) computed from the\nsame earliest ", (0,jsx_runtime.jsx)(_components.em, {
+          children: "remaining"
+        }), " delay (", (0,jsx_runtime.jsx)(_components.code, {
+          children: "deadline - now"
+        }), "), so clients are never told\nto retry early. The stored deadline uses the original delay; the response\nuses the remaining delay. Zero upstream calls occur and skipped targets gain\nno upstream attribution. A mixed pool of cooling plus otherwise-unhealthy\ntargets keeps the existing exhaustion behavior instead of synthetic ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "429"
+        }), "."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Terminal policy: a retryable failure (per that alias's ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "retry_status_codes"
+        }), ")\nthat newly cools the last eligible target is discarded and becomes synthetic\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "429"
+        }), " immediately. A success or non-retryable error is always returned\nverbatim even when its advice completes all-cooling coverage; only subsequent\nrequests observe synthetic ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "429"
+        }), "."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Lifetime and reload: cooldown state is process-local with no Redis sharing,\npersistence, or cross-process coordination (like ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "least_connections"
+        }), ", each\ninstance decides locally). Effective identity additionally includes resolved\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "base_url"
+        }), ", credential, upstream model, and protocol; deadlines survive\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "SIGHUP"
+        }), " for fingerprint-unchanged targets (algorithm and\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "retry_status_codes"
+        }), " changes do not invalidate them), are dropped for\nremoved/changed targets, and are untouched by failed reloads. In-flight\nrequests admitted before advice arrives cannot be retroactively prevented."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Cooldown never marks providers unhealthy and never adds ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "429"
+        }), " to\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "retry_status_codes"
+        }), " on its own."]
+      }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "provider-types",
       children: "Provider Types"

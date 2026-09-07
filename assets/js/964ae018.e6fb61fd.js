@@ -568,6 +568,20 @@ function _createMdxContent(props) {
         }), " responses are returned verbatim"]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "Unsupported operations return client-visible proxy errors"
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Alias targets carrying valid upstream retry advice (", (0,jsx_runtime.jsx)(_components.code, {
+          children: "retry-after-ms"
+        }), ", else\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "Retry-After"
+        }), ") cool down across requests: later alias requests skip cooling\ntargets until expiry. When every pool target is actively cooling, the proxy\nreturns a generated JSON ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "429"
+        }), "\n(", (0,jsx_runtime.jsx)(_components.code, {
+          children: "{\"error\":{\"type\":\"upstream_rate_limited\",\"message\":\"all alias targets cooling, retry after <N>ms\"}}"
+        }), ")\nwith ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "Retry-After"
+        }), " (ceiling seconds, min 1) and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "retry-after-ms"
+        }), " (ceiling\nmilliseconds, min 1) from the same earliest remaining delay, without upstream\ncalls. Direct requests never consult or populate this state."]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "This behavior is deliberate: direct model requests are explicit, while alias requests are the only place where the proxy is allowed to choose another target."

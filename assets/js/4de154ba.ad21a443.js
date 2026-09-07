@@ -354,6 +354,10 @@ function _createMdxContent(props) {
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "If rate-limit settings are unchanged, reload preserves existing limiter buckets.\nChanging rate-limit settings creates a fresh limiter and resets bucket state."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Alias cooldown deadlines survive reload only for fingerprint-unchanged targets\n(resolved ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), ", credential, upstream model, protocol); removed or changed\ntargets are dropped, and failed reloads leave state untouched."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "These changes still require a restart:"
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
@@ -426,6 +430,14 @@ function _createMdxContent(props) {
       }), " responses can mark a provider unhealthy for routing and readiness decisions. Configured retryable ", (0,jsx_runtime.jsx)(_components.code, {
         children: "4xx"
       }), " statuses can trigger alias failover but do not mark providers unhealthy."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Alias upstream retry advice (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "retry-after-ms"
+      }), ", else ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Retry-After"
+      }), ") is tracked\nseparately from provider health as process-local per-target cooldown deadlines.\nIt is never shared across processes or via Redis, never marks providers\nunhealthy, and leaves skipped targets out of upstream attribution while the\nclient-facing ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "429"
+      }), " stays visible in HTTP accounting and metrics."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "This health state is shared across requests within the same process."
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {

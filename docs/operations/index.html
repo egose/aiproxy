@@ -5,8 +5,8 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Operations | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/operations/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Operations | aiproxy"><meta data-rh="true" name="description" content="This page covers the commands and operational behavior that matter most for local development and production deployment."><meta data-rh="true" property="og:description" content="This page covers the commands and operational behavior that matter most for local development and production deployment."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/operations/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/operations/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/operations/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Operations","item":"https://aiproxy.pages.dev/docs/operations"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
-<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.ad7227f1.css">
-<script src="/assets/js/runtime~main.6fc555c5.js" defer="defer"></script>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.0700b446.css">
+<script src="/assets/js/runtime~main.28b3b79d.js" defer="defer"></script>
 <script src="/assets/js/main.8b8c49ad.js" defer="defer"></script>
 </head>
 <body>
@@ -89,6 +89,9 @@ client ID; never reuse another application&#x27;s client ID.</p>
 </ul>
 <p>If rate-limit settings are unchanged, reload preserves existing limiter buckets.
 Changing rate-limit settings creates a fresh limiter and resets bucket state.</p>
+<p>Alias cooldown deadlines survive reload only for fingerprint-unchanged targets
+(resolved <code>base_url</code>, credential, upstream model, protocol); removed or changed
+targets are dropped, and failed reloads leave state untouched.</p>
 <p>These changes still require a restart:</p>
 <ul>
 <li class="">listener address changes</li>
@@ -119,6 +122,11 @@ returns <code>401</code>. The metrics token is checked independently of API auth
 tokens; API clients cannot scrape <code>/metrics</code> with their own credentials. An
 empty or missing token is rejected at config validation.</p>
 <p>Transient transport failures, upstream request errors, and upstream <code>5xx</code> responses can mark a provider unhealthy for routing and readiness decisions. Configured retryable <code>4xx</code> statuses can trigger alias failover but do not mark providers unhealthy.</p>
+<p>Alias upstream retry advice (<code>retry-after-ms</code>, else <code>Retry-After</code>) is tracked
+separately from provider health as process-local per-target cooldown deadlines.
+It is never shared across processes or via Redis, never marks providers
+unhealthy, and leaves skipped targets out of upstream attribution while the
+client-facing <code>429</code> stays visible in HTTP accounting and metrics.</p>
 <p>This health state is shared across requests within the same process.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="shared-provider-health">Shared Provider Health<a href="#shared-provider-health" class="hash-link" aria-label="Direct link to Shared Provider Health" title="Direct link to Shared Provider Health" translate="no">​</a></h2>
 <p>Without extra config, provider health is in-process only.</p>

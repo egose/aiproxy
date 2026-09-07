@@ -5,8 +5,8 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">API Reference | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/api-reference/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="API Reference | aiproxy"><meta data-rh="true" name="description" content="aiproxy exposes an OpenAI-compatible HTTP API."><meta data-rh="true" property="og:description" content="aiproxy exposes an OpenAI-compatible HTTP API."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/api-reference/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/api-reference/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/api-reference/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"API Reference","item":"https://aiproxy.pages.dev/docs/api-reference"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
-<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.ad7227f1.css">
-<script src="/assets/js/runtime~main.6fc555c5.js" defer="defer"></script>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.0700b446.css">
+<script src="/assets/js/runtime~main.28b3b79d.js" defer="defer"></script>
 <script src="/assets/js/main.8b8c49ad.js" defer="defer"></script>
 </head>
 <body>
@@ -58,6 +58,14 @@ codes listed in <code>retry_status_codes</code></li>
 <code>4xx</code> statuses do not mark providers unhealthy</li>
 <li class="">Other upstream <code>4xx</code> responses are returned verbatim</li>
 <li class="">Unsupported operations return client-visible proxy errors</li>
+<li class="">Alias targets carrying valid upstream retry advice (<code>retry-after-ms</code>, else
+<code>Retry-After</code>) cool down across requests: later alias requests skip cooling
+targets until expiry. When every pool target is actively cooling, the proxy
+returns a generated JSON <code>429</code>
+(<code>{&quot;error&quot;:{&quot;type&quot;:&quot;upstream_rate_limited&quot;,&quot;message&quot;:&quot;all alias targets cooling, retry after &lt;N&gt;ms&quot;}}</code>)
+with <code>Retry-After</code> (ceiling seconds, min 1) and <code>retry-after-ms</code> (ceiling
+milliseconds, min 1) from the same earliest remaining delay, without upstream
+calls. Direct requests never consult or populate this state.</li>
 </ul>
 <p>This behavior is deliberate: direct model requests are explicit, while alias requests are the only place where the proxy is allowed to choose another target.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="provider-coverage-notes">Provider Coverage Notes<a href="#provider-coverage-notes" class="hash-link" aria-label="Direct link to Provider Coverage Notes" title="Direct link to Provider Coverage Notes" translate="no">​</a></h2>
