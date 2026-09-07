@@ -176,6 +176,58 @@ Use this when:
 - the same model name needs different protocols per service
 - you want explicit alias failover without implicit cross-service rerouting
 
+## GitHub Copilot Chat
+
+This setup exposes a chat-only Copilot model backed by a device-flow login.
+Provision first (your own public OAuth client ID, no secret), then serve; the
+config validates only after the sidecar exists.
+
+```sh
+aiproxy login github-copilot --client-id YOUR_GITHUB_OAUTH_CLIENT_ID --credential copilot-main
+```
+
+```hcl
+listener "http" "public" {
+  address = ":8080"
+}
+
+auth "main" {
+  mode = "none"
+}
+
+provider "github-copilot" "copilot" {
+  credential_ref {
+    name = "copilot-main"
+  }
+
+  model "gpt-5.4-nano" {
+    display_name = "Copilot Nano"
+  }
+}
+
+alias "copilot_chat" {
+  algorithm = "round_robin"
+
+  target {
+    provider = "copilot"
+    model    = "gpt-5.4-nano"
+  }
+}
+```
+
+Public model names are `copilot/gpt-5.4-nano` and `alias/copilot_chat`. Only
+`POST /v1/chat/completions` (JSON and SSE) is served; every other operation is
+rejected before upstream I/O. `GET /v1/models` and `GET /v1/billing/usage`
+stay proxy-owned. Restart or `SIGHUP` after `login`; re-run `login` + reload
+on upstream `401`/`403`, revocation, or expiry. The complete validated
+version of this block lives in `examples/github-copilot.hcl`.
+
+Use this when:
+
+- you want Copilot chat completions behind the same OpenAI-compatible API
+- operators can run an explicit headless-friendly login per credential name
+- all other operations must stay rejected rather than translated
+
 ## Multi-Provider Chat Pool With Tenant-Aware Auth
 
 This example mixes translated and pass-through providers and adds tenant metadata plus a local rate limit.

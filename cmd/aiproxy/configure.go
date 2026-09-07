@@ -77,6 +77,8 @@ type providerOptions struct {
 	APIKeyEnv             string
 	SecretsPath           string
 	SecretsKey            string
+	Credential            string
+	CredentialPath        string
 	Models                []string
 	ModelUpstreams        []string
 	ModelDisplayName      []string
@@ -87,6 +89,10 @@ type providerOptions struct {
 	NonInteractive        bool
 	BaseProviderNames     []string
 	BaseProviderTypes     map[string]string
+}
+
+func isGitHubCopilotProviderType(providerType string) bool {
+	return providerType == "github-copilot"
 }
 
 type aliasOptions struct {
@@ -260,6 +266,8 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().StringVar(&options.APIKeyEnv, "api-key-env", "", "provider API key environment variable name")
 	cmd.Flags().StringVar(&options.SecretsPath, "secrets-path", "", "secrets file path for api_key_ref")
 	cmd.Flags().StringVar(&options.SecretsKey, "secrets-key", "", "secrets file key for api_key_ref")
+	cmd.Flags().StringVar(&options.Credential, "credential", "", "saved GitHub Copilot login name from `aiproxy login github-copilot` (github-copilot only)")
+	cmd.Flags().StringVar(&options.CredentialPath, "credential-path", "", "secrets file path locating the saved GitHub Copilot login sidecar (github-copilot only; defaults to the shared secrets path)")
 	cmd.Flags().StringArrayVar(&options.Models, "model", nil, "model spec: name or name=upstream")
 	cmd.Flags().StringArrayVar(&options.ModelUpstreams, "model-upstream", nil, "model upstream spec: name=upstream")
 	cmd.Flags().StringArrayVar(&options.ModelDisplayName, "model-display-name", nil, "model display name spec: name=display")
@@ -1005,6 +1013,43 @@ func buildAuthClientsFromOptions(options authOptions) ([]authClientInput, error)
 }
 
 func applyProviderCredentialOptions(input *providerInput, options providerOptions) error {
+	if isGitHubCopilotProviderType(input.ProviderType) {
+		if options.APIKey != "" || options.APIKeyEnv != "" || options.SecretsKey != "" {
+			return fmt.Errorf("github-copilot providers use --credential/--credential-path referencing a saved login (run `aiproxy login github-copilot` first), not API key flags")
+		}
+		hasCredentialFlag := options.Credential != "" || options.CredentialPath != "" || options.SecretsPath != ""
+		if !hasCredentialFlag {
+			return nil
+		}
+		if options.CredentialPath != "" && options.SecretsPath != "" && options.CredentialPath != options.SecretsPath {
+			return fmt.Errorf("provider flags may set only one credential source")
+		}
+		name := options.Credential
+		if name == "" {
+			name = input.Credential.CopilotName
+		}
+		if name == "" && input.Name != "" {
+			name = input.Name
+		}
+		if err := validateCopilotCredentialName(name); err != nil {
+			return err
+		}
+		path := options.CredentialPath
+		if path == "" {
+			path = options.SecretsPath
+		}
+		if path == "" {
+			path = input.Credential.CopilotPath
+		}
+		if path == "" {
+			path = defaultSecretsPath()
+		}
+		input.Credential = providerCredentialInput{Mode: "credential_ref", CopilotPath: path, CopilotName: name}
+		return nil
+	}
+	if options.Credential != "" || options.CredentialPath != "" {
+		return fmt.Errorf("--credential/--credential-path is only supported by github-copilot providers")
+	}
 	credentialModes := 0
 	useSecrets := options.SecretsKey != "" || options.SecretsPath != "" // pragma: allowlist secret
 	if options.APIKey != "" && !useSecrets {
@@ -1042,6 +1087,16 @@ func applyProviderCredentialOptions(input *providerInput, options providerOption
 	}
 	if options.APIKey != "" {
 		input.Credential = providerCredentialInput{Mode: "inline", APIKeyValue: options.APIKey}
+	}
+	return nil
+}
+
+func validateCopilotCredentialName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("github-copilot credential name is required (use --credential <name> from `aiproxy login github-copilot`)")
+	}
+	if !config.IsLowercaseName(strings.TrimSpace(name)) {
+		return fmt.Errorf("credential name must start with [a-z0-9]; remaining chars must be [a-z0-9._-]; no spaces or '/'")
 	}
 	return nil
 }
@@ -1621,7 +1676,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		return providerInput{}, secretsUpdate{}, err
 	}
 	if options.HasEnabled && !options.Enabled {
-		if options.APIKey != "" || options.APIKeyEnv != "" || options.SecretsKey != "" || options.SecretsPath != "" {
+		if options.APIKey != "" || options.APIKeyEnv != "" || options.SecretsKey != "" || options.SecretsPath != "" || options.Credential != "" || options.CredentialPath != "" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("--enabled=false cannot be combined with credential flags")
 		}
 		defaults.Credential = providerCredentialInput{Mode: "disabled"}
@@ -1645,9 +1700,15 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if defaults.ProviderType == "" || defaults.Name == "" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider requires type and name in non-interactive mode")
 		}
+		if isGitHubCopilotProviderType(defaults.ProviderType) && defaults.Credential.Mode == "secrets_file" {
+			return providerInput{}, secretsUpdate{}, fmt.Errorf("github-copilot providers use --credential/--credential-path referencing a saved login, not API key flags")
+		}
 		if defaults.Extends != "" {
 			if defaults.Credential.Mode == "" && defaults.ProviderType != "opencode-zen" {
 				return providerInput{}, secretsUpdate{}, fmt.Errorf("derived provider requires local credential flags in non-interactive mode")
+			}
+			if isGitHubCopilotProviderType(defaults.ProviderType) && defaults.Credential.Mode != "credential_ref" {
+				return providerInput{}, secretsUpdate{}, fmt.Errorf("derived github-copilot provider requires --credential in non-interactive mode")
 			}
 			defaults.BaseURL = ""
 			defaults.UpstreamHeaderTimeout = ""
@@ -1662,8 +1723,14 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if defaults.ProviderType == "openai-compatible" && defaults.BaseURL == "" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider type openai-compatible requires --base-url in non-interactive mode")
 		}
+		if isGitHubCopilotProviderType(defaults.ProviderType) && defaults.Credential.Mode == "" {
+			return providerInput{}, secretsUpdate{}, fmt.Errorf("github-copilot provider requires --credential referencing a saved login (run `aiproxy login github-copilot` first) or existing credentials in non-interactive mode")
+		}
 		if defaults.Credential.Mode == "" && defaults.ProviderType != "opencode-zen" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider requires credential flags or existing credentials in non-interactive mode")
+		}
+		if isGitHubCopilotProviderType(defaults.ProviderType) && defaults.Credential.Mode != "credential_ref" {
+			return providerInput{}, secretsUpdate{}, fmt.Errorf("github-copilot providers use --credential/--credential-path referencing a saved login, not API key flags")
 		}
 		if len(defaults.Models) == 0 {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider requires at least one model in non-interactive mode")
@@ -1684,6 +1751,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 					huh.NewOption("Gemini", "gemini"),
 					huh.NewOption("OpenCode Zen", "opencode-zen"),
 					huh.NewOption("OpenCode Go", "opencode-go"),
+					huh.NewOption("GitHub Copilot", "github-copilot"),
 				).Value(&providerType),
 				huh.NewInput().Title("Provider name").Description(providerNameDescription()).Value(&providerName).Validate(validateProviderName),
 				huh.NewInput().Title("Display name").Description(providerDisplayNameDescription()).Value(&displayName),
@@ -1747,8 +1815,41 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			); err != nil {
 				return providerInput{}, secretsUpdate{}, err
 			}
+		} else if isGitHubCopilotProviderType(providerType) {
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewInput().Title("Base URL override").Description(copilotBaseURLDescription()).Value(&baseURL),
+				).Title("Endpoint"),
+			); err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
 		} else {
 			baseURL = ""
+		}
+		if isGitHubCopilotProviderType(providerType) {
+			credential, err := promptCopilotCredentialInteractive(prompts, defaults, strings.TrimSpace(providerName))
+			if err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
+			var models []providerModelInput
+			if strings.TrimSpace(extends) == "" {
+				models, err = promptProviderModels(prompts, providerType, defaults.Models)
+				if err != nil {
+					return providerInput{}, secretsUpdate{}, err
+				}
+			}
+			return providerInput{
+				ProviderType:          providerType,
+				Name:                  strings.TrimSpace(providerName),
+				Extends:               strings.TrimSpace(extends),
+				DisplayName:           strings.TrimSpace(displayName),
+				BaseURL:               strings.TrimSpace(baseURL),
+				UpstreamHeaderTimeout: strings.TrimSpace(upstreamHeaderTimeout),
+				UserAgent:             "",
+				Credential:            credential,
+				Enabled:               defaults.Enabled,
+				Models:                models,
+			}, secretsUpdate{}, nil
 		}
 		credentialMode := "secrets_file"
 		if defaults.Credential.Mode != "" {
@@ -1842,7 +1943,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			Models:                models,
 		}, update, nil
 	}
-	providerType, err := prompts.askChoiceWithDescription("Provider type", providerTypeDescription(), []string{"openai", "openai-compatible", "anthropic", "gemini", "opencode-zen", "opencode-go"}, defaults.ProviderType)
+	providerType, err := prompts.askChoiceWithDescription("Provider type", providerTypeDescription(), []string{"openai", "openai-compatible", "anthropic", "gemini", "opencode-zen", "opencode-go", "github-copilot"}, defaults.ProviderType)
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
@@ -1896,8 +1997,39 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
+	} else if isGitHubCopilotProviderType(providerType) {
+		_, _ = fmt.Fprintln(prompts.out, copilotBaseURLDescription())
+		baseURL, err = prompts.ask("Base URL override", baseURL)
+		if err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
 	} else {
 		baseURL = ""
+	}
+	if isGitHubCopilotProviderType(providerType) {
+		credential, err := promptCopilotCredentialLineOriented(prompts, defaults, providerName)
+		if err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
+		var models []providerModelInput
+		if strings.TrimSpace(extends) == "" {
+			models, err = promptProviderModels(prompts, providerType, defaults.Models)
+			if err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
+		}
+		return providerInput{
+			ProviderType:          providerType,
+			Name:                  providerName,
+			Extends:               strings.TrimSpace(extends),
+			DisplayName:           displayName,
+			BaseURL:               baseURL,
+			UpstreamHeaderTimeout: upstreamHeaderTimeout,
+			UserAgent:             "",
+			Credential:            credential,
+			Enabled:               defaults.Enabled,
+			Models:                models,
+		}, secretsUpdate{}, nil
 	}
 	credentialDefault := "secrets_file"
 	if defaults.Credential.Mode != "" {
@@ -2626,7 +2758,7 @@ func listenerTimeoutsDescription() string {
 }
 
 func providerTypeDescription() string {
-	return "Choose the upstream adapter type. 'openai-compatible' is for OpenAI-style APIs hosted elsewhere. 'opencode-zen' and 'opencode-go' target the OpenCode Zen and Go services with per-model protocol selection."
+	return "Choose the upstream adapter type. 'openai-compatible' is for OpenAI-style APIs hosted elsewhere. 'opencode-zen' and 'opencode-go' target the OpenCode Zen and Go services with per-model protocol selection. 'github-copilot' references a saved device-flow login and serves chat only."
 }
 
 func modelProtocolDescription(providerType string) string {
@@ -3136,6 +3268,8 @@ func defaultCapabilities(providerType string) []string {
 		return capabilities
 	case "opencode-zen", "opencode-go":
 		return capabilities
+	case "github-copilot":
+		return capabilities
 	default:
 		return capabilities[:2]
 	}
@@ -3151,9 +3285,75 @@ func supportedCapabilities(providerType string) []string {
 		return []string{"chat", "responses", "embeddings"}
 	case "opencode-zen", "opencode-go":
 		return []string{"chat", "responses"}
+	case "github-copilot":
+		return []string{"chat"}
 	default:
 		return nil
 	}
+}
+
+func copilotBaseURLDescription() string {
+	return "Optional transport override only; the default is https://api.githubcopilot.com. An override never changes auth or header behavior. Leave blank to use the default."
+}
+
+func copilotCredentialDescription() string {
+	return "Reference a saved GitHub Copilot login created with `aiproxy login github-copilot --client-id <id> --credential <name>`. No OAuth networking runs here and no tokens are displayed; restart or SIGHUP after login to activate."
+}
+
+func promptCopilotCredentialInteractive(prompts *promptSession, defaults providerInput, providerName string) (providerCredentialInput, error) {
+	nameDefault := defaults.Credential.CopilotName
+	if nameDefault == "" {
+		nameDefault = providerName
+	}
+	pathDefault := defaults.Credential.CopilotPath
+	if pathDefault == "" {
+		pathDefault = defaultSecretsPath()
+	}
+	_, _ = fmt.Fprintln(prompts.out, copilotCredentialDescription())
+	name := nameDefault
+	path := pathDefault
+	if err := prompts.runHuhForm(
+		huh.NewGroup(
+			huh.NewInput().Title("Copilot credential name").Description("Saved login name from `aiproxy login github-copilot`").Value(&name).Validate(validateCopilotCredentialNameHuh),
+			huh.NewInput().Title("Credential file path").Description("Secrets file path locating the copilot-<name>.json sidecar").Value(&path).Validate(huh.ValidateNotEmpty()),
+		).Title("GitHub Copilot Login"),
+	); err != nil {
+		return providerCredentialInput{}, err
+	}
+	name = strings.TrimSpace(name)
+	path = strings.TrimSpace(path)
+	if err := validateCopilotCredentialName(name); err != nil {
+		return providerCredentialInput{}, err
+	}
+	if path == "" {
+		path = defaultSecretsPath()
+	}
+	return providerCredentialInput{Mode: "credential_ref", CopilotPath: path, CopilotName: name}, nil
+}
+
+func promptCopilotCredentialLineOriented(prompts *promptSession, defaults providerInput, providerName string) (providerCredentialInput, error) {
+	_, _ = fmt.Fprintln(prompts.out, copilotCredentialDescription())
+	nameDefault := defaults.Credential.CopilotName
+	if nameDefault == "" {
+		nameDefault = providerName
+	}
+	name, err := prompts.askValidated("Copilot credential name", nameDefault, validateCopilotCredentialName)
+	if err != nil {
+		return providerCredentialInput{}, err
+	}
+	pathDefault := defaults.Credential.CopilotPath
+	if pathDefault == "" {
+		pathDefault = defaultSecretsPath()
+	}
+	path, err := prompts.askRequired("Credential file path", pathDefault)
+	if err != nil {
+		return providerCredentialInput{}, err
+	}
+	return providerCredentialInput{Mode: "credential_ref", CopilotPath: path, CopilotName: name}, nil
+}
+
+func validateCopilotCredentialNameHuh(value string) error {
+	return validateCopilotCredentialName(value)
 }
 
 func sanitizeSelectedOptions(options, selected []string) []string {
@@ -3403,7 +3603,14 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 		boolVal := enabledExpr == "true" || enabledExpr == "1"
 		input.Enabled = &boolVal
 	}
-	if apiKeyRef := findNestedBlock(parsed.Body, "api_key_ref"); apiKeyRef != nil {
+	if credentialRef := findNestedBlock(parsed.Body, "credential_ref"); credentialRef != nil {
+		input.Credential.Mode = "credential_ref"
+		input.Credential.CopilotPath = parseLiteralOrExpression(attributeExpr(src, credentialRef.Body, "path"))
+		if input.Credential.CopilotPath == "" {
+			input.Credential.CopilotPath = defaultSecretsPath()
+		}
+		input.Credential.CopilotName = parseLiteralOrExpression(attributeExpr(src, credentialRef.Body, "name"))
+	} else if apiKeyRef := findNestedBlock(parsed.Body, "api_key_ref"); apiKeyRef != nil {
 		input.Credential.Mode = "secrets_file"
 		input.Credential.SecretsPath = parseLiteralOrExpression(attributeExpr(src, apiKeyRef.Body, "path"))
 		if input.Credential.SecretsPath == "" {

@@ -167,11 +167,24 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 			provider.APIKeyRef.Path = defaultKeyFilePath()
 		}
 	}
+	provider.CopilotCredentialRef = nil
+	provider.CopilotToken = ""
+	if rawProvider.CredentialRef != nil {
+		provider.CopilotCredentialRef = &CopilotCredentialRef{Path: rawProvider.CredentialRef.Path, Name: rawProvider.CredentialRef.Name}
+		if provider.CopilotCredentialRef.Path == "" {
+			provider.CopilotCredentialRef.Path = defaultKeyFilePath()
+		}
+	}
 	if err := validateProviderCredentialStructure(&provider); err != nil {
 		return Provider{}, err
 	}
 	if err := resolveProviderCredential(&provider); err != nil {
 		return Provider{}, err
+	}
+	if provider.Type == ProviderTypeGitHubCopilot {
+		if err := resolveCopilotCredential(&provider); err != nil {
+			return Provider{}, err
+		}
 	}
 	return provider, nil
 }
@@ -184,6 +197,18 @@ func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderS
 	}
 	if syntax.Blocks["model"] > 0 {
 		return fmt.Errorf("derived provider cannot declare model blocks")
+	}
+	if rawProvider.Type == string(ProviderTypeGitHubCopilot) {
+		if syntax.Attrs["api_key"] || syntax.Blocks["api_key_ref"] > 0 {
+			return fmt.Errorf("derived github-copilot provider must use credential_ref, not api_key or api_key_ref")
+		}
+		if syntax.Blocks["credential_ref"] == 0 {
+			return fmt.Errorf("derived provider requires exactly one local credential: credential_ref")
+		}
+		return nil
+	}
+	if syntax.Blocks["credential_ref"] > 0 {
+		return fmt.Errorf("credential_ref is only supported by github-copilot")
 	}
 	hasAPIKey := syntax.Attrs["api_key"]
 	hasAPIKeyRef := syntax.Blocks["api_key_ref"] > 0
@@ -312,12 +337,23 @@ func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Durat
 			provider.APIKeyRef.Path = defaultKeyFilePath()
 		}
 	}
+	if rawProvider.CredentialRef != nil {
+		provider.CopilotCredentialRef = &CopilotCredentialRef{Path: rawProvider.CredentialRef.Path, Name: rawProvider.CredentialRef.Name}
+		if provider.CopilotCredentialRef.Path == "" {
+			provider.CopilotCredentialRef.Path = defaultKeyFilePath()
+		}
+	}
 	if err := validateProviderCredentialStructure(&provider); err != nil {
 		return Provider{}, err
 	}
 	if provider.Enabled {
 		if err := resolveProviderCredential(&provider); err != nil {
 			return Provider{}, err
+		}
+		if provider.Type == ProviderTypeGitHubCopilot {
+			if err := resolveCopilotCredential(&provider); err != nil {
+				return Provider{}, err
+			}
 		}
 	}
 	for _, m := range rawProvider.Models {

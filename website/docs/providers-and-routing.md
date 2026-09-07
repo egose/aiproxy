@@ -88,14 +88,15 @@ Retryable `4xx` statuses are an alias failover policy only. They do not mark the
 
 ## Provider Types
 
-| Provider type       | Behavior                           | Notes                                      |
-| ------------------- | ---------------------------------- | ------------------------------------------ |
-| `openai`            | Pass-through OpenAI adapter        | Sends OpenAI-style requests upstream       |
-| `openai-compatible` | Pass-through compatible adapter    | Requires `base_url`                        |
-| `anthropic`         | Translated provider-native adapter | Supports chat and responses                |
-| `gemini`            | Translated provider-native adapter | Supports chat, responses, and embeddings   |
-| `opencode-zen`      | Native or translated, per protocol | Requires per-model `protocol`; Zen service |
-| `opencode-go`       | Native or translated, per protocol | Requires per-model `protocol`; Go service  |
+| Provider type       | Behavior                           | Notes                                                   |
+| ------------------- | ---------------------------------- | ------------------------------------------------------- |
+| `openai`            | Pass-through OpenAI adapter        | Sends OpenAI-style requests upstream                    |
+| `openai-compatible` | Pass-through compatible adapter    | Requires `base_url`                                     |
+| `anthropic`         | Translated provider-native adapter | Supports chat and responses                             |
+| `gemini`            | Translated provider-native adapter | Supports chat, responses, and embeddings                |
+| `opencode-zen`      | Native or translated, per protocol | Requires per-model `protocol`; Zen service              |
+| `opencode-go`       | Native or translated, per protocol | Requires per-model `protocol`; Go service               |
+| `github-copilot`    | Pass-through chat-only adapter     | Device-flow login; `credential_ref`; chat JSON/SSE only |
 
 For `openai` and `openai-compatible`, the proxy stays close to pass-through behavior. For translated providers, the proxy maps between the public OpenAI-style contract and the provider-native request and response shape.
 
@@ -165,6 +166,50 @@ reroute requests. Model catalogs are static configuration validated at load;
 the proxy performs no runtime catalog sync and advertises no universal model
 support beyond what is configured.
 
+## GitHub Copilot
+
+`github-copilot` is a chat-only provider backed by a device-flow login. It
+serves `POST /v1/chat/completions` (JSON and SSE); `responses`, `embeddings`,
+`images`, and audio are rejected before upstream I/O. The default origin is
+`https://api.githubcopilot.com`; `base_url` is an optional transport override
+only and never changes auth or header behavior.
+
+Provisioning uses your own public OAuth client ID (no secret):
+
+```sh
+aiproxy login github-copilot --client-id YOUR_GITHUB_OAUTH_CLIENT_ID --credential copilot-main
+```
+
+The command prints the verification URI and user code, waits for
+authorization, then writes `<secrets-dir>/copilot-<name>.json` (`0600`)
+without editing HCL or signaling a server. It is headless-friendly over SSH:
+copy the URI/code to a browser, authorize, and return. Never reuse another
+application's client ID.
+
+Reference the saved login from config:
+
+```hcl
+provider "github-copilot" "copilot" {
+  credential_ref {
+    name = "copilot-main"
+  }
+
+  model "gpt-5.4-nano" {}
+}
+```
+
+`credential_ref.path` defaults to the shared secrets path. Derived Copilot
+providers require their own local `credential_ref`. The token activates on
+restart/`SIGHUP`; sidecar-only changes are inert until reload, failed reloads
+keep the old runtime, and upstream `401`/`403` means re-run `login` with the
+same client ID/name and reload. Upstream headers are an allowlist only
+(`Authorization` from the stored login, proxy `User-Agent`,
+`X-GitHub-Api-Version`, `Openai-Intent`, derived `x-initiator: user`, vision
+only on image bodies); inbound auth/cookies/`x-api-key`/caller Copilot
+metadata are stripped. `GET {base}/models` listing shares the same auth
+without changing the static proxy inventory. See `examples/github-copilot.hcl`
+for a complete config.
+
 ## Model Capabilities
 
 Capabilities describe which proxy operations a model may serve.
@@ -190,6 +235,7 @@ If `capabilities` is omitted, the proxy derives defaults from the provider type 
 | `gemini`            | `chat`, `responses`                        | `embeddings`                                     |
 | `opencode-zen`      | `chat`, `responses`, or both (by protocol) | None                                             |
 | `opencode-go`       | `chat`, `responses`, or both (by protocol) | None                                             |
+| `github-copilot`    | `chat`                                     | None                                             |
 
 <!-- docs-contract:capability-matrix:end -->
 

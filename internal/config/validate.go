@@ -159,7 +159,10 @@ func validateProviders(providers []Provider, requireCredential bool) error {
 		if err := validateProviderUserAgent(p); err != nil {
 			return err
 		}
-		if requireCredential && p.APIKey == "" && p.Type != ProviderTypeOpenCodeZen {
+		if requireCredential && p.Type == ProviderTypeGitHubCopilot && p.CopilotToken == "" {
+			return fmt.Errorf("provider %q: enabled github-copilot providers require a resolvable credential_ref (run login first; set enabled = false to disable a provider intentionally)", p.Name)
+		}
+		if requireCredential && p.Type != ProviderTypeGitHubCopilot && p.APIKey == "" && p.Type != ProviderTypeOpenCodeZen {
 			return fmt.Errorf("provider %q: enabled providers require a non-empty api_key or a resolvable api_key_ref (set enabled = false to disable a provider intentionally; opencode-zen providers may omit the credential for keyless upstream access)", p.Name)
 		}
 		if len(p.Models) == 0 {

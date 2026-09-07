@@ -97,6 +97,7 @@ const (
 	ProviderTypeGemini           ProviderType = "gemini"
 	ProviderTypeOpenCodeZen      ProviderType = "opencode-zen"
 	ProviderTypeOpenCodeGo       ProviderType = "opencode-go"
+	ProviderTypeGitHubCopilot    ProviderType = "github-copilot"
 )
 
 type ModelProtocol string
@@ -135,6 +136,8 @@ type Provider struct {
 	UserAgent             string
 	APIKey                string
 	APIKeyRef             *APIKeyRef
+	CopilotCredentialRef  *CopilotCredentialRef
+	CopilotToken          string
 	Enabled               bool
 	Models                []Model
 
@@ -144,6 +147,12 @@ type Provider struct {
 type APIKeyRef struct {
 	Path     string
 	Key      string
+	Resolved bool
+}
+
+type CopilotCredentialRef struct {
+	Path     string
+	Name     string
 	Resolved bool
 }
 

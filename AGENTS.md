@@ -166,22 +166,42 @@ matrices.
   upstream "spend Zen balance past Go limits" console setting never permits
   proxy-side rerouting. Model catalogs are static config; the proxy does no
   runtime catalog sync.
+- `github-copilot` (default `https://api.githubcopilot.com`) is chat-only
+  (`POST /v1/chat/completions` JSON and SSE; every other operation is rejected
+  before upstream I/O). Provision with
+  `aiproxy login github-copilot --client-id <id> --credential <name>` using an
+  explicitly supplied public OAuth client ID (no secret, no endpoint-override
+  flags); the command writes a structured sidecar
+  `<secrets-dir>/copilot-<name>.json` (`0600`) and never edits HCL or signals
+  a server. Providers declare `credential_ref { name = ... }` (`path`
+  optional, defaults to the shared secrets path); the token resolves at load
+  into a dedicated field (never `api_key`), activates on restart/`SIGHUP`,
+  and requires re-login + reload on `401`/`403`/revocation/expiry. Derived
+  Copilot providers require their own local `credential_ref`. Upstream
+  inference is `POST {base}/chat/completions` with an allowlist only
+  (`Authorization`, proxy `User-Agent`, `X-GitHub-Api-Version`,
+  `Openai-Intent`, derived `x-initiator: user`, vision only on image bodies);
+  inbound auth/cookies/`x-api-key`/caller Copilot metadata are stripped.
+  `aiproxy configure provider --credential/--credential-path` references the
+  saved login without OAuth networking or token display, and upstream model
+  listing (`GET {base}/models`) shares the same auth without changing the
+  static inventory.
 
 Public endpoint/provider support matrix:
 
 <!-- docs-contract:public-matrix:start -->
 
-| Surface                         | `openai`                           | `openai-compatible`                | `anthropic`                        | `gemini`                           | `opencode-zen`                           | `opencode-go`                            |
-| ------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------------- | ---------------------------------------- |
-| `GET /v1/models`                | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                              | Proxy-owned                              |
-| `GET /v1/billing/usage`         | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting       | Proxy-owned local usage accounting       |
-| `GET /metrics`                  | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics           | Proxy-owned Prometheus metrics           |
-| `POST /v1/chat/completions`     | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated            | JSON and SSE translated            | JSON and SSE native or translated subset | JSON and SSE native or translated subset |
-| `POST /v1/embeddings`           | Yes                                | Yes                                | No                                 | Yes                                | No                                       | No                                       |
-| `POST /v1/responses`            | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated subset     | JSON and SSE translated subset     | JSON and SSE native or translated subset | JSON and SSE native or translated subset |
-| `POST /v1/images/generations`   | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       |
-| `POST /v1/audio/transcriptions` | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       |
-| `POST /v1/audio/speech`         | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       |
+| Surface                         | `openai`                           | `openai-compatible`                | `anthropic`                        | `gemini`                           | `opencode-zen`                           | `opencode-go`                            | `github-copilot`                   |
+| ------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------------- | ---------------------------------------- | ---------------------------------- |
+| `GET /v1/models`                | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                              | Proxy-owned                              | Proxy-owned                        |
+| `GET /v1/billing/usage`         | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting       | Proxy-owned local usage accounting       | Proxy-owned local usage accounting |
+| `GET /metrics`                  | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics           | Proxy-owned Prometheus metrics           | Proxy-owned Prometheus metrics     |
+| `POST /v1/chat/completions`     | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated            | JSON and SSE translated            | JSON and SSE native or translated subset | JSON and SSE native or translated subset | JSON and SSE                       |
+| `POST /v1/embeddings`           | Yes                                | Yes                                | No                                 | Yes                                | No                                       | No                                       | No                                 |
+| `POST /v1/responses`            | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated subset     | JSON and SSE translated subset     | JSON and SSE native or translated subset | JSON and SSE native or translated subset | No                                 |
+| `POST /v1/images/generations`   | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       | No                                 |
+| `POST /v1/audio/transcriptions` | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       | No                                 |
+| `POST /v1/audio/speech`         | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       | No                                 |
 
 <!-- docs-contract:public-matrix:end -->
 
@@ -197,5 +217,6 @@ Provider capability defaults and additional supported capabilities:
 | `gemini`            | `chat`, `responses`                        | `embeddings`                                     |
 | `opencode-zen`      | `chat`, `responses`, or both (by protocol) | None                                             |
 | `opencode-go`       | `chat`, `responses`, or both (by protocol) | None                                             |
+| `github-copilot`    | `chat`                                     | None                                             |
 
 <!-- docs-contract:capability-matrix:end -->

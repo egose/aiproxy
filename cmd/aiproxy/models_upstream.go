@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/copilotlogin"
 )
 
 type upstreamModel struct {
@@ -29,6 +30,8 @@ func listUpstreamModels(ctx context.Context, provider config.Provider) ([]upstre
 		return listAnthropicModels(ctx, provider)
 	case config.ProviderTypeGemini:
 		return listGeminiModels(ctx, provider)
+	case config.ProviderTypeGitHubCopilot:
+		return listGitHubCopilotModels(ctx, provider)
 	default:
 		return nil, fmt.Errorf("unsupported provider type %q", provider.Type)
 	}
@@ -57,6 +60,8 @@ func upstreamBaseURL(provider config.Provider) string {
 		return "https://opencode.ai/zen/v1"
 	case config.ProviderTypeOpenCodeGo:
 		return "https://opencode.ai/zen/go/v1"
+	case config.ProviderTypeGitHubCopilot:
+		return copilotlogin.DefaultBaseURL
 	default:
 		return ""
 	}
@@ -212,6 +217,71 @@ func listGeminiModels(ctx context.Context, provider config.Provider) ([]upstream
 		}
 		pageToken = parsed.NextPageToken
 	}
+}
+
+func listGitHubCopilotModels(ctx context.Context, provider config.Provider) ([]upstreamModel, error) {
+	if provider.CopilotToken == "" {
+		return nil, fmt.Errorf("github-copilot credential is not configured; run login first")
+	}
+	base := upstreamBaseURL(provider)
+	if base == "" {
+		base = copilotlogin.DefaultBaseURL
+	}
+	target := strings.TrimRight(base, "/") + "/models"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	copilotlogin.ApplyModelsHeaders(req, provider.CopilotToken, version)
+	resp, err := upstreamHTTPClient(provider).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("upstream call: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read upstream body: %w", err)
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("upstream %s returned status %d: %s (re-run `aiproxy login github-copilot`, then restart or SIGHUP)", target, resp.StatusCode, truncateUpstreamBody(body))
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("upstream %s returned status %d: %s", target, resp.StatusCode, truncateUpstreamBody(body))
+	}
+	var objectParsed struct {
+		Data []struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"display_name"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &objectParsed); err != nil {
+		return nil, fmt.Errorf("decode upstream models: %w", err)
+	}
+	if len(objectParsed.Data) > 0 {
+		out := make([]upstreamModel, 0, len(objectParsed.Data))
+		for _, m := range objectParsed.Data {
+			if m.ID == "" {
+				continue
+			}
+			out = append(out, upstreamModel{ID: m.ID, DisplayName: m.DisplayName})
+		}
+		return out, nil
+	}
+	var arrayParsed []struct {
+		ID          string `json:"id"`
+		DisplayName string `json:"display_name"`
+	}
+	if err := json.Unmarshal(body, &arrayParsed); err != nil {
+		return nil, fmt.Errorf("decode upstream models: %w", err)
+	}
+	out := make([]upstreamModel, 0, len(arrayParsed))
+	for _, m := range arrayParsed {
+		if m.ID == "" {
+			continue
+		}
+		out = append(out, upstreamModel{ID: m.ID, DisplayName: m.DisplayName})
+	}
+	return out, nil
 }
 
 func opencodeCLIUserAgent(provider config.Provider) string {

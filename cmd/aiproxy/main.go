@@ -38,6 +38,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newPathsCommand())
 	rootCmd.AddCommand(newConfigureCommand())
 	rootCmd.AddCommand(newModelsCommand())
+	rootCmd.AddCommand(newLoginCommand())
 	rootCmd.AddCommand(newExamplesCommand())
 	rootCmd.AddCommand(newVersionCommand())
 	rootCmd.AddCommand(newDashboardCommand())

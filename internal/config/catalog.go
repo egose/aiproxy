@@ -125,6 +125,10 @@ func cloneProvider(provider Provider) Provider {
 		ref := *provider.APIKeyRef
 		out.APIKeyRef = &ref
 	}
+	if provider.CopilotCredentialRef != nil {
+		ref := *provider.CopilotCredentialRef
+		out.CopilotCredentialRef = &ref
+	}
 	out.Models = cloneModels(provider.Models)
 	out.ModelByName = make(map[string]Model, len(out.Models)+len(provider.ModelByName))
 	for _, model := range out.Models {

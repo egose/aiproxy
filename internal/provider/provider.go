@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/copilotlogin"
 )
 
 type Operation int
@@ -27,6 +28,7 @@ type Request struct {
 	PublicModel   string
 	BaseURL       string
 	APIKey        string
+	CopilotToken  string
 	UpstreamModel string
 	ModelProtocol config.ModelProtocol
 	UserAgent     string
@@ -164,6 +166,11 @@ var providerDescriptors = map[config.ProviderType]providerDescriptor{
 		providerType:   config.ProviderTypeOpenCodeGo,
 		defaultBaseURL: defaultOpenCodeGoBaseURL,
 		do:             (*adapter).doOpenCode,
+	},
+	config.ProviderTypeGitHubCopilot: {
+		providerType:   config.ProviderTypeGitHubCopilot,
+		defaultBaseURL: copilotlogin.DefaultBaseURL,
+		do:             (*adapter).doGitHubCopilot,
 	},
 }
 

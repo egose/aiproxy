@@ -40,6 +40,11 @@ func TestProviderTypePoliciesCoverCapabilityMatrix(t *testing.T) {
 			defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
 			supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses},
 		},
+		{
+			providerType:          ProviderTypeGitHubCopilot,
+			defaultCapabilities:   []Capability{CapabilityChat},
+			supportedCapabilities: []Capability{CapabilityChat},
+		},
 	}
 
 	if got := ProviderTypes(); len(got) != len(tests) {

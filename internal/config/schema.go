@@ -72,22 +72,28 @@ type rawProviderHealth struct {
 }
 
 type rawProvider struct {
-	Type                  string        `hcl:"type,label"`
-	Name                  string        `hcl:"name,label"`
-	Extends               string        `hcl:"extends,optional"`
-	DisplayName           string        `hcl:"display_name,optional"`
-	BaseURL               string        `hcl:"base_url,optional"`
-	UpstreamHeaderTimeout string        `hcl:"upstream_header_timeout,optional"`
-	UserAgent             string        `hcl:"user_agent,optional"`
-	APIKey                string        `hcl:"api_key,optional"`
-	APIKeyRef             *rawAPIKeyRef `hcl:"api_key_ref,block"`
-	Enabled               *bool         `hcl:"enabled,optional"`
-	Models                []rawModel    `hcl:"model,block"`
+	Type                  string            `hcl:"type,label"`
+	Name                  string            `hcl:"name,label"`
+	Extends               string            `hcl:"extends,optional"`
+	DisplayName           string            `hcl:"display_name,optional"`
+	BaseURL               string            `hcl:"base_url,optional"`
+	UpstreamHeaderTimeout string            `hcl:"upstream_header_timeout,optional"`
+	UserAgent             string            `hcl:"user_agent,optional"`
+	APIKey                string            `hcl:"api_key,optional"`
+	APIKeyRef             *rawAPIKeyRef     `hcl:"api_key_ref,block"`
+	CredentialRef         *rawCredentialRef `hcl:"credential_ref,block"`
+	Enabled               *bool             `hcl:"enabled,optional"`
+	Models                []rawModel        `hcl:"model,block"`
 }
 
 type rawAPIKeyRef struct {
 	Path string `hcl:"path,optional"`
 	Key  string `hcl:"key"`
+}
+
+type rawCredentialRef struct {
+	Path string `hcl:"path,optional"`
+	Name string `hcl:"name"`
 }
 
 type rawModel struct {
