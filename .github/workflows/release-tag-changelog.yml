@@ -46,7 +46,7 @@ jobs:
         [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-${identifier}(\.${identifier})*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
 
     - name: Create Release Tag
-      uses: egose/actions/release-tag@799b388fb3497236093c6eb7e3eac0b4c8f956ce
+      uses: egose/actions/release-tag@6e49f5129448cff1d901b16032c09445bd49dde1
       with:
         tag: ${{ github.event.inputs.tag }}
         github-token: ${{ secrets.GITHUB_TOKEN }}

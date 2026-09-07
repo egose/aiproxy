@@ -1,0 +1,47 @@
+# See https://helm.sh/docs/chart_template_guide/subcharts_and_globals/#global-chart-values
+global:
+  env:
+    "Env": ""
+  security:
+    allowInsecureImages: false
+  serviceAccountName:
+  imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+api:
+  enabled: true
+  replicaCount: 1
+  image:
+    pullPolicy: IfNotPresent
+
+  nameOverride: api
+  fullnameOverride: ""
+
+  resources:
+    requests:
+      cpu: 250m         # 0.25 CPU core
+      memory: 256Mi     # 256 MB RAM
+    limits:
+      cpu: 500m         # 0.5 CPU core
+      memory: 512Mi     # 512 MB RAM
+
+  env: {}
+  envSecretName: ""
+
+networkPolicy:
+  enabled: true
+  allowSameNamespace: false
+  allowOpenShiftIngress: false
+  dns:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+  api:
+    ingressFrom: []
+    idpEgressIpBlocks: []
+    extraEgress: []
