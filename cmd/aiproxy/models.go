@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -16,19 +17,21 @@ import (
 func newModelsCommand() *cobra.Command {
 	var cfgPath string
 	var providerName string
+	var upstream bool
 	cmd := &cobra.Command{
 		Use:   "models",
 		Short: "List models for a provider from the config file",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runModels(cfgPath, providerName, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return runModels(cmd.Context(), cfgPath, providerName, upstream, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", defaultConfigPath(), "path to config file")
 	cmd.Flags().StringVarP(&providerName, "provider", "p", "", "provider name (skips the interactive prompt)")
+	cmd.Flags().BoolVar(&upstream, "upstream", false, "list models from the upstream model endpoint instead of the config file")
 	return cmd
 }
 
-func runModels(cfgPath, providerName string, stdout, stderr io.Writer) error {
+func runModels(ctx context.Context, cfgPath, providerName string, upstream bool, stdout, stderr io.Writer) error {
 	rt, err := config.LoadFile(cfgPath)
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
@@ -46,9 +49,45 @@ func runModels(cfgPath, providerName string, stdout, stderr io.Writer) error {
 		return err
 	}
 
+	if upstream {
+		return runModelsUpstream(ctx, provider, stdout, stderr)
+	}
+
 	fmt.Fprintf(stdout, "Provider %q (%s) — %d model(s):\n", provider.Name, provider.Type, len(provider.Models))
 	for _, m := range provider.Models {
 		fmt.Fprintf(stdout, "  %s\n", formatPublicModel(provider, m))
+	}
+	return nil
+}
+
+func runModelsUpstream(ctx context.Context, provider config.Provider, stdout, stderr io.Writer) error {
+	models, err := listUpstreamModels(ctx, provider)
+	if err != nil {
+		fmt.Fprintln(stderr, err.Error())
+		return err
+	}
+	configured := make(map[string]string, len(provider.Models))
+	for _, m := range provider.Models {
+		upstreamName := m.UpstreamName
+		if upstreamName == "" {
+			upstreamName = m.Name
+		}
+		if _, ok := configured[upstreamName]; !ok {
+			configured[upstreamName] = provider.Name + "/" + m.Name
+		}
+	}
+	fmt.Fprintf(stdout, "Provider %q (%s) — %d upstream model(s):\n", provider.Name, provider.Type, len(models))
+	for _, m := range models {
+		line := "  " + m.ID
+		if m.DisplayName != "" && m.DisplayName != m.ID {
+			line += " — " + m.DisplayName
+		}
+		if public, ok := configured[m.ID]; ok {
+			line += " (configured as " + public + ")"
+		} else {
+			line += " (not in config)"
+		}
+		fmt.Fprintln(stdout, line)
 	}
 	return nil
 }

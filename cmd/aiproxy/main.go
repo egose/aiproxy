@@ -224,6 +224,7 @@ aiproxy configure provider
 aiproxy configure provider --config /etc/aiproxy/config.hcl --non-interactive --name backup --type openai-compatible --base-url https://llm.internal/v1 --secrets-key localai --api-key "$LOCALAI_API_KEY" --model qwen3-32b
 aiproxy models
 aiproxy models --provider openai
+aiproxy models --provider openai --upstream
 aiproxy version`)
 }
 
