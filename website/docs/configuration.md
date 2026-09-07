@@ -163,6 +163,7 @@ Common attributes:
 - `extends` for restricted provider inheritance
 - `api_key`
 - `api_key_ref`
+- `credential_ref` for `github-copilot` only (saved device-flow login)
 - `upstream_header_timeout`
 - `enabled` (optional, default `true`)
 - nested `model` blocks (OpenCode models additionally require `protocol`)
@@ -175,6 +176,26 @@ header. To
 intentionally disable a provider, declare `enabled = false`; disabled
 providers are still validated for structure, URL, models, and capabilities,
 but they do not require a usable credential.
+
+`github-copilot` never uses `api_key`/`api_key_ref`. Provision with
+`aiproxy login github-copilot --client-id <id> --credential <name>` (your own
+public OAuth client ID, no secret), then reference the saved login:
+
+```hcl
+provider "github-copilot" "copilot" {
+  credential_ref {
+    name = "copilot-main"
+  }
+
+  model "gpt-5.4-nano" {}
+}
+```
+
+`credential_ref.path` is optional and defaults to the shared secrets path so
+the `copilot-<name>.json` sidecar is found next to `keys.json`. Derived
+Copilot providers require their own local `credential_ref`. The token
+activates on restart/`SIGHUP`; re-run `login` with the same client ID/name
+and reload on `401`/`403`, revocation, or expiry.
 
 ```hcl
 provider "openai" "backup" {
@@ -190,6 +211,8 @@ Plain `http` is accepted only for loopback development endpoints such as
 (`https://opencode.ai/zen/v1` and `https://opencode.ai/zen/go/v1`) and accept
 `base_url` only as a transport override for tests and custom gateways. An
 override never changes service selection, auth, or header behavior.
+`github-copilot` defaults to `https://api.githubcopilot.com` with the same
+transport-override-only `base_url` rule.
 
 Provider names are part of the public model string, so keep them stable and machine-friendly.
 
@@ -271,6 +294,8 @@ provider "openai-compatible" "nvidia-2" {
 ```
 
 A derived provider may be declared before or after its base. It may declare only `extends`, optional `display_name`, and exactly one local credential, either `api_key` or `api_key_ref`. It inherits the base provider type, `base_url`, effective upstream header timeout, enabled state, and all model blocks.
+
+`github-copilot` derivatives instead require a local `credential_ref` and stay compact (no `base_url`/models); `credential_ref` is rejected on all other types, and `api_key`/`api_key_ref` are rejected on Copilot blocks.
 
 The type label remains required and must match the base. The base must exist, be enabled, and must not itself use `extends`; inheritance chains are rejected. Local `base_url`, `upstream_header_timeout`, `enabled`, and `model` declarations are rejected instead of ignored.
 
@@ -366,6 +391,21 @@ api_key_ref {
 
 Use `api_key_ref` when you want provider secrets stored outside the main HCL file.
 
+### `credential_ref` (GitHub Copilot)
+
+`credential_ref` references a structured sidecar written by `aiproxy login github-copilot`:
+
+```hcl
+credential_ref {
+  name = "copilot-main"
+}
+```
+
+The sidecar lives at `<secrets-dir>/copilot-<name>.json` (`0600`). `path` is
+optional and defaults to the shared secrets path. `configure provider
+--credential/--credential-path` writes this block without OAuth networking or
+token display.
+
 ## Naming Rules
 
 `aiproxy` keeps public names intentionally strict:
@@ -396,7 +436,11 @@ Startup fails on invalid configuration. Important checks include:
 - `opencode-zen` or `opencode-go` models missing `protocol`, using an unknown
   protocol, using `gemini` on `opencode-go`, or declaring a capability the
   protocol does not serve; `protocol` on any other provider type
+- `user_agent` on any non-OpenCode provider type (including `github-copilot`)
 - providers with both `api_key` and `api_key_ref`
+- `github-copilot` providers with `api_key`/`api_key_ref`, or `credential_ref`
+  on any other provider type; enabled Copilot providers without a resolvable
+  sidecar credential
 - enabled providers with no resolved credential, including an empty
   `api_key = env("...")`; missing or empty credentials fail validation unless
   `enabled = false` is declared explicitly or the provider type is

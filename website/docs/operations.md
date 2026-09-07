@@ -21,6 +21,7 @@ Direct CLI usage:
 ```sh
 aiproxy serve
 aiproxy validate
+aiproxy login github-copilot --client-id YOUR_GITHUB_OAUTH_CLIENT_ID --credential copilot-main
 aiproxy paths
 aiproxy examples
 aiproxy configure
@@ -126,6 +127,27 @@ aiproxy configure provider \
   --model minimax-m3 \
   --model-protocol minimax-m3=messages
 ```
+
+GitHub Copilot providers reference a saved device-flow login (no API-key
+flags, no OAuth networking here, no token display):
+
+```sh
+aiproxy login github-copilot --client-id YOUR_GITHUB_OAUTH_CLIENT_ID --credential copilot-main
+
+aiproxy configure provider \
+  --config /etc/aiproxy/config.hcl \
+  --non-interactive \
+  --name copilot \
+  --type github-copilot \
+  --credential copilot-main \
+  --model gpt-5.4-nano
+```
+
+`login` prints the verification URI and user code, then writes
+`<secrets-dir>/copilot-<name>.json` (`0600`). It never edits HCL or signals a
+server: restart or `SIGHUP` to activate, and re-run the same `login` + reload
+on upstream `401`/`403`, revocation, or expiry. Use your own public OAuth
+client ID; never reuse another application's client ID.
 
 Root upstream timeout example:
 
@@ -327,6 +349,12 @@ When `api_key_ref` is used, the default key file path is:
 - or `~/.config/aiproxy/keys.json`
 
 Mount this file read-only in production deployments.
+
+GitHub Copilot logins live beside that file as `copilot-<name>.json`
+sidecars (`0600`, restrictive parent directory). `credential_ref.path`
+defaults to the same secrets path; mount the secrets directory (not just
+`keys.json`) when Copilot providers are configured, and reload with `SIGHUP`
+or a restart after every `login` or sidecar rotation.
 
 ## Production Checklist
 

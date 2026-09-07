@@ -66,17 +66,17 @@ The current public API surface is:
 
 <!-- docs-contract:public-matrix:start -->
 
-| Surface                         | `openai`                           | `openai-compatible`                | `anthropic`                        | `gemini`                           | `opencode-zen`                           | `opencode-go`                            |
-| ------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------------- | ---------------------------------------- |
-| `GET /v1/models`                | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                              | Proxy-owned                              |
-| `GET /v1/billing/usage`         | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting       | Proxy-owned local usage accounting       |
-| `GET /metrics`                  | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics           | Proxy-owned Prometheus metrics           |
-| `POST /v1/chat/completions`     | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated            | JSON and SSE translated            | JSON and SSE native or translated subset | JSON and SSE native or translated subset |
-| `POST /v1/embeddings`           | Yes                                | Yes                                | No                                 | Yes                                | No                                       | No                                       |
-| `POST /v1/responses`            | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated subset     | JSON and SSE translated subset     | JSON and SSE native or translated subset | JSON and SSE native or translated subset |
-| `POST /v1/images/generations`   | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       |
-| `POST /v1/audio/transcriptions` | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       |
-| `POST /v1/audio/speech`         | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       |
+| Surface                         | `openai`                           | `openai-compatible`                | `anthropic`                        | `gemini`                           | `opencode-zen`                           | `opencode-go`                            | `github-copilot`                   |
+| ------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------------- | ---------------------------------------- | ---------------------------------- |
+| `GET /v1/models`                | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                              | Proxy-owned                              | Proxy-owned                        |
+| `GET /v1/billing/usage`         | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting       | Proxy-owned local usage accounting       | Proxy-owned local usage accounting |
+| `GET /metrics`                  | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics           | Proxy-owned Prometheus metrics           | Proxy-owned Prometheus metrics     |
+| `POST /v1/chat/completions`     | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated            | JSON and SSE translated            | JSON and SSE native or translated subset | JSON and SSE native or translated subset | JSON and SSE                       |
+| `POST /v1/embeddings`           | Yes                                | Yes                                | No                                 | Yes                                | No                                       | No                                       | No                                 |
+| `POST /v1/responses`            | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated subset     | JSON and SSE translated subset     | JSON and SSE native or translated subset | JSON and SSE native or translated subset | No                                 |
+| `POST /v1/images/generations`   | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       | No                                 |
+| `POST /v1/audio/transcriptions` | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       | No                                 |
+| `POST /v1/audio/speech`         | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       | No                                 |
 
 <!-- docs-contract:public-matrix:end -->
 
@@ -238,6 +238,7 @@ Initial provider types:
 - `gemini`
 - `opencode-zen`
 - `opencode-go`
+- `github-copilot`
 
 Additional types can be added later without changing the external client API.
 
@@ -247,6 +248,7 @@ Provider attributes:
 - `base_url`
 - `api_key`
 - `api_key_ref`
+- `credential_ref` (`github-copilot` only)
 - `extends`
 - `upstream_header_timeout`
 - `enabled`
@@ -264,6 +266,8 @@ Derived provider blocks are intentionally restricted:
 - declaration order does not matter
 - `display_name` may override the inherited display name
 - exactly one local credential form, `api_key` or `api_key_ref`, is required
+  (`github-copilot` derivatives require a local `credential_ref` instead and
+  reject `api_key`/`api_key_ref`; `credential_ref` is rejected on all other types) # pragma: allowlist secret
 - local `base_url`, `upstream_header_timeout`, `enabled`, and `model` blocks are rejected
 
 After loading, derived providers are ordinary providers. Direct routing,
@@ -347,6 +351,42 @@ own. The upstream console setting that spends Zen balance past Go limits is an
 account setting, not proxy routing permission. Model catalogs are static
 configuration; the proxy performs no runtime catalog sync.
 
+#### `github-copilot`
+
+Chat-only device-flow provider (GitHub.com release scope). Defaults to
+`https://api.githubcopilot.com`; `base_url` is an optional transport override
+only (same absolute-URL and loopback rules as other providers) that never
+changes auth or header behavior. Models declare no `protocol` (rejected, as is
+`user_agent`); default and supported capabilities are `chat` only.
+
+Provisioning is explicit and headless-friendly:
+`aiproxy login github-copilot --client-id <id> --credential <name>` uses the
+GitHub device authorization grant with the operator-supplied public client ID
+(no secret, no endpoint-override flags), polls with server `interval` /
+`slow_down` handling, then persists a structured sidecar
+`<secrets-dir>/copilot-<name>.json` (`0600`, restrictive directory, atomic
+rename) holding `{client_id, domain, access_token, refresh_token, expires_at,
+obtained_at}`. Login never edits HCL, never signals a server, and never prints
+tokens; it reports persistence separately from activation.
+
+Providers reference the saved login with `credential_ref { path?, name }`
+(`path` defaults to the shared secrets path). The token resolves at load into
+a dedicated field (never `api_key`), activates on restart/`SIGHUP`, and
+sidecar-only changes leave a running server untouched until reload; failed
+reload candidates keep the old runtime. Upstream `401`/`403` (inference and
+`GET {base}/models`) maps to an explicit re-login hint: re-run `login` with
+the same client ID/name, then reload.
+
+Inference is `POST {base}/chat/completions` with model rewrite and shared
+JSON/SSE pass-through handling. Upstream headers are an allowlist only:
+`Authorization` from the stored login, proxy `User-Agent: aiproxy/<version>`,
+`X-GitHub-Api-Version`, `Openai-Intent`, derived `x-initiator: user`, and
+`Copilot-Vision-Request` only when the request body structurally contains
+image parts. Inbound authorization, cookies, `x-api-key`, and caller-supplied
+Copilot metadata are stripped, never trusted. Unsupported operations are
+rejected before auth/inference I/O; direct failures never change targets and
+aliases follow the standard configured status policy.
+
 ## Model Model
 
 Each provider contains one or more nested `model` blocks:
@@ -394,6 +434,7 @@ Default capability behavior:
 | `gemini`            | `chat`, `responses`                        | `embeddings`                                     |
 | `opencode-zen`      | `chat`, `responses`, or both (by protocol) | None                                             |
 | `opencode-go`       | `chat`, `responses`, or both (by protocol) | None                                             |
+| `github-copilot`    | `chat`                                     | None                                             |
 
 <!-- docs-contract:capability-matrix:end -->
 
@@ -554,6 +595,14 @@ Exactly one of these must be set:
 
 - `api_key`
 - `api_key_ref`
+
+`github-copilot` is the exception: it declares `credential_ref { path?, name }`
+instead and rejects `api_key`/`api_key_ref` (`credential_ref` is rejected on
+all other types). `credential_ref` points at a sidecar written by
+`aiproxy login github-copilot` (`<secrets-dir>/copilot-<name>.json`); `path`
+defaults to the shared secrets path. The token resolves at config load, so a
+missing/expired credential fails startup/reload with a re-login hint rather
+than failing on first request.
 
 ### `api_key`
 
@@ -761,6 +810,10 @@ The config loader should validate:
   protocol, using `gemini` on `opencode-go`, or declaring a capability the
   protocol does not serve; `protocol` on any other provider type
 - providers with both `api_key` and `api_key_ref`
+- `github-copilot` providers with `api_key`/`api_key_ref`, missing
+  `credential_ref.name`, or `credential_ref` on any other provider type
+- `protocol` on any non-OpenCode provider type, or `user_agent` on any
+  non-OpenCode provider type (including `github-copilot`)
 - malformed, zero, or negative `upstream_header_timeout` values
 - active providers with no resolved credential, including an empty
   `api_key = env("...")`; missing or empty credentials fail validation unless
@@ -849,6 +902,7 @@ Recommended commands:
 
 - `aiproxy serve --config /etc/aiproxy/config.hcl`
 - `aiproxy validate --config /etc/aiproxy/config.hcl`
+- `aiproxy login github-copilot --client-id <id> --credential <name>`
 - `aiproxy version`
 
 Linux also supports `aiproxy serve -d`, `aiproxy status`, `aiproxy stop`, and
@@ -1106,7 +1160,8 @@ The chosen design allows fallback only for alias-based requests.
 - providers normally declare exactly one of `api_key` or `api_key_ref`;
   missing or empty credentials fail validation unless `enabled = false` is
   declared explicitly or the provider type is `opencode-zen` (keyless upstream
-  access sends no `Authorization` header)
+  access sends no `Authorization` header); `github-copilot` declares
+  `credential_ref` instead and resolves its device-flow sidecar at load
 - `api_key_ref.path` defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json` and falls back to `~/.config/aiproxy/keys.json`
 - aliases support `round_robin` and `least_connections`
 - alias retry happens for transport errors, timeouts, and configured

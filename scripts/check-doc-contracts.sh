@@ -4,17 +4,17 @@ set -euo pipefail
 root=${1:-$(pwd)}
 
 public_expected=$(cat <<'EOF'
-| Surface | `openai` | `openai-compatible` | `anthropic` | `gemini` | `opencode-zen` | `opencode-go` |
-| --- | --- | --- | --- | --- | --- | --- |
-| `GET /v1/models` | Proxy-owned | Proxy-owned | Proxy-owned | Proxy-owned | Proxy-owned | Proxy-owned |
-| `GET /v1/billing/usage` | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting |
-| `GET /metrics` | Proxy-owned Prometheus metrics | Proxy-owned Prometheus metrics | Proxy-owned Prometheus metrics | Proxy-owned Prometheus metrics | Proxy-owned Prometheus metrics | Proxy-owned Prometheus metrics |
-| `POST /v1/chat/completions` | JSON and SSE | JSON and SSE | JSON and SSE translated | JSON and SSE translated | JSON and SSE native or translated subset | JSON and SSE native or translated subset |
-| `POST /v1/embeddings` | Yes | Yes | No | Yes | No | No |
-| `POST /v1/responses` | JSON and SSE | JSON and SSE | JSON and SSE translated subset | JSON and SSE translated subset | JSON and SSE native or translated subset | JSON and SSE native or translated subset |
-| `POST /v1/images/generations` | Yes | Yes | No | No | No | No |
-| `POST /v1/audio/transcriptions` | Yes | Yes | No | No | No | No |
-| `POST /v1/audio/speech` | Yes | Yes | No | No | No | No |
+| Surface | `openai` | `openai-compatible` | `anthropic` | `gemini` | `opencode-zen` | `opencode-go` | `github-copilot` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET /v1/models` | Proxy-owned | Proxy-owned | Proxy-owned | Proxy-owned | Proxy-owned | Proxy-owned | Proxy-owned |
+| `GET /v1/billing/usage` | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting |
+| `GET /metrics` | Proxy-owned Prometheus metrics | Proxy-owned Prometheus metrics | Proxy-owned Prometheus metrics | Proxy-owned Prometheus metrics | Proxy-owned Prometheus metrics | Proxy-owned Prometheus metrics | Proxy-owned Prometheus metrics |
+| `POST /v1/chat/completions` | JSON and SSE | JSON and SSE | JSON and SSE translated | JSON and SSE translated | JSON and SSE native or translated subset | JSON and SSE native or translated subset | JSON and SSE |
+| `POST /v1/embeddings` | Yes | Yes | No | Yes | No | No | No |
+| `POST /v1/responses` | JSON and SSE | JSON and SSE | JSON and SSE translated subset | JSON and SSE translated subset | JSON and SSE native or translated subset | JSON and SSE native or translated subset | No |
+| `POST /v1/images/generations` | Yes | Yes | No | No | No | No | No |
+| `POST /v1/audio/transcriptions` | Yes | Yes | No | No | No | No | No |
+| `POST /v1/audio/speech` | Yes | Yes | No | No | No | No | No |
 EOF
 )
 
@@ -27,6 +27,7 @@ capability_expected=$(cat <<'EOF'
 | `gemini` | `chat`, `responses` | `embeddings` |
 | `opencode-zen` | `chat`, `responses`, or both (by protocol) | None |
 | `opencode-go` | `chat`, `responses`, or both (by protocol) | None |
+| `github-copilot` | `chat` | None |
 EOF
 )
 

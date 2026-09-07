@@ -75,6 +75,8 @@ type ProviderCredentialInput struct {
 	APIKeyValue string
 	SecretsPath string
 	SecretsKey  string
+	CopilotPath string
+	CopilotName string
 }
 
 type ProviderModelInput struct {
@@ -310,6 +312,17 @@ func renderProviderCredential(b *strings.Builder, input ProviderInput, defaultSe
 		b.WriteString(strconv.Quote(input.Credential.SecretsKey))
 		b.WriteString("\n")
 		b.WriteString("  }\n")
+	case "credential_ref":
+		b.WriteString("  credential_ref {\n")
+		if input.Credential.CopilotPath != "" && input.Credential.CopilotPath != defaultSecretsPath {
+			b.WriteString("    path = ")
+			b.WriteString(strconv.Quote(input.Credential.CopilotPath))
+			b.WriteString("\n")
+		}
+		b.WriteString("    name = ")
+		b.WriteString(strconv.Quote(input.Credential.CopilotName))
+		b.WriteString("\n")
+		b.WriteString("  }\n")
 	case "disabled":
 	case "none":
 	case "":
@@ -416,6 +429,11 @@ func WriteProviderFiles(configPath, source string, update SecretsUpdate) error {
 	if update.Path == "" {
 		return WriteFile(configPath, []byte(source), 0o600)
 	}
+	unlock, err := filestore.Lock(update.Path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	secretsBody, err := BuildSecretsUpdate(update)
 	if err != nil {
 		return err
@@ -430,6 +448,14 @@ func WriteSecretsUpdate(update SecretsUpdate) error {
 	if update.Path == "" {
 		return nil
 	}
+	if update.Key == "" {
+		return fmt.Errorf("secrets key is required")
+	}
+	unlock, err := filestore.Lock(update.Path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	body, err := BuildSecretsUpdate(update)
 	if err != nil {
 		return err

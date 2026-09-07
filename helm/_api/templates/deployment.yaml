@@ -3,9 +3,9 @@
 {{- $envSecretName := .Values.envSecretName | default "" -}}
 {{- $serviceAccountName := .Values.serviceAccountName | default ($global.serviceAccountName | default (include "_.serviceAccountName" .)) -}}
 {{- $configSecretName := "" -}}
-{{- if or .Values.config.existingSecret .Values.config.content (not (empty .Values.secrets.keysJson)) .Values.secrets.keysJsonRaw -}}
-{{- $configSecretName = include "_.configSecretName" . -}} # pragma: allowlist secret
-{{- end -}}
+{{- if or .Values.config.existingSecret .Values.config.content (not (empty .Values.secrets.keysJson)) .Values.secrets.keysJsonRaw }}
+{{- $configSecretName = include "_.configSecretName" . }}
+{{- end }}
 {{- $configMountPath := .Values.config.mountPath | default "/etc/aiproxy" -}}
 {{- $configKey := .Values.config.configKey | default "config.hcl" -}}
 {{- $configFile := printf "%s/%s" ($configMountPath | trimSuffix "/") $configKey -}}
@@ -67,6 +67,8 @@ spec:
           env:
             - name: DEPLOYMENT_TAG
               value: {{ $deploymentTag | quote }}
+            - name: HELM_REVISION
+              value: {{ .Release.Revision | quote }}
           {{- $env := merge ($global.env | default dict) (.Values.env | default dict) -}}
             {{- range $k, $v := $env }}
             - name: {{ $k | quote }}
