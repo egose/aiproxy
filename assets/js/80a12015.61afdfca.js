@@ -520,9 +520,15 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Every upstream request sends ", (0,jsx_runtime.jsx)(_components.code, {
         children: "User-Agent: aiproxy/<version>"
-      }), "; the inbound\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), " unless the\nprovider declares a ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "user_agent"
+      }), " override (supported on ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-zen"
+      }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-go"
+      }), " only, validated as 1-256 printable ASCII characters); the\ninbound ", (0,jsx_runtime.jsx)(_components.code, {
         children: "User-Agent"
-      }), " is never forwarded and the proxy never impersonates the OpenCode\nclient IDs. Both ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " is never forwarded implicitly, so matching a first-party\nclient fingerprint is always an explicit operator choice. Both\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "opencode-zen"
       }), " and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "opencode-go"
@@ -536,7 +542,9 @@ function _createMdxContent(props) {
         children: "X-Session-Id"
       }), " is adopted\nwhen valid, and only then does the proxy generate a fresh\nper-request ", (0,jsx_runtime.jsx)(_components.code, {
         children: "ses_"
-      }), " + 128-bit hex ID. Missing or invalid values never fail the\nrequest and never create shared cross-client state. No other inbound headers\nor credentials are forwarded."]
+      }), " + 128-bit hex ID. A caller-supplied ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "x-opencode-client"
+      }), "\nis forwarded under the same validity rule and omitted otherwise. Missing or invalid values never fail the\nrequest and never create shared cross-client state. No other inbound headers\nor credentials are forwarded."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "quota-errors-failover-and-static-catalogs",
       children: "Quota Errors, Failover, And Static Catalogs"

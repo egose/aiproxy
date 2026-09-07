@@ -331,6 +331,18 @@ function _createMdxContent(props) {
         })]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "user_agent"
+        }), " as an optional upstream ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "User-Agent"
+        }), " override for\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "opencode-zen"
+        }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "opencode-go"
+        }), " (defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "aiproxy/<version>"
+        }), ")"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "extends"
         }), " for restricted provider inheritance"]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
