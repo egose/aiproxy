@@ -12,7 +12,10 @@ import (
 	"github.com/egose/aiproxy/internal/config"
 )
 
-const openCodeSessionHeader = "x-opencode-session"
+const (
+	openCodeSessionHeader = "x-opencode-session"
+	openCodeClientHeader  = "x-opencode-client"
+)
 
 func (a *adapter) doOpenCode(ctx context.Context, r Request) (*Result, error) {
 	switch r.ProviderType {
@@ -260,7 +263,10 @@ func applyOpenCodeHeaders(req *http.Request, r Request) error {
 		req.Header.Set("Authorization", "Bearer "+r.APIKey)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", openCodeUserAgent(r.Version))
+	req.Header.Set("User-Agent", openCodeUserAgent(r))
+	if v := openCodeForwardedHeader(r, openCodeClientHeader); v != "" {
+		req.Header.Set(openCodeClientHeader, v)
+	}
 	session, err := openCodeSessionValue(r)
 	if err != nil {
 		return err
@@ -269,11 +275,28 @@ func applyOpenCodeHeaders(req *http.Request, r Request) error {
 	return nil
 }
 
-func openCodeUserAgent(version string) string {
-	if version == "" {
-		version = "dev"
+func openCodeUserAgent(r Request) string {
+	if r.UserAgent != "" {
+		return r.UserAgent
 	}
-	return "aiproxy/" + version
+	return "aiproxy/" + openCodeDefaultVersion(r.Version)
+}
+
+func openCodeDefaultVersion(version string) string {
+	if version == "" {
+		return "dev"
+	}
+	return version
+}
+
+func openCodeForwardedHeader(r Request, name string) string {
+	if r.Inbound == nil {
+		return ""
+	}
+	if v := r.Inbound.Header.Get(name); isValidOpenCodeSessionID(v) {
+		return v
+	}
+	return ""
 }
 
 func openCodeSessionValue(r Request) (string, error) {

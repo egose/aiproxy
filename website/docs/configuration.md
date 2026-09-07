@@ -158,6 +158,8 @@ Common attributes:
 - `display_name`
 - `base_url` for `openai-compatible` (required), and as an optional transport
   override for `opencode-zen` and `opencode-go`
+- `user_agent` as an optional upstream `User-Agent` override for
+  `opencode-zen` and `opencode-go` (defaults to `aiproxy/<version>`)
 - `extends` for restricted provider inheritance
 - `api_key`
 - `api_key_ref`

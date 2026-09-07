@@ -60,6 +60,7 @@ type ProviderInput struct {
 	DisplayName           string
 	BaseURL               string
 	UpstreamHeaderTimeout string
+	UserAgent             string
 	Credential            ProviderCredentialInput
 	Enabled               *bool
 	Models                []ProviderModelInput
@@ -253,6 +254,11 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 	if input.UpstreamHeaderTimeout != "" {
 		b.WriteString("  upstream_header_timeout = ")
 		b.WriteString(strconv.Quote(input.UpstreamHeaderTimeout))
+		b.WriteString("\n")
+	}
+	if input.UserAgent != "" {
+		b.WriteString("  user_agent = ")
+		b.WriteString(strconv.Quote(input.UserAgent))
 		b.WriteString("\n")
 	}
 	if input.IsExplicitlyDisabled() {

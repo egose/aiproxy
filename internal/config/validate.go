@@ -156,6 +156,9 @@ func validateProviders(providers []Provider, requireCredential bool) error {
 		if err := validateProviderBaseURL(p); err != nil {
 			return err
 		}
+		if err := validateProviderUserAgent(p); err != nil {
+			return err
+		}
 		if requireCredential && p.APIKey == "" && p.Type != ProviderTypeOpenCodeZen {
 			return fmt.Errorf("provider %q: enabled providers require a non-empty api_key or a resolvable api_key_ref (set enabled = false to disable a provider intentionally; opencode-zen providers may omit the credential for keyless upstream access)", p.Name)
 		}
@@ -234,6 +237,28 @@ func validateProviderBaseURL(p Provider) error {
 	default:
 		return fmt.Errorf("provider %q: base_url scheme must be http or https", p.Name)
 	}
+}
+
+func validateProviderUserAgent(p Provider) error {
+	if p.UserAgent == "" {
+		return nil
+	}
+	if !IsOpenCodeProviderType(p.Type) {
+		return fmt.Errorf("provider %q: user_agent is only supported by opencode-zen and opencode-go", p.Name)
+	}
+	if len(p.UserAgent) > 256 || !isValidUserAgent(p.UserAgent) {
+		return fmt.Errorf("provider %q: user_agent must be 1-256 printable ASCII characters without newlines", p.Name)
+	}
+	return nil
+}
+
+func isValidUserAgent(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func isLoopbackHost(host string) bool {
