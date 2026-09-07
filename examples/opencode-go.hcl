@@ -1,3 +1,5 @@
+# Standalone opencode-go setup with explicit per-model protocols.
+# Combined Zen-plus-Go setup: opencode.hcl.
 listener "http" "public" {
   address = ":8080"
 }
