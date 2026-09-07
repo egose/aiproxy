@@ -101,8 +101,8 @@ provider "opencode-go" "go" {
 	if zen.path != "/v1/chat/completions" {
 		t.Fatalf("zen path = %q", zen.path)
 	}
-	if zen.auth != "Bearer sk-zen" || zen.ua != "aiproxy/9.9.9" || zen.session != "" {
-		t.Fatalf("zen headers auth=%q ua=%q session=%q", zen.auth, zen.ua, zen.session)
+	if zen.auth != "Bearer sk-zen" || zen.ua != "aiproxy/9.9.9" || zen.session == "" {
+		t.Fatalf("zen headers auth=%q ua=%q session=%q, want generated session", zen.auth, zen.ua, zen.session)
 	}
 
 	goBody := `{"model":"go/minimax-m3","messages":[{"role":"user","content":"hi"}]}`
