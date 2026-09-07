@@ -80,6 +80,7 @@ type providerOptions struct {
 	ModelUpstreams        []string
 	ModelDisplayName      []string
 	ModelCaps             []string
+	ModelProtocols        []string
 	Enabled               bool
 	HasEnabled            bool
 	NonInteractive        bool
@@ -238,6 +239,7 @@ func newConfigureProviderCommand() *cobra.Command {
 		Short: "Interactively create or update a provider block",
 		Example: "aiproxy configure provider\n" +
 			"aiproxy configure provider --config /etc/aiproxy/config.hcl --non-interactive --name backup --type openai-compatible --base-url https://llm.internal/v1 --secrets-key localai --api-key \"$LOCALAI_API_KEY\" --model qwen3-32b\n" +
+			"aiproxy configure provider --config /etc/aiproxy/config.hcl --non-interactive --name zen --type opencode-zen --api-key-env OPENCODE_ZEN_API_KEY --model glm-5.3 --model-protocol glm-5.3=chat\n" +
 			"aiproxy configure provider --config /etc/aiproxy/config.hcl --delete --name backup",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.HasEnabled = cmd.Flags().Changed("enabled")
@@ -260,6 +262,7 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&options.ModelUpstreams, "model-upstream", nil, "model upstream spec: name=upstream")
 	cmd.Flags().StringArrayVar(&options.ModelDisplayName, "model-display-name", nil, "model display name spec: name=display")
 	cmd.Flags().StringArrayVar(&options.ModelCaps, "model-capabilities", nil, "model capabilities spec: name=cap1,cap2")
+	cmd.Flags().StringArrayVar(&options.ModelProtocols, "model-protocol", nil, "model protocol spec: name=protocol (required for opencode-zen and opencode-go: chat, responses, messages, or gemini; gemini is zen-only)")
 	cmd.Flags().BoolVar(&options.Enabled, "enabled", false, "provider enabled state (use --enabled=false to disable; default preserves existing)")
 	cmd.Flags().Lookup("enabled").NoOptDefVal = "true"
 	cmd.Flags().BoolVar(&options.NonInteractive, "non-interactive", false, "fail instead of prompting for missing values")
@@ -1049,19 +1052,106 @@ func providerSecretsUpdate(input providerInput, options providerOptions) secrets
 }
 
 func hasProviderModelOptions(options providerOptions) bool {
-	return len(options.Models) > 0 || len(options.ModelUpstreams) > 0 || len(options.ModelDisplayName) > 0 || len(options.ModelCaps) > 0
+	return len(options.Models) > 0 || len(options.ModelUpstreams) > 0 || len(options.ModelDisplayName) > 0 || len(options.ModelCaps) > 0 || len(options.ModelProtocols) > 0
+}
+
+func isOpenCodeProviderType(providerType string) bool {
+	return providerType == "opencode-zen" || providerType == "opencode-go"
+}
+
+func supportedProtocols(providerType string) []string {
+	switch providerType {
+	case "opencode-zen":
+		return []string{"chat", "responses", "messages", "gemini"}
+	case "opencode-go":
+		return []string{"chat", "responses", "messages"}
+	default:
+		return nil
+	}
+}
+
+func protocolDefaultCapabilities(providerType, protocol string) []string {
+	if isOpenCodeProviderType(providerType) {
+		switch protocol {
+		case "chat":
+			return []string{"chat"}
+		case "responses":
+			return []string{"responses"}
+		case "messages":
+			return []string{"chat", "responses"}
+		case "gemini":
+			if providerType == "opencode-zen" {
+				return []string{"chat", "responses"}
+			}
+			return nil
+		}
+		return nil
+	}
+	return defaultCapabilities(providerType)
+}
+
+func validateModelProtocolValue(providerType, protocol string) error {
+	if !isOpenCodeProviderType(providerType) {
+		if protocol == "" {
+			return nil
+		}
+		return fmt.Errorf("protocol is only supported by opencode-zen and opencode-go")
+	}
+	switch protocol {
+	case "chat", "responses", "messages", "gemini":
+	default:
+		return fmt.Errorf("invalid protocol %q (must be chat, responses, messages, or gemini)", protocol)
+	}
+	if providerType == "opencode-go" && protocol == "gemini" {
+		return fmt.Errorf("protocol %q is not supported by provider type %q", protocol, providerType)
+	}
+	return nil
+}
+
+func validateProviderModelProtocols(providerType string, models []providerModelInput) error {
+	if !isOpenCodeProviderType(providerType) {
+		return nil
+	}
+	for _, model := range models {
+		if model.Protocol == "" {
+			return fmt.Errorf("provider type %s requires --model-protocol %s=<protocol> for model %q", providerType, model.Name, model.Name)
+		}
+		if err := validateModelProtocolValue(providerType, model.Protocol); err != nil {
+			return fmt.Errorf("model %q: %w", model.Name, err)
+		}
+	}
+	return nil
+}
+
+func protocolServedCapabilities(providerType, protocol string) []string {
+	if caps := protocolDefaultCapabilities(providerType, protocol); caps != nil {
+		return caps
+	}
+	return supportedCapabilities(providerType)
 }
 
 func buildProviderModelsFromOptions(providerType string, options providerOptions) ([]providerModelInput, error) {
 	ordered := make([]string, 0, len(options.Models))
 	models := make(map[string]*providerModelInput)
+	protocols, err := parseNamedValueSpecs(options.ModelProtocols)
+	if err != nil {
+		return nil, err
+	}
+	for name, protocol := range protocols {
+		if !isOpenCodeProviderType(providerType) {
+			return nil, fmt.Errorf("model %q: protocol is only supported by opencode-zen and opencode-go", name)
+		}
+		if err := validateModelProtocolValue(providerType, protocol); err != nil {
+			return nil, fmt.Errorf("model %q: %w", name, err)
+		}
+	}
 	for _, spec := range options.Models {
 		name, upstream, err := parseModelSpec(spec)
 		if err != nil {
 			return nil, err
 		}
 		ordered = append(ordered, name)
-		models[name] = &providerModelInput{Name: name, UpstreamName: upstream, Capabilities: append([]string(nil), defaultCapabilities(providerType)...)}
+		models[name] = &providerModelInput{Name: name, UpstreamName: upstream, Protocol: protocols[name], Capabilities: append([]string(nil), protocolDefaultCapabilities(providerType, protocols[name])...)}
 	}
 	upstreams, err := parseNamedValueSpecs(options.ModelUpstreams)
 	if err != nil {
@@ -1076,16 +1166,20 @@ func buildProviderModelsFromOptions(providerType string, options providerOptions
 		return nil, err
 	}
 	for name, upstream := range upstreams {
-		model := ensureProviderModel(models, &ordered, name, providerType)
+		model := ensureProviderModel(models, &ordered, name, providerType, protocols[name])
 		model.UpstreamName = upstream
 	}
 	for name, display := range displayNames {
-		model := ensureProviderModel(models, &ordered, name, providerType)
+		model := ensureProviderModel(models, &ordered, name, providerType, protocols[name])
 		model.DisplayName = display
 	}
 	for name, caps := range capabilities {
-		model := ensureProviderModel(models, &ordered, name, providerType)
+		model := ensureProviderModel(models, &ordered, name, providerType, protocols[name])
 		model.Capabilities = caps
+	}
+	for name, protocol := range protocols {
+		model := ensureProviderModel(models, &ordered, name, providerType, protocol)
+		model.Protocol = protocol
 	}
 	out := make([]providerModelInput, 0, len(ordered))
 	for _, name := range ordered {
@@ -1094,18 +1188,31 @@ func buildProviderModelsFromOptions(providerType string, options providerOptions
 			model.UpstreamName = model.Name
 		}
 		if len(model.Capabilities) == 0 {
-			model.Capabilities = append([]string(nil), defaultCapabilities(providerType)...)
+			model.Capabilities = append([]string(nil), protocolDefaultCapabilities(providerType, model.Protocol)...)
+		}
+		if isOpenCodeProviderType(providerType) {
+			if model.Protocol == "" {
+				return nil, fmt.Errorf("model %q: provider type %s requires --model-protocol %s=<protocol>", model.Name, providerType, model.Name)
+			}
+			if err := validateModelProtocolValue(providerType, model.Protocol); err != nil {
+				return nil, fmt.Errorf("model %q: %w", model.Name, err)
+			}
+			for _, cap := range model.Capabilities {
+				if !containsName(protocolServedCapabilities(providerType, model.Protocol), cap) {
+					return nil, fmt.Errorf("model %q: capability %q is not served by protocol %q", model.Name, cap, model.Protocol)
+				}
+			}
 		}
 		out = append(out, model)
 	}
 	return out, nil
 }
 
-func ensureProviderModel(models map[string]*providerModelInput, ordered *[]string, name, providerType string) *providerModelInput {
+func ensureProviderModel(models map[string]*providerModelInput, ordered *[]string, name, providerType, protocol string) *providerModelInput {
 	if model, ok := models[name]; ok {
 		return model
 	}
-	model := &providerModelInput{Name: name, UpstreamName: name, Capabilities: append([]string(nil), defaultCapabilities(providerType)...)}
+	model := &providerModelInput{Name: name, UpstreamName: name, Protocol: protocol, Capabilities: append([]string(nil), protocolDefaultCapabilities(providerType, protocol)...)}
 	models[name] = model
 	*ordered = append(*ordered, name)
 	return model
@@ -1521,6 +1628,9 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		defaults.Models = models
 	}
 	if options.NonInteractive {
+		if err := validateProviderModelProtocols(defaults.ProviderType, defaults.Models); err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
 		if defaults.ProviderType == "" || defaults.Name == "" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider requires type and name in non-interactive mode")
 		}
@@ -1560,6 +1670,8 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 					huh.NewOption("OpenAI-compatible", "openai-compatible"),
 					huh.NewOption("Anthropic", "anthropic"),
 					huh.NewOption("Gemini", "gemini"),
+					huh.NewOption("OpenCode Zen", "opencode-zen"),
+					huh.NewOption("OpenCode Go", "opencode-go"),
 				).Value(&providerType),
 				huh.NewInput().Title("Provider name").Description(providerNameDescription()).Value(&providerName).Validate(validateProviderName),
 				huh.NewInput().Title("Display name").Description(providerDisplayNameDescription()).Value(&displayName),
@@ -1597,6 +1709,14 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			if err := prompts.runHuhForm(
 				huh.NewGroup(
 					huh.NewInput().Title("Base URL").Value(&baseURL).Validate(huh.ValidateNotEmpty()),
+				).Title("Endpoint"),
+			); err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
+		} else if isOpenCodeProviderType(providerType) {
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewInput().Title("Base URL override").Description(openCodeBaseURLDescription(providerType)).Value(&baseURL),
 				).Title("Endpoint"),
 			); err != nil {
 				return providerInput{}, secretsUpdate{}, err
@@ -1687,7 +1807,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			Models:                models,
 		}, update, nil
 	}
-	providerType, err := prompts.askChoiceWithDescription("Provider type", providerTypeDescription(), []string{"openai", "openai-compatible", "anthropic", "gemini"}, defaults.ProviderType)
+	providerType, err := prompts.askChoiceWithDescription("Provider type", providerTypeDescription(), []string{"openai", "openai-compatible", "anthropic", "gemini", "opencode-zen", "opencode-go"}, defaults.ProviderType)
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
@@ -1721,6 +1841,12 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			baseURL = "https://llm.internal/v1"
 		}
 		baseURL, err = prompts.askRequired("Base URL", baseURL)
+		if err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
+	} else if isOpenCodeProviderType(providerType) {
+		_, _ = fmt.Fprintln(prompts.out, openCodeBaseURLDescription(providerType))
+		baseURL, err = prompts.ask("Base URL override", baseURL)
 		if err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
@@ -1800,12 +1926,16 @@ func promptProviderModels(prompts *promptSession, providerType string, existing 
 		return promptProviderModelsInteractive(prompts, providerType, existing)
 	}
 	if len(existing) > 0 {
-		keepModels, err := prompts.askYesNo("Keep existing models", true)
-		if err != nil {
-			return nil, err
-		}
-		if keepModels {
-			return append([]providerModelInput(nil), existing...), nil
+		if !isOpenCodeProviderType(providerType) || allModelsHaveProtocol(providerType, existing) {
+			keepModels, err := prompts.askYesNo("Keep existing models", true)
+			if err != nil {
+				return nil, err
+			}
+			if keepModels {
+				return append([]providerModelInput(nil), existing...), nil
+			}
+		} else {
+			_, _ = fmt.Fprintln(prompts.out, "Existing models are missing the required protocol for "+providerType+"; enter the models again.")
 		}
 	}
 	var models []providerModelInput
@@ -1823,11 +1953,20 @@ func promptProviderModels(prompts *promptSession, providerType string, existing 
 		if err != nil {
 			return nil, err
 		}
-		capabilities, err := prompts.askMultiChoiceWithDescription("Capabilities", capabilitySelectionDescription(providerType), supportedCapabilities(providerType), defaultCaps)
+		protocol := ""
+		capsDefault := defaultCaps
+		if isOpenCodeProviderType(providerType) {
+			protocol, err = prompts.askChoiceWithDescription("Protocol", modelProtocolDescription(providerType), supportedProtocols(providerType), "chat")
+			if err != nil {
+				return nil, err
+			}
+			capsDefault = protocolDefaultCapabilities(providerType, protocol)
+		}
+		capabilities, err := prompts.askMultiChoiceWithDescription("Capabilities", capabilitySelectionDescription(providerType), supportedCapabilities(providerType), capsDefault)
 		if err != nil {
 			return nil, err
 		}
-		models = append(models, providerModelInput{Name: name, DisplayName: displayName, UpstreamName: upstreamName, Capabilities: capabilities})
+		models = append(models, providerModelInput{Name: name, DisplayName: displayName, UpstreamName: upstreamName, Protocol: protocol, Capabilities: capabilities})
 		more, err := prompts.askYesNo("Add another model", false)
 		if err != nil {
 			return nil, err
@@ -1891,6 +2030,10 @@ func promptProviderModelsInteractive(prompts *promptSession, providerType string
 				_, _ = fmt.Fprintln(prompts.out, "Add at least one model.")
 				continue
 			}
+			if err := validateProviderModelProtocols(providerType, models); err != nil {
+				_, _ = fmt.Fprintln(prompts.out, err.Error()+".")
+				continue
+			}
 			return models, nil
 		}
 	}
@@ -1900,11 +2043,13 @@ func promptProviderModelInteractive(prompts *promptSession, providerType string,
 	name := ""
 	displayName := ""
 	upstreamName := ""
+	protocol := ""
 	capabilities := defaultCapabilities(providerType)
 	if existing != nil {
 		name = existing.Name
 		displayName = existing.DisplayName
 		upstreamName = existing.UpstreamName
+		protocol = existing.Protocol
 		capabilities = append([]string(nil), existing.Capabilities...)
 	}
 	if err := prompts.runHuhForm(
@@ -1919,6 +2064,16 @@ func promptProviderModelInteractive(prompts *promptSession, providerType string,
 	if strings.TrimSpace(upstreamName) == "" {
 		upstreamName = name
 	}
+	if isOpenCodeProviderType(providerType) {
+		selectedProtocol, err := prompts.askChoiceWithDescription("Protocol", modelProtocolDescription(providerType), supportedProtocols(providerType), defaultProtocolChoice(providerType, protocol))
+		if err != nil {
+			return providerModelInput{}, err
+		}
+		protocol = selectedProtocol
+		if existing == nil || len(capabilities) == 0 {
+			capabilities = protocolDefaultCapabilities(providerType, protocol)
+		}
+	}
 	selectedCaps, err := prompts.askMultiChoiceWithDescription("Capabilities", capabilitySelectionDescription(providerType), supportedCapabilities(providerType), capabilities)
 	if err != nil {
 		return providerModelInput{}, err
@@ -1927,8 +2082,25 @@ func promptProviderModelInteractive(prompts *promptSession, providerType string,
 		Name:         strings.TrimSpace(name),
 		DisplayName:  strings.TrimSpace(displayName),
 		UpstreamName: strings.TrimSpace(upstreamName),
+		Protocol:     protocol,
 		Capabilities: selectedCaps,
 	}, nil
+}
+
+func allModelsHaveProtocol(providerType string, models []providerModelInput) bool {
+	for _, model := range models {
+		if validateModelProtocolValue(providerType, model.Protocol) != nil {
+			return false
+		}
+	}
+	return len(models) > 0
+}
+
+func defaultProtocolChoice(providerType, current string) string {
+	if validateModelProtocolValue(providerType, current) == nil && current != "" {
+		return current
+	}
+	return "chat"
 }
 
 func promptAuthClientsInteractive(prompts *promptSession, availableModels []string, existing []authClientInput) ([]authClientInput, error) {
@@ -2401,7 +2573,25 @@ func listenerTimeoutsDescription() string {
 }
 
 func providerTypeDescription() string {
-	return "Choose the upstream adapter type. 'openai-compatible' is for OpenAI-style APIs hosted elsewhere."
+	return "Choose the upstream adapter type. 'openai-compatible' is for OpenAI-style APIs hosted elsewhere. 'opencode-zen' and 'opencode-go' target the OpenCode Zen and Go services with per-model protocol selection."
+}
+
+func modelProtocolDescription(providerType string) string {
+	if providerType == "opencode-go" {
+		return "Upstream protocol for this model on OpenCode Go: 'chat' serves chat, 'responses' serves responses, 'messages' serves chat and responses via translation. The service, not the URL, selects behavior."
+	}
+	return "Upstream protocol for this model: 'chat' serves chat, 'responses' serves responses, 'messages' and 'gemini' serve chat and responses via translation. The service, not the URL, selects behavior."
+}
+
+func openCodeBaseURLDescription(providerType string) string {
+	var serviceURL string
+	switch providerType {
+	case "opencode-go":
+		serviceURL = "https://opencode.ai/zen/go/v1"
+	default:
+		serviceURL = "https://opencode.ai/zen/v1"
+	}
+	return "Optional transport override only; the default is " + serviceURL + ". An override never changes service selection, auth, or header behavior. Leave blank to use the default."
 }
 
 func credentialStorageDescription() string {
@@ -2852,6 +3042,10 @@ func defaultProviderEnvExpression(providerType string) string {
 		return `env("ANTHROPIC_API_KEY")`
 	case "gemini":
 		return `env("GEMINI_API_KEY")`
+	case "opencode-zen":
+		return `env("OPENCODE_ZEN_API_KEY")`
+	case "opencode-go":
+		return `env("OPENCODE_GO_API_KEY")`
 	default:
 		return `env("OPENAI_API_KEY")`
 	}
@@ -2867,6 +3061,8 @@ func defaultCapabilities(providerType string) []string {
 		return capabilities[:2]
 	case "gemini":
 		return capabilities
+	case "opencode-zen", "opencode-go":
+		return capabilities
 	default:
 		return capabilities[:2]
 	}
@@ -2880,6 +3076,8 @@ func supportedCapabilities(providerType string) []string {
 		return []string{"chat", "responses"}
 	case "gemini":
 		return []string{"chat", "responses", "embeddings"}
+	case "opencode-zen", "opencode-go":
+		return []string{"chat", "responses"}
 	default:
 		return nil
 	}
@@ -3154,6 +3352,7 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 		}
 		model.DisplayName = parseLiteralOrExpression(attributeExpr(src, modelBlock.Body, "display_name"))
 		model.UpstreamName = parseLiteralOrExpression(attributeExpr(src, modelBlock.Body, "upstream_name"))
+		model.Protocol = parseLiteralOrExpression(attributeExpr(src, modelBlock.Body, "protocol"))
 		model.Capabilities = parseQuotedListExpr(attributeExpr(src, modelBlock.Body, "capabilities"))
 		input.Models = append(input.Models, model)
 	}

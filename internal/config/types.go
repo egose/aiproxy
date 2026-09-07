@@ -95,6 +95,17 @@ const (
 	ProviderTypeOpenAICompatible ProviderType = "openai-compatible"
 	ProviderTypeAnthropic        ProviderType = "anthropic"
 	ProviderTypeGemini           ProviderType = "gemini"
+	ProviderTypeOpenCodeZen      ProviderType = "opencode-zen"
+	ProviderTypeOpenCodeGo       ProviderType = "opencode-go"
+)
+
+type ModelProtocol string
+
+const (
+	ModelProtocolChat      ModelProtocol = "chat"
+	ModelProtocolResponses ModelProtocol = "responses"
+	ModelProtocolMessages  ModelProtocol = "messages"
+	ModelProtocolGemini    ModelProtocol = "gemini"
 )
 
 type Capability string
@@ -139,6 +150,7 @@ type Model struct {
 	Name         string
 	DisplayName  string
 	UpstreamName string
+	Protocol     ModelProtocol
 	Capabilities []Capability
 }
 

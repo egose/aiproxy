@@ -324,7 +324,7 @@ func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Durat
 		if upstream == "" {
 			upstream = m.Name
 		}
-		model := Model{Name: m.Name, DisplayName: m.DisplayName, UpstreamName: upstream, Capabilities: make([]Capability, 0, len(m.Capabilities))}
+		model := Model{Name: m.Name, DisplayName: m.DisplayName, UpstreamName: upstream, Protocol: ModelProtocol(m.Protocol), Capabilities: make([]Capability, 0, len(m.Capabilities))}
 		for _, c := range m.Capabilities {
 			model.Capabilities = append(model.Capabilities, Capability(c))
 		}

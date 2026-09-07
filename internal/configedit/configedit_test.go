@@ -49,6 +49,46 @@ provider "openai" "primary" {
 	}
 }
 
+func TestRenderProviderBlockOpenCodeProtocol(t *testing.T) {
+	block := RenderProviderBlock(ProviderInput{
+		ProviderType: "opencode-go",
+		Name:         "go",
+		BaseURL:      "http://127.0.0.1:18081",
+		Credential:   ProviderCredentialInput{Mode: "inline", APIKeyValue: `env("OPENCODE_GO_API_KEY")`},
+		Models: []ProviderModelInput{
+			{Name: "minimax-m3", Protocol: "messages", Capabilities: []string{"chat", "responses"}},
+			{Name: "glm-5.3", UpstreamName: "glm-5.3", Protocol: "chat", Capabilities: []string{"chat"}},
+		},
+	}, "/unused/keys.json")
+	for _, want := range []string{
+		`provider "opencode-go" "go" {`,
+		`base_url = "http://127.0.0.1:18081"`,
+		`api_key = env("OPENCODE_GO_API_KEY")`,
+		`model "minimax-m3" {`,
+		`protocol = "messages"`,
+		`capabilities = ["chat", "responses"]`,
+		`model "glm-5.3" {`,
+		`protocol = "chat"`,
+		`capabilities = ["chat"]`,
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("rendered block missing %q:\n%s", want, block)
+		}
+	}
+	if err := ValidateGeneratedConfig([]byte(block), "config.hcl"); err != nil {
+		t.Fatalf("ValidateGeneratedConfig(): %v", err)
+	}
+	updated, err := UpsertBlock("", block, func(candidate TopLevelBlock) bool {
+		return candidate.Type == "provider" && len(candidate.Labels) >= 2 && candidate.Labels[1] == "go"
+	})
+	if err != nil {
+		t.Fatalf("UpsertBlock(): %v", err)
+	}
+	if !strings.Contains(updated, `protocol = "messages"`) || !strings.Contains(updated, `base_url = "http://127.0.0.1:18081"`) {
+		t.Fatalf("round trip dropped protocol or override:\n%s", updated)
+	}
+}
+
 func TestRenderProviderBlockDisabled(t *testing.T) {
 	disabled := false
 	block := RenderProviderBlock(ProviderInput{

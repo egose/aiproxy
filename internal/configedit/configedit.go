@@ -80,6 +80,7 @@ type ProviderModelInput struct {
 	Name         string
 	DisplayName  string
 	UpstreamName string
+	Protocol     string
 	Capabilities []string
 }
 
@@ -272,6 +273,11 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 		if model.UpstreamName != "" && model.UpstreamName != model.Name {
 			b.WriteString("    upstream_name = ")
 			b.WriteString(strconv.Quote(model.UpstreamName))
+			b.WriteString("\n")
+		}
+		if model.Protocol != "" {
+			b.WriteString("    protocol = ")
+			b.WriteString(strconv.Quote(model.Protocol))
 			b.WriteString("\n")
 		}
 		if len(model.Capabilities) > 0 {

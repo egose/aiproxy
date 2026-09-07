@@ -106,6 +106,76 @@ Use this when:
 - you want simple balancing across two backends
 - you want alias retry behavior on transport failures, timeouts, and configured retryable upstream statuses
 
+## OpenCode Zen And Go
+
+This setup exposes Zen and Go models side by side with explicit per-model
+protocols. Base URLs are omitted so each type uses its service default; an
+optional `base_url` would only override transport, never service selection.
+
+```hcl
+listener "http" "public" {
+  address = ":8080"
+}
+
+auth "main" {
+  mode = "none"
+}
+
+provider "opencode-zen" "zen" {
+  api_key = env("OPENCODE_ZEN_API_KEY")
+
+  model "glm-5.3" {
+    protocol     = "chat"
+    capabilities = ["chat"]
+  }
+
+  model "claude-sonnet-5" {
+    protocol = "messages"
+  }
+}
+
+provider "opencode-go" "go" {
+  api_key = env("OPENCODE_GO_API_KEY")
+
+  model "minimax-m3" {
+    protocol = "messages"
+  }
+
+  model "glm-5.3" {
+    protocol = "chat"
+  }
+}
+
+alias "chat_fallback" {
+  algorithm = "round_robin"
+
+  target {
+    provider = "zen"
+    model    = "glm-5.3"
+  }
+
+  target {
+    provider = "go"
+    model    = "glm-5.3"
+  }
+}
+```
+
+Public model names are `zen/glm-5.3` and `go/minimax-m3`. `chat` and
+`responses` protocols are native pass-through for one public operation each,
+while `messages` (and `gemini`, Zen only) serve both through the conservative
+translation subsets. Direct requests never cross services; only the explicit
+`chat_fallback` alias above may retry across them. `opencode-go` sends
+`x-opencode-session` on every upstream request. Complete validated versions of
+these blocks live in `examples/opencode-zen.hcl` and
+`examples/opencode-go.hcl`.
+
+Use this when:
+
+- you serve OpenCode models through the proxy with static, reviewable routing
+- the same model name needs different protocols per service
+- you want explicit alias failover without implicit cross-service rerouting
+
 ## Multi-Provider Chat Pool With Tenant-Aware Auth
 
 This example mixes translated and pass-through providers and adds tenant metadata plus a local rate limit.

@@ -12,34 +12,40 @@ OpenAI-compatible responses.
 
 <!-- docs-contract:public-matrix:start -->
 
-| Surface                         | `openai`                           | `openai-compatible`                | `anthropic`                        | `gemini`                           |
-| ------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- |
-| `GET /v1/models`                | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        |
-| `GET /v1/billing/usage`         | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting |
-| `GET /metrics`                  | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     |
-| `POST /v1/chat/completions`     | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated            | JSON and SSE translated            |
-| `POST /v1/embeddings`           | Yes                                | Yes                                | No                                 | Yes                                |
-| `POST /v1/responses`            | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated subset     | JSON and SSE translated subset     |
-| `POST /v1/images/generations`   | Yes                                | Yes                                | No                                 | No                                 |
-| `POST /v1/audio/transcriptions` | Yes                                | Yes                                | No                                 | No                                 |
-| `POST /v1/audio/speech`         | Yes                                | Yes                                | No                                 | No                                 |
+| Surface                         | `openai`                           | `openai-compatible`                | `anthropic`                        | `gemini`                           | `opencode-zen`                           | `opencode-go`                            |
+| ------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------------- | ---------------------------------------- |
+| `GET /v1/models`                | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                              | Proxy-owned                              |
+| `GET /v1/billing/usage`         | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting       | Proxy-owned local usage accounting       |
+| `GET /metrics`                  | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics           | Proxy-owned Prometheus metrics           |
+| `POST /v1/chat/completions`     | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated            | JSON and SSE translated            | JSON and SSE native or translated subset | JSON and SSE native or translated subset |
+| `POST /v1/embeddings`           | Yes                                | Yes                                | No                                 | Yes                                | No                                       | No                                       |
+| `POST /v1/responses`            | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated subset     | JSON and SSE translated subset     | JSON and SSE native or translated subset | JSON and SSE native or translated subset |
+| `POST /v1/images/generations`   | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       |
+| `POST /v1/audio/transcriptions` | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       |
+| `POST /v1/audio/speech`         | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       |
 
 <!-- docs-contract:public-matrix:end -->
 
 <!-- docs-contract:capability-matrix:start -->
 
-| Provider type       | Default capabilities when omitted | Additional supported capabilities                |
-| ------------------- | --------------------------------- | ------------------------------------------------ |
-| `openai`            | `chat`, `responses`, `embeddings` | `images`, `audio_transcriptions`, `audio_speech` |
-| `openai-compatible` | `chat`, `responses`, `embeddings` | `images`, `audio_transcriptions`, `audio_speech` |
-| `anthropic`         | `chat`, `responses`               | None                                             |
-| `gemini`            | `chat`, `responses`               | `embeddings`                                     |
+| Provider type       | Default capabilities when omitted          | Additional supported capabilities                |
+| ------------------- | ------------------------------------------ | ------------------------------------------------ |
+| `openai`            | `chat`, `responses`, `embeddings`          | `images`, `audio_transcriptions`, `audio_speech` |
+| `openai-compatible` | `chat`, `responses`, `embeddings`          | `images`, `audio_transcriptions`, `audio_speech` |
+| `anthropic`         | `chat`, `responses`                        | None                                             |
+| `gemini`            | `chat`, `responses`                        | `embeddings`                                     |
+| `opencode-zen`      | `chat`, `responses`, or both (by protocol) | None                                             |
+| `opencode-go`       | `chat`, `responses`, or both (by protocol) | None                                             |
 
 <!-- docs-contract:capability-matrix:end -->
 
 Capabilities are enforced per configured model. If `capabilities` is omitted,
 the provider-type defaults above are used; explicit values can narrow or, where
-listed as additionally supported, opt a model into more operations.
+listed as additionally supported, opt a model into more operations. For
+`opencode-zen` and `opencode-go` the omitted default comes from the model's
+required `protocol`: `chat` defaults to `chat`, `responses` defaults to
+`responses`, and `messages` (both services) plus `gemini` (Zen only) default to
+`chat` and `responses`.
 
 ### Auth Modes
 
@@ -70,8 +76,54 @@ listed as additionally supported, opt a model into more operations.
 - `openai-compatible` – any OpenAI-compatible endpoint (requires `base_url`)
 - `anthropic` – chat and responses translation to Anthropic Messages API
 - `gemini` – chat translation to Gemini generateContent API, embeddings translation to Gemini embedContent API, and responses translation through generateContent
+- `opencode-zen` – OpenCode Zen service (defaults to `https://opencode.ai/zen/v1`); every model declares a required `protocol`
+- `opencode-go` – OpenCode Go service (defaults to `https://opencode.ai/zen/go/v1`); every model declares a required `protocol`
 
 Pass-through providers rewrite only the top-level `model` JSON field and preserve other request fields, including unknown extension fields. Translated providers reject unsupported top-level request controls rather than silently dropping them; their supported chat fields are `model`, `messages`, `max_tokens`, `temperature`, `top_p`, and `stream`, their supported responses fields are `model`, `input`, `instructions`, `max_output_tokens`, `temperature`, `top_p`, and `stream`, and Gemini embeddings supports `model`, `input`, and `dimensions`.
+
+OpenCode providers share one adapter behind the two explicit types: the type
+selects the service, never the URL or credential. `protocol` is `chat`,
+`responses`, `messages`, or `gemini` (`gemini` is Zen-only). `chat` and
+`responses` protocols are native pass-through and each serve one public
+operation; `messages` and `gemini` serve `chat` and `responses` through the
+existing conservative translation subsets. A public operation the model's
+protocol does not serve is rejected before any upstream I/O. `base_url` is an
+optional transport override only and never reclassifies the service. Every
+upstream request sends `User-Agent: aiproxy/<version>`; `opencode-go`
+additionally sends `x-opencode-session` (a caller-supplied value is forwarded
+only when it is 1-128 `[A-Za-z0-9_-]` characters, otherwise a fresh per-request
+ID is generated). No other inbound headers or credentials are forwarded.
+Public model names look like `zen/glm-5.3` and `go/minimax-m3`:
+
+```hcl
+provider "opencode-zen" "zen" {
+  api_key = env("OPENCODE_ZEN_API_KEY")
+
+  model "glm-5.3" {
+    protocol     = "chat"
+    capabilities = ["chat"]
+  }
+
+  model "claude-sonnet-5" {
+    protocol = "messages"
+  }
+}
+
+provider "opencode-go" "go" {
+  api_key = env("OPENCODE_GO_API_KEY")
+
+  model "minimax-m3" {
+    protocol = "messages"
+  }
+
+  model "glm-5.3" {
+    protocol = "chat"
+  }
+}
+```
+
+See `examples/opencode-zen.hcl` and `examples/opencode-go.hcl` for complete
+validated configs, including explicit alias targets.
 
 ### Routing
 
@@ -267,6 +319,15 @@ aiproxy configure provider \
   --api-key "$LOCALAI_API_KEY" \
   --model qwen3-32b=qwen/qwen3-32b \
   --model-capabilities qwen3-32b=chat,responses
+
+aiproxy configure provider \
+  --config /etc/aiproxy/config.hcl \
+  --non-interactive \
+  --name zen \
+  --type opencode-zen \
+  --api-key-env OPENCODE_ZEN_API_KEY \
+  --model glm-5.3 \
+  --model-protocol glm-5.3=chat
 
 aiproxy configure alias \
   --config /etc/aiproxy/config.hcl \
@@ -493,6 +554,23 @@ provider "openai" "backup" {
   `openai-compatible`, `anthropic`, and `gemini` providers. The translated
   provider path supports a conservative request subset for both JSON and
   streaming responses.
+- `opencode-zen` and `opencode-go` serve `POST /v1/chat/completions` and
+  `POST /v1/responses` per model protocol: `chat` serves chat only,
+  `responses` serves responses only, and `messages` (both services) plus
+  `gemini` (Zen only) serve both through the existing conservative translation
+  subsets. Any other operation/protocol combination, including `embeddings`,
+  `images`, and audio on both OpenCode types, is rejected before upstream I/O.
+- `opencode-go` sends `x-opencode-session` on every upstream request for prompt
+  caching. Callers may supply their own session value (1-128 characters of
+  `[A-Za-z0-9_-]`); missing or invalid values get a fresh per-request ID, never
+  a shared global session. `opencode-zen` sends no session header.
+- Direct `<provider>/<model>` requests never cross OpenCode services. Upstream
+  Go quota/limit errors are returned to the client like any other upstream
+  error; only explicitly configured aliases retry another target, and the proxy
+  never reroutes to the other service on its own. The upstream console setting
+  that spends Zen balance past Go limits is an account setting, not proxy
+  routing. Model catalogs are static configuration; the proxy performs no
+  runtime catalog sync.
 - `/metrics` exposes Prometheus-format metrics for provider selection, alias
   retries, skipped providers, readiness state, startup inventory gauges for
   build version / auth mode / provider types / alias algorithms, explicit
