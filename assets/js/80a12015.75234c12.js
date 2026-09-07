@@ -528,9 +528,13 @@ function _createMdxContent(props) {
         children: "opencode-go"
       }), " additionally send ", (0,jsx_runtime.jsx)(_components.code, {
         children: "x-opencode-session"
-      }), " for\nprompt caching: a caller-supplied value is forwarded as-is when it is 1-128\ncharacters of ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " for\nprompt caching: a caller-supplied ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "x-opencode-session"
+      }), " is forwarded as-is when it is 1-128\ncharacters of ", (0,jsx_runtime.jsx)(_components.code, {
         children: "[A-Za-z0-9_-]"
-      }), "; otherwise the proxy generates a fresh\nper-request ", (0,jsx_runtime.jsx)(_components.code, {
+      }), "; otherwise the caller's ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Session-Id"
+      }), " is adopted\nwhen valid, and only then does the proxy generate a fresh\nper-request ", (0,jsx_runtime.jsx)(_components.code, {
         children: "ses_"
       }), " + 128-bit hex ID. Missing or invalid values never fail the\nrequest and never create shared cross-client state. No other inbound headers\nor credentials are forwarded."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {

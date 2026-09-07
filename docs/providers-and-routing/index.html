@@ -6,7 +6,7 @@
 <title data-rh="true">Providers and Routing | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/providers-and-routing/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Providers and Routing | aiproxy"><meta data-rh="true" name="description" content="aiproxy separates the client-facing model name from the concrete upstream target."><meta data-rh="true" property="og:description" content="aiproxy separates the client-facing model name from the concrete upstream target."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/providers-and-routing/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/providers-and-routing/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/providers-and-routing/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Providers and Routing","item":"https://aiproxy.pages.dev/docs/providers-and-routing"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
 <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.ad7227f1.css">
-<script src="/assets/js/runtime~main.a51a0e98.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.4cea71ba.js" defer="defer"></script>
 <script src="/assets/js/main.8b8c49ad.js" defer="defer"></script>
 </head>
 <body>
@@ -95,8 +95,9 @@ from the model name. There is no generic <code>opencode</code> type.</p>
 <p>Every upstream request sends <code>User-Agent: aiproxy/&lt;version&gt;</code>; the inbound
 <code>User-Agent</code> is never forwarded and the proxy never impersonates the OpenCode
 client IDs. Both <code>opencode-zen</code> and <code>opencode-go</code> additionally send <code>x-opencode-session</code> for
-prompt caching: a caller-supplied value is forwarded as-is when it is 1-128
-characters of <code>[A-Za-z0-9_-]</code>; otherwise the proxy generates a fresh
+prompt caching: a caller-supplied <code>x-opencode-session</code> is forwarded as-is when it is 1-128
+characters of <code>[A-Za-z0-9_-]</code>; otherwise the caller&#x27;s <code>X-Session-Id</code> is adopted
+when valid, and only then does the proxy generate a fresh
 per-request <code>ses_</code> + 128-bit hex ID. Missing or invalid values never fail the
 request and never create shared cross-client state. No other inbound headers
 or credentials are forwarded.</p>

@@ -458,7 +458,9 @@ function _createMdxContent(props) {
         children: "opencode-go"
       }), " send ", (0,jsx_runtime.jsx)(_components.code, {
         children: "x-opencode-session"
-      }), " on every upstream\nrequest (caller values are forwarded only when valid, otherwise a fresh\nper-request ID is generated); direct requests never cross services, and only\nexplicitly configured aliases retry another target. See\n", (0,jsx_runtime.jsx)(_components.a, {
+      }), " on every upstream\nrequest (caller values are forwarded only when valid, falling back to a valid\ncaller ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Session-Id"
+      }), ", otherwise a fresh\nper-request ID is generated); direct requests never cross services, and only\nexplicitly configured aliases retry another target. See\n", (0,jsx_runtime.jsx)(_components.a, {
         href: "/docs/providers-and-routing",
         children: "Providers and Routing"
       }), " for the full contract and\n", (0,jsx_runtime.jsx)(_components.code, {
