@@ -709,6 +709,31 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "That makes it suitable for API keys, bearer tokens, URLs, and other deployment-specific values."
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Set ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "$AIPROXY_CONFIG"
+      }), " to inline the whole HCL document and skip the config file:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "export AIPROXY_CONFIG='listener \"http\" \"public\" { address = \":8080\" }\nauth \"main\" { mode = \"none\" }\nprovider \"openai\" \"openai\" {\n  api_key = env(\"OPENAI_API_KEY\")\n  model \"gpt-4o-mini\" {}\n}'\naiproxy validate\naiproxy serve\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["An explicit ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--config"
+      }), " overrides ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "$AIPROXY_CONFIG"
+      }), ". ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "serve -d"
+      }), " and the\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "configure"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "login"
+      }), " file workflows require a file. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), " re-reads\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "$AIPROXY_CONFIG"
+      }), " when the server was started from it."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["For local runs, if your config depends on variables in ", (0,jsx_runtime.jsx)(_components.code, {
         children: ".env"
       }), ", load them first:"]
@@ -956,7 +981,7 @@ function _createMdxContent(props) {
         children: "$XDG_CONFIG_HOME/aiproxy/dashboard.token"
       }), "; the ", (0,jsx_runtime.jsx)(_components.code, {
         children: "dashboard"
-      }), "\ncommand reads that file to authenticate. The dashboard command is local-only: it\nconnects over loopback plain HTTP and refuses concrete non-loopback listener\nhosts. HTTPS and remote dashboard URLs are not supported by the current\nconfiguration model."]
+      }), "\ncommand reads that file to authenticate. If a reload drops a previously\ndeclared token, the carried-over secret is published to the file before the\nnew runtime activates, so tokenless discovery keeps working; a persistence\nfailure rejects the reload and keeps the old runtime unchanged. The dashboard command is local-only: it\nconnects over loopback plain HTTP and refuses concrete non-loopback listener\nhosts. HTTPS and remote dashboard URLs are not supported by the current\nconfiguration model."]
     })]
   });
 }

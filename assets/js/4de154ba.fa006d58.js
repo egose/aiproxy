@@ -133,7 +133,17 @@ function _createMdxContent(props) {
         children: "~/.config/aiproxy/config.hcl"
       }), " when ", (0,jsx_runtime.jsx)(_components.code, {
         children: "XDG_CONFIG_HOME"
-      }), " is unset."]
+      }), " is unset. Set ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "$AIPROXY_CONFIG"
+      }), "\nto inline HCL to skip the config file (explicit ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--config"
+      }), " overrides it; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "serve -d"
+      }), "\nand ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "configure"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "login"
+      }), " file workflows require a file)."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Foreground ", (0,jsx_runtime.jsx)(_components.code, {
         children: "aiproxy serve"
