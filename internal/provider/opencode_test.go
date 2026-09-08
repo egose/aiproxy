@@ -277,7 +277,7 @@ func TestOpenCodeResponsesJSON(t *testing.T) {
 	for _, providerType := range []config.ProviderType{config.ProviderTypeOpenCodeZen, config.ProviderTypeOpenCodeGo} {
 		t.Run(string(providerType), func(t *testing.T) {
 			cap := &openCodeCapture{}
-			upstream := openCodeUpstream(t, cap, openCodeJSONResponder(`{"id":"resp_1","object":"response","model":"upstream","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"prompt_tokens":4,"completion_tokens":6,"total_tokens":10}}`))
+			upstream := openCodeUpstream(t, cap, openCodeJSONResponder(`{"id":"resp_1","object":"response","model":"upstream","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":4,"output_tokens":6,"total_tokens":10}}`))
 			defer upstream.Close()
 			res, _, _ := openCodeDo(t, upstream, providerType, config.ModelProtocolResponses, OpResponses, "test/gpt", "gpt-5.5", `{"model":"test/gpt","input":"hi"}`)
 			_, method, path, _, _, _, _, body := cap.snapshot()

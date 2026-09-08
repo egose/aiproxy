@@ -557,30 +557,60 @@ func RemoveBlock(source string, match func(TopLevelBlock) bool) (string, bool, e
 	return source, false, nil
 }
 
-func UpsertTopLevelStringAttribute(source, name, value string) string {
-	line := name + " = " + strconv.Quote(value)
-	re := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(name) + `\s*=.*$`)
-	if re.MatchString(source) {
-		return re.ReplaceAllString(source, line)
+func UpsertTopLevelStringAttribute(source, name, value string) (string, error) {
+	quoted := strconv.Quote(value)
+	if strings.TrimSpace(source) == "" {
+		return name + " = " + quoted + "\n", nil
 	}
-	trimmed := strings.TrimLeft(source, "\n")
-	if strings.TrimSpace(trimmed) == "" {
-		return line + "\n"
+	file, diags := hclsyntax.ParseConfig([]byte(source), "config.hcl", hcl.Pos{Line: 1, Column: 1})
+	if diags.HasErrors() {
+		return "", fmt.Errorf("parse config: %s", diags.Error())
 	}
-	return line + "\n\n" + trimmed
+	body, ok := file.Body.(*hclsyntax.Body)
+	if !ok {
+		return "", fmt.Errorf("parse config: unexpected body type")
+	}
+	attr, ok := body.Attributes[name]
+	if !ok {
+		trimmed := strings.TrimLeft(source, "\n")
+		if strings.TrimSpace(trimmed) == "" {
+			return name + " = " + quoted + "\n", nil
+		}
+		return name + " = " + quoted + "\n\n" + trimmed, nil
+	}
+	exprRange := attr.Expr.Range()
+	if exprRange.Start.Byte < 0 || exprRange.End.Byte > len(source) || exprRange.End.Byte < exprRange.Start.Byte {
+		return "", fmt.Errorf("parse config: attribute %q has out-of-range expression", name)
+	}
+	return source[:exprRange.Start.Byte] + quoted + source[exprRange.End.Byte:], nil
 }
 
-func TopLevelStringAttribute(source, name string) string {
-	re := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(name) + `\s*=\s*(.+?)\s*$`)
-	match := re.FindStringSubmatch(source)
-	if len(match) != 2 {
-		return ""
+func TopLevelStringAttribute(source, name string) (string, error) {
+	if strings.TrimSpace(source) == "" {
+		return "", nil
 	}
-	value, err := strconv.Unquote(strings.TrimSpace(match[1]))
+	file, diags := hclsyntax.ParseConfig([]byte(source), "config.hcl", hcl.Pos{Line: 1, Column: 1})
+	if diags.HasErrors() {
+		return "", fmt.Errorf("parse config: %s", diags.Error())
+	}
+	body, ok := file.Body.(*hclsyntax.Body)
+	if !ok {
+		return "", fmt.Errorf("parse config: unexpected body type")
+	}
+	attr, ok := body.Attributes[name]
+	if !ok {
+		return "", nil
+	}
+	exprRange := attr.Expr.Range()
+	if exprRange.Start.Byte < 0 || exprRange.End.Byte > len(source) || exprRange.End.Byte < exprRange.Start.Byte {
+		return "", fmt.Errorf("parse config: attribute %q has out-of-range expression", name)
+	}
+	raw := strings.TrimSpace(source[exprRange.Start.Byte:exprRange.End.Byte])
+	value, err := strconv.Unquote(raw)
 	if err != nil {
-		return ""
+		return "", nil
 	}
-	return value
+	return value, nil
 }
 
 func ParseTopLevelBlocks(source string) ([]TopLevelBlock, error) {

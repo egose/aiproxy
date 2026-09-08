@@ -95,10 +95,54 @@ type responsesStreamState struct {
 	ItemID       string
 	PublicModel  string
 	Text         strings.Builder
-	Usage        openAIUsage
+	Usage        openAIResponsesUsage
 	Created      bool
 	OutputOpened bool
 	Completed    bool
+}
+
+// Retained-text budget and overflow contract (STREAM-03 release note).
+//
+// Translated Responses streams accumulate generated text in
+// responsesStreamState so the terminal events can replay it:
+// response.output_text.done carries the full text once and
+// response.completed embeds it again inside response.output. Per-event SSE
+// framing limits (maxSSELineBytes/maxSSEEventBytes) reset between events, so
+// without an aggregate bound many individually valid deltas could grow
+// retained state indefinitely.
+//
+// Budget: maxResponsesRetainedTextBytes (1 MiB) of retained translated text
+// per stream. 1 MiB matches the existing per-line SSE bound, so the aggregate
+// is on the order of one maximum line; it covers large realistic model
+// outputs (~250k tokens of text) while peak completion serialization stays
+// small: retained 1x plus the two terminal serializations (~3x transient,
+// ~3 MiB), an order of magnitude below the 32 MiB upstream body cap. The cap
+// is a fixed internal value, not operator configuration: no concrete
+// operator need justifies tuning it. It is a package var (not const) only so
+// tests can substitute a small deterministic budget; production code never
+// changes it.
+//
+// Overflow contract: the delta that would exceed the budget is neither
+// retained nor emitted downstream; translation fails with
+// ErrResponsesOutputOverflow through the existing pipe error boundary
+// (reusing the STREAM-02 propagation path), upstream is closed, and no
+// response.completed or data: [DONE] terminal is emitted. Partial text
+// already streamed as deltas stays downstream; only the successful terminal
+// is withheld. Opaque pass-through streams (openai/openai-compatible) are
+// intentionally not capped: they retain no aggregate text, only a bounded
+// per-event usage observer.
+//
+// Non-streaming translated Responses JSON (translateAnthropicResponsesResponse,
+// translateGeminiResponsesResponse) does not use this accumulator; its input
+// remains bounded by the existing maxUpstreamBodyBytes body cap.
+var maxResponsesRetainedTextBytes = 1 << 20
+
+type ErrResponsesOutputOverflow struct {
+	Limit int
+}
+
+func (e ErrResponsesOutputOverflow) Error() string {
+	return fmt.Sprintf("translated responses output exceeds %d bytes", e.Limit)
 }
 
 func newResponsesStreamState(publicModel, fallbackID string) *responsesStreamState {
@@ -119,30 +163,42 @@ func (s *responsesStreamState) ensureIDs(fallbackID string) {
 	}
 }
 
-func (s *responsesStreamState) setUsage(usage openAIUsage) {
-	if usage.PromptTokens > 0 {
-		s.Usage.PromptTokens = usage.PromptTokens
+func (s *responsesStreamState) setUsage(usage openAIResponsesUsage) {
+	if usage.InputTokens > 0 {
+		s.Usage.InputTokens = usage.InputTokens
 	}
-	if usage.CompletionTokens > 0 {
-		s.Usage.CompletionTokens = usage.CompletionTokens
+	if usage.OutputTokens > 0 {
+		s.Usage.OutputTokens = usage.OutputTokens
 	}
 	if usage.TotalTokens > 0 {
 		s.Usage.TotalTokens = usage.TotalTokens
 	}
-	if s.Usage.TotalTokens == 0 {
-		s.Usage.TotalTokens = s.Usage.PromptTokens + s.Usage.CompletionTokens
+	if total := s.Usage.InputTokens + s.Usage.OutputTokens; total > s.Usage.TotalTokens {
+		s.Usage.TotalTokens = total
 	}
 }
 
-func (s *responsesStreamState) appendText(delta string) {
+func reconcileResponsesUsage(input, output, total int) openAIResponsesUsage {
+	out := openAIResponsesUsage{InputTokens: input, OutputTokens: output, TotalTokens: total}
+	if out.TotalTokens == 0 || input+output > out.TotalTokens {
+		out.TotalTokens = input + output
+	}
+	return out
+}
+
+func (s *responsesStreamState) appendText(delta string) error {
+	if s.Text.Len()+len(delta) > maxResponsesRetainedTextBytes {
+		return ErrResponsesOutputOverflow{Limit: maxResponsesRetainedTextBytes}
+	}
 	s.Text.WriteString(delta)
+	return nil
 }
 
 func (s *responsesStreamState) text() string {
 	return s.Text.String()
 }
 
-func buildResponsesObject(id, publicModel, text, status string, usage openAIUsage) openAIResponsesResponse {
+func buildResponsesObject(id, publicModel, text, status string, usage openAIResponsesUsage) openAIResponsesResponse {
 	out := openAIResponsesResponse{
 		ID:     id,
 		Object: "response",
@@ -161,13 +217,13 @@ func buildResponsesObject(id, publicModel, text, status string, usage openAIUsag
 			}},
 		}}
 	}
-	if usage.PromptTokens > 0 || usage.CompletionTokens > 0 || usage.TotalTokens > 0 {
-		out.Usage = usage
+	if usage.InputTokens > 0 || usage.OutputTokens > 0 || usage.TotalTokens > 0 {
+		out.Usage = &usage
 	}
 	return out
 }
 
-func buildResponsesOutput(id, publicModel, text string, usage openAIUsage) ([]byte, error) {
+func buildResponsesOutput(id, publicModel, text string, usage openAIResponsesUsage) ([]byte, error) {
 	out := buildResponsesObject(id, publicModel, text, "completed", usage)
 	return json.Marshal(out)
 }
@@ -197,7 +253,7 @@ func writeResponsesCreated(w io.Writer, state *responsesStreamState) error {
 		Response openAIResponsesResponse `json:"response"`
 	}{
 		Type:     "response.created",
-		Response: buildResponsesObject(state.ResponseID, state.PublicModel, "", "in_progress", openAIUsage{}),
+		Response: buildResponsesObject(state.ResponseID, state.PublicModel, "", "in_progress", openAIResponsesUsage{}),
 	}); err != nil {
 		return err
 	}
@@ -236,10 +292,15 @@ func writeResponsesDelta(w io.Writer, state *responsesStreamState, delta string)
 	if delta == "" {
 		return nil
 	}
+	if state.Text.Len()+len(delta) > maxResponsesRetainedTextBytes {
+		return ErrResponsesOutputOverflow{Limit: maxResponsesRetainedTextBytes}
+	}
 	if err := writeResponsesOutputItemAdded(w, state); err != nil {
 		return err
 	}
-	state.appendText(delta)
+	if err := state.appendText(delta); err != nil {
+		return err
+	}
 	return writeResponsesEvent(w, struct {
 		Type         string `json:"type"`
 		ItemID       string `json:"item_id"`

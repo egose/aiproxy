@@ -67,7 +67,7 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	dashboardTokenMinted, err := ensureDashboardToken(rt, "", false)
+	dashboardTokenMinted, _, err := ensureDashboardToken(rt, config.Dashboard{}, false)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard token: %w", err)
 	}
@@ -231,7 +231,11 @@ func (a *App) Reload() error {
 	if current != nil && rt.Dashboard.Enabled && !current.Dashboard.Enabled {
 		return fmt.Errorf("enabling dashboard requires restart")
 	}
-	dashboardTokenMinted, err := ensureDashboardToken(rt, current.Dashboard.Token, true)
+	var currentDashboard config.Dashboard
+	if current != nil {
+		currentDashboard = current.Dashboard
+	}
+	dashboardTokenMinted, dashboardTokenPublished, err := ensureDashboardToken(rt, currentDashboard, true)
 	if err != nil {
 		return fmt.Errorf("dashboard token: %w", err)
 	}
@@ -253,7 +257,7 @@ func (a *App) Reload() error {
 	a.health = nextHealth
 	a.rateLimiter = nextRateLimiter
 	a.dashboardTokenMinted = dashboardTokenMinted
-	a.dashboardTokenWritten = a.dashboardTokenWritten || dashboardTokenMinted
+	a.dashboardTokenWritten = a.dashboardTokenWritten || dashboardTokenPublished
 	a.mu.Unlock()
 	if oldHealth != nil && oldHealth != nextHealth {
 		_ = oldHealth.Close()
@@ -287,7 +291,7 @@ func (a *App) persistDashboardTokenIfNeeded() error {
 	if !a.dashboardTokenMinted || a.dashboardTokenWritten {
 		return nil
 	}
-	if err := dashrpc.PersistToken(a.Config.Dashboard.Token); err != nil {
+	if err := persistDashboardToken(a.Config.Dashboard.Token); err != nil {
 		return err
 	}
 	a.dashboardTokenWritten = true
@@ -409,26 +413,37 @@ func applyServerConfig(server *http.Server, listener config.Listener) {
 	}
 }
 
-func ensureDashboardToken(rt *config.Runtime, existing string, persist bool) (bool, error) {
+var persistDashboardToken = dashrpc.PersistToken
+
+func ensureDashboardToken(rt *config.Runtime, current config.Dashboard, persist bool) (minted bool, published bool, err error) {
 	if !rt.Dashboard.Enabled {
-		return false, nil
+		return false, false, nil
 	}
 	if rt.Dashboard.Token != "" {
-		return false, nil
+		return false, false, nil
 	}
-	if existing != "" {
-		rt.Dashboard.Token = existing
-		return false, nil
+	if current.Token != "" {
+		rt.Dashboard.Token = current.Token
+		if !current.TokenFromConfig || !persist {
+			return false, false, nil
+		}
+		if err := persistDashboardToken(current.Token); err != nil {
+			rt.Dashboard.Token = ""
+			return false, false, err
+		}
+		return false, true, nil
 	}
 	token, err := dashrpc.MintToken()
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if persist {
-		if err := dashrpc.PersistToken(token); err != nil {
-			return false, err
+		if err := persistDashboardToken(token); err != nil {
+			return false, false, err
 		}
+		rt.Dashboard.Token = token
+		return true, true, nil
 	}
 	rt.Dashboard.Token = token
-	return true, nil
+	return true, false, nil
 }

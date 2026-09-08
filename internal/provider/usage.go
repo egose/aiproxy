@@ -41,19 +41,71 @@ func usageFromBody(body []byte) Usage {
 	if len(body) == 0 || body[0] != '{' {
 		return Usage{}
 	}
-	if u := extractOpenAIUsage(body); u.Has() {
-		return u
-	}
-	if u := extractAnthropicUsage(body); u.Has() {
-		return u
-	}
 	if u := extractGeminiUsage(body); u.Has() {
 		return u
+	}
+	raw := rawTopLevelUsage(body)
+	if raw == nil {
+		return Usage{}
+	}
+	if hasUsageKey(raw, "input_tokens") || hasUsageKey(raw, "output_tokens") {
+		if u := extractOpenAIResponsesUsage(body); u.Has() {
+			return u
+		}
+		return Usage{}
+	}
+	if hasUsageKey(raw, "prompt_tokens") || hasUsageKey(raw, "completion_tokens") {
+		if u := extractOpenAIUsage(body); u.Has() {
+			return u
+		}
+		return Usage{}
 	}
 	if u := extractOpenAIResponsesUsage(body); u.Has() {
 		return u
 	}
 	return Usage{}
+}
+
+func rawTopLevelUsage(body []byte) json.RawMessage {
+	var envelope struct {
+		Usage json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil
+	}
+	if len(envelope.Usage) == 0 || string(envelope.Usage) == "null" {
+		return nil
+	}
+	return envelope.Usage
+}
+
+func hasUsageKey(raw json.RawMessage, key string) bool {
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		return false
+	}
+	_, ok := keys[key]
+	return ok
+}
+
+func usageFromSSEData(data []byte) Usage {
+	if u := usageFromBody(data); u.Has() {
+		return u
+	}
+	var envelope struct {
+		Response struct {
+			Usage json.RawMessage `json:"usage"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return Usage{}
+	}
+	if len(envelope.Response.Usage) == 0 || string(envelope.Response.Usage) == "null" {
+		return Usage{}
+	}
+	wrapped := append([]byte(`{"usage":`), envelope.Response.Usage...)
+	wrapped = append(wrapped, '}')
+	return usageFromBody(wrapped)
 }
 
 func extractOpenAIUsage(body []byte) Usage {

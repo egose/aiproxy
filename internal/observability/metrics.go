@@ -55,35 +55,35 @@ func NewMetrics() *Metrics {
 		registry: registry,
 		httpRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "aiproxy_http_requests_total",
-			Help: "Total number of inbound HTTP requests by method, path, and status.",
+			Help: "Total number of inbound HTTP requests by method, path, and status. The method label is normalized to a standard method or UNKNOWN.",
 		}, []string{"method", "path", "status"}),
 		httpLatency: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "aiproxy_http_request_duration_seconds",
-			Help:    "End-to-end latency of inbound HTTP requests by method, path, and status.",
+			Help:    "End-to-end latency of inbound HTTP requests by method, path, and status. The method label is normalized to a standard method or UNKNOWN.",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"method", "path", "status"}),
 		httpRequestBytes: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "aiproxy_http_request_body_bytes",
-			Help:    "Size of inbound HTTP request bodies by method and path.",
+			Help:    "Size of inbound HTTP request bodies by method and path. The method label is normalized to a standard method or UNKNOWN.",
 			Buckets: prometheus.ExponentialBuckets(64, 2, 12),
 		}, []string{"method", "path"}),
 		httpResponseBytes: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "aiproxy_http_response_body_bytes",
-			Help:    "Size of outbound HTTP response bodies by method, path, and status.",
+			Help:    "Size of outbound HTTP response bodies by method, path, and status. The method label is normalized to a standard method or UNKNOWN.",
 			Buckets: prometheus.ExponentialBuckets(64, 2, 12),
 		}, []string{"method", "path", "status"}),
 		httpStreams: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "aiproxy_http_stream_responses_total",
-			Help: "Total number of streaming HTTP responses served by method, path, and status.",
+			Help: "Total number of streaming HTTP responses served by method, path, and status. The method label is normalized to a standard method or UNKNOWN.",
 		}, []string{"method", "path", "status"}),
 		httpStreamLatency: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "aiproxy_http_stream_duration_seconds",
-			Help:    "End-to-end duration of streaming HTTP responses by method, path, and status.",
+			Help:    "End-to-end duration of streaming HTTP responses by method, path, and status. The method label is normalized to a standard method or UNKNOWN.",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"method", "path", "status"}),
 		httpErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "aiproxy_http_errors_total",
-			Help: "Total number of proxy-generated HTTP error responses by method, path, status, and error type.",
+			Help: "Total number of proxy-generated HTTP error responses by method, path, status, and error type. The method label is normalized to a standard method or UNKNOWN.",
 		}, []string{"method", "path", "status", "error_type"}),
 		usageEvents: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "aiproxy_usage_events_total",
@@ -342,10 +342,28 @@ func (m *Metrics) RecordProviderHealthFallback(operation, reason string) {
 	m.providerHealthFallback.WithLabelValues(operation, reason).Inc()
 }
 
+func NormalizeHTTPMethod(method string) string {
+	switch method {
+	case http.MethodGet,
+		http.MethodHead,
+		http.MethodPost,
+		http.MethodPut,
+		http.MethodPatch,
+		http.MethodDelete,
+		http.MethodConnect,
+		http.MethodOptions,
+		http.MethodTrace:
+		return method
+	default:
+		return "UNKNOWN"
+	}
+}
+
 func (m *Metrics) RecordHTTP(method, path string, statusCode int, seconds float64) {
 	if m == nil {
 		return
 	}
+	method = NormalizeHTTPMethod(method)
 	status := strconv.Itoa(statusCode)
 	m.httpRequests.WithLabelValues(method, path, status).Inc()
 	m.httpLatency.WithLabelValues(method, path, status).Observe(seconds)
@@ -355,6 +373,7 @@ func (m *Metrics) RecordHTTPSize(method, path string, statusCode int, requestByt
 	if m == nil {
 		return
 	}
+	method = NormalizeHTTPMethod(method)
 	status := strconv.Itoa(statusCode)
 	m.httpRequestBytes.WithLabelValues(method, path).Observe(float64(requestBytes))
 	m.httpResponseBytes.WithLabelValues(method, path, status).Observe(float64(responseBytes))
@@ -364,6 +383,7 @@ func (m *Metrics) RecordHTTPStream(method, path string, statusCode int, seconds 
 	if m == nil {
 		return
 	}
+	method = NormalizeHTTPMethod(method)
 	status := strconv.Itoa(statusCode)
 	m.httpStreams.WithLabelValues(method, path, status).Inc()
 	m.httpStreamLatency.WithLabelValues(method, path, status).Observe(seconds)
@@ -373,6 +393,7 @@ func (m *Metrics) RecordHTTPError(method, path string, statusCode int, errType s
 	if m == nil {
 		return
 	}
+	method = NormalizeHTTPMethod(method)
 	status := strconv.Itoa(statusCode)
 	m.httpErrors.WithLabelValues(method, path, status, errType).Inc()
 }

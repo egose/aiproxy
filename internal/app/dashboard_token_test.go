@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,18 +173,28 @@ provider "openai" "openai" {
 	if a.Config.Dashboard.Token != "tok-B" {
 		t.Fatalf("post-second-reload token = %q, want tok-B (preserved)", a.Config.Dashboard.Token)
 	}
+	if a.Config.Dashboard.TokenFromConfig {
+		t.Fatal("post-second-reload TokenFromConfig should be false after the token is removed from config")
+	}
 
-	// And the token file should NEVER have been written because the user
-	// never relied on the auto-mint path.
-	if _, err := os.Stat(dashrpc.TokenFilePath()); !os.IsNotExist(err) {
-		t.Fatalf("token file should remain absent under explicitly-resolved path; err = %v", err)
+	// The explicit-to-omitted transition must publish the carried-over token
+	// so a tokenless CLI discovery keeps working.
+	data, err := os.ReadFile(dashrpc.TokenFilePath())
+	if err != nil {
+		t.Fatalf("token file should be published on explicit-to-omitted transition: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != "tok-B" {
+		t.Fatal("published token file does not match the carried-over runtime token")
+	}
+	if fi, err := os.Stat(dashrpc.TokenFilePath()); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("published token file must retain mode 0600: stat=%v mode=%v", err, fi.Mode())
 	}
 }
 
 func TestEnsureDashboardTokenNoopsWhenBlockAbsent(t *testing.T) {
 	rt := &config.Runtime{}
-	if minted, err := ensureDashboardToken(rt, "irrelevant", false); err != nil || minted {
-		t.Fatalf("ensureDashboardToken err = %v", err)
+	if minted, published, err := ensureDashboardToken(rt, config.Dashboard{Token: "irrelevant", TokenFromConfig: true}, false); err != nil || minted || published {
+		t.Fatalf("ensureDashboardToken err = %v minted = %v published = %v", err, minted, published)
 	}
 	if rt.Dashboard.Enabled {
 		t.Fatal("Dashboard.Enabled should remain false")
@@ -198,8 +209,8 @@ func TestEnsureDashboardTokenMintsWhenEnabledWithEmptyTokenAndEmptyExisting(t *t
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	rt := &config.Runtime{Dashboard: config.Dashboard{Enabled: true}}
-	if minted, err := ensureDashboardToken(rt, "", true); err != nil || !minted {
-		t.Fatalf("ensureDashboardToken err = %v", err)
+	if minted, published, err := ensureDashboardToken(rt, config.Dashboard{}, true); err != nil || !minted || !published {
+		t.Fatalf("ensureDashboardToken err = %v minted = %v published = %v", err, minted, published)
 	}
 	if rt.Dashboard.Token == "" {
 		t.Fatal("expected minted token")
@@ -214,8 +225,8 @@ func TestEnsureDashboardTokenReusesExistingWhenEnabledWithEmptyToken(t *testing.
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	rt := &config.Runtime{Dashboard: config.Dashboard{Enabled: true}}
-	if minted, err := ensureDashboardToken(rt, "previously-minted", true); err != nil || minted {
-		t.Fatalf("ensureDashboardToken err = %v", err)
+	if minted, published, err := ensureDashboardToken(rt, config.Dashboard{Token: "previously-minted"}, true); err != nil || minted || published {
+		t.Fatalf("ensureDashboardToken err = %v minted = %v published = %v", err, minted, published)
 	}
 	if rt.Dashboard.Token != "previously-minted" {
 		t.Fatalf("Token = %q, want previously-minted", rt.Dashboard.Token)
@@ -230,13 +241,69 @@ func TestEnsureDashboardTokenUsesConfigToken(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	rt := &config.Runtime{Dashboard: config.Dashboard{Enabled: true, Token: "from-config"}}
-	if minted, err := ensureDashboardToken(rt, "previously-minted", true); err != nil || minted {
-		t.Fatalf("ensureDashboardToken err = %v", err)
+	if minted, published, err := ensureDashboardToken(rt, config.Dashboard{Token: "previously-minted"}, true); err != nil || minted || published {
+		t.Fatalf("ensureDashboardToken err = %v minted = %v published = %v", err, minted, published)
 	}
 	if rt.Dashboard.Token != "from-config" {
 		t.Fatalf("Token = %q, want from-config (config beats existing)", rt.Dashboard.Token)
 	}
 	if _, err := os.Stat(dashrpc.TokenFilePath()); !os.IsNotExist(err) {
 		t.Fatalf("token file should NOT be persisted when config provided one; err = %v", err)
+	}
+}
+
+func TestEnsureDashboardTokenPublishesExplicitToOmittedTransition(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	rt := &config.Runtime{Dashboard: config.Dashboard{Enabled: true}}
+	current := config.Dashboard{Token: "carried-over", TokenFromConfig: true}
+	if minted, published, err := ensureDashboardToken(rt, current, true); err != nil || minted || !published {
+		t.Fatalf("ensureDashboardToken err = %v minted = %v published = %v", err, minted, published)
+	}
+	if rt.Dashboard.Token != "carried-over" {
+		t.Fatalf("Token = %q, want carried-over", rt.Dashboard.Token)
+	}
+	if rt.Dashboard.TokenFromConfig {
+		t.Fatal("reused runtime must keep omitted provenance (TokenFromConfig false)")
+	}
+	data, err := os.ReadFile(dashrpc.TokenFilePath())
+	if err != nil {
+		t.Fatalf("token file should be published: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != "carried-over" {
+		t.Fatal("published token file does not match the carried-over token")
+	}
+	fi, err := os.Stat(dashrpc.TokenFilePath())
+	if err != nil {
+		t.Fatalf("stat token file: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("published token file mode = %o, want 600", fi.Mode().Perm())
+	}
+}
+
+func TestEnsureDashboardTokenPublishFailureClearsCandidate(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	old := persistDashboardToken
+	persistDashboardToken = func(string) error { return errors.New("injected persistence failure") }
+	t.Cleanup(func() { persistDashboardToken = old })
+
+	rt := &config.Runtime{Dashboard: config.Dashboard{Enabled: true}}
+	current := config.Dashboard{Token: "carried-over", TokenFromConfig: true}
+	_, _, err := ensureDashboardToken(rt, current, true)
+	if err == nil {
+		t.Fatal("expected persistence failure")
+	}
+	if strings.Contains(err.Error(), "carried-over") {
+		t.Fatalf("error must not contain token contents: %v", err)
+	}
+	if rt.Dashboard.Token != "" {
+		t.Fatal("failed publication must not leave an unpersisted token on the candidate runtime")
+	}
+	if _, err := os.Stat(dashrpc.TokenFilePath()); !os.IsNotExist(err) {
+		t.Fatalf("failed publication must not create a token file; err = %v", err)
 	}
 }

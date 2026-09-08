@@ -477,7 +477,10 @@ dashboard {
 
 When `token` is omitted, `aiproxy serve` mints a random secret at startup and
 persists it to `$XDG_CONFIG_HOME/aiproxy/dashboard.token`; the `dashboard`
-command reads that file to authenticate. The dashboard command is local-only: it
+command reads that file to authenticate. If a reload drops a previously
+declared token, the carried-over secret is published to the file before the
+new runtime activates, so tokenless discovery keeps working; a persistence
+failure rejects the reload and keeps the old runtime unchanged. The dashboard command is local-only: it
 connects over loopback plain HTTP and refuses concrete non-loopback listener
 hosts. HTTPS and remote dashboard URLs are not supported by the current
 configuration model.

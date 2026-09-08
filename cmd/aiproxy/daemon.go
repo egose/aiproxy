@@ -62,6 +62,10 @@ func spawnDaemon(cmd *cobra.Command, cfgPath string) error {
 	}
 	defer releaseDaemonLock(lockFile)
 
+	return spawnDaemonLocked(cmd, cfgPath, statePath, logPath, canonicalConfig)
+}
+
+func spawnDaemonLocked(cmd *cobra.Command, cfgPath, statePath, logPath, canonicalConfig string) error {
 	if state, ok := readVerifiedDaemonState(statePath); ok {
 		return fmt.Errorf("server already running (pid %d); use `aiproxy stop --config %s` first", state.PID, canonicalConfig)
 	}
@@ -282,6 +286,10 @@ func stopServer(cfgPath string, out io.Writer) error {
 		return err
 	}
 	defer releaseDaemonLock(lockFile)
+	return stopDaemonLocked(statePath, out)
+}
+
+func stopDaemonLocked(statePath string, out io.Writer) error {
 	state, ok := readVerifiedDaemonState(statePath)
 	if !ok {
 		return errors.New("no server running")
@@ -334,10 +342,28 @@ func statusServer(cfgPath string, out io.Writer) error {
 	return nil
 }
 
-// restartServer stops the running daemon (if any) and starts a fresh one.
+var restartStopImpl = stopDaemonLocked
+var restartSpawnImpl = spawnDaemonLocked
+
+// restartServer stops the running daemon and starts a fresh one under one
+// lifecycle lock. Stop errors propagate and never trigger a replacement spawn.
 func restartServer(cmd *cobra.Command, cfgPath string) error {
-	_ = stopServer(cfgPath, cmd.OutOrStdout())
-	return spawnDaemon(cmd, cfgPath)
+	if !daemonLifecycleSupported() {
+		return errDaemonLifecycleUnsupported
+	}
+	statePath, lockPath, logPath, canonicalConfig, err := resolveDaemonFiles(cfgPath)
+	if err != nil {
+		return err
+	}
+	lockFile, err := acquireDaemonLock(lockPath)
+	if err != nil {
+		return err
+	}
+	defer releaseDaemonLock(lockFile)
+	if err := restartStopImpl(statePath, cmd.OutOrStdout()); err != nil {
+		return err
+	}
+	return restartSpawnImpl(cmd, cfgPath, statePath, logPath, canonicalConfig)
 }
 
 func newStopCommand() *cobra.Command {
