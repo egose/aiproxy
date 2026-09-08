@@ -32,7 +32,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "aiproxy",
 		Short: "Proxy multiple AI providers behind a single API",
-		Long:  "aiproxy proxies multiple AI providers behind a single OpenAI-compatible API.\n\nDefault config path: $XDG_CONFIG_HOME/aiproxy/config.hcl\nFallback config path: ~/.config/aiproxy/config.hcl\nDefault secrets path: $XDG_CONFIG_HOME/aiproxy/keys.json\nFallback secrets path: ~/.config/aiproxy/keys.json\n\nSet $AIPROXY_CONFIG to inline HCL to skip the config file (explicit --config overrides it).\n\nDaemon lifecycle commands (`serve -d`, `stop`, `status`, `restart`) are Linux-only.\n\nUse `aiproxy paths` to print resolved paths, `aiproxy examples` for boxed config examples, and `aiproxy configure` to create or update config blocks interactively.",
+		Long:  rootLongText(),
 	}
 	rootCmd.AddCommand(newServeCommand())
 	rootCmd.AddCommand(newValidateCommand())
@@ -117,6 +117,28 @@ func defaultSecretsPath() string {
 		return filepath.Join("aiproxy", "keys.json")
 	}
 	return filepath.Join(home, ".config", "aiproxy", "keys.json")
+}
+
+func rootLongText() string {
+	return "aiproxy proxies multiple AI providers behind a single OpenAI-compatible API.\n\nDefault config path: $XDG_CONFIG_HOME/aiproxy/config.hcl\nFallback config path: ~/.config/aiproxy/config.hcl\nDefault secrets path: $XDG_CONFIG_HOME/aiproxy/keys.json\nFallback secrets path: ~/.config/aiproxy/keys.json\n\nSet $AIPROXY_CONFIG to inline HCL to skip the config file (explicit --config overrides it).\n\nDaemon lifecycle commands (`serve -d`, `stop`, `status`, `restart`) are Linux-only.\n\nUse `aiproxy paths` to print resolved paths, `aiproxy examples` for boxed config examples, and `aiproxy configure` to create or update config blocks interactively.\n\n" + currentConfigStatusText()
+}
+
+func currentConfigStatusText() string {
+	var b strings.Builder
+	b.WriteString("Current status:")
+	if src, ok := config.EnvConfigContent(); ok {
+		fmt.Fprintf(&b, "\n  config: %s (set, %d bytes; --config overrides)", config.EnvConfigFilename, len(src))
+	} else if st, err := os.Stat(defaultConfigPath()); err == nil && !st.IsDir() {
+		fmt.Fprintf(&b, "\n  config: %s (exists, %d bytes)", defaultConfigPath(), st.Size())
+	} else {
+		fmt.Fprintf(&b, "\n  config: %s (missing)", defaultConfigPath())
+	}
+	if st, err := os.Stat(defaultSecretsPath()); err == nil && !st.IsDir() {
+		fmt.Fprintf(&b, "\n  secrets: %s (exists, %d bytes, mode %04o)", defaultSecretsPath(), st.Size(), st.Mode().Perm())
+	} else {
+		fmt.Fprintf(&b, "\n  secrets: %s (missing)", defaultSecretsPath())
+	}
+	return b.String()
 }
 
 func newPathsCommand() *cobra.Command {
