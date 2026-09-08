@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -23,6 +24,8 @@ type hookSet struct {
 	afterWrite   func(string) error
 	afterSync    func(string) error
 	beforeRename func(string, string) error
+	beforeRemove func(string) error
+	afterDirSync func(string) error
 }
 
 type writer struct {
@@ -42,7 +45,11 @@ func (w writer) WriteFile(path string, data []byte, mode os.FileMode, opts Optio
 	if err != nil {
 		return err
 	}
-	defer prepared.cleanup()
+	defer func() {
+		if prepared.temp != "" {
+			_ = w.remove(prepared.temp)
+		}
+	}()
 	if err := safeDestination(path, opts.Secret); err != nil {
 		return err
 	}
@@ -53,46 +60,107 @@ func (w writer) WriteFile(path string, data []byte, mode os.FileMode, opts Optio
 	return syncDir(filepath.Dir(path))
 }
 
+type RecoveryFailure struct {
+	Path     string
+	Op       string
+	Err      error
+	Retained string
+}
+
+type ReplaceError struct {
+	Op         string
+	Path       string
+	Err        error
+	Recoveries []RecoveryFailure
+	Retained   []string
+}
+
+func (e *ReplaceError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %s: %v", e.Op, e.Path, e.Err)
+	for _, r := range e.Recoveries {
+		fmt.Fprintf(&b, "; %s %s: %v", r.Op, r.Path, r.Err)
+	}
+	if len(e.Retained) > 0 {
+		fmt.Fprintf(&b, "; retained recovery paths: %s", strings.Join(e.Retained, ", "))
+	}
+	return b.String()
+}
+
+func (e *ReplaceError) Unwrap() []error {
+	errs := make([]error, 0, len(e.Recoveries)+1)
+	if e.Err != nil {
+		errs = append(errs, e.Err)
+	}
+	for _, r := range e.Recoveries {
+		if r.Err != nil {
+			errs = append(errs, r.Err)
+		}
+	}
+	return errs
+}
+
 func (w writer) ReplaceFiles(files []File, opts Options) error {
 	prepared := make([]preparedFile, 0, len(files))
 	for _, file := range files {
 		path := file.Path
 		p, err := w.prepare(path, file.Data, file.Mode, opts)
 		if err != nil {
-			cleanupPrepared(prepared)
+			for _, q := range prepared {
+				if q.temp != "" {
+					_ = w.remove(q.temp)
+				}
+			}
 			return err
 		}
 		prepared = append(prepared, p)
 	}
-	defer cleanupPrepared(prepared)
 
 	committed := make([]preparedFile, 0, len(prepared))
 	for i := range prepared {
 		p := &prepared[i]
 		if err := safeDestination(p.path, opts.Secret); err != nil {
-			rollback(committed, opts, w)
-			return err
+			recoveries, retained := w.restoreCommitted(committed)
+			w.discardTemps(prepared[i:])
+			return &ReplaceError{Op: "verify", Path: p.path, Err: err, Recoveries: recoveries, Retained: retained}
 		}
 		backup := p.temp + ".old"
 		hadOld := false
 		if _, err := os.Lstat(p.path); err == nil {
 			if err := w.rename(p.path, backup); err != nil {
-				rollback(committed, opts, w)
-				return fmt.Errorf("backup %s: %w", p.path, err)
+				recoveries, retained := w.restoreCommitted(committed)
+				w.discardTemps(prepared[i:])
+				return &ReplaceError{Op: "backup", Path: p.path, Err: err, Recoveries: recoveries, Retained: retained}
 			}
 			hadOld = true
 		} else if !errors.Is(err, os.ErrNotExist) {
-			rollback(committed, opts, w)
-			return fmt.Errorf("stat %s: %w", p.path, err)
+			recoveries, retained := w.restoreCommitted(committed)
+			w.discardTemps(prepared[i:])
+			return &ReplaceError{Op: "stat", Path: p.path, Err: err, Recoveries: recoveries, Retained: retained}
 		}
 		p.backup = backup
 		p.hadOld = hadOld
 		if err := w.rename(p.temp, p.path); err != nil {
+			var recoveries []RecoveryFailure
+			var retained []string
 			if hadOld {
-				_ = os.Rename(backup, p.path)
+				if rerr := w.rename(p.backup, p.path); rerr != nil {
+					recoveries = append(recoveries, RecoveryFailure{Path: p.path, Op: "restore", Err: rerr, Retained: p.backup})
+					retained = append(retained, p.backup, p.temp)
+				} else {
+					p.backup = ""
+					_ = w.remove(p.temp)
+					p.temp = ""
+				}
+			} else {
+				retained = append(retained, p.temp)
+				p.temp = ""
 			}
-			rollback(committed, opts, w)
-			return fmt.Errorf("rename %s: %w", p.path, err)
+			cRec, cRet := w.restoreCommitted(committed)
+			recoveries = append(recoveries, cRec...)
+			retained = append(retained, cRet...)
+			w.discardTemps(prepared[i+1:])
+			return &ReplaceError{Op: "rename", Path: p.path, Err: err, Recoveries: recoveries, Retained: retained}
 		}
 		p.temp = ""
 		committed = append(committed, *p)
@@ -105,9 +173,18 @@ func (w writer) ReplaceFiles(files []File, opts Options) error {
 			continue
 		}
 		seen[dir] = struct{}{}
-		if err := syncDir(dir); err != nil {
-			return err
+		if err := w.syncDir(dir); err != nil {
+			var retained []string
+			for _, q := range committed {
+				if q.hadOld {
+					retained = append(retained, q.backup)
+				}
+			}
+			return &ReplaceError{Op: "sync", Path: dir, Err: err, Retained: retained}
 		}
+	}
+	if err := w.removeBackups(committed); err != nil {
+		return err
 	}
 	return nil
 }
@@ -174,6 +251,79 @@ func (w writer) rename(oldPath, newPath string) error {
 	return os.Rename(oldPath, newPath)
 }
 
+func (w writer) remove(path string) error {
+	if w.hooks.beforeRemove != nil {
+		if err := w.hooks.beforeRemove(path); err != nil {
+			return err
+		}
+	}
+	return os.Remove(path)
+}
+
+func (w writer) restoreCommitted(committed []preparedFile) ([]RecoveryFailure, []string) {
+	var recoveries []RecoveryFailure
+	var retained []string
+	for i := len(committed) - 1; i >= 0; i-- {
+		p := committed[i]
+		if !p.hadOld {
+			if err := w.remove(p.path); err != nil {
+				recoveries = append(recoveries, RecoveryFailure{Path: p.path, Op: "remove-new", Err: err, Retained: p.path})
+				retained = append(retained, p.path)
+			}
+			continue
+		}
+		if err := w.rename(p.backup, p.path); err != nil {
+			recoveries = append(recoveries, RecoveryFailure{Path: p.path, Op: "restore", Err: err, Retained: p.backup})
+			retained = append(retained, p.backup)
+		}
+	}
+	return recoveries, retained
+}
+
+func (w writer) discardTemps(files []preparedFile) {
+	for _, p := range files {
+		if p.temp != "" {
+			_ = w.remove(p.temp)
+		}
+	}
+}
+
+func (w writer) removeBackups(committed []preparedFile) error {
+	var recoveries []RecoveryFailure
+	var retained []string
+	var firstErr error
+	var firstPath string
+	for _, p := range committed {
+		if !p.hadOld || p.backup == "" {
+			continue
+		}
+		if err := w.remove(p.backup); err != nil {
+			if firstErr == nil {
+				firstErr = err
+				firstPath = p.backup
+			}
+			recoveries = append(recoveries, RecoveryFailure{Path: p.path, Op: "cleanup", Err: err, Retained: p.backup})
+			retained = append(retained, p.backup)
+		}
+	}
+	if firstErr != nil {
+		return &ReplaceError{Op: "cleanup", Path: firstPath, Err: firstErr, Recoveries: recoveries, Retained: retained}
+	}
+	return nil
+}
+
+func (w writer) syncDir(path string) error {
+	if err := syncDir(path); err != nil {
+		return err
+	}
+	if w.hooks.afterDirSync != nil {
+		if err := w.hooks.afterDirSync(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func safeDestination(path string, secret bool) error {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -201,29 +351,4 @@ func syncDir(path string) error {
 		return fmt.Errorf("sync directory %s: %w", path, err)
 	}
 	return nil
-}
-
-func cleanupPrepared(prepared []preparedFile) {
-	for _, p := range prepared {
-		p.cleanup()
-	}
-}
-
-func (p preparedFile) cleanup() {
-	if p.temp != "" {
-		_ = os.Remove(p.temp)
-	}
-	if p.backup != "" {
-		_ = os.Remove(p.backup)
-	}
-}
-
-func rollback(committed []preparedFile, opts Options, w writer) {
-	for i := len(committed) - 1; i >= 0; i-- {
-		p := committed[i]
-		_ = os.Remove(p.path)
-		if p.hadOld {
-			_ = w.rename(p.backup, p.path)
-		}
-	}
 }

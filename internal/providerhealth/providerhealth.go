@@ -160,7 +160,9 @@ func (t *Tracker) MarkSuccessContext(ctx context.Context, name string) {
 	if t == nil || name == "" {
 		return
 	}
-	_ = t.backend.MarkSuccess(ctx, name)
+	if err := t.backend.MarkSuccess(ctx, name); err != nil {
+		t.recordBackendError("mark_success")
+	}
 	t.writeCache(name, true)
 	if t.metrics != nil {
 		t.metrics.SetProviderHealthy(name, true)
@@ -175,7 +177,9 @@ func (t *Tracker) MarkFailureContext(ctx context.Context, name string) {
 	if t == nil || name == "" {
 		return
 	}
-	_ = t.backend.MarkFailure(ctx, name, t.cooldown)
+	if err := t.backend.MarkFailure(ctx, name, t.cooldown); err != nil {
+		t.recordBackendError("mark_failure")
+	}
 	t.writeCache(name, false)
 	if t.metrics != nil {
 		t.metrics.SetProviderHealthy(name, false)

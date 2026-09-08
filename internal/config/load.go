@@ -3,11 +3,41 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 )
+
+const ConfigEnvVar = "AIPROXY_CONFIG"
+
+const EnvConfigFilename = "env(AIPROXY_CONFIG)"
+
+func EnvConfigContent() (string, bool) {
+	src, ok := os.LookupEnv(ConfigEnvVar)
+	if !ok || strings.TrimSpace(src) == "" {
+		return "", false
+	}
+	return src, true
+}
+
+func LoadEnv() (*Runtime, error) {
+	src, ok := EnvConfigContent()
+	if !ok {
+		return nil, fmt.Errorf("config %s is not set", EnvConfigFilename)
+	}
+	return Load([]byte(src), EnvConfigFilename)
+}
+
+func LoadFileOrEnv(path string, explicit bool) (*Runtime, error) {
+	if !explicit {
+		if _, ok := EnvConfigContent(); ok {
+			return LoadEnv()
+		}
+	}
+	return LoadFile(path)
+}
 
 func LoadFile(path string) (*Runtime, error) {
 	src, err := os.ReadFile(path)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -56,8 +57,8 @@ func TestReplaceFilesRollsBackRenameFailure(t *testing.T) {
 		t.Fatalf("WriteFile(config): %v", err)
 	}
 	injected := errors.New("injected rename failure")
-	w := writer{hooks: hookSet{beforeRename: func(_, newPath string) error {
-		if newPath == config {
+	w := writer{hooks: hookSet{beforeRename: func(oldPath, newPath string) error {
+		if newPath == config && !strings.HasSuffix(oldPath, ".old") {
 			return injected
 		}
 		return nil

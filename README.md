@@ -236,7 +236,9 @@ aiproxy version
 
 By default, the CLI looks for the config file at `$XDG_CONFIG_HOME/aiproxy/config.hcl`,
 falling back to `~/.config/aiproxy/config.hcl` when `XDG_CONFIG_HOME` is unset.
-Pass `--config` to use a different file.
+Pass `--config` to use a different file. Set `$AIPROXY_CONFIG` to inline HCL to
+skip the config file (explicit `--config` overrides it; `serve -d` and
+`configure`/`login` file workflows require a file).
 
 Foreground `aiproxy serve` is supported across the advertised release targets.
 Linux additionally supports `aiproxy serve -d` and the `aiproxy status`,
@@ -536,7 +538,11 @@ dashboard {
 - `token` is optional. When omitted, `aiproxy serve` mints a random secret at
   startup and persists it to `$XDG_CONFIG_HOME/aiproxy/dashboard.token`; the
   `dashboard` command reads that file to authenticate. Declared tokens are
-  used as-is and the file is not written.
+  used as-is and the file is not written at startup. If a reload drops a
+  previously declared token, the carried-over secret is published to the
+  file before the new runtime activates, so tokenless discovery keeps
+  working; a persistence failure rejects the reload and keeps the old
+  runtime unchanged.
 - The `dashboard` command is local-only. It connects to the configured listener
   over loopback plain HTTP with bearer authentication and refuses non-loopback
   listener hosts. Remote dashboard access requires a future explicit transport

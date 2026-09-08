@@ -409,11 +409,7 @@ func translateGeminiResponsesResponse(body []byte, publicModel string) ([]byte, 
 	if len(resp.Candidates) > 0 {
 		text = joinGeminiText(resp.Candidates[0].Content.Parts)
 	}
-	usage := openAIUsage{
-		PromptTokens:     resp.UsageMetadata.PromptTokenCount,
-		CompletionTokens: resp.UsageMetadata.CandidatesTokenCount,
-		TotalTokens:      resp.UsageMetadata.TotalTokenCount,
-	}
+	usage := reconcileResponsesUsage(resp.UsageMetadata.PromptTokenCount, resp.UsageMetadata.CandidatesTokenCount, resp.UsageMetadata.TotalTokenCount)
 	return buildResponsesOutput("resp_gemini", publicModel, text, usage)
 }
 
@@ -492,6 +488,40 @@ func translateGeminiError(body []byte) []byte {
 	return encoded
 }
 
+func geminiStreamError(payload string) error {
+	var envelope struct {
+		Error *struct {
+			Message string          `json:"message"`
+			Status  string          `json:"status"`
+			Code    json.RawMessage `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
+		return nil
+	}
+	if envelope.Error == nil {
+		return nil
+	}
+	parts := make([]string, 0, 3)
+	if envelope.Error.Status != "" {
+		parts = append(parts, strings.ToLower(envelope.Error.Status))
+	}
+	if len(envelope.Error.Code) > 0 && string(envelope.Error.Code) != "null" {
+		parts = append(parts, strings.Trim(string(envelope.Error.Code), `"`))
+	}
+	if envelope.Error.Message != "" {
+		parts = append(parts, envelope.Error.Message)
+	}
+	if len(parts) == 0 {
+		return fmt.Errorf("upstream stream error: gemini error envelope")
+	}
+	return fmt.Errorf("upstream stream error: %s", strings.Join(parts, ": "))
+}
+
+// Translated Gemini chat streams require a candidate finishReason before
+// transport EOF. Premature EOF is reported as truncated instead of
+// synthesizing [DONE]; error envelopes fail the stream. Valid EOF-delimited
+// final events still complete normally.
 func translateGeminiStream(src io.ReadCloser, publicModel string, stream *StreamCompletion) io.ReadCloser {
 	return newTranslatedStream(src, func(pw *io.PipeWriter) {
 		defer src.Close()
@@ -503,12 +533,12 @@ func translateGeminiStream(src io.ReadCloser, publicModel string, stream *Stream
 		for {
 			event, err := decoder.Next()
 			if err != nil {
-				if err != io.EOF {
+				if err == io.EOF {
+					if !sentDone {
+						_ = pw.CloseWithError(fmt.Errorf("upstream stream truncated: gemini chat stream ended without finishReason"))
+					}
+				} else {
 					_ = pw.CloseWithError(err)
-					return
-				}
-				if !sentDone {
-					_, _ = io.WriteString(pw, "data: [DONE]\n\n")
 				}
 				return
 			}
@@ -527,6 +557,9 @@ func translateGeminiStream(src io.ReadCloser, publicModel string, stream *Stream
 	})
 }
 
+// Translated Gemini Responses streams require a finished candidate before
+// transport EOF. Premature EOF is reported as truncated instead of
+// synthesizing response.completed.
 func translateGeminiResponsesStream(src io.ReadCloser, publicModel string, stream *StreamCompletion) io.ReadCloser {
 	return newTranslatedStream(src, func(pw *io.PipeWriter) {
 		defer src.Close()
@@ -537,14 +570,12 @@ func translateGeminiResponsesStream(src io.ReadCloser, publicModel string, strea
 		for {
 			event, err := decoder.Next()
 			if err != nil {
-				if err != io.EOF {
-					_ = pw.CloseWithError(err)
-					return
-				}
-				if !state.Completed {
-					if err := writeResponsesCompleted(pw, state); err != nil {
-						_ = pw.CloseWithError(err)
+				if err == io.EOF {
+					if !state.Completed {
+						_ = pw.CloseWithError(fmt.Errorf("upstream stream truncated: gemini responses stream ended without finishReason"))
 					}
+				} else {
+					_ = pw.CloseWithError(err)
 				}
 				return
 			}
@@ -564,6 +595,9 @@ func translateGeminiResponsesStream(src io.ReadCloser, publicModel string, strea
 }
 
 func processGeminiPayload(w io.Writer, payload, publicModel string, sentRole *bool, stream *StreamCompletion) (bool, bool, error) {
+	if err := geminiStreamError(payload); err != nil {
+		return false, false, err
+	}
 	var resp geminiResponse
 	if err := json.Unmarshal([]byte(payload), &resp); err != nil {
 		return false, false, err
@@ -630,14 +664,17 @@ func processGeminiPayload(w io.Writer, payload, publicModel string, sentRole *bo
 }
 
 func processGeminiResponsesPayload(w io.Writer, payload string, state *responsesStreamState, stream *StreamCompletion) (bool, error) {
+	if err := geminiStreamError(payload); err != nil {
+		return false, err
+	}
 	var resp geminiResponse
 	if err := json.Unmarshal([]byte(payload), &resp); err != nil {
 		return false, err
 	}
-	state.setUsage(openAIUsage{
-		PromptTokens:     resp.UsageMetadata.PromptTokenCount,
-		CompletionTokens: resp.UsageMetadata.CandidatesTokenCount,
-		TotalTokens:      resp.UsageMetadata.TotalTokenCount,
+	state.setUsage(openAIResponsesUsage{
+		InputTokens:  resp.UsageMetadata.PromptTokenCount,
+		OutputTokens: resp.UsageMetadata.CandidatesTokenCount,
+		TotalTokens:  resp.UsageMetadata.TotalTokenCount,
 	})
 	stream.SetUsage(Usage{PromptTokens: int64(resp.UsageMetadata.PromptTokenCount), CompletionTokens: int64(resp.UsageMetadata.CandidatesTokenCount), TotalTokens: int64(resp.UsageMetadata.TotalTokenCount)})
 	if err := writeResponsesCreated(w, state); err != nil {

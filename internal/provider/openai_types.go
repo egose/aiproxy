@@ -42,6 +42,19 @@ type openAIUsage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
+// openAIResponsesUsage is the endpoint-specific wire usage for the Responses
+// API. It uses input_tokens/output_tokens/total_tokens and must not emit
+// Chat-only prompt_tokens/completion_tokens keys. Shared internal accounting
+// stays in provider.Usage; translators reconcile split observations into
+// both shapes with the same rule (retain positive categories, keep an
+// authoritative total when it covers extra categories, otherwise use the
+// input+output sum).
+type openAIResponsesUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	TotalTokens  int `json:"total_tokens"`
+}
+
 type openAIChunk struct {
 	ID      string              `json:"id"`
 	Object  string              `json:"object"`
@@ -76,7 +89,7 @@ type openAIResponsesResponse struct {
 	Object string                      `json:"object"`
 	Model  string                      `json:"model"`
 	Output []openAIResponsesOutputItem `json:"output"`
-	Usage  openAIUsage                 `json:"usage,omitempty"`
+	Usage  *openAIResponsesUsage       `json:"usage,omitempty"`
 	Status string                      `json:"status"`
 }
 

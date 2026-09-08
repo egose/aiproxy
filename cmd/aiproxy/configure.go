@@ -427,7 +427,11 @@ func runConfigureUpstream(prompts *promptSession, configPath string, options ups
 	}
 	timeout := options.UpstreamHeaderTimeout
 	if timeout == "" {
-		timeout = configedit.TopLevelStringAttribute(doc.source, "upstream_header_timeout")
+		current, err := configedit.TopLevelStringAttribute(doc.source, "upstream_header_timeout")
+		if err != nil {
+			return err
+		}
+		timeout = current
 	}
 	if options.NonInteractive {
 		if timeout == "" {
@@ -445,9 +449,12 @@ func runConfigureUpstream(prompts *promptSession, configPath string, options ups
 			return fmt.Errorf("root upstream header timeout is required")
 		}
 	}
-	updated := configedit.UpsertTopLevelStringAttribute(doc.source, "upstream_header_timeout", timeout)
+	updated, err := configedit.UpsertTopLevelStringAttribute(doc.source, "upstream_header_timeout", timeout)
+	if err != nil {
+		return err
+	}
 	preview := "upstream_header_timeout = " + strconv.Quote(timeout) + "\n"
-	if err := prompts.confirmWrite("Review upstream changes", buildReviewSummary([]string{"Config path: " + configPath, "Action: update upstream settings"}, preview)); err != nil {
+	if err := prompts.confirmWrite("Review upstream changes", buildReviewSummary([]string{"Config path: " + configPath, "Action: update root upstream_header_timeout (provider overrides preserved)"}, preview)); err != nil {
 		return err
 	}
 	if err := writeConfigFile(configPath, updated); err != nil {

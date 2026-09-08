@@ -358,6 +358,23 @@ Use `env("VAR")` anywhere a string is allowed. Values are inlined before HCL par
 
 That makes it suitable for API keys, bearer tokens, URLs, and other deployment-specific values.
 
+Set `$AIPROXY_CONFIG` to inline the whole HCL document and skip the config file:
+
+```sh
+export AIPROXY_CONFIG='listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = env("OPENAI_API_KEY")
+  model "gpt-4o-mini" {}
+}'
+aiproxy validate
+aiproxy serve
+```
+
+An explicit `--config` overrides `$AIPROXY_CONFIG`. `serve -d` and the
+`configure`/`login` file workflows require a file. `SIGHUP` re-reads
+`$AIPROXY_CONFIG` when the server was started from it.
+
 For local runs, if your config depends on variables in `.env`, load them first:
 
 ```sh
@@ -477,7 +494,10 @@ dashboard {
 
 When `token` is omitted, `aiproxy serve` mints a random secret at startup and
 persists it to `$XDG_CONFIG_HOME/aiproxy/dashboard.token`; the `dashboard`
-command reads that file to authenticate. The dashboard command is local-only: it
+command reads that file to authenticate. If a reload drops a previously
+declared token, the carried-over secret is published to the file before the
+new runtime activates, so tokenless discovery keeps working; a persistence
+failure rejects the reload and keeps the old runtime unchanged. The dashboard command is local-only: it
 connects over loopback plain HTTP and refuses concrete non-loopback listener
 hosts. HTTPS and remote dashboard URLs are not supported by the current
 configuration model.

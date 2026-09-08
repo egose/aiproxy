@@ -231,8 +231,10 @@ func (c *AuthenticatedClient) authHeader() string {
 
 // TokenFilePath returns the canonical location of the persisted dashboard
 // token. The serve process writes a freshly-minted secret here when the
-// config declares a dashboard block without a token; the dashboard command
-// reads from this path to authenticate to a running server.
+// config declares a dashboard block without a token, and publishes the
+// carried-over secret here when a reload drops a previously declared token;
+// the dashboard command reads from this path to authenticate to a running
+// server.
 func TokenFilePath() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		return filepath.Join(xdg, "aiproxy", "dashboard.token")
@@ -255,7 +257,9 @@ func MintToken() (string, error) {
 }
 
 // PersistToken writes the given token to TokenFilePath() so the dashboard
-// command can read it. The parent directory is created if missing.
+// command can read it. The parent directory is created if missing. It is
+// used for freshly-minted secrets and for publishing a carried-over secret
+// when a reload drops a previously declared token.
 func PersistToken(token string) error {
 	path := TokenFilePath()
 	if err := filestore.WriteFile(path, []byte(token+"\n"), 0o600, filestore.Options{DirMode: 0o700, Secret: true}); err != nil {

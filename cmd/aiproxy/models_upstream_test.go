@@ -36,7 +36,7 @@ provider "openai-compatible" "local" {
 	var stdout, stderr bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := runModels(ctx, cfg, "local", true, &stdout, &stderr); err != nil {
+	if err := runModels(ctx, cfg, true, "local", true, &stdout, &stderr); err != nil {
 		t.Fatalf("runModels upstream: %v (stderr=%s)", err, stderr.String())
 	}
 	if gotAuth != "Bearer sk-test" {
@@ -74,7 +74,7 @@ provider "anthropic" "anthropic" {
 	var stdout, stderr bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := runModels(ctx, cfg, "anthropic", true, &stdout, &stderr); err != nil {
+	if err := runModels(ctx, cfg, true, "anthropic", true, &stdout, &stderr); err != nil {
 		t.Fatalf("runModels upstream: %v (stderr=%s)", err, stderr.String())
 	}
 	if gotKey != "sk-ant" || gotVersion == "" {
@@ -108,7 +108,7 @@ provider "gemini" "gemini" {
 	var stdout, stderr bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := runModels(ctx, cfg, "gemini", true, &stdout, &stderr); err != nil {
+	if err := runModels(ctx, cfg, true, "gemini", true, &stdout, &stderr); err != nil {
 		t.Fatalf("runModels upstream: %v (stderr=%s)", err, stderr.String())
 	}
 	if gotKey != "gem-key" {
@@ -165,7 +165,7 @@ provider "openai" "openai" {
 	var stdout, stderr bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	err := runModels(ctx, cfg, "openai", true, &stdout, &stderr)
+	err := runModels(ctx, cfg, true, "openai", true, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected error for 401 upstream")
 	}

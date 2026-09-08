@@ -155,15 +155,6 @@ func coolingExclusions(cooldowns *modelresolver.CooldownStore, pool []aliasPoolT
 	return exclude
 }
 
-func hasUntriedTarget(pool []aliasPoolTarget, tried map[alias.Target]bool) bool {
-	for _, entry := range pool {
-		if !tried[entry.target] {
-			return true
-		}
-	}
-	return false
-}
-
 func observeCooldownResult(cooldowns *modelresolver.CooldownStore, ctx context.Context, fp modelresolver.CooldownFingerprint, result *provider.Result) {
 	if cooldowns == nil || result == nil || !result.HasRetryDelay {
 		return
@@ -209,9 +200,25 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 	if remaining, ok := allCoolingRemaining(cooldowns, pool); ok {
 		return provider.SyntheticCooldownResult(remaining), nil
 	}
+	var pending *provider.Result
+	var pendingRetryProvider, pendingRetryModel, pendingRetryReason string
+	var hasPendingRetry bool
+	commitPending := func() {
+		if hasPendingRetry && deps.Metrics != nil {
+			deps.Metrics.RecordAliasRetry(r.Alias.Name, pendingRetryProvider, pendingRetryModel, pendingRetryReason)
+		}
+		hasPendingRetry = false
+		if pending != nil {
+			closeResult(pending)
+			pending = nil
+		}
+	}
 	for {
 		t, releaseLease := r.Selector.Acquire(coolingExclusions(cooldowns, pool, tried))
 		if t.Provider == "" && t.Model == "" {
+			if pending != nil {
+				return pending, nil
+			}
 			break
 		}
 		tried[t] = true
@@ -248,6 +255,7 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			lastErr = fmt.Errorf("alias has no healthy targets")
 			continue
 		}
+		commitPending()
 		targetLogger := logger.With("target", t.Provider+"/"+t.Model)
 		if deps.AccessLog {
 			targetLogger.Info("upstream request started",
@@ -325,13 +333,16 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			releaseTarget()
 			var invalid provider.ErrInvalidRequest
 			if errors.As(err, &invalid) {
+				if pending != nil {
+					closeResult(pending)
+					pending = nil
+				}
 				return nil, err
 			}
 			observeCooldownError(cooldowns, ctx, fp, err)
 			lastErr = err
-			if hasUntriedTarget(pool, tried) && deps.Metrics != nil {
-				deps.Metrics.RecordAliasRetry(r.Alias.Name, t.Provider, t.Model, "error")
-			}
+			pendingRetryProvider, pendingRetryModel, pendingRetryReason = t.Provider, t.Model, "error"
+			hasPendingRetry = true
 			targetLogger.Warn("alias target failed", "error", err)
 			continue
 		}
@@ -345,21 +356,21 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 		}
 		if retryCodes[result.StatusCode] {
 			if remaining, ok := allCoolingRemaining(cooldowns, pool); ok {
+				if pending != nil {
+					closeResult(pending)
+					pending = nil
+				}
 				closeResult(result)
 				return provider.SyntheticCooldownResult(remaining), nil
 			}
-			if !hasUntriedTarget(pool, tried) {
-				return result, nil
+			reason := "upstream_status"
+			if result.StatusCode >= 500 {
+				reason = "upstream_5xx"
 			}
-			closeResult(result)
+			pending = result
+			pendingRetryProvider, pendingRetryModel, pendingRetryReason = t.Provider, t.Model, reason
+			hasPendingRetry = true
 			lastErr = fmt.Errorf("upstream returned status %d", result.StatusCode)
-			if deps.Metrics != nil {
-				reason := "upstream_status"
-				if result.StatusCode >= 500 {
-					reason = "upstream_5xx"
-				}
-				deps.Metrics.RecordAliasRetry(r.Alias.Name, t.Provider, t.Model, reason)
-			}
 			targetLogger.Warn("alias target returned retryable status, retrying", "status", result.StatusCode)
 			continue
 		}

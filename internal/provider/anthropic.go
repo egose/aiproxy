@@ -269,11 +269,7 @@ func translateAnthropicResponsesResponse(body []byte, publicModel string) ([]byt
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, err
 	}
-	usage := openAIUsage{
-		PromptTokens:     resp.Usage.InputTokens,
-		CompletionTokens: resp.Usage.OutputTokens,
-		TotalTokens:      resp.Usage.InputTokens + resp.Usage.OutputTokens,
-	}
+	usage := reconcileResponsesUsage(resp.Usage.InputTokens, resp.Usage.OutputTokens, 0)
 	return buildResponsesOutput(resp.ID, publicModel, joinAnthropicText(resp.Content), usage)
 }
 
@@ -312,6 +308,42 @@ func translateAnthropicError(body []byte) []byte {
 	return encoded
 }
 
+func anthropicStreamError(eventType, data string) error {
+	if eventType != "error" {
+		var probe struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal([]byte(data), &probe) != nil || probe.Type != "error" {
+			return nil
+		}
+	}
+	var envelope struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(data), &envelope); err != nil {
+		return fmt.Errorf("upstream stream error: anthropic error event with undecodable payload")
+	}
+	if envelope.Error.Message != "" && envelope.Error.Type != "" {
+		return fmt.Errorf("upstream stream error: %s: %s", envelope.Error.Type, envelope.Error.Message)
+	}
+	if envelope.Error.Message != "" {
+		return fmt.Errorf("upstream stream error: %s", envelope.Error.Message)
+	}
+	if envelope.Error.Type != "" {
+		return fmt.Errorf("upstream stream error: %s", envelope.Error.Type)
+	}
+	return fmt.Errorf("upstream stream error: anthropic error event")
+}
+
+// Translated Anthropic chat streams require a terminal message_stop.
+// A transport EOF without message_stop is reported as a truncated-stream
+// error through the pipe boundary; success is tracked separately from EOF so
+// partial content is never upgraded to [DONE]. Valid EOF-delimited final
+// events are still processed before the EOF check. Error events fail the
+// stream without emitting a later terminal event.
 func translateAnthropicStream(src io.ReadCloser, publicModel string, stream *StreamCompletion) io.ReadCloser {
 	return newTranslatedStream(src, func(pw *io.PipeWriter) {
 		defer src.Close()
@@ -320,23 +352,37 @@ func translateAnthropicStream(src io.ReadCloser, publicModel string, stream *Str
 		decoder := newSSEDecoder(src)
 		var streamID string
 		var finishReason string
+		completed := false
 
 		for {
 			event, err := decoder.Next()
 			if err != nil {
-				if err != io.EOF {
+				if err == io.EOF {
+					if !completed {
+						_ = pw.CloseWithError(fmt.Errorf("upstream stream truncated: anthropic chat stream ended without message_stop"))
+					}
+				} else {
 					_ = pw.CloseWithError(err)
 				}
 				return
 			}
-			if err := processAnthropicEvent(pw, event.Type, event.Data, publicModel, &streamID, &finishReason, stream); err != nil {
+			done, err := processAnthropicEvent(pw, event.Type, event.Data, publicModel, &streamID, &finishReason, stream)
+			if err != nil {
 				_ = pw.CloseWithError(err)
+				return
+			}
+			if done {
+				completed = true
 				return
 			}
 		}
 	})
 }
 
+// Translated Anthropic Responses streams require a terminal message_stop.
+// A transport EOF without completion is reported as truncated instead of
+// synthesizing response.completed. See translateAnthropicStream for the
+// shared EOF-versus-success contract.
 func translateAnthropicResponsesStream(src io.ReadCloser, publicModel string, stream *StreamCompletion) io.ReadCloser {
 	return newTranslatedStream(src, func(pw *io.PipeWriter) {
 		defer src.Close()
@@ -350,9 +396,7 @@ func translateAnthropicResponsesStream(src io.ReadCloser, publicModel string, st
 			if err != nil {
 				if err == io.EOF {
 					if !state.Completed {
-						if err := writeResponsesCompleted(pw, state); err != nil {
-							_ = pw.CloseWithError(err)
-						}
+						_ = pw.CloseWithError(fmt.Errorf("upstream stream truncated: anthropic responses stream ended without message_stop"))
 					}
 				} else {
 					_ = pw.CloseWithError(err)
@@ -371,7 +415,10 @@ func translateAnthropicResponsesStream(src io.ReadCloser, publicModel string, st
 	})
 }
 
-func processAnthropicEvent(w io.Writer, eventType, data, publicModel string, streamID *string, finishReason *string, stream *StreamCompletion) error {
+func processAnthropicEvent(w io.Writer, eventType, data, publicModel string, streamID *string, finishReason *string, stream *StreamCompletion) (bool, error) {
+	if err := anthropicStreamError(eventType, data); err != nil {
+		return false, err
+	}
 	switch eventType {
 	case "message_start":
 		var evt struct {
@@ -381,13 +428,13 @@ func processAnthropicEvent(w io.Writer, eventType, data, publicModel string, str
 			} `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(data), &evt); err != nil {
-			return err
+			return false, err
 		}
 		if evt.Message.ID != "" {
 			*streamID = evt.Message.ID
 		}
 		stream.SetUsage(Usage{PromptTokens: int64(evt.Message.Usage.InputTokens), CompletionTokens: int64(evt.Message.Usage.OutputTokens), TotalTokens: int64(evt.Message.Usage.InputTokens + evt.Message.Usage.OutputTokens)})
-		return writeOpenAIChunk(w, openAIChunk{
+		return false, writeOpenAIChunk(w, openAIChunk{
 			ID:      fallbackStreamID(*streamID),
 			Object:  "chat.completion.chunk",
 			Created: 0,
@@ -405,12 +452,12 @@ func processAnthropicEvent(w io.Writer, eventType, data, publicModel string, str
 			} `json:"delta"`
 		}
 		if err := json.Unmarshal([]byte(data), &evt); err != nil {
-			return err
+			return false, err
 		}
 		if evt.Delta.Type != "text_delta" || evt.Delta.Text == "" {
-			return nil
+			return false, nil
 		}
-		return writeOpenAIChunk(w, openAIChunk{
+		return false, writeOpenAIChunk(w, openAIChunk{
 			ID:      fallbackStreamID(*streamID),
 			Object:  "chat.completion.chunk",
 			Created: 0,
@@ -428,13 +475,13 @@ func processAnthropicEvent(w io.Writer, eventType, data, publicModel string, str
 			Usage anthropicUsage `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &evt); err != nil {
-			return err
+			return false, err
 		}
 		if evt.Delta.StopReason != "" {
 			*finishReason = mapAnthropicStopReason(evt.Delta.StopReason)
 		}
 		stream.SetUsage(Usage{PromptTokens: int64(evt.Usage.InputTokens), CompletionTokens: int64(evt.Usage.OutputTokens), TotalTokens: int64(evt.Usage.InputTokens + evt.Usage.OutputTokens)})
-		return nil
+		return false, nil
 	case "message_stop":
 		if err := writeOpenAIChunk(w, openAIChunk{
 			ID:      fallbackStreamID(*streamID),
@@ -447,16 +494,21 @@ func processAnthropicEvent(w io.Writer, eventType, data, publicModel string, str
 				FinishReason: stringPtr(*finishReason),
 			}},
 		}); err != nil {
-			return err
+			return false, err
 		}
-		_, err := io.WriteString(w, "data: [DONE]\n\n")
-		return err
+		if _, err := io.WriteString(w, "data: [DONE]\n\n"); err != nil {
+			return false, err
+		}
+		return true, nil
 	default:
-		return nil
+		return false, nil
 	}
 }
 
 func processAnthropicResponsesEvent(w io.Writer, eventType, data string, state *responsesStreamState, stream *StreamCompletion) (bool, error) {
+	if err := anthropicStreamError(eventType, data); err != nil {
+		return false, err
+	}
 	switch eventType {
 	case "message_start":
 		var evt struct {
@@ -472,10 +524,10 @@ func processAnthropicResponsesEvent(w io.Writer, eventType, data string, state *
 			state.ResponseID = evt.Message.ID
 			state.ItemID = evt.Message.ID + "_msg"
 		}
-		state.setUsage(openAIUsage{
-			PromptTokens:     evt.Message.Usage.InputTokens,
-			CompletionTokens: evt.Message.Usage.OutputTokens,
-			TotalTokens:      evt.Message.Usage.InputTokens + evt.Message.Usage.OutputTokens,
+		state.setUsage(openAIResponsesUsage{
+			InputTokens:  evt.Message.Usage.InputTokens,
+			OutputTokens: evt.Message.Usage.OutputTokens,
+			TotalTokens:  evt.Message.Usage.InputTokens + evt.Message.Usage.OutputTokens,
 		})
 		stream.SetUsage(Usage{PromptTokens: int64(evt.Message.Usage.InputTokens), CompletionTokens: int64(evt.Message.Usage.OutputTokens), TotalTokens: int64(evt.Message.Usage.InputTokens + evt.Message.Usage.OutputTokens)})
 		return false, writeResponsesCreated(w, state)
@@ -500,10 +552,10 @@ func processAnthropicResponsesEvent(w io.Writer, eventType, data string, state *
 		if err := json.Unmarshal([]byte(data), &evt); err != nil {
 			return false, err
 		}
-		state.setUsage(openAIUsage{
-			PromptTokens:     evt.Usage.InputTokens,
-			CompletionTokens: evt.Usage.OutputTokens,
-			TotalTokens:      evt.Usage.InputTokens + evt.Usage.OutputTokens,
+		state.setUsage(openAIResponsesUsage{
+			InputTokens:  evt.Usage.InputTokens,
+			OutputTokens: evt.Usage.OutputTokens,
+			TotalTokens:  evt.Usage.InputTokens + evt.Usage.OutputTokens,
 		})
 		stream.SetUsage(Usage{PromptTokens: int64(evt.Usage.InputTokens), CompletionTokens: int64(evt.Usage.OutputTokens), TotalTokens: int64(evt.Usage.InputTokens + evt.Usage.OutputTokens)})
 		return false, nil

@@ -97,7 +97,7 @@ func observeOpenAIStreamEvent(stream *StreamCompletion, event sseEvent) {
 		stream.Complete(err, false)
 		return
 	}
-	if usage := usageFromBody([]byte(event.Data)); usage.Has() {
+	if usage := usageFromSSEData([]byte(event.Data)); usage.Has() {
 		stream.SetUsage(usage)
 	}
 }

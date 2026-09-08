@@ -32,7 +32,9 @@ aiproxy version
 ```
 
 Without `--config`, the CLI reads `$XDG_CONFIG_HOME/aiproxy/config.hcl`, falling back to
-`~/.config/aiproxy/config.hcl` when `XDG_CONFIG_HOME` is unset.
+`~/.config/aiproxy/config.hcl` when `XDG_CONFIG_HOME` is unset. Set `$AIPROXY_CONFIG`
+to inline HCL to skip the config file (explicit `--config` overrides it; `serve -d`
+and `configure`/`login` file workflows require a file).
 
 Foreground `aiproxy serve` is supported across the advertised release targets.
 Linux additionally supports `aiproxy serve -d` and the `aiproxy status`,

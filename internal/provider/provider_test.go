@@ -1219,6 +1219,10 @@ func TestAnthropicAdapterStreamingTranslation(t *testing.T) {
 }
 
 func TestAnthropicStreamTranslatesFragmentedEOFEvent(t *testing.T) {
+	// Release note (STREAM-02 tightening): a transport EOF without the
+	// terminal message_stop is now a truncated-stream error, not a silent
+	// success. Partial chunks emitted before EOF are preserved, but the read
+	// must fail and no [DONE] may be synthesized.
 	src := io.NopCloser(strings.NewReader("event: message_start\n" +
 		"data: {\"message\":\n" +
 		"data: {\"id\":\"msg_stream\"}}\n" +
@@ -1229,12 +1233,15 @@ func TestAnthropicStreamTranslatesFragmentedEOFEvent(t *testing.T) {
 	defer stream.Close()
 
 	body, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "truncated") {
+		t.Fatalf("expected truncated-stream error, got body %q err %v", string(body), err)
 	}
 	text := string(body)
 	if !strings.Contains(text, `"id":"msg_stream"`) || !strings.Contains(text, `"content":"Hello"`) {
 		t.Fatalf("missing translated fragmented EOF event: %q", text)
+	}
+	if strings.Contains(text, "data: [DONE]") {
+		t.Fatalf("truncated stream must not synthesize [DONE]: %q", text)
 	}
 }
 

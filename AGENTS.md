@@ -17,7 +17,9 @@ Operational guide for AI agents (and humans) working in this repo.
 
 The CLI defaults to `$XDG_CONFIG_HOME/aiproxy/config.hcl`, falling back to
 `~/.config/aiproxy/config.hcl` when `XDG_CONFIG_HOME` is unset. Pass
-`--config` to use a different file.
+`--config` to use a different file. Set `$AIPROXY_CONFIG` to inline HCL to
+skip the config file (explicit `--config` overrides it; `serve -d` and
+`configure`/`login` file workflows require a file).
 
 The CLI also includes:
 
@@ -44,7 +46,10 @@ The CLI also includes:
   random secret at startup and persists it to
   `$XDG_CONFIG_HOME/aiproxy/dashboard.token`, and the `dashboard` command
   reads that file to authenticate. When `token` is declared explicitly, the
-  file is not written and that value is used as-is. The minted token survives
+  file is not written at startup and that value is used as-is. If a `SIGHUP`
+  reload drops a previously declared token, the carried-over secret is
+  published to the file before the new runtime activates; a persistence
+  failure rejects the reload with the old runtime intact. The minted token survives
   `SIGHUP` reloads unchanged. Self-hosted reload is still `SIGHUP` for the
   server side.
 - `aiproxy paths` to print resolved config and secrets paths
