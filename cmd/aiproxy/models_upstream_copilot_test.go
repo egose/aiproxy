@@ -61,7 +61,7 @@ provider "github-copilot" "copilot" {
 	var stdout, stderr bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := runModels(ctx, cfg, "copilot", true, &stdout, &stderr); err != nil {
+	if err := runModels(ctx, cfg, true, "copilot", true, &stdout, &stderr); err != nil {
 		t.Fatalf("runModels upstream: %v (stderr=%s)", err, stderr.String())
 	}
 	if gotMethod != http.MethodGet {
@@ -112,7 +112,7 @@ provider "github-copilot" "copilot" {
 	var stdout, stderr bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	err := runModels(ctx, cfg, "copilot", true, &stdout, &stderr)
+	err := runModels(ctx, cfg, true, "copilot", true, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected error for 401 upstream")
 	}

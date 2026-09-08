@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -31,7 +32,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "aiproxy",
 		Short: "Proxy multiple AI providers behind a single API",
-		Long:  "aiproxy proxies multiple AI providers behind a single OpenAI-compatible API.\n\nDefault config path: $XDG_CONFIG_HOME/aiproxy/config.hcl\nFallback config path: ~/.config/aiproxy/config.hcl\nDefault secrets path: $XDG_CONFIG_HOME/aiproxy/keys.json\nFallback secrets path: ~/.config/aiproxy/keys.json\n\nDaemon lifecycle commands (`serve -d`, `stop`, `status`, `restart`) are Linux-only.\n\nUse `aiproxy paths` to print resolved paths, `aiproxy examples` for boxed config examples, and `aiproxy configure` to create or update config blocks interactively.",
+		Long:  "aiproxy proxies multiple AI providers behind a single OpenAI-compatible API.\n\nDefault config path: $XDG_CONFIG_HOME/aiproxy/config.hcl\nFallback config path: ~/.config/aiproxy/config.hcl\nDefault secrets path: $XDG_CONFIG_HOME/aiproxy/keys.json\nFallback secrets path: ~/.config/aiproxy/keys.json\n\nSet $AIPROXY_CONFIG to inline HCL to skip the config file (explicit --config overrides it).\n\nDaemon lifecycle commands (`serve -d`, `stop`, `status`, `restart`) are Linux-only.\n\nUse `aiproxy paths` to print resolved paths, `aiproxy examples` for boxed config examples, and `aiproxy configure` to create or update config blocks interactively.",
 	}
 	rootCmd.AddCommand(newServeCommand())
 	rootCmd.AddCommand(newValidateCommand())
@@ -54,12 +55,16 @@ func newServeCommand() *cobra.Command {
 		Short: "Run the AI proxy server",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if daemon {
+				if configFromEnvRequested(cmd) {
+					return errors.New("daemon mode requires a config file; unset AIPROXY_CONFIG or pass --config")
+				}
 				return spawnDaemon(cmd, configPath)
 			}
-			a, err := app.Build(context.Background(), app.BuildOptions{
-				ConfigPath: configPath,
-				Version:    version,
-			})
+			opts, err := buildOptionsForServe(configPath, cmd)
+			if err != nil {
+				return err
+			}
+			a, err := app.Build(context.Background(), opts)
 			if err != nil {
 				return err
 			}
@@ -70,7 +75,7 @@ func newServeCommand() *cobra.Command {
 			return a.RunReady(ctx, notifyDaemonReady)
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", defaultConfigPath(), "path to config file")
+	cmd.Flags().StringVarP(&configPath, "config", "c", defaultConfigPath(), "path to config file (overrides $AIPROXY_CONFIG)")
 	cmd.Flags().BoolVarP(&daemon, "daemon", "d", false, "run the server in the background (Linux only)")
 	return cmd
 }
@@ -81,14 +86,14 @@ func newValidateCommand() *cobra.Command {
 		Use:   "validate",
 		Short: "Validate the config file without running the server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if _, err := config.LoadFile(cfgPath); err != nil {
+			if _, err := loadConfigForCommand(cfgPath, cmd); err != nil {
 				return err
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), "config is valid")
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&cfgPath, "config", "c", defaultConfigPath(), "path to config file")
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", defaultConfigPath(), "path to config file (overrides $AIPROXY_CONFIG)")
 	return cmd
 }
 
@@ -119,7 +124,11 @@ func newPathsCommand() *cobra.Command {
 		Use:   "paths",
 		Short: "Print resolved default config and secrets paths",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Fprintf(cmd.OutOrStdout(), "config: %s\nsecrets: %s\n", defaultConfigPath(), defaultSecretsPath())
+			configDisplay := defaultConfigPath()
+			if _, ok := config.EnvConfigContent(); ok {
+				configDisplay = config.EnvConfigFilename + " (AIPROXY_CONFIG is set; --config overrides)"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "config: %s\nsecrets: %s\n", configDisplay, defaultSecretsPath())
 		},
 	}
 }

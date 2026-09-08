@@ -29,15 +29,15 @@ func newDashboardCommand() *cobra.Command {
 		Use:   "dashboard",
 		Short: "Attach an interactive dashboard to a running aiproxy server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDashboard(cmd.Context(), cfgPath, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return runDashboard(cmd.Context(), cfgPath, configFlagExplicit(cmd), cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
-	cmd.Flags().StringVarP(&cfgPath, "config", "c", defaultConfigPath(), "path to config file")
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", defaultConfigPath(), "path to config file (overrides $AIPROXY_CONFIG)")
 	return cmd
 }
 
-func runDashboard(parentCtx context.Context, cfgPath string, stdout, stderr io.Writer) error {
-	rt, err := config.LoadFile(cfgPath)
+func runDashboard(parentCtx context.Context, cfgPath string, explicit bool, stdout, stderr io.Writer) error {
+	rt, err := config.LoadFileOrEnv(cfgPath, explicit)
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}

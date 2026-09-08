@@ -22,17 +22,17 @@ func newModelsCommand() *cobra.Command {
 		Use:   "models",
 		Short: "List models for a provider from the config file",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runModels(cmd.Context(), cfgPath, providerName, upstream, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return runModels(cmd.Context(), cfgPath, configFlagExplicit(cmd), providerName, upstream, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
-	cmd.Flags().StringVarP(&cfgPath, "config", "c", defaultConfigPath(), "path to config file")
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", defaultConfigPath(), "path to config file (overrides $AIPROXY_CONFIG)")
 	cmd.Flags().StringVarP(&providerName, "provider", "p", "", "provider name (skips the interactive prompt)")
 	cmd.Flags().BoolVar(&upstream, "upstream", false, "list models from the upstream model endpoint instead of the config file")
 	return cmd
 }
 
-func runModels(ctx context.Context, cfgPath, providerName string, upstream bool, stdout, stderr io.Writer) error {
-	rt, err := config.LoadFile(cfgPath)
+func runModels(ctx context.Context, cfgPath string, explicit bool, providerName string, upstream bool, stdout, stderr io.Writer) error {
+	rt, err := config.LoadFileOrEnv(cfgPath, explicit)
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}

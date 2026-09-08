@@ -358,6 +358,23 @@ Use `env("VAR")` anywhere a string is allowed. Values are inlined before HCL par
 
 That makes it suitable for API keys, bearer tokens, URLs, and other deployment-specific values.
 
+Set `$AIPROXY_CONFIG` to inline the whole HCL document and skip the config file:
+
+```sh
+export AIPROXY_CONFIG='listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = env("OPENAI_API_KEY")
+  model "gpt-4o-mini" {}
+}'
+aiproxy validate
+aiproxy serve
+```
+
+An explicit `--config` overrides `$AIPROXY_CONFIG`. `serve -d` and the
+`configure`/`login` file workflows require a file. `SIGHUP` re-reads
+`$AIPROXY_CONFIG` when the server was started from it.
+
 For local runs, if your config depends on variables in `.env`, load them first:
 
 ```sh

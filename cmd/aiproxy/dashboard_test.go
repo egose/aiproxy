@@ -37,7 +37,7 @@ provider "openai" "openai" {
 }
 `)
 	var stdout, stderr bytes.Buffer
-	err := runDashboard(context.Background(), cfg, &stdout, &stderr)
+	err := runDashboard(context.Background(), cfg, true, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected error when dashboard block is absent")
 	}
@@ -49,7 +49,7 @@ provider "openai" "openai" {
 func TestRunDashboardErrorsWhenConfigInvalid(t *testing.T) {
 	cfg := writeDashboardConfig(t, `invalid hcl >>>`)
 	var stdout, stderr bytes.Buffer
-	err := runDashboard(context.Background(), cfg, &stdout, &stderr)
+	err := runDashboard(context.Background(), cfg, true, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected error for invalid config")
 	}
@@ -96,7 +96,7 @@ provider "openai" "openai" {
 	var stdout, stderr bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	_ = runDashboard(ctx, cfg, &stdout, &stderr)
+	_ = runDashboard(ctx, cfg, true, &stdout, &stderr)
 	// runDashboard should have authenticated with "stub-token" and attached.
 	// It returns when ctx is cancelled (TUI keeps running until then).
 	if strings.Contains(stderr.String(), "no server running") {
@@ -125,7 +125,7 @@ provider "openai" "openai" {
 }
 `)
 	var stdout, stderr bytes.Buffer
-	err := runDashboard(context.Background(), cfg, &stdout, &stderr)
+	err := runDashboard(context.Background(), cfg, true, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected error when token file is missing")
 	}
@@ -187,7 +187,7 @@ provider "openai" "openai" {
 }
 `)
 	var stdout, stderr bytes.Buffer
-	err := runDashboard(context.Background(), cfg, &stdout, &stderr)
+	err := runDashboard(context.Background(), cfg, true, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected error when no server is running")
 	}
@@ -220,7 +220,7 @@ provider "openai" "openai" {
 }
 `)
 			var stdout, stderr bytes.Buffer
-			err := runDashboard(context.Background(), cfg, &stdout, &stderr)
+			err := runDashboard(context.Background(), cfg, true, &stdout, &stderr)
 			if !errors.Is(err, errDashboardInsecureTransport) {
 				t.Fatalf("expected errDashboardInsecureTransport, got %v (stderr=%s)", err, stderr.String())
 			}
@@ -248,7 +248,7 @@ provider "openai" "openai" {
 }
 `)
 	var stdout, stderr bytes.Buffer
-	err := runDashboard(context.Background(), cfg, &stdout, &stderr)
+	err := runDashboard(context.Background(), cfg, true, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "allow_insecure_remote is unsupported") {
 		t.Fatalf("expected unsupported allow_insecure_remote error, got %v", err)
 	}
@@ -273,7 +273,7 @@ provider "openai" "openai" {
 	var stdout, stderr bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	_ = runDashboard(ctx, cfg, &stdout, &stderr)
+	_ = runDashboard(ctx, cfg, true, &stdout, &stderr)
 	if strings.Contains(stderr.String(), "non-loopback") {
 		t.Fatalf("loopback should be allowed without override, stderr=%s", stderr.String())
 	}
@@ -298,7 +298,7 @@ provider "openai" "openai" {
 }
 `)
 	var stdout, stderr bytes.Buffer
-	err := runDashboard(context.Background(), cfg, &stdout, &stderr)
+	err := runDashboard(context.Background(), cfg, true, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected validation error for insecure remote with minted token")
 	}

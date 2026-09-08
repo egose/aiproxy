@@ -17,7 +17,9 @@ Operational guide for AI agents (and humans) working in this repo.
 
 The CLI defaults to `$XDG_CONFIG_HOME/aiproxy/config.hcl`, falling back to
 `~/.config/aiproxy/config.hcl` when `XDG_CONFIG_HOME` is unset. Pass
-`--config` to use a different file.
+`--config` to use a different file. Set `$AIPROXY_CONFIG` to inline HCL to
+skip the config file (explicit `--config` overrides it; `serve -d` and
+`configure`/`login` file workflows require a file).
 
 The CLI also includes:
 

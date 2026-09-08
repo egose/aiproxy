@@ -32,9 +32,10 @@ const (
 )
 
 type BuildOptions struct {
-	ConfigPath string
-	Version    string
-	LogOutput  io.Writer
+	ConfigPath    string
+	ConfigFromEnv bool
+	Version       string
+	LogOutput     io.Writer
 }
 
 type App struct {
@@ -63,7 +64,7 @@ type App struct {
 }
 
 func Build(ctx context.Context, opts BuildOptions) (*App, error) {
-	rt, err := loadRuntime(opts.ConfigPath)
+	rt, err := loadRuntime(opts)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
@@ -213,7 +214,7 @@ func (a *App) Reload() error {
 	a.reloadMu.Lock()
 	defer a.reloadMu.Unlock()
 
-	rt, err := loadRuntime(a.buildOpt.ConfigPath)
+	rt, err := loadRuntime(a.buildOpt)
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
@@ -338,8 +339,11 @@ func aOrAggregator(usage accounting.Recorder) *accounting.Aggregator {
 	return nil
 }
 
-func loadRuntime(path string) (*config.Runtime, error) {
-	return config.LoadFile(path)
+func loadRuntime(opts BuildOptions) (*config.Runtime, error) {
+	if opts.ConfigFromEnv {
+		return config.LoadEnv()
+	}
+	return config.LoadFile(opts.ConfigPath)
 }
 
 type upstreamClientPool struct {
