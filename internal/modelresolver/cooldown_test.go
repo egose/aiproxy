@@ -47,6 +47,26 @@ func cooldownTestRT() *config.Runtime {
 	}
 }
 
+func TestCooldownStoreActiveListsRemaining(t *testing.T) {
+	rt := cooldownTestRT()
+	store := NewCooldownStore()
+	current := time.Now()
+	store.SetNowFunc(func() time.Time { return current })
+	fp := fingerprintFor(t, rt, "a", "p1", "m")
+	store.Observe(fp, 30*time.Second)
+	active := store.Active()
+	if len(active) != 1 || active[0].Alias != "a" || active[0].Provider != "p1" || active[0].Model != "m" {
+		t.Fatalf("Active = %+v", active)
+	}
+	if active[0].Remaining < 29*time.Second || active[0].Remaining > 30*time.Second {
+		t.Fatalf("Remaining = %v", active[0].Remaining)
+	}
+	current = current.Add(time.Minute)
+	if got := store.Active(); len(got) != 0 {
+		t.Fatalf("expired Active = %+v", got)
+	}
+}
+
 func fingerprintFor(t *testing.T, rt *config.Runtime, alias, provider, model string) CooldownFingerprint {
 	t.Helper()
 	prov, m, ok := rt.Catalog.Model(provider, model)

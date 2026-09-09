@@ -37,10 +37,20 @@ type Snapshot struct {
 	DisabledProviders []Provider               `json:"disabled_providers"`
 	Aliases           []Alias                  `json:"aliases"`
 	Health            map[string]bool          `json:"health"`
+	Cooldowns         []CooldownInfo           `json:"cooldowns,omitempty"`
 	Usage             []Usage                  `json:"usage"`
+	ProviderStats     []ProviderStat           `json:"provider_stats,omitempty"`
+	Upstream          []UpstreamUsage          `json:"upstream,omitempty"`
 	Recent            []Recent                 `json:"recent"`
 	Logs              []observability.LogEntry `json:"logs"`
 	LastSeq           uint64                   `json:"last_seq"`
+}
+
+type CooldownInfo struct {
+	Alias       string `json:"alias"`
+	Provider    string `json:"provider"`
+	Model       string `json:"model"`
+	RemainingMs int64  `json:"remaining_ms"`
 }
 
 type Provider struct {
@@ -65,6 +75,8 @@ type AliasTarget struct {
 
 type Usage = accounting.Summary
 type Recent = accounting.Event
+type ProviderStat = accounting.ProviderSummary
+type UpstreamUsage = accounting.UpstreamSummary
 
 type Logs struct {
 	Logs    []observability.LogEntry `json:"logs"`
@@ -88,6 +100,14 @@ type RuntimeSource struct {
 	usage     *accounting.Aggregator
 	health    *providerhealth.Tracker
 	logs      *observability.LogBuffer
+	cooldowns func() []CooldownInfo
+}
+
+func (s *RuntimeSource) SetCooldownSource(fn func() []CooldownInfo) {
+	if s == nil {
+		return
+	}
+	s.cooldowns = fn
 }
 
 func NewRuntimeSource(dashboard config.Dashboard, version, address, authMode string, startTime time.Time, catalog config.Catalog, usage *accounting.Aggregator, health *providerhealth.Tracker, logs *observability.LogBuffer) *RuntimeSource {
@@ -119,7 +139,15 @@ func (s *RuntimeSource) Snapshot(ctx context.Context, recentN int) Snapshot {
 	if s == nil {
 		return Snapshot{}
 	}
-	return BuildContext(ctx, s.version, s.address, s.authMode, s.startTime, s.catalog, s.usage, s.health, s.logs, recentN)
+	snap := BuildContext(ctx, s.version, s.address, s.authMode, s.startTime, s.catalog, s.usage, s.health, s.logs, recentN)
+	if s.cooldowns != nil {
+		snap.Cooldowns = s.cooldowns()
+	}
+	if s.usage != nil {
+		snap.ProviderStats = s.usage.ProviderSummaries()
+		snap.Upstream = s.usage.UpstreamSummaries()
+	}
+	return snap
 }
 
 func (s *RuntimeSource) Logs(since uint64) Logs {

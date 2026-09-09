@@ -50,6 +50,8 @@ type Result struct {
 	Stream        *StreamCompletion
 	RetryDelay    time.Duration
 	HasRetryDelay bool
+	Provider      string
+	UpstreamModel string
 }
 
 type Usage struct {

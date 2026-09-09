@@ -73,6 +73,20 @@ func TestSnapshotFromTransportRoundTripsCoreFields(t *testing.T) {
 	}
 }
 
+func TestSnapshotFromTransportCarriesProviderStats(t *testing.T) {
+	transport := dashrpc.Snapshot{
+		ProviderStats: []dashrpc.ProviderStat{{Provider: "zen", Requests: 2, TotalTokens: 20}},
+		Upstream:      []dashrpc.UpstreamUsage{{Provider: "zen", Model: "spark", Count: 2}},
+	}
+	snap := SnapshotFromTransport(transport)
+	if got := snap.Usage.ProviderSummaries(); len(got) != 1 || got[0].Provider != "zen" || got[0].Requests != 2 {
+		t.Fatalf("ProviderSummaries = %+v", got)
+	}
+	if got := snap.Usage.UpstreamSummaries(); len(got) != 1 || got[0].Model != "spark" {
+		t.Fatalf("UpstreamSummaries = %+v", got)
+	}
+}
+
 func TestSnapshotFromTransportHandlesEmptyTransport(t *testing.T) {
 	snap := SnapshotFromTransport(dashrpc.Snapshot{})
 	if snap == nil {
