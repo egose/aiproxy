@@ -95,6 +95,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newValidateCommand())
 	rootCmd.AddCommand(newPathsCommand())
 	rootCmd.AddCommand(newConfigureCommand())
+	rootCmd.AddCommand(newConvertCommand())
 	rootCmd.AddCommand(newModelsCommand())
 	rootCmd.AddCommand(newLoginCommand())
 	rootCmd.AddCommand(newExamplesCommand())
@@ -295,6 +296,7 @@ aiproxy restart   # Linux only
 aiproxy dashboard --config /etc/aiproxy/config.hcl
 aiproxy validate
 aiproxy validate --config /etc/aiproxy/config.hcl
+aiproxy convert ./config.json --config /etc/aiproxy/config.hcl
 aiproxy paths
 aiproxy configure
 aiproxy configure provider
