@@ -28,11 +28,68 @@ func main() {
 	}
 }
 
+const (
+	defaultServeEnv = "AIPROXY_DEFAULT_SERVE"
+	daemonEnv       = "AIPROXY_DAEMON"
+)
+
+func envTruthy(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func daemonRequested(cmd *cobra.Command) bool {
+	if flag := cmd.Flags().Lookup("daemon"); flag != nil && cmd.Flags().Changed("daemon") {
+		enabled, err := cmd.Flags().GetBool("daemon")
+		return err == nil && enabled
+	}
+	return envTruthy(daemonEnv)
+}
+
+func serveBuildOptions(cfgPath string, configExplicit bool) app.BuildOptions {
+	if !configExplicit {
+		if _, ok := config.EnvConfigContent(); ok {
+			return app.BuildOptions{ConfigPath: cfgPath, ConfigFromEnv: true, Version: version}
+		}
+	}
+	return app.BuildOptions{ConfigPath: cfgPath, Version: version}
+}
+
+func runForeground(opts app.BuildOptions) error {
+	a, err := app.Build(context.Background(), opts)
+	if err != nil {
+		return err
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+	defer stop()
+
+	return a.RunReady(ctx, notifyDaemonReady)
+}
+
 func newRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "aiproxy",
-		Short: "Proxy multiple AI providers behind a single API",
-		Long:  rootLongText(),
+		Use:     "aiproxy",
+		Short:   "Proxy multiple AI providers behind a single API",
+		Long:    rootLongText(),
+		Version: version,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !envTruthy(defaultServeEnv) {
+				return cmd.Help()
+			}
+			cfgPath := defaultConfigPath()
+			if daemonRequested(cmd) {
+				if _, ok := config.EnvConfigContent(); ok {
+					return errors.New("daemon mode requires a config file; unset AIPROXY_CONFIG or pass --config")
+				}
+				return spawnDaemon(cmd, cfgPath)
+			}
+			return runForeground(serveBuildOptions(cfgPath, false))
+		},
 	}
 	rootCmd.AddCommand(newServeCommand())
 	rootCmd.AddCommand(newValidateCommand())
@@ -54,29 +111,17 @@ func newServeCommand() *cobra.Command {
 		Use:   "serve",
 		Short: "Run the AI proxy server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if daemon {
+			if daemonRequested(cmd) {
 				if configFromEnvRequested(cmd) {
 					return errors.New("daemon mode requires a config file; unset AIPROXY_CONFIG or pass --config")
 				}
 				return spawnDaemon(cmd, configPath)
 			}
-			opts, err := buildOptionsForServe(configPath, cmd)
-			if err != nil {
-				return err
-			}
-			a, err := app.Build(context.Background(), opts)
-			if err != nil {
-				return err
-			}
-
-			ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
-			defer stop()
-
-			return a.RunReady(ctx, notifyDaemonReady)
+			return runForeground(serveBuildOptions(configPath, configFlagExplicit(cmd)))
 		},
 	}
 	cmd.Flags().StringVarP(&configPath, "config", "c", defaultConfigPath(), "path to config file (overrides $AIPROXY_CONFIG)")
-	cmd.Flags().BoolVarP(&daemon, "daemon", "d", false, "run the server in the background (Linux only)")
+	cmd.Flags().BoolVarP(&daemon, "daemon", "d", false, "run the server in the background (Linux only, or set $AIPROXY_DAEMON)")
 	return cmd
 }
 
@@ -120,7 +165,7 @@ func defaultSecretsPath() string {
 }
 
 func rootLongText() string {
-	return "aiproxy proxies multiple AI providers behind a single OpenAI-compatible API.\n\nDefault config path: $XDG_CONFIG_HOME/aiproxy/config.hcl\nFallback config path: ~/.config/aiproxy/config.hcl\nDefault secrets path: $XDG_CONFIG_HOME/aiproxy/keys.json\nFallback secrets path: ~/.config/aiproxy/keys.json\n\nSet $AIPROXY_CONFIG to inline HCL to skip the config file (explicit --config overrides it).\n\nDaemon lifecycle commands (`serve -d`, `stop`, `status`, `restart`) are Linux-only.\n\nUse `aiproxy paths` to print resolved paths, `aiproxy examples` for boxed config examples, and `aiproxy configure` to create or update config blocks interactively.\n\n" + currentConfigStatusText()
+	return "aiproxy " + version + "\n\nProxies multiple AI providers behind a single OpenAI-compatible API.\n\nDefault config path: $XDG_CONFIG_HOME/aiproxy/config.hcl\nFallback config path: ~/.config/aiproxy/config.hcl\nDefault secrets path: $XDG_CONFIG_HOME/aiproxy/keys.json\nFallback secrets path: ~/.config/aiproxy/keys.json\n\nSet $AIPROXY_CONFIG to inline HCL to skip the config file (explicit --config overrides it).\n\nSet $AIPROXY_DEFAULT_SERVE to a truthy value (1, true, yes, on) so bare `aiproxy` behaves as `aiproxy serve` instead of printing this help.\n\nSet $AIPROXY_DAEMON to a truthy value for the effect of `serve -d` without passing the flag (explicit --daemon/--daemon=false overrides it).\n\nDaemon lifecycle commands (`serve -d`, `stop`, `status`, `restart`) are Linux-only.\n\nUse `aiproxy paths` to print resolved paths, `aiproxy examples` for boxed config examples, and `aiproxy configure` to create or update config blocks interactively.\n\n" + currentConfigStatusText()
 }
 
 func currentConfigStatusText() string {
