@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
+	"github.com/hashicorp/hcl/v2/json"
 )
 
 const ConfigEnvVar = "AIPROXY_CONFIG"
@@ -51,9 +52,9 @@ func Load(src []byte, filename string) (*Runtime, error) {
 	src = trimLeadingWhitespace(src)
 	expanded := expandEnvCalls(src)
 
-	file, diags := hclsyntax.ParseConfig(expanded, filename, hcl.Pos{Line: 1, Column: 1})
-	if diags.HasErrors() {
-		return nil, fmt.Errorf("parse config %s: %s", filename, diags.Error())
+	file, err := parseConfig(expanded, filename)
+	if err != nil {
+		return nil, err
 	}
 
 	var raw rawFile
@@ -72,23 +73,70 @@ func Load(src []byte, filename string) (*Runtime, error) {
 	return rt, nil
 }
 
+func parseConfig(src []byte, filename string) (*hcl.File, error) {
+	file, diags := hclsyntax.ParseConfig(src, filename, hcl.Pos{Line: 1, Column: 1})
+	if !diags.HasErrors() {
+		return file, nil
+	}
+	if jsonFile, jsonDiags := json.Parse(src, filename); !jsonDiags.HasErrors() {
+		return jsonFile, nil
+	}
+	return nil, fmt.Errorf("parse config %s: %s", filename, diags.Error())
+}
+
 func annotateProviderSyntax(body hcl.Body, raw *rawFile) {
-	syntaxBody, ok := body.(*hclsyntax.Body)
-	if !ok {
+	raw.providerSyntax = make([]rawProviderSyntax, 0, len(raw.Providers))
+	if syntaxBody, ok := body.(*hclsyntax.Body); ok {
+		for _, block := range syntaxBody.Blocks {
+			if block.Type != "provider" {
+				continue
+			}
+			attrs := make(map[string]bool, len(block.Body.Attributes))
+			for name := range block.Body.Attributes {
+				attrs[name] = true
+			}
+			blocks := make(map[string]int)
+			for _, nested := range block.Body.Blocks {
+				blocks[nested.Type]++
+			}
+			raw.providerSyntax = append(raw.providerSyntax, rawProviderSyntax{Attrs: attrs, Blocks: blocks})
+		}
 		return
 	}
-	raw.providerSyntax = make([]rawProviderSyntax, 0, len(raw.Providers))
-	for _, block := range syntaxBody.Blocks {
-		if block.Type != "provider" {
-			continue
-		}
-		attrs := make(map[string]bool, len(block.Body.Attributes))
-		for name := range block.Body.Attributes {
-			attrs[name] = true
+	content, _, diags := body.PartialContent(&hcl.BodySchema{
+		Blocks: []hcl.BlockHeaderSchema{{Type: "provider", LabelNames: []string{"type", "name"}}},
+	})
+	if diags.HasErrors() {
+		return
+	}
+	for _, block := range content.Blocks {
+		attrs := make(map[string]bool)
+		if attrContent, _, attrDiags := block.Body.PartialContent(&hcl.BodySchema{
+			Attributes: []hcl.AttributeSchema{
+				{Name: "extends"},
+				{Name: "display_name"},
+				{Name: "base_url"},
+				{Name: "upstream_header_timeout"},
+				{Name: "user_agent"},
+				{Name: "api_key"},
+				{Name: "enabled"},
+			},
+		}); !attrDiags.HasErrors() {
+			for name := range attrContent.Attributes {
+				attrs[name] = true
+			}
 		}
 		blocks := make(map[string]int)
-		for _, nested := range block.Body.Blocks {
-			blocks[nested.Type]++
+		if blockContent, _, blockDiags := block.Body.PartialContent(&hcl.BodySchema{
+			Blocks: []hcl.BlockHeaderSchema{
+				{Type: "api_key_ref"},
+				{Type: "credential_ref"},
+				{Type: "model", LabelNames: []string{"name"}},
+			},
+		}); !blockDiags.HasErrors() {
+			for _, nested := range blockContent.Blocks {
+				blocks[nested.Type]++
+			}
 		}
 		raw.providerSyntax = append(raw.providerSyntax, rawProviderSyntax{Attrs: attrs, Blocks: blocks})
 	}

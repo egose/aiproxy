@@ -238,7 +238,10 @@ By default, the CLI looks for the config file at `$XDG_CONFIG_HOME/aiproxy/confi
 falling back to `~/.config/aiproxy/config.hcl` when `XDG_CONFIG_HOME` is unset.
 Pass `--config` to use a different file. Set `$AIPROXY_CONFIG` to inline HCL to
 skip the config file (explicit `--config` overrides it; `serve -d` and
-`configure`/`login` file workflows require a file).
+`configure`/`login` file workflows require a file). The config also accepts
+HCL's JSON form, which is single-line safe when newlines cannot survive the
+transport (for example a single-line input field). Use `aiproxy convert
+[target-file]` to translate a config between HCL and JSON.
 
 Foreground `aiproxy serve` is supported across the advertised release targets.
 Linux additionally supports `aiproxy serve -d` and the `aiproxy status`,
