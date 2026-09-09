@@ -56,10 +56,15 @@ The CLI also includes:
 - `aiproxy examples` for boxed command/config examples
 - `aiproxy configure` for interactive config editing
 - `aiproxy configure <block> --non-interactive ...` for scripted config updates
+- `aiproxy convert [target-file]` to translate the config between HCL and JSON
+  (direction auto-detected; source defaults to the usual config context,
+  target defaults to the current working directory; `env()` calls resolve at
+  conversion time and output is validated before writing)
 
 The HCL config uses `env("VAR")` for secret/placeholder substitution; values
-are textually inlined **before** HCL parsing. Run `set -a; . ./.env; set +a`
-before invoking the binary locally so env vars resolve.
+are textually inlined **before** HCL parsing. The same inlining applies to the
+JSON config form, where `env("VAR")` is written bare as the value. Run
+`set -a; . ./.env; set +a` before invoking the binary locally so env vars resolve.
 
 The server supports `SIGHUP`-triggered live config reload for auth, providers,
 models, aliases, root and provider upstream header timeouts, access-log

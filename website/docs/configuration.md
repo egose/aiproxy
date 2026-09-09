@@ -375,6 +375,31 @@ An explicit `--config` overrides `$AIPROXY_CONFIG`. `serve -d` and the
 `configure`/`login` file workflows require a file. `SIGHUP` re-reads
 `$AIPROXY_CONFIG` when the server was started from it.
 
+HCL blocks must be separated by newlines, so a multi-block document collapsed
+to a single line (for example by a single-line input field) is rejected. When
+newlines cannot survive the transport, use the JSON form instead: it is fully
+single-line safe. Block labels become nested objects, repeatable label-less
+blocks (such as `target`) accept a single object or an array, and `env("VAR")`
+is written bare as the value:
+
+```sh
+export AIPROXY_CONFIG='{"listener":{"http":{"public":{"address":":8080"}}},"auth":{"main":{"mode":"none"}},"provider":{"openai":{"openai":{"api_key":env("OPENAI_API_KEY"),"model":{"gpt-4o-mini":{}}}}}}'
+aiproxy validate
+aiproxy serve
+```
+
+Convert an existing config between the two forms with `aiproxy convert`.
+The direction is detected automatically, the source defaults to the usual
+config context (`--config`, otherwise `$AIPROXY_CONFIG`, otherwise the default
+path), and the target defaults to a file in the current working directory.
+`env("VAR")` calls are resolved at conversion time, so the referenced
+variables must be set, and the output is validated before writing:
+
+```sh
+aiproxy convert ./config.json --config /etc/aiproxy/config.hcl
+aiproxy convert --compact - --config /etc/aiproxy/config.hcl
+```
+
 For local runs, if your config depends on variables in `.env`, load them first:
 
 ```sh
