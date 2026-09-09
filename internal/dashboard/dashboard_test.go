@@ -555,6 +555,44 @@ func TestTabCyclesThreeFocusAreas(t *testing.T) {
 	}
 }
 
+func TestEnterZoomsFocusedPane(t *testing.T) {
+	snap := newSnapshot()
+	m := &model{snapshot: snap, health: map[string]bool{}, now: time.Now(), dirty: true, focus: focusUsage}
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "enter"}))
+	mod := mm.(*model)
+	if !mod.zoomed {
+		t.Fatal("enter should zoom focused pane")
+	}
+	got := mm.View().Content
+	if !strings.Contains(got, "USAGE") {
+		t.Fatalf("zoomed usage pane missing:\n%s", got)
+	}
+	if strings.Contains(got, "PROVIDER") {
+		t.Errorf("zoomed usage should hide providers pane:\n%s", got)
+	}
+	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if mod := mm.(*model); mod.zoomed {
+		t.Fatal("esc should unzoom instead of quitting")
+	} else if mod.quit {
+		t.Fatal("esc while zoomed should not quit")
+	}
+}
+
+func TestZoomedBottomKeepsTabs(t *testing.T) {
+	snap := newSnapshot()
+	m := &model{snapshot: snap, health: map[string]bool{}, now: time.Now(), dirty: true, focus: focusBottom}
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "enter"}))
+	got := mm.View().Content
+	if !strings.Contains(got, "1:Aliases") || !strings.Contains(got, "2:Logs") {
+		t.Fatalf("zoomed bottom should keep tab strip:\n%s", got)
+	}
+	if strings.Contains(got, "PROVIDER") || strings.Contains(got, "USAGE") {
+		t.Errorf("zoomed bottom should hide top panes:\n%s", got)
+	}
+}
+
 func TestSideWidthFollowsProviderContent(t *testing.T) {
 	narrow := &model{snapshot: &RuntimeSnapshot{Providers: []config.Provider{{Name: "a"}, {Name: "b"}}}, width: 120}
 	if got := narrow.sideWidth(); got >= 60 {

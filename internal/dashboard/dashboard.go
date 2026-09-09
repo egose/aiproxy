@@ -115,6 +115,7 @@ type model struct {
 	staleAt        time.Time
 	paused         bool
 	showHelp       bool
+	zoomed         bool
 	usageScroll    int
 	providerScroll int
 	aliasScroll    int
@@ -168,6 +169,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dirty = true
 		return m, nil
 	case tea.KeyMsg:
+		if m.zoomed && msg.String() == "esc" {
+			m.zoomed = false
+			m.dirty = true
+			return m, nil
+		}
 		if shouldQuit(msg) {
 			m.quit = true
 			return m, tea.Quit
@@ -237,6 +243,10 @@ func (m *model) handleKey(msg tea.KeyMsg) bool {
 	switch msg.String() {
 	case "tab":
 		m.focus = (m.focus + 1) % 3
+		return true
+	case "enter":
+		m.zoomed = !m.zoomed
+		m.clampScroll()
 		return true
 	case "1":
 		m.bottomTab = bottomTabAliases
@@ -539,7 +549,7 @@ func (m *model) providerVisibleRows() int {
 	if m.snapshot != nil {
 		notes = providerNoteCount(m.snapshot.Usage.Summaries())
 	}
-	n := m.statsHeight - 4 - notes
+	n := m.effStatsHeight() - 4 - notes
 	if n < 1 {
 		n = 1
 	}
@@ -577,8 +587,30 @@ func (m *model) maxAliasScroll() int {
 	return max
 }
 
+func zoomBodyHeight(height int) int {
+	h := height - chromeLines
+	if h < 4 {
+		h = 4
+	}
+	return h
+}
+
+func (m *model) effStatsHeight() int {
+	if m.zoomed && m.focus != focusBottom {
+		return zoomBodyHeight(m.height)
+	}
+	return m.statsHeight
+}
+
+func (m *model) effBottomHeight() int {
+	if m.zoomed && m.focus == focusBottom {
+		return zoomBodyHeight(m.height)
+	}
+	return m.bottomHeight
+}
+
 func (m *model) usageVisibleRows() int {
-	n := m.statsHeight - 5
+	n := m.effStatsHeight() - 5
 	if n < 1 {
 		n = 1
 	}
@@ -586,7 +618,7 @@ func (m *model) usageVisibleRows() int {
 }
 
 func (m *model) bottomVisibleRows() int {
-	n := m.bottomHeight - 5
+	n := m.effBottomHeight() - 5
 	if n < 1 {
 		n = 1
 	}
@@ -687,7 +719,20 @@ func (m *model) render() string {
 	}
 	header := renderHeader(m)
 	rate := renderRate(m, m.width)
-	statsHeight := m.statsHeight
+	if m.zoomed {
+		bodyHeight := zoomBodyHeight(m.height)
+		var body string
+		switch m.focus {
+		case focusProviders:
+			body = renderProviders(m, m.width, bodyHeight)
+		case focusUsage:
+			body = renderUsage(m, m.width, bodyHeight)
+		default:
+			body = renderBottom(m, m.width, bodyHeight)
+		}
+		return fitView(lipgloss.JoinVertical(lipgloss.Left, header, rate, body, renderFooter(m)), m.width)
+	}
+	statsHeight := m.effStatsHeight()
 	if statsHeight < 4 {
 		statsHeight = 4
 	}
@@ -696,7 +741,7 @@ func (m *model) render() string {
 	side := renderProviders(m, sideWidth, statsHeight)
 	usage := renderUsage(m, usageWidth, statsHeight)
 	mid := lipgloss.JoinHorizontal(lipgloss.Top, side, usage)
-	bottom := renderBottom(m, m.width, m.bottomHeight)
+	bottom := renderBottom(m, m.width, m.effBottomHeight())
 	return fitView(lipgloss.JoinVertical(lipgloss.Left, header, rate, mid, bottom, renderFooter(m)), m.width)
 }
 
@@ -787,6 +832,8 @@ func (m *model) renderHelp() string {
 		"",
 		"  tab        cycle focus PROVIDERS / USAGE / bottom tabs",
 		"  1/2 or [/] switch bottom tab (Aliases / Logs)",
+		"  enter      zoom focused pane to full screen",
+		"  esc        unzoom (or quit when not zoomed)",
 		"  j/k dn/up  scroll focused pane   g/G,home/end top/bottom",
 		"  +/- J/K    resize bottom pane",
 		"  t          cycle tenant filter    e toggle errors-only",
@@ -821,7 +868,11 @@ func renderFooter(m *model) string {
 	} else if m.staleErr != "" {
 		state = "STALE"
 	}
-	base := fmt.Sprintf("%s focus:%s [tab] pane [1/2] tabs [j/k] scroll [t]enant [e]rrs [u]pstream [l]evel [p]ause [?]help [q]uit", state, focusName)
+	zoomHint := "[enter] zoom"
+	if m.zoomed {
+		zoomHint = "[esc] unzoom"
+	}
+	base := fmt.Sprintf("%s focus:%s [tab] pane [1/2] tabs [j/k] scroll [t]enant [e]rrs [u]pstream [l]evel [p]ause %s [?]help [q]uit", state, focusName, zoomHint)
 	if len([]rune(base)) > m.width && m.width > 20 {
 		base = truncate(base, m.width)
 	}
