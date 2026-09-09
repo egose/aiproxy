@@ -734,6 +734,32 @@ function _createMdxContent(props) {
         children: "$AIPROXY_CONFIG"
       }), " when the server was started from it."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["HCL blocks must be separated by newlines, so a multi-block document collapsed\nto a single line (for example by a single-line input field) is rejected. When\nnewlines cannot survive the transport, use the JSON form instead: it is fully\nsingle-line safe. Block labels become nested objects, repeatable label-less\nblocks (such as ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "target"
+      }), ") accept a single object or an array, and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env(\"VAR\")"
+      }), "\nis written bare as the value:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "export AIPROXY_CONFIG='{\"listener\":{\"http\":{\"public\":{\"address\":\":8080\"}}},\"auth\":{\"main\":{\"mode\":\"none\"}},\"provider\":{\"openai\":{\"openai\":{\"api_key\":env(\"OPENAI_API_KEY\"),\"model\":{\"gpt-4o-mini\":{}}}}}}'\naiproxy validate\naiproxy serve\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Convert an existing config between the two forms with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy convert"
+      }), ".\nThe direction is detected automatically, the source defaults to the usual\nconfig context (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--config"
+      }), ", otherwise ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "$AIPROXY_CONFIG"
+      }), ", otherwise the default\npath), and the target defaults to a file in the current working directory.\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env(\"VAR\")"
+      }), " calls are resolved at conversion time, so the referenced\nvariables must be set, and the output is validated before writing:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "aiproxy convert ./config.json --config /etc/aiproxy/config.hcl\naiproxy convert --compact - --config /etc/aiproxy/config.hcl\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["For local runs, if your config depends on variables in ", (0,jsx_runtime.jsx)(_components.code, {
         children: ".env"
       }), ", load them first:"]
