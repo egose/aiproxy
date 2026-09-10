@@ -199,6 +199,49 @@ func TestByProvider(t *testing.T) {
 	}
 }
 
+func TestEventProviderPrefersResolved(t *testing.T) {
+	if got := EventProvider(Event{Model: "alias/chat", Provider: "zen", UpstreamModel: "m"}); got != "zen" {
+		t.Fatalf("EventProvider = %q, want zen", got)
+	}
+	if got := EventProvider(Event{Model: "openai/gpt-4o-mini"}); got != "openai" {
+		t.Fatalf("EventProvider = %q, want openai", got)
+	}
+	if got := EventProvider(Event{Model: "_unresolved_model"}); got != "aiproxy" {
+		t.Fatalf("EventProvider = %q, want aiproxy", got)
+	}
+}
+
+func TestProviderSummariesAttributeAliasTraffic(t *testing.T) {
+	a := NewAggregator()
+	a.Record(Event{Model: "alias/chat", Operation: "chat_completions", StatusCode: 200, Provider: "zen", UpstreamModel: "spark", TotalTokens: 10})
+	a.Record(Event{Model: "alias/chat", Operation: "chat_completions", StatusCode: 429, Provider: "zen", UpstreamModel: "spark"})
+	a.Record(Event{Model: "openai/gpt-4o-mini", Operation: "chat_completions", StatusCode: 200, Provider: "openai", UpstreamModel: "gpt-4o-mini", TotalTokens: 5})
+	got := a.ProviderSummaries()
+	if len(got) != 2 {
+		t.Fatalf("ProviderSummaries = %+v", got)
+	}
+	if got[0].Provider != "zen" || got[0].Requests != 2 || got[0].Throttled != 1 || got[0].Errors != 0 || got[0].TotalTokens != 10 {
+		t.Fatalf("got[0] = %+v", got[0])
+	}
+	if got[1].Provider != "openai" || got[1].Requests != 1 {
+		t.Fatalf("got[1] = %+v", got[1])
+	}
+	up := a.UpstreamSummaries()
+	if len(up) != 3 {
+		t.Fatalf("UpstreamSummaries = %+v", up)
+	}
+}
+
+func TestByProviderCountsThrottled(t *testing.T) {
+	got := ByProvider([]Summary{
+		{Model: "openai/a", StatusCode: 429, Count: 3},
+		{Model: "openai/a", StatusCode: 200, Count: 7},
+	})
+	if len(got) != 1 || got[0].Throttled != 3 || got[0].Errors != 0 || got[0].Requests != 10 {
+		t.Fatalf("ByProvider = %+v", got)
+	}
+}
+
 func TestMemoryRecorderRecent(t *testing.T) {
 	m := &MemoryRecorder{}
 	m.Record(Event{Model: "openai/gpt-4o-mini", StatusCode: 200})

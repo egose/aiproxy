@@ -63,6 +63,34 @@ func TestBuildSerializesAllLiveState(t *testing.T) {
 	}
 }
 
+func TestRuntimeSourceIncludesCooldowns(t *testing.T) {
+	start := time.Now()
+	catalog := config.NewCatalog([]config.Provider{{Name: "openai"}}, nil, nil)
+	src := NewRuntimeSource(config.Dashboard{Enabled: true, Token: "t"}, "v", ":8080", "none", start, catalog, nil, nil, nil)
+	src.SetCooldownSource(func() []CooldownInfo {
+		return []CooldownInfo{{Alias: "a", Provider: "openai", Model: "m", RemainingMs: 5000}}
+	})
+	snap := src.Snapshot(t.Context(), 10)
+	if len(snap.Cooldowns) != 1 || snap.Cooldowns[0].Alias != "a" || snap.Cooldowns[0].RemainingMs != 5000 {
+		t.Fatalf("Cooldowns = %+v", snap.Cooldowns)
+	}
+}
+
+func TestRuntimeSourceIncludesProviderStats(t *testing.T) {
+	start := time.Now()
+	catalog := config.NewCatalog([]config.Provider{{Name: "zen"}}, nil, nil)
+	usage := accounting.NewAggregator()
+	usage.Record(accounting.Event{Model: "alias/chat", Operation: "chat", StatusCode: 200, Provider: "zen", UpstreamModel: "spark", TotalTokens: 7})
+	src := NewRuntimeSource(config.Dashboard{Enabled: true, Token: "t"}, "v", ":8080", "none", start, catalog, usage, nil, nil)
+	snap := src.Snapshot(t.Context(), 10)
+	if len(snap.ProviderStats) != 1 || snap.ProviderStats[0].Provider != "zen" || snap.ProviderStats[0].Requests != 1 {
+		t.Fatalf("ProviderStats = %+v", snap.ProviderStats)
+	}
+	if len(snap.Upstream) != 1 || snap.Upstream[0].Model != "spark" || snap.Upstream[0].TotalTokens != 7 {
+		t.Fatalf("Upstream = %+v", snap.Upstream)
+	}
+}
+
 func TestBuildHandlesNilLiveState(t *testing.T) {
 	snap := Build("v", ":1", "none", time.Now(), config.Catalog{}, nil, nil, nil, 200)
 	if len(snap.Providers) != 0 || len(snap.Health) != 0 || len(snap.Usage) != 0 || len(snap.Logs) != 0 {

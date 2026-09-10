@@ -126,6 +126,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestBytes := 0
 	var principal *auth.Principal
 	accountingModel := ""
+	accountingProvider := ""
+	accountingUpstream := ""
 	var publicModel string
 	var op provider.Operation
 	opKnown := false
@@ -145,6 +147,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Model:            accountingModel,
 				Operation:        op.String(),
 				StatusCode:       rw.statusCode,
+				Provider:         accountingProvider,
+				UpstreamModel:    accountingUpstream,
 				PromptTokens:     usage.PromptTokens,
 				CompletionTokens: usage.CompletionTokens,
 				TotalTokens:      usage.TotalTokens,
@@ -303,9 +307,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if result == nil {
-		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadGateway, "upstream_error", "no healthy target")
+		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadGateway, "upstream_error", "no healthy targets")
 		return
 	}
+	accountingProvider = result.Provider
+	accountingUpstream = result.UpstreamModel
 
 	if result.Streaming {
 		responseStreaming = true

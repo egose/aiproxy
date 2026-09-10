@@ -52,11 +52,35 @@ func attachCooldownDelay(res *Result, delay time.Duration, ok bool) *Result {
 	return res
 }
 
+const defaultQuotaCooldown = 60 * time.Second
+
 func ParseRetryCooldown(header http.Header, now time.Time) (time.Duration, bool) {
 	if delay, ok := parseRetryAfterMS(header); ok {
 		return delay, true
 	}
-	return parseRetryAfter(header, now)
+	if delay, ok := parseRetryAfter(header, now); ok {
+		return delay, true
+	}
+	return parseQuotaExhausted(header)
+}
+
+func parseQuotaExhausted(header http.Header) (time.Duration, bool) {
+	for _, name := range []string{"x-ratelimit-remaining-tokens", "x-ratelimit-remaining-requests"} {
+		for _, value := range headerValuesFold(header, name) {
+			trimmed := strings.Trim(value, " \t")
+			if trimmed == "" || !isASCIIDigits(trimmed) {
+				continue
+			}
+			remaining, err := strconv.ParseUint(trimmed, 10, 64)
+			if err != nil {
+				continue
+			}
+			if remaining == 0 {
+				return defaultQuotaCooldown, true
+			}
+		}
+	}
+	return 0, false
 }
 
 func headerValuesFold(header http.Header, name string) []string {

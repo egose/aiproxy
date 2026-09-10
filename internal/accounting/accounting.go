@@ -20,11 +20,36 @@ type Event struct {
 	Operation  string
 	StatusCode int
 
+	Provider      string
+	UpstreamModel string
+
 	PromptTokens     int64
 	CompletionTokens int64
 	TotalTokens      int64
 
 	Duration time.Duration
+}
+
+func EventProvider(e Event) string {
+	if e.Provider != "" {
+		return e.Provider
+	}
+	if strings.HasPrefix(e.Model, "_") {
+		return "aiproxy"
+	}
+	for i := 0; i < len(e.Model); i++ {
+		if e.Model[i] == '/' {
+			return e.Model[:i]
+		}
+	}
+	return e.Model
+}
+
+func isErrorStatus(code int) bool {
+	if code >= 500 || code == 0 {
+		return true
+	}
+	return code >= 400 && code != 429
 }
 
 func (e Event) HasTokens() bool {
@@ -60,6 +85,21 @@ type ProviderSummary struct {
 	Provider         string
 	Requests         int64
 	Errors           int64
+	Throttled        int64
+	PromptTokens     int64
+	CompletionTokens int64
+	TotalTokens      int64
+}
+
+type UpstreamSummary struct {
+	Tenant     string
+	Client     string
+	Provider   string
+	Model      string
+	Operation  string
+	StatusCode int
+	Count      int64
+
 	PromptTokens     int64
 	CompletionTokens int64
 	TotalTokens      int64
@@ -139,6 +179,24 @@ func (r *MemoryRecorder) Recent(n int) []Event {
 	return out
 }
 
+type providerEntry struct {
+	requests         int64
+	errors           int64
+	throttled        int64
+	promptTokens     int64
+	completionTokens int64
+	totalTokens      int64
+}
+
+type upstreamKey struct {
+	tenant     string
+	client     string
+	provider   string
+	model      string
+	operation  string
+	statusCode int
+}
+
 type Aggregator struct {
 	mu             sync.Mutex
 	buckets        map[time.Time]map[summaryKey]aggregateEntry
@@ -147,6 +205,8 @@ type Aggregator struct {
 	recent         *ringBuffer
 	retention      time.Duration
 	now            func() time.Time
+	providers      map[string]*providerEntry
+	upstream       map[upstreamKey]*providerEntry
 }
 
 type aggregateEntry struct {
@@ -204,6 +264,50 @@ func (a *Aggregator) Record(event Event) {
 	entry.completionTokens += event.CompletionTokens
 	entry.totalTokens += event.TotalTokens
 	bucket[key] = entry
+	if a.providers == nil {
+		a.providers = make(map[string]*providerEntry)
+	}
+	provName := EventProvider(event)
+	prov := a.providers[provName]
+	if prov == nil {
+		prov = &providerEntry{}
+		a.providers[provName] = prov
+	}
+	prov.requests++
+	if isErrorStatus(event.StatusCode) {
+		prov.errors++
+	}
+	if event.StatusCode == 429 {
+		prov.throttled++
+	}
+	prov.promptTokens += event.PromptTokens
+	prov.completionTokens += event.CompletionTokens
+	prov.totalTokens += event.TotalTokens
+	if event.Provider != "" && event.UpstreamModel != "" {
+		if a.upstream == nil {
+			a.upstream = make(map[upstreamKey]*providerEntry)
+		}
+		ukey := upstreamKey{
+			tenant:     event.Tenant,
+			client:     event.Client,
+			provider:   event.Provider,
+			model:      event.UpstreamModel,
+			operation:  event.Operation,
+			statusCode: event.StatusCode,
+		}
+		uent := a.upstream[ukey]
+		if uent == nil {
+			uent = &providerEntry{}
+			a.upstream[ukey] = uent
+		}
+		uent.requests++
+		if isErrorStatus(event.StatusCode) {
+			uent.errors++
+		}
+		uent.promptTokens += event.PromptTokens
+		uent.completionTokens += event.CompletionTokens
+		uent.totalTokens += event.TotalTokens
+	}
 	ringEntry := event
 	if ringEntry.Timestamp.IsZero() {
 		ringEntry.Timestamp = now
@@ -335,10 +439,11 @@ func ByProvider(summaries []Summary) []ProviderSummary {
 			byProvider[name] = entry
 		}
 		entry.Requests += s.Count
-		if s.StatusCode >= 500 || s.StatusCode == 0 {
+		if isErrorStatus(s.StatusCode) {
 			entry.Errors += s.Count
-		} else if s.StatusCode >= 400 && s.StatusCode != 429 {
-			entry.Errors += s.Count
+		}
+		if s.StatusCode == 429 {
+			entry.Throttled += s.Count
 		}
 		entry.PromptTokens += s.PromptTokens
 		entry.CompletionTokens += s.CompletionTokens
@@ -353,6 +458,60 @@ func ByProvider(summaries []Summary) []ProviderSummary {
 			return out[i].Requests > out[j].Requests
 		}
 		return out[i].Provider < out[j].Provider
+	})
+	return out
+}
+
+func (a *Aggregator) ProviderSummaries() []ProviderSummary {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]ProviderSummary, 0, len(a.providers))
+	for name, entry := range a.providers {
+		out = append(out, ProviderSummary{
+			Provider:         name,
+			Requests:         entry.requests,
+			Errors:           entry.errors,
+			Throttled:        entry.throttled,
+			PromptTokens:     entry.promptTokens,
+			CompletionTokens: entry.completionTokens,
+			TotalTokens:      entry.totalTokens,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Requests != out[j].Requests {
+			return out[i].Requests > out[j].Requests
+		}
+		return out[i].Provider < out[j].Provider
+	})
+	return out
+}
+
+func (a *Aggregator) UpstreamSummaries() []UpstreamSummary {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]UpstreamSummary, 0, len(a.upstream))
+	for key, entry := range a.upstream {
+		out = append(out, UpstreamSummary{
+			Tenant:           key.tenant,
+			Client:           key.client,
+			Provider:         key.provider,
+			Model:            key.model,
+			Operation:        key.operation,
+			StatusCode:       key.statusCode,
+			Count:            entry.requests,
+			PromptTokens:     entry.promptTokens,
+			CompletionTokens: entry.completionTokens,
+			TotalTokens:      entry.totalTokens,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		if out[i].Provider != out[j].Provider {
+			return out[i].Provider < out[j].Provider
+		}
+		return out[i].Model < out[j].Model
 	})
 	return out
 }

@@ -99,6 +99,7 @@ func runDashboard(parentCtx context.Context, cfgPath string, explicit bool, stdo
 					fmt.Fprintln(stderr, "server unreachable; dashboard detached")
 					return err
 				}
+				prog.RefreshError(err)
 				continue
 			}
 			prog.Refresh(dashboard.SnapshotFromTransport(updated))

@@ -92,7 +92,8 @@ proxy's rolling 24-hour accounting window.
 - Other upstream `4xx` responses are returned verbatim
 - Unsupported operations return client-visible proxy errors
 - Alias targets carrying valid upstream retry advice (`retry-after-ms`, else
-  `Retry-After`) cool down across requests: later alias requests skip cooling
+  `Retry-After`, else exhausted Meta quota headers) cool down across requests:
+  later alias requests skip cooling
   targets until expiry. When every pool target is actively cooling, the proxy
   returns a generated JSON `429`
   (`{"error":{"type":"upstream_rate_limited","message":"all alias targets cooling, retry after <N>ms"}}`)

@@ -303,6 +303,8 @@ func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, log
 	if resolver == nil {
 		resolver = modelresolver.New(rt)
 	}
+	dashboard := dashrpc.NewRuntimeSource(rt.Dashboard, version, rt.Listener.Address, string(rt.Auth.Mode), startTime, rt.Catalog, aOrAggregator(usage), health, logs)
+	dashboard.SetCooldownSource(cooldownSourceFor(resolver))
 	return httpapi.Dependencies{
 		Resolver:          resolver,
 		Adapter:           adapter,
@@ -320,8 +322,30 @@ func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, log
 		AccessLog:         rt.Logging.AccessLog,
 		HasAccessLog:      true,
 		Logger:            logger,
-		Dashboard:         dashrpc.NewRuntimeSource(rt.Dashboard, version, rt.Listener.Address, string(rt.Auth.Mode), startTime, rt.Catalog, aOrAggregator(usage), health, logs),
+		Dashboard:         dashboard,
 		Version:           version,
+	}
+}
+
+func cooldownSourceFor(resolver *modelresolver.Resolver) func() []dashrpc.CooldownInfo {
+	return func() []dashrpc.CooldownInfo {
+		if resolver == nil {
+			return nil
+		}
+		active := resolver.Cooldowns().Active()
+		if len(active) == 0 {
+			return nil
+		}
+		out := make([]dashrpc.CooldownInfo, 0, len(active))
+		for _, c := range active {
+			out = append(out, dashrpc.CooldownInfo{
+				Alias:       c.Alias,
+				Provider:    c.Provider,
+				Model:       c.Model,
+				RemainingMs: c.Remaining.Milliseconds(),
+			})
+		}
+		return out
 	}
 }
 

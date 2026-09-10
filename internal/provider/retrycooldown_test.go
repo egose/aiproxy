@@ -99,6 +99,39 @@ func TestParseRetryCooldownRetryAfter(t *testing.T) {
 	}
 }
 
+func TestParseRetryCooldownQuotaExhausted(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name   string
+		header http.Header
+		delay  time.Duration
+		ok     bool
+	}{
+		{name: "tokens exhausted", header: http.Header{"X-Ratelimit-Remaining-Tokens": []string{"0"}}, delay: defaultQuotaCooldown, ok: true},
+		{name: "requests exhausted", header: http.Header{"X-Ratelimit-Remaining-Requests": []string{"0"}}, delay: defaultQuotaCooldown, ok: true},
+		{name: "lowercase names", header: http.Header{"x-ratelimit-remaining-tokens": []string{"0"}}, delay: defaultQuotaCooldown, ok: true},
+		{name: "ows", header: http.Header{"X-Ratelimit-Remaining-Requests": []string{"  0\t"}}, delay: defaultQuotaCooldown, ok: true},
+		{name: "tokens remain", header: http.Header{"X-Ratelimit-Remaining-Tokens": []string{"5"}}, ok: false},
+		{name: "requests remain", header: http.Header{"X-Ratelimit-Remaining-Requests": []string{"100"}}, ok: false},
+		{name: "tokens remain but requests exhausted", header: http.Header{"X-Ratelimit-Remaining-Tokens": []string{"5"}, "X-Ratelimit-Remaining-Requests": []string{"0"}}, delay: defaultQuotaCooldown, ok: true},
+		{name: "malformed", header: http.Header{"X-Ratelimit-Remaining-Tokens": []string{"lots"}}, ok: false},
+		{name: "negative", header: http.Header{"X-Ratelimit-Remaining-Tokens": []string{"-1"}}, ok: false},
+		{name: "explicit ms wins", header: http.Header{"Retry-After-Ms": []string{"2500"}, "X-Ratelimit-Remaining-Tokens": []string{"0"}}, delay: 2500 * time.Millisecond, ok: true},
+		{name: "explicit retry-after wins", header: http.Header{"Retry-After": []string{"30"}, "X-Ratelimit-Remaining-Requests": []string{"0"}}, delay: 30 * time.Second, ok: true},
+		{name: "invalid retry-after falls back to quota", header: http.Header{"Retry-After": []string{"soon"}, "X-Ratelimit-Remaining-Tokens": []string{"0"}}, delay: defaultQuotaCooldown, ok: true},
+		{name: "unrelated headers", header: http.Header{"X-Ratelimit-Limit-Tokens": []string{"1000"}}, ok: false},
+		{name: "none", header: http.Header{}, ok: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			delay, ok := ParseRetryCooldown(tt.header, now)
+			if ok != tt.ok || delay != tt.delay {
+				t.Fatalf("delay = %v, %v; want %v, %v", delay, ok, tt.delay, tt.ok)
+			}
+		})
+	}
+}
+
 func msHeader(value string) http.Header {
 	return http.Header{"Retry-After-Ms": []string{value}}
 }

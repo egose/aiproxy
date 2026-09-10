@@ -13,10 +13,18 @@ import (
 type remoteUsage struct {
 	summaries []accounting.Summary
 	recent    []accounting.Event
+	providers []accounting.ProviderSummary
+	upstream  []accounting.UpstreamSummary
 }
 
 func (u *remoteUsage) Summaries() []accounting.Summary { return u.summaries }
 func (u *remoteUsage) Recent(int) []accounting.Event   { return u.recent }
+func (u *remoteUsage) ProviderSummaries() []accounting.ProviderSummary {
+	return u.providers
+}
+func (u *remoteUsage) UpstreamSummaries() []accounting.UpstreamSummary {
+	return u.upstream
+}
 
 type remoteHealth struct {
 	states map[string]bool
@@ -50,6 +58,15 @@ func (l *remoteLogs) Since(n int) []observability.LogEntry {
 // SnapshotFromTransport converts a dashrpc.Snapshot into a dashboard
 // RuntimeSnapshot suitable for the existing TUI renderer.
 func SnapshotFromTransport(s dashrpc.Snapshot) *RuntimeSnapshot {
+	cooldowns := make([]CooldownEntry, 0, len(s.Cooldowns))
+	for _, c := range s.Cooldowns {
+		cooldowns = append(cooldowns, CooldownEntry{
+			Alias:       c.Alias,
+			Provider:    c.Provider,
+			Model:       c.Model,
+			RemainingMs: c.RemainingMs,
+		})
+	}
 	var providers, disabled []config.Provider
 	for _, p := range s.Providers {
 		providers = append(providers, config.Provider{
@@ -85,10 +102,12 @@ func SnapshotFromTransport(s dashrpc.Snapshot) *RuntimeSnapshot {
 		Address:           s.Address,
 		AuthMode:          s.AuthMode,
 		StartTime:         s.StartTime,
+		SnapshotAt:        s.Now,
 		Providers:         providers,
 		DisabledProviders: disabled,
 		Aliases:           aliases,
-		Usage:             &remoteUsage{summaries: s.Usage, recent: s.Recent},
+		Cooldowns:         cooldowns,
+		Usage:             &remoteUsage{summaries: s.Usage, recent: s.Recent, providers: s.ProviderStats, upstream: s.Upstream},
 		Health:            &remoteHealth{states: s.Health},
 		Logs:              &remoteLogs{entries: s.Logs},
 	}

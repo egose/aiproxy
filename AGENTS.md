@@ -121,8 +121,10 @@ matrices.
   is `500`, `502`, `503`, and `504`; other upstream `4xx` responses are returned
   verbatim. Retryable `4xx` statuses do not mark providers unhealthy.
 - Alias targets honor upstream retry advice (`retry-after-ms` wins, else
-  `Retry-After` delay-seconds then HTTP-date; first valid value wins; zero,
-  malformed, past, or overflow values record nothing) as a process-local
+  `Retry-After` delay-seconds then HTTP-date, else exhausted Meta quota
+  (`x-ratelimit-remaining-tokens` / `x-ratelimit-remaining-requests` of `0`
+  cools for 60s); first valid value wins; zero, malformed, past, or overflow
+  values record nothing) as a process-local
   cross-request cooldown keyed by `(alias, provider, model)` and shared across
   that alias's operations. Cooling targets are excluded until expiry; when all
   pool targets actively cool, dispatch returns a generated JSON `429`

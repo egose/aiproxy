@@ -34,10 +34,41 @@ func CooldownFingerprintFor(alias string, prov config.Provider, model config.Mod
 	}
 }
 
+type ActiveCooldown struct {
+	Alias     string
+	Provider  string
+	Model     string
+	Remaining time.Duration
+}
+
 type CooldownStore struct {
 	mu        sync.Mutex
 	deadlines map[CooldownFingerprint]time.Time
 	now       func() time.Time
+}
+
+func (s *CooldownStore) Active() []ActiveCooldown {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	out := make([]ActiveCooldown, 0, len(s.deadlines))
+	for fp, deadline := range s.deadlines {
+		remaining := deadline.Sub(now)
+		if remaining <= 0 {
+			delete(s.deadlines, fp)
+			continue
+		}
+		out = append(out, ActiveCooldown{
+			Alias:     fp.Alias,
+			Provider:  fp.Provider,
+			Model:     fp.Model,
+			Remaining: remaining,
+		})
+	}
+	return out
 }
 
 func NewCooldownStore() *CooldownStore {

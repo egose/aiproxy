@@ -28,14 +28,23 @@ func authedMetricsRequest() *http.Request {
 }
 
 func newDashboardDeps(rt *config.Runtime, startTime time.Time, usage *accounting.Aggregator, health *providerhealth.Tracker, logs *observability.LogBuffer) Dependencies {
+	resolver := modelresolver.New(rt)
+	dashboard := dashrpc.NewRuntimeSource(config.Dashboard{Token: dashboardTestToken, Enabled: true}, "test", rt.Listener.Address, string(rt.Auth.Mode), startTime, rt.Catalog, usage, health, logs)
+	dashboard.SetCooldownSource(func() []dashrpc.CooldownInfo {
+		var out []dashrpc.CooldownInfo
+		for _, c := range resolver.Cooldowns().Active() {
+			out = append(out, dashrpc.CooldownInfo{Alias: c.Alias, Provider: c.Provider, Model: c.Model, RemainingMs: c.Remaining.Milliseconds()})
+		}
+		return out
+	})
 	return Dependencies{
-		Resolver:  modelresolver.New(rt),
+		Resolver:  resolver,
 		Auth:      auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
 		Catalog:   rt.Catalog,
 		Metrics:   observability.NewMetrics(),
 		Health:    health,
 		Usage:     usage,
-		Dashboard: dashrpc.NewRuntimeSource(config.Dashboard{Token: dashboardTestToken, Enabled: true}, "test", rt.Listener.Address, string(rt.Auth.Mode), startTime, rt.Catalog, usage, health, logs),
+		Dashboard: dashboard,
 	}
 }
 

@@ -1936,6 +1936,46 @@ func TestHandlerAccountingRecordsTenantClientModelAndStatus(t *testing.T) {
 	}
 }
 
+func TestHandlerAccountingRecordsAliasServingTarget(t *testing.T) {
+	rt := twoProviderAliasRT(config.AlgorithmRoundRobin, []int{500, 502, 503, 504})
+	usage := accounting.NewAggregator()
+	h := NewHandler(Dependencies{
+		Resolver:   modelresolver.New(rt),
+		Adapter:    &stubAdapter{},
+		Auth:       auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Authorizer: auth.NewAuthorizer(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:    rt.Catalog,
+		Metrics:    observability.NewMetrics(),
+		Accounting: usage,
+		Usage:      usage,
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"alias/a","messages":[]}`)))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	summaries := usage.Summaries()
+	if len(summaries) != 1 || summaries[0].Model != "alias/a" {
+		t.Fatalf("public summaries = %+v, want single alias/a row", summaries)
+	}
+	stats := usage.ProviderSummaries()
+	if len(stats) != 1 || (stats[0].Provider != "p1" && stats[0].Provider != "p2") {
+		t.Fatalf("provider stats = %+v, want single p1/p2 row", stats)
+	}
+	if stats[0].Requests != 1 {
+		t.Fatalf("provider stats = %+v, want 1 request", stats)
+	}
+	upstream := usage.UpstreamSummaries()
+	if len(upstream) != 1 || upstream[0].Provider != stats[0].Provider || upstream[0].Model != "m" {
+		t.Fatalf("upstream = %+v, want provider model m", upstream)
+	}
+	recent := usage.Recent(10)
+	if len(recent) != 1 || recent[0].Provider != stats[0].Provider || recent[0].UpstreamModel != "m" {
+		t.Fatalf("recent = %+v, want serving target stamped", recent)
+	}
+}
+
 func TestHandlerAccountingRecordsUsageTokens(t *testing.T) {
 	rt := newRT()
 	recorder := &accounting.MemoryRecorder{}
