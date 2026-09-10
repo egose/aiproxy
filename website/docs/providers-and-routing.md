@@ -98,12 +98,13 @@ Alias targets additionally honor upstream retry advice as a cross-request cooldo
   advice affects future selection only. Transport errors without a response,
   pre-I/O validation errors, and client-canceled contexts record nothing.
 - Parsing and precedence: a valid positive-integer `retry-after-ms` wins;
-  otherwise standard `Retry-After` (delay-seconds, then HTTP-date) is used.
-  Header names are case-insensitive; the first valid value wins per header.
-  Zero, malformed, past, or unrepresentable (overflow) values record no
-  cooldown from that header, with `retry-after-ms` falling back to
-  `Retry-After`. There is no configured maximum duration, only overflow
-  protection.
+  otherwise standard `Retry-After` (delay-seconds, then HTTP-date) is used;
+  otherwise exhausted Meta quota (`x-ratelimit-remaining-tokens` or
+  `x-ratelimit-remaining-requests` of `0`) cools for 60s since those headers
+  carry no reset time. Header names are case-insensitive; the first valid
+  value wins per header. Zero, malformed, past, or unrepresentable (overflow)
+  values record no cooldown from that header, falling back to the next source.
+  There is no configured maximum duration, only overflow protection.
 - Selection: cooling targets are excluded alongside already-tried targets for
   both `round_robin` and `least_connections`, rechecked before dispatch.
   Expired advice no longer excludes a target.

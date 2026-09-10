@@ -303,6 +303,10 @@ provider "openai-compatible" "localai" {
 
 alias "chat_default" {
   algorithm = "round_robin"
+  # Optional. Defaults to ["500", "502", "503", "504"] when omitted.
+  # Add "429" (shown here with the defaults) to fail over to the next
+  # target on upstream rate limits instead of returning 429 verbatim.
+  retry_status_codes = ["429", "500", "502", "503", "504"]
 
   target {
     provider = "openai"
@@ -611,13 +615,15 @@ provider "openai" "backup" {
   configured `retry_status_codes` in the `400`-`599` range. The default list is
   `500`, `502`, `503`, and `504`; other upstream `4xx` responses are returned to
   the client verbatim.
-- Alias targets honor upstream retry advice (`retry-after-ms` / `Retry-After`)
-  as a cross-request cooldown. Any alias-target response carrying valid advice
-  records a deadline under the identity `(alias, provider, model)`; later alias
-  requests skip cooling targets until expiry. A valid positive-integer
-  `retry-after-ms` wins, otherwise standard `Retry-After` delay-seconds then
-  HTTP-date is used. Malformed, zero, past, or unrepresentable values record
-  nothing. When every pool target is actively cooling, the proxy returns a
+- Alias targets honor upstream retry advice (`retry-after-ms` / `Retry-After` /
+  exhausted Meta quota headers) as a cross-request cooldown. Any alias-target
+  response carrying valid advice records a deadline under the identity
+  `(alias, provider, model)`; later alias requests skip cooling targets until
+  expiry. A valid positive-integer `retry-after-ms` wins, otherwise standard
+  `Retry-After` delay-seconds then HTTP-date is used, otherwise an exhausted
+  Meta quota (`x-ratelimit-remaining-tokens` / `x-ratelimit-remaining-requests`
+  of `0`) cools for 60s. Malformed, zero, past, or unrepresentable values
+  record nothing. When every pool target is actively cooling, the proxy returns a
   generated JSON `429`
   (`{"error":{"type":"upstream_rate_limited","message":"all alias targets cooling, retry after <N>ms"}}`)
   with `Retry-After` (ceiling seconds, min 1) and `retry-after-ms` (ceiling
