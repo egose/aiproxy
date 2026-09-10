@@ -573,7 +573,7 @@ function _createMdxContent(props) {
           children: "retry-after-ms"
         }), ", else\n", (0,jsx_runtime.jsx)(_components.code, {
           children: "Retry-After"
-        }), ") cool down across requests: later alias requests skip cooling\ntargets until expiry. When every pool target is actively cooling, the proxy\nreturns a generated JSON ", (0,jsx_runtime.jsx)(_components.code, {
+        }), ", else exhausted Meta quota headers) cool down across requests:\nlater alias requests skip cooling\ntargets until expiry. When every pool target is actively cooling, the proxy\nreturns a generated JSON ", (0,jsx_runtime.jsx)(_components.code, {
           children: "429"
         }), "\n(", (0,jsx_runtime.jsx)(_components.code, {
           children: "{\"error\":{\"type\":\"upstream_rate_limited\",\"message\":\"all alias targets cooling, retry after <N>ms\"}}"

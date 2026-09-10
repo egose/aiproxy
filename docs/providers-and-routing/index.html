@@ -6,7 +6,7 @@
 <title data-rh="true">Providers and Routing | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/providers-and-routing/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Providers and Routing | aiproxy"><meta data-rh="true" name="description" content="aiproxy separates the client-facing model name from the concrete upstream target."><meta data-rh="true" property="og:description" content="aiproxy separates the client-facing model name from the concrete upstream target."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/providers-and-routing/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/providers-and-routing/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/providers-and-routing/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Providers and Routing","item":"https://aiproxy.pages.dev/docs/providers-and-routing"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
 <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.0700b446.css">
-<script src="/assets/js/runtime~main.af1287aa.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.2b6dcc4e.js" defer="defer"></script>
 <script src="/assets/js/main.8b8c49ad.js" defer="defer"></script>
 </head>
 <body>
@@ -76,12 +76,13 @@ a deadline, regardless of status. Successes are still returned normally;
 advice affects future selection only. Transport errors without a response,
 pre-I/O validation errors, and client-canceled contexts record nothing.</li>
 <li class="">Parsing and precedence: a valid positive-integer <code>retry-after-ms</code> wins;
-otherwise standard <code>Retry-After</code> (delay-seconds, then HTTP-date) is used.
-Header names are case-insensitive; the first valid value wins per header.
-Zero, malformed, past, or unrepresentable (overflow) values record no
-cooldown from that header, with <code>retry-after-ms</code> falling back to
-<code>Retry-After</code>. There is no configured maximum duration, only overflow
-protection.</li>
+otherwise standard <code>Retry-After</code> (delay-seconds, then HTTP-date) is used;
+otherwise exhausted Meta quota (<code>x-ratelimit-remaining-tokens</code> or
+<code>x-ratelimit-remaining-requests</code> of <code>0</code>) cools for 60s since those headers
+carry no reset time. Header names are case-insensitive; the first valid
+value wins per header. Zero, malformed, past, or unrepresentable (overflow)
+values record no cooldown from that header, falling back to the next source.
+There is no configured maximum duration, only overflow protection.</li>
 <li class="">Selection: cooling targets are excluded alongside already-tried targets for
 both <code>round_robin</code> and <code>least_connections</code>, rechecked before dispatch.
 Expired advice no longer excludes a target.</li>

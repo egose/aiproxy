@@ -270,11 +270,13 @@ function _createMdxContent(props) {
           children: "retry-after-ms"
         }), " wins;\notherwise standard ", (0,jsx_runtime.jsx)(_components.code, {
           children: "Retry-After"
-        }), " (delay-seconds, then HTTP-date) is used.\nHeader names are case-insensitive; the first valid value wins per header.\nZero, malformed, past, or unrepresentable (overflow) values record no\ncooldown from that header, with ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "retry-after-ms"
-        }), " falling back to\n", (0,jsx_runtime.jsx)(_components.code, {
-          children: "Retry-After"
-        }), ". There is no configured maximum duration, only overflow\nprotection."]
+        }), " (delay-seconds, then HTTP-date) is used;\notherwise exhausted Meta quota (", (0,jsx_runtime.jsx)(_components.code, {
+          children: "x-ratelimit-remaining-tokens"
+        }), " or\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "x-ratelimit-remaining-requests"
+        }), " of ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "0"
+        }), ") cools for 60s since those headers\ncarry no reset time. Header names are case-insensitive; the first valid\nvalue wins per header. Zero, malformed, past, or unrepresentable (overflow)\nvalues record no cooldown from that header, falling back to the next source.\nThere is no configured maximum duration, only overflow protection."]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["Selection: cooling targets are excluded alongside already-tried targets for\nboth ", (0,jsx_runtime.jsx)(_components.code, {
           children: "round_robin"
