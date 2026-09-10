@@ -73,6 +73,7 @@ func SnapshotFromTransport(s dashrpc.Snapshot) *RuntimeSnapshot {
 			Type:        config.ProviderType(p.Type),
 			Name:        p.Name,
 			DisplayName: p.DisplayName,
+			BaseURL:     p.BaseURL,
 			Models:      configModels(p.Models),
 		})
 	}
@@ -81,6 +82,7 @@ func SnapshotFromTransport(s dashrpc.Snapshot) *RuntimeSnapshot {
 			Type:        config.ProviderType(p.Type),
 			Name:        p.Name,
 			DisplayName: p.DisplayName,
+			BaseURL:     p.BaseURL,
 			Models:      configModels(p.Models),
 		})
 	}

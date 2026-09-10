@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -125,6 +127,7 @@ type model struct {
 	tenantIndex    int
 	errorsOnly     bool
 	usageUpstream  bool
+	ipCache        map[string]string
 }
 
 type tickMsg time.Time
@@ -1144,22 +1147,25 @@ func renderProviders(m *model, width, height int) string {
 	}
 	latency, samples := p95WithSamples(snap.Usage.Recent(recentLimit))
 	var names []string
+	var ips []string
 	var reqs, t429s, toks []int64
 	for _, p := range snap.Providers {
 		ps := byName[p.Name]
 		names = append(names, p.Name)
+		ips = append(ips, m.providerIP(p.BaseURL))
 		reqs = append(reqs, ps.Requests)
 		t429s = append(t429s, ps.Throttled)
 		toks = append(toks, ps.TotalTokens)
 	}
 	for _, p := range snap.DisabledProviders {
 		names = append(names, p.Name)
+		ips = append(ips, m.providerIP(p.BaseURL))
 		reqs = append(reqs, 0)
 		t429s = append(t429s, 0)
 		toks = append(toks, 0)
 	}
-	nameW, reqW, t429W, tokW := providerColWidths(names, reqs, t429s, toks, inner)
-	rows := []string{headerStyle.Render(fitRow(headerCells([]col{{"PROVIDER", nameW}, {"", 1}, {"REQS", reqW}, {"ERR%", 6}, {"429", t429W}, {"P95", 8}, {"TOKENS", tokW}}), inner))}
+	nameW, ipW, reqW, t429W, tokW := providerColWidths(names, ips, reqs, t429s, toks, inner)
+	rows := []string{headerStyle.Render(fitRow(headerCells([]col{{"PROVIDER", nameW}, {"", 1}, {"REQS", reqW}, {"ERR%", 6}, {"429", t429W}, {"P95", 8}, {"TOKENS", tokW}, {"IP", ipW}}), inner))}
 	unresolved := int64(0)
 	for _, s := range summaries {
 		if strings.HasPrefix(s.Model, "_") {
@@ -1174,12 +1180,12 @@ func renderProviders(m *model, width, height int) string {
 	for _, p := range snap.Providers {
 		known, healthy := healthKnown(m.health, p.Name)
 		ps := byName[p.Name]
-		data = append(data, providerLine{text: providerRow(p.Name, known, healthy, ps, ps.Throttled, latency[p.Name], samples[p.Name], false, nameW, reqW, t429W, tokW)})
+		data = append(data, providerLine{text: providerRow(p.Name, known, healthy, ps, ps.Throttled, latency[p.Name], samples[p.Name], false, m.providerIP(p.BaseURL), nameW, ipW, reqW, t429W, tokW)})
 	}
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B"))
 	for _, p := range snap.DisabledProviders {
 		data = append(data, providerLine{
-			text: providerRow(p.Name, true, false, accounting.ProviderSummary{}, 0, 0, 0, true, nameW, reqW, t429W, tokW),
+			text: providerRow(p.Name, true, false, accounting.ProviderSummary{}, 0, 0, 0, true, m.providerIP(p.BaseURL), nameW, ipW, reqW, t429W, tokW),
 			dim:  true,
 		})
 	}
@@ -1230,6 +1236,70 @@ func healthKnown(health map[string]bool, name string) (bool, bool) {
 	return ok, v
 }
 
+var lookupHostIPs = func(ctx context.Context, host string) ([]string, error) {
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		out = append(out, a.IP.String())
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func baseURLHost(baseURL string) string {
+	if baseURL == "" {
+		return ""
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Hostname()
+}
+
+func formatIPs(addrs []string) string {
+	if len(addrs) == 0 {
+		return "-"
+	}
+	if len(addrs) == 1 {
+		return addrs[0]
+	}
+	return fmt.Sprintf("%s +%d", addrs[0], len(addrs)-1)
+}
+
+func (m *model) providerIP(baseURL string) string {
+	host := baseURLHost(baseURL)
+	if host == "" {
+		return "-"
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return host
+	}
+	if m == nil {
+		return "-"
+	}
+	if m.ipCache == nil {
+		m.ipCache = map[string]string{}
+	}
+	if cached, ok := m.ipCache[host]; ok {
+		return cached
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	addrs, err := lookupHostIPs(ctx, host)
+	if err != nil || len(addrs) == 0 {
+		m.ipCache[host] = "-"
+		return "-"
+	}
+	sort.Strings(addrs)
+	display := formatIPs(addrs)
+	m.ipCache[host] = display
+	return display
+}
+
 func runeLen(s string) int {
 	return len([]rune(s))
 }
@@ -1263,10 +1333,13 @@ func comma(n int64) string {
 	return b.String()
 }
 
-func providerColWidths(names []string, requests, throttled, tokens []int64, inner int) (nameW, reqW, t429W, tokW int) {
-	nameW, reqW, t429W, tokW = len("PROVIDER"), len("REQS"), len("429"), len("TOKENS")
+func providerColWidths(names, ips []string, requests, throttled, tokens []int64, inner int) (nameW, ipW, reqW, t429W, tokW int) {
+	nameW, ipW, reqW, t429W, tokW = len("PROVIDER"), len("IP"), len("REQS"), len("429"), len("TOKENS")
 	for _, n := range names {
 		nameW = max(nameW, runeLen(n))
+	}
+	for _, ip := range ips {
+		ipW = max(ipW, runeLen(ip))
 	}
 	for _, r := range requests {
 		reqW = max(reqW, runeLen(comma(r)))
@@ -1277,25 +1350,36 @@ func providerColWidths(names []string, requests, throttled, tokens []int64, inne
 	for _, t := range tokens {
 		tokW = max(tokW, runeLen(comma(t)))
 	}
-	nameW = min(nameW, 32)
+	nameW = min(nameW, 24)
+	ipW = min(ipW, 21)
 	reqW = min(reqW, 10)
 	t429W = min(t429W, 8)
 	tokW = min(tokW, 14)
 	const fixed = 1 + 6 + 8
-	const gaps = 6
-	for nameW+reqW+t429W+tokW+fixed+gaps > inner && nameW > 8 {
+	const gaps = 7
+	limit := inner - 2
+	if limit < 20 {
+		limit = 20
+	}
+	for nameW+ipW+reqW+t429W+tokW+fixed+gaps > limit && nameW > 8 {
 		nameW--
 	}
-	for nameW+reqW+t429W+tokW+fixed+gaps > inner && tokW > 6 {
+	for nameW+ipW+reqW+t429W+tokW+fixed+gaps > limit && ipW > 7 {
+		ipW--
+	}
+	for nameW+ipW+reqW+t429W+tokW+fixed+gaps > limit && tokW > 6 {
 		tokW--
 	}
-	for nameW+reqW+t429W+tokW+fixed+gaps > inner && reqW > 4 {
+	for nameW+ipW+reqW+t429W+tokW+fixed+gaps > limit && reqW > 4 {
 		reqW--
 	}
-	for nameW+reqW+t429W+tokW+fixed+gaps > inner && t429W > 3 {
+	for nameW+ipW+reqW+t429W+tokW+fixed+gaps > limit && t429W > 3 {
 		t429W--
 	}
-	return nameW, reqW, t429W, tokW
+	for nameW+ipW+reqW+t429W+tokW+fixed+gaps > limit && ipW > 2 {
+		ipW--
+	}
+	return nameW, ipW, reqW, t429W, tokW
 }
 
 func usageColWidths(summaries []accounting.Summary, inner int) (modelW, opW, countW, tokW int) {
@@ -1334,7 +1418,7 @@ func tokensText(s accounting.Summary) string {
 	return comma(s.TotalTokens)
 }
 
-func providerRow(name string, known, healthy bool, ps accounting.ProviderSummary, throttled int64, p95 time.Duration, samples int, disabled bool, nameW, reqW, t429W, tokW int) string {
+func providerRow(name string, known, healthy bool, ps accounting.ProviderSummary, throttled int64, p95 time.Duration, samples int, disabled bool, ip string, nameW, ipW, reqW, t429W, tokW int) string {
 	status := "✓"
 	if disabled {
 		status = "✗"
@@ -1359,7 +1443,8 @@ func providerRow(name string, known, healthy bool, ps accounting.ProviderSummary
 		fmt.Sprintf("%*s", t429W, comma(throttled)),
 		p95cell,
 		fmt.Sprintf("%*s", tokW, comma(ps.TotalTokens)),
-	}, []int{nameW, 1, reqW, 6, t429W, 8, tokW})
+		truncate(ip, ipW),
+	}, []int{nameW, 1, reqW, 6, t429W, 8, tokW, ipW})
 }
 
 func p95LatencyByProvider(recent []accounting.Event) map[string]time.Duration {

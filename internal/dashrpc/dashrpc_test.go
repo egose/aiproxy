@@ -63,6 +63,24 @@ func TestBuildSerializesAllLiveState(t *testing.T) {
 	}
 }
 
+func TestBuildSendsEffectiveBaseURL(t *testing.T) {
+	start := time.Now()
+	providers := []config.Provider{
+		{Type: config.ProviderTypeOpenAI, Name: "openai", Models: []config.Model{{Name: "m"}}},
+		{Type: config.ProviderTypeOpenAICompatible, Name: "custom", BaseURL: "https://llm.internal/v1", Models: []config.Model{{Name: "m"}}},
+	}
+	catalog := config.NewCatalog(providers, nil, nil)
+	snap := Build("v", ":8080", "none", start, catalog, nil, nil, nil, 10)
+	if len(snap.Providers) != 2 {
+		t.Fatalf("Providers = %+v, want 2", snap.Providers)
+	}
+	if snap.Providers[0].BaseURL != "https://api.openai.com" {
+		t.Errorf("openai BaseURL = %q, want default https://api.openai.com", snap.Providers[0].BaseURL)
+	}
+	if snap.Providers[1].BaseURL != "https://llm.internal/v1" {
+		t.Errorf("custom BaseURL = %q, want explicit value", snap.Providers[1].BaseURL)
+	}
+}
 func TestRuntimeSourceIncludesCooldowns(t *testing.T) {
 	start := time.Now()
 	catalog := config.NewCatalog([]config.Provider{{Name: "openai"}}, nil, nil)
