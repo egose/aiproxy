@@ -767,28 +767,10 @@ func fitView(out string, width int) string {
 }
 
 func (m *model) sideWidth() int {
-	nameW := len("PROVIDER")
-	if m.snapshot != nil {
-		for _, p := range m.snapshot.Providers {
-			nameW = max(nameW, runeLen(p.Name))
-		}
-		for _, p := range m.snapshot.DisabledProviders {
-			nameW = max(nameW, runeLen(p.Name))
-		}
+	if m.width <= 0 {
+		return 0
 	}
-	nameW = min(nameW, 32)
-	want := nameW + 1 + 6 + 6 + 5 + 8 + 14 + 6 + 2
-	side := want
-	if half := m.width / 2; side > half {
-		side = half
-	}
-	if side > m.width-40 {
-		side = m.width - 40
-	}
-	if side < 40 {
-		side = 40
-	}
-	return side
+	return m.width / 2
 }
 
 func renderBottom(m *model, width, height int) string {

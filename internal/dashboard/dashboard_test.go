@@ -593,10 +593,10 @@ func TestZoomedBottomKeepsTabs(t *testing.T) {
 	}
 }
 
-func TestSideWidthFollowsProviderContent(t *testing.T) {
+func TestSideWidthSplitsEvenly(t *testing.T) {
 	narrow := &model{snapshot: &RuntimeSnapshot{Providers: []config.Provider{{Name: "a"}, {Name: "b"}}}, width: 120}
-	if got := narrow.sideWidth(); got >= 60 {
-		t.Fatalf("sideWidth = %d, want < 60 for short names", got)
+	if got := narrow.sideWidth(); got != 60 {
+		t.Fatalf("sideWidth = %d, want 60 for width 120", got)
 	}
 	var many []config.Provider
 	for i := 0; i < 5; i++ {
@@ -604,7 +604,11 @@ func TestSideWidthFollowsProviderContent(t *testing.T) {
 	}
 	wide := &model{snapshot: &RuntimeSnapshot{Providers: many}, width: 120}
 	if got := wide.sideWidth(); got != 60 {
-		t.Fatalf("sideWidth = %d, want capped at half (60)", got)
+		t.Fatalf("sideWidth = %d, want 60 regardless of provider name length", got)
+	}
+	odd := &model{width: 121}
+	if got, want := odd.sideWidth(), 60; got != want {
+		t.Fatalf("sideWidth = %d, want %d for odd width 121", got, want)
 	}
 }
 
