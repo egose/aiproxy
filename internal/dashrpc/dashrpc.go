@@ -17,6 +17,7 @@ import (
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/filestore"
 	"github.com/egose/aiproxy/internal/observability"
+	"github.com/egose/aiproxy/internal/provider"
 	"github.com/egose/aiproxy/internal/providerhealth"
 )
 
@@ -212,7 +213,7 @@ func toProviders(in []config.Provider) []Provider {
 			Type:        string(p.Type),
 			Name:        p.Name,
 			DisplayName: p.DisplayName,
-			BaseURL:     p.BaseURL,
+			BaseURL:     provider.EffectiveBaseURL(p.Type, p.BaseURL),
 			Models:      models,
 		}
 	}

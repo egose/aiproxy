@@ -1,6 +1,8 @@
 package dashboard
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -177,7 +179,7 @@ func TestByProviderInSnapshot(t *testing.T) {
 
 func TestProviderRowFormatsErrorAndP95(t *testing.T) {
 	ps := accounting.ProviderSummary{Provider: "openai", Requests: 4, Errors: 1, TotalTokens: 25}
-	row := providerRow("openai", true, true, ps, 2, 1_200*time.Millisecond, 5, false, 18, 5, 4, 10)
+	row := providerRow("openai", true, true, ps, 2, 1_200*time.Millisecond, 5, false, "1.2.3.4", 18, 9, 5, 4, 10)
 	if !strings.Contains(row, "4") || !strings.Contains(row, "25.0%") || !strings.Contains(row, "1.2s") {
 		t.Errorf("provider row missing err/p95: %q", row)
 	}
@@ -186,6 +188,9 @@ func TestProviderRowFormatsErrorAndP95(t *testing.T) {
 	}
 	if !strings.Contains(row, "2") {
 		t.Errorf("missing throttled 429 count: %q", row)
+	}
+	if !strings.Contains(row, "1.2.3.4") {
+		t.Errorf("missing ip: %q", row)
 	}
 }
 
@@ -222,7 +227,7 @@ func TestProviderPaneAttributesAliasTraffic(t *testing.T) {
 
 func TestProviderRowUnknownHealthAndSparseLatency(t *testing.T) {
 	ps := accounting.ProviderSummary{Provider: "openai", Requests: 1}
-	row := providerRow("openai", false, false, ps, 0, 0, 0, false, 18, 5, 4, 10)
+	row := providerRow("openai", false, false, ps, 0, 0, 0, false, "-", 18, 9, 5, 4, 10)
 	if !strings.Contains(row, "?") {
 		t.Errorf("expected unknown health mark: %q", row)
 	}
@@ -464,9 +469,12 @@ func TestUsageColumnsShrinkOnNarrowTerminal(t *testing.T) {
 }
 
 func TestProviderColumnsSizeToContent(t *testing.T) {
-	nameW, reqW, t429W, tokW := providerColWidths([]string{"zen", "render-coreanesque"}, []int64{0, 1615}, []int64{0, 280}, []int64{0, 1234567}, 125)
+	nameW, ipW, reqW, t429W, tokW := providerColWidths([]string{"zen", "render-coreanesque"}, []string{"-", "1.2.3.4"}, []int64{0, 1615}, []int64{0, 280}, []int64{0, 1234567}, 125)
 	if nameW != len("render-coreanesque") {
 		t.Fatalf("nameW = %d, want %d", nameW, len("render-coreanesque"))
+	}
+	if ipW != len("1.2.3.4") {
+		t.Fatalf("ipW = %d, want %d", ipW, len("1.2.3.4"))
 	}
 	if reqW != len("1,615") {
 		t.Fatalf("reqW = %d, want %d", reqW, len("1,615"))
@@ -520,7 +528,7 @@ func TestProviderPaneScrollsManyProviders(t *testing.T) {
 		Health: &remoteHealth{states: health},
 	}
 	m := &model{snapshot: snap, health: health, now: time.Now(), dirty: true, focus: focusUsage, lastRefresh: time.Now()}
-	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 200, Height: 24})
 	mod := mm.(*model)
 	if got := mod.maxProviderScroll(); got <= 0 {
 		t.Fatalf("maxProviderScroll = %d, want > 0 for 20 providers", got)
@@ -626,5 +634,89 @@ func TestPauseBuffersSnapshot(t *testing.T) {
 	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "p"}))
 	if got := mm.(*model).snapshot.Providers[0].Name; got != "claude" {
 		t.Fatalf("unpause did not apply pending: %q", got)
+	}
+}
+
+func TestBaseURLHostParsing(t *testing.T) {
+	cases := map[string]string{
+		"https://api.openai.com/v1":   "api.openai.com",
+		"http://127.0.0.1:8080":       "127.0.0.1",
+		"http://[::1]:8080/v1":        "::1",
+		"https://opencode.ai/zen/v1":  "opencode.ai",
+		"":                            "",
+		"://bad":                      "",
+		"https://user:pass@h.example": "h.example",
+	}
+	for in, want := range cases {
+		if got := baseURLHost(in); got != want {
+			t.Errorf("baseURLHost(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestFormatIPs(t *testing.T) {
+	if got := formatIPs(nil); got != "-" {
+		t.Errorf("formatIPs(nil) = %q, want -", got)
+	}
+	if got := formatIPs([]string{"1.2.3.4"}); got != "1.2.3.4" {
+		t.Errorf("formatIPs single = %q", got)
+	}
+	if got := formatIPs([]string{"10.0.0.1", "10.0.0.2", "10.0.0.3"}); got != "10.0.0.1 +2" {
+		t.Errorf("formatIPs multi = %q", got)
+	}
+}
+
+func TestProviderIPResolutionCachesPerHost(t *testing.T) {
+	old := lookupHostIPs
+	defer func() { lookupHostIPs = old }()
+	calls := 0
+	lookupHostIPs = func(ctx context.Context, host string) ([]string, error) {
+		calls++
+		if host == "api.example.com" {
+			return []string{"10.0.0.2", "10.0.0.1"}, nil
+		}
+		return nil, errors.New("dns failure")
+	}
+	m := &model{}
+	if got := m.providerIP("https://api.example.com/v1"); got != "10.0.0.1 +1" {
+		t.Fatalf("providerIP = %q, want 10.0.0.1 +1", got)
+	}
+	if got := m.providerIP("https://api.example.com/other"); got != "10.0.0.1 +1" {
+		t.Fatalf("providerIP cached = %q", got)
+	}
+	if calls != 1 {
+		t.Fatalf("lookup calls = %d, want 1 (cached)", calls)
+	}
+	if got := m.providerIP("http://127.0.0.1:8080"); got != "127.0.0.1" {
+		t.Errorf("IP literal = %q, want 127.0.0.1", got)
+	}
+	if got := m.providerIP(""); got != "-" {
+		t.Errorf("empty base = %q, want -", got)
+	}
+	if got := m.providerIP("https://unknown.invalid"); got != "-" {
+		t.Errorf("lookup error = %q, want -", got)
+	}
+	if calls != 2 {
+		t.Errorf("lookup calls = %d, want 2", calls)
+	}
+}
+
+func TestProviderPaneShowsIPColumn(t *testing.T) {
+	usage := accounting.NewAggregator()
+	snap := &RuntimeSnapshot{
+		Version: "test", Address: ":8080", AuthMode: "none",
+		StartTime: time.Now(),
+		Providers: []config.Provider{{Name: "local", BaseURL: "http://127.0.0.1:8080"}},
+		Usage:     usage,
+		Health:    &remoteHealth{states: map[string]bool{"local": true}},
+	}
+	m := &model{snapshot: snap, health: map[string]bool{"local": true}, now: time.Now(), dirty: true, lastRefresh: time.Now()}
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
+	got := mm.View().Content
+	if !strings.Contains(got, "IP") {
+		t.Fatalf("missing IP header in:\n%s", got)
+	}
+	if !strings.Contains(got, "127.0.0.1") {
+		t.Errorf("missing resolved IP in:\n%s", got)
 	}
 }

@@ -19,10 +19,10 @@ func TestSnapshotFromTransportRoundTripsCoreFields(t *testing.T) {
 		AuthMode:  "bearer_static",
 		StartTime: start,
 		Providers: []dashrpc.Provider{
-			{Type: "openai", Name: "openai", DisplayName: "OpenAI", Models: []string{"gpt-4o-mini"}},
+			{Type: "openai", Name: "openai", DisplayName: "OpenAI", BaseURL: "https://api.openai.com", Models: []string{"gpt-4o-mini"}},
 		},
 		DisabledProviders: []dashrpc.Provider{
-			{Type: "openai-compatible", Name: "localai"},
+			{Type: "openai-compatible", Name: "localai", BaseURL: "http://127.0.0.1:8080"},
 		},
 		Aliases: []dashrpc.Alias{
 			{Name: "chat", Algorithm: "round_robin", Targets: []dashrpc.AliasTarget{{Provider: "openai", Model: "gpt-4o-mini"}}},
@@ -53,8 +53,14 @@ func TestSnapshotFromTransportRoundTripsCoreFields(t *testing.T) {
 	if len(snap.Providers[0].Models) != 1 || snap.Providers[0].Models[0].Name != "gpt-4o-mini" {
 		t.Fatalf("Provider Models lost: %+v", snap.Providers[0].Models)
 	}
+	if snap.Providers[0].BaseURL != "https://api.openai.com" {
+		t.Fatalf("Provider BaseURL lost: %+v", snap.Providers[0].BaseURL)
+	}
 	if len(snap.DisabledProviders) != 1 || snap.DisabledProviders[0].Name != "localai" {
 		t.Fatalf("DisabledProviders mis-converted: %+v", snap.DisabledProviders)
+	}
+	if snap.DisabledProviders[0].BaseURL != "http://127.0.0.1:8080" {
+		t.Fatalf("DisabledProvider BaseURL lost: %+v", snap.DisabledProviders[0].BaseURL)
 	}
 	if len(snap.Aliases) != 1 || snap.Aliases[0].Algorithm != config.AlgorithmRoundRobin {
 		t.Fatalf("Aliases mis-converted: %+v", snap.Aliases)
