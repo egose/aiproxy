@@ -131,6 +131,7 @@ func annotateProviderSyntax(body hcl.Body, raw *rawFile) {
 			Blocks: []hcl.BlockHeaderSchema{
 				{Type: "api_key_ref"},
 				{Type: "credential_ref"},
+				{Type: "healthcheck"},
 				{Type: "model", LabelNames: []string{"name"}},
 			},
 		}); !blockDiags.HasErrors() {

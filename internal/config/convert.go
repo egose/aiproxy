@@ -33,6 +33,7 @@ var jsonBlockLabels = map[string]int{
 	"target":          0,
 	"api_key_ref":     0,
 	"credential_ref":  0,
+	"healthcheck":     0,
 	"model":           1,
 }
 

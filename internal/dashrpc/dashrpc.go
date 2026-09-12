@@ -39,6 +39,7 @@ type Snapshot struct {
 	Aliases           []Alias                  `json:"aliases"`
 	Health            map[string]bool          `json:"health"`
 	Cooldowns         []CooldownInfo           `json:"cooldowns,omitempty"`
+	Healthchecks      []HealthcheckStatus      `json:"healthchecks,omitempty"`
 	Usage             []Usage                  `json:"usage"`
 	ProviderStats     []ProviderStat           `json:"provider_stats,omitempty"`
 	Upstream          []UpstreamUsage          `json:"upstream,omitempty"`
@@ -52,6 +53,17 @@ type CooldownInfo struct {
 	Provider    string `json:"provider"`
 	Model       string `json:"model"`
 	RemainingMs int64  `json:"remaining_ms"`
+}
+
+type HealthcheckStatus struct {
+	Provider    string    `json:"provider"`
+	Configured  bool      `json:"configured"`
+	Checked     bool      `json:"checked"`
+	Healthy     bool      `json:"healthy"`
+	StatusCode  int       `json:"status_code,omitempty"`
+	Message     string    `json:"message,omitempty"`
+	Path        string    `json:"path,omitempty"`
+	LastChecked time.Time `json:"last_checked,omitempty"`
 }
 
 type Provider struct {
@@ -92,16 +104,17 @@ type Source interface {
 }
 
 type RuntimeSource struct {
-	dashboard config.Dashboard
-	version   string
-	address   string
-	authMode  string
-	startTime time.Time
-	catalog   config.Catalog
-	usage     *accounting.Aggregator
-	health    *providerhealth.Tracker
-	logs      *observability.LogBuffer
-	cooldowns func() []CooldownInfo
+	dashboard    config.Dashboard
+	version      string
+	address      string
+	authMode     string
+	startTime    time.Time
+	catalog      config.Catalog
+	usage        *accounting.Aggregator
+	health       *providerhealth.Tracker
+	logs         *observability.LogBuffer
+	cooldowns    func() []CooldownInfo
+	healthchecks func() []HealthcheckStatus
 }
 
 func (s *RuntimeSource) SetCooldownSource(fn func() []CooldownInfo) {
@@ -109,6 +122,13 @@ func (s *RuntimeSource) SetCooldownSource(fn func() []CooldownInfo) {
 		return
 	}
 	s.cooldowns = fn
+}
+
+func (s *RuntimeSource) SetHealthcheckSource(fn func() []HealthcheckStatus) {
+	if s == nil {
+		return
+	}
+	s.healthchecks = fn
 }
 
 func NewRuntimeSource(dashboard config.Dashboard, version, address, authMode string, startTime time.Time, catalog config.Catalog, usage *accounting.Aggregator, health *providerhealth.Tracker, logs *observability.LogBuffer) *RuntimeSource {
@@ -143,6 +163,9 @@ func (s *RuntimeSource) Snapshot(ctx context.Context, recentN int) Snapshot {
 	snap := BuildContext(ctx, s.version, s.address, s.authMode, s.startTime, s.catalog, s.usage, s.health, s.logs, recentN)
 	if s.cooldowns != nil {
 		snap.Cooldowns = s.cooldowns()
+	}
+	if s.healthchecks != nil {
+		snap.Healthchecks = s.healthchecks()
 	}
 	if s.usage != nil {
 		snap.ProviderStats = s.usage.ProviderSummaries()

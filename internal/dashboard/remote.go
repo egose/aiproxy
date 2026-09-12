@@ -109,10 +109,30 @@ func SnapshotFromTransport(s dashrpc.Snapshot) *RuntimeSnapshot {
 		DisabledProviders: disabled,
 		Aliases:           aliases,
 		Cooldowns:         cooldowns,
+		Healthchecks:      healthchecksFromTransport(s.Healthchecks),
 		Usage:             &remoteUsage{summaries: s.Usage, recent: s.Recent, providers: s.ProviderStats, upstream: s.Upstream},
 		Health:            &remoteHealth{states: s.Health},
 		Logs:              &remoteLogs{entries: s.Logs},
 	}
+}
+
+func healthchecksFromTransport(in []dashrpc.HealthcheckStatus) []HealthcheckEntry {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]HealthcheckEntry, 0, len(in))
+	for _, h := range in {
+		out = append(out, HealthcheckEntry{
+			Provider:   h.Provider,
+			Configured: h.Configured,
+			Checked:    h.Checked,
+			Healthy:    h.Healthy,
+			StatusCode: h.StatusCode,
+			Message:    h.Message,
+			Path:       h.Path,
+		})
+	}
+	return out
 }
 
 // configModels converts a list of model names into the minimal config.Model

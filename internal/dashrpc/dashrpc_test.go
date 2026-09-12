@@ -94,6 +94,32 @@ func TestRuntimeSourceIncludesCooldowns(t *testing.T) {
 	}
 }
 
+func TestRuntimeSourceIncludesHealthchecks(t *testing.T) {
+	start := time.Now()
+	catalog := config.NewCatalog([]config.Provider{{Name: "local"}}, nil, nil)
+	src := NewRuntimeSource(config.Dashboard{Enabled: true, Token: "t"}, "v", ":8080", "none", start, catalog, nil, nil, nil)
+	src.SetHealthcheckSource(func() []HealthcheckStatus {
+		return []HealthcheckStatus{{Provider: "local", Configured: true, Checked: true, Healthy: false, StatusCode: 500, Message: "unexpected status 500 (want 200)", Path: "/health"}}
+	})
+	snap := src.Snapshot(t.Context(), 10)
+	if len(snap.Healthchecks) != 1 {
+		t.Fatalf("Healthchecks = %+v", snap.Healthchecks)
+	}
+	hc := snap.Healthchecks[0]
+	if hc.Provider != "local" || !hc.Configured || !hc.Checked || hc.Healthy || hc.StatusCode != 500 || hc.Path != "/health" {
+		t.Fatalf("Healthcheck = %+v", hc)
+	}
+}
+
+func TestRuntimeSourceOmitsHealthchecksWithoutSource(t *testing.T) {
+	start := time.Now()
+	catalog := config.NewCatalog([]config.Provider{{Name: "local"}}, nil, nil)
+	src := NewRuntimeSource(config.Dashboard{Enabled: true, Token: "t"}, "v", ":8080", "none", start, catalog, nil, nil, nil)
+	if snap := src.Snapshot(t.Context(), 10); len(snap.Healthchecks) != 0 {
+		t.Fatalf("Healthchecks = %+v", snap.Healthchecks)
+	}
+}
+
 func TestRuntimeSourceIncludesProviderStats(t *testing.T) {
 	start := time.Now()
 	catalog := config.NewCatalog([]config.Provider{{Name: "zen"}}, nil, nil)

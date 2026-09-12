@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
@@ -35,6 +36,9 @@ type Metrics struct {
 	providerHealthy        *prometheus.GaugeVec
 	providerHealthErrs     *prometheus.CounterVec
 	providerHealthFallback *prometheus.CounterVec
+	healthcheckRequests    *prometheus.CounterVec
+	healthcheckLatency     *prometheus.HistogramVec
+	healthcheckUp          *prometheus.GaugeVec
 	skippedProviders       *prometheus.GaugeVec
 	buildInfo              *prometheus.GaugeVec
 	authModeInfo           *prometheus.GaugeVec
@@ -127,6 +131,19 @@ func NewMetrics() *Metrics {
 			Name: "aiproxy_provider_health_fallbacks_total",
 			Help: "Total number of provider health routing fallbacks by operation and reason (cached=open-while-fresh, open_no_cache=failed open).",
 		}, []string{"operation", "reason"}),
+		healthcheckRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "aiproxy_healthcheck_requests_total",
+			Help: "Total number of upstream healthcheck probes by provider and outcome (success or failure).",
+		}, []string{"provider", "outcome"}),
+		healthcheckLatency: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "aiproxy_healthcheck_request_duration_seconds",
+			Help:    "Latency of upstream healthcheck probes by provider.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"provider"}),
+		healthcheckUp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "aiproxy_healthcheck_up",
+			Help: "Whether the last completed upstream healthcheck threshold state is healthy (1=yes, 0=no). Only exported for providers with a healthcheck block.",
+		}, []string{"provider"}),
 		skippedProviders: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "aiproxy_skipped_provider_info",
 			Help: "Static gauge for providers skipped during startup because they are not active.",
@@ -186,6 +203,9 @@ func NewMetrics() *Metrics {
 		m.providerHealthy,
 		m.providerHealthErrs,
 		m.providerHealthFallback,
+		m.healthcheckRequests,
+		m.healthcheckLatency,
+		m.healthcheckUp,
 		m.skippedProviders,
 		m.buildInfo,
 		m.authModeInfo,
@@ -340,6 +360,36 @@ func (m *Metrics) RecordProviderHealthFallback(operation, reason string) {
 		reason = "unknown"
 	}
 	m.providerHealthFallback.WithLabelValues(operation, reason).Inc()
+}
+
+func (m *Metrics) RecordHealthcheck(provider string, success bool, latency time.Duration) {
+	if m == nil || provider == "" {
+		return
+	}
+	outcome := "failure"
+	if success {
+		outcome = "success"
+	}
+	m.healthcheckRequests.WithLabelValues(provider, outcome).Inc()
+	m.healthcheckLatency.WithLabelValues(provider).Observe(latency.Seconds())
+}
+
+func (m *Metrics) SetHealthcheckUp(provider string, up bool) {
+	if m == nil || provider == "" {
+		return
+	}
+	if up {
+		m.healthcheckUp.WithLabelValues(provider).Set(1)
+		return
+	}
+	m.healthcheckUp.WithLabelValues(provider).Set(0)
+}
+
+func (m *Metrics) RemoveHealthcheck(provider string) {
+	if m == nil || provider == "" {
+		return
+	}
+	m.healthcheckUp.DeleteLabelValues(provider)
 }
 
 func NormalizeHTTPMethod(method string) string {
