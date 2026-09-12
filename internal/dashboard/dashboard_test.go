@@ -179,7 +179,7 @@ func TestByProviderInSnapshot(t *testing.T) {
 
 func TestProviderRowFormatsErrorAndP95(t *testing.T) {
 	ps := accounting.ProviderSummary{Provider: "openai", Requests: 4, Errors: 1, TotalTokens: 25}
-	row := providerRow("openai", true, true, ps, 2, 1_200*time.Millisecond, 5, false, "1.2.3.4", 18, 9, 5, 4, 10)
+	row := providerRow("openai", true, true, "-", ps, 2, 1_200*time.Millisecond, 5, false, "1.2.3.4", 18, 9, 5, 4, 10)
 	if !strings.Contains(row, "4") || !strings.Contains(row, "25.0%") || !strings.Contains(row, "1.2s") {
 		t.Errorf("provider row missing err/p95: %q", row)
 	}
@@ -227,7 +227,7 @@ func TestProviderPaneAttributesAliasTraffic(t *testing.T) {
 
 func TestProviderRowUnknownHealthAndSparseLatency(t *testing.T) {
 	ps := accounting.ProviderSummary{Provider: "openai", Requests: 1}
-	row := providerRow("openai", false, false, ps, 0, 0, 0, false, "-", 18, 9, 5, 4, 10)
+	row := providerRow("openai", false, false, "-", ps, 0, 0, 0, false, "-", 18, 9, 5, 4, 10)
 	if !strings.Contains(row, "?") {
 		t.Errorf("expected unknown health mark: %q", row)
 	}
@@ -718,5 +718,34 @@ func TestProviderPaneShowsIPColumn(t *testing.T) {
 	}
 	if !strings.Contains(got, "127.0.0.1") {
 		t.Errorf("missing resolved IP in:\n%s", got)
+	}
+}
+
+func TestHealthcheckMarksMapping(t *testing.T) {
+	entries := []HealthcheckEntry{
+		{Provider: "ok", Configured: true, Checked: true, Healthy: true},
+		{Provider: "bad", Configured: true, Checked: true, Healthy: false},
+		{Provider: "pending", Configured: true, Checked: false},
+	}
+	marks := healthcheckMarks(entries)
+	if marks["ok"] != "✓" || marks["bad"] != "✗" || marks["pending"] != "?" {
+		t.Fatalf("marks = %+v", marks)
+	}
+	if marks["missing"] != "" {
+		t.Fatalf("unconfigured provider should have no mark, got %q", marks["missing"])
+	}
+}
+
+func TestProvidersPaneShowsHealthcheckColumn(t *testing.T) {
+	snap := newSnapshot()
+	snap.Healthchecks = []HealthcheckEntry{
+		{Provider: "openai", Configured: true, Checked: true, Healthy: true, StatusCode: 200, Path: "/health"},
+		{Provider: "backup", Configured: true, Checked: true, Healthy: false, StatusCode: 500, Path: "/health"},
+	}
+	m := &model{snapshot: snap, health: map[string]bool{"openai": true, "backup": false}, now: time.Now(), dirty: true}
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
+	got := mm.View().Content
+	if !strings.Contains(got, "HC") {
+		t.Fatalf("missing HC column header in:\n%s", got)
 	}
 }

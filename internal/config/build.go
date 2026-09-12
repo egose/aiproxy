@@ -198,6 +198,9 @@ func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderS
 	if syntax.Blocks["model"] > 0 {
 		return fmt.Errorf("derived provider cannot declare model blocks")
 	}
+	if syntax.Blocks["healthcheck"] > 0 {
+		return fmt.Errorf("derived provider cannot declare healthcheck block")
+	}
 	if rawProvider.Type == string(ProviderTypeGitHubCopilot) {
 		if syntax.Attrs["api_key"] || syntax.Blocks["api_key_ref"] > 0 {
 			return fmt.Errorf("derived github-copilot provider must use credential_ref, not api_key or api_key_ref")
@@ -356,6 +359,13 @@ func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Durat
 			}
 		}
 	}
+	if rawProvider.Healthcheck != nil {
+		hc, err := buildHealthcheck(rawProvider.Healthcheck)
+		if err != nil {
+			return Provider{}, err
+		}
+		provider.Healthcheck = hc
+	}
 	for _, m := range rawProvider.Models {
 		if _, dup := provider.ModelByName[m.Name]; dup {
 			return Provider{}, fmt.Errorf("duplicate model %q in provider %q", m.Name, rawProvider.Name)
@@ -375,6 +385,67 @@ func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Durat
 }
 
 var defaultRetryStatusCodes = []int{500, 502, 503, 504}
+
+const (
+	defaultHealthcheckMethod           = "GET"
+	defaultHealthcheckExpectedStatus   = 200
+	defaultHealthcheckExpectedBody     = "*"
+	defaultHealthcheckInterval         = 30 * time.Second
+	defaultHealthcheckTimeout          = 5 * time.Second
+	defaultHealthcheckFailureThreshold = 2
+	defaultHealthcheckSuccessThreshold = 1
+	maxHealthcheckBodyBytes            = 256 << 10
+)
+
+func buildHealthcheck(raw *rawHealthcheck) (*ProviderHealthcheck, error) {
+	out := &ProviderHealthcheck{
+		Path:              raw.Path,
+		Method:            defaultHealthcheckMethod,
+		ExpectedStatus:    defaultHealthcheckExpectedStatus,
+		ExpectedBody:      defaultHealthcheckExpectedBody,
+		Interval:          defaultHealthcheckInterval,
+		Timeout:           defaultHealthcheckTimeout,
+		FailureThreshold:  defaultHealthcheckFailureThreshold,
+		SuccessThreshold:  defaultHealthcheckSuccessThreshold,
+		SendAuthorization: false,
+	}
+	if raw.Method != "" {
+		out.Method = raw.Method
+	}
+	if raw.ExpectedStatus != nil {
+		out.ExpectedStatus = *raw.ExpectedStatus
+	}
+	if raw.ExpectedBody != "" {
+		out.ExpectedBody = raw.ExpectedBody
+	}
+	if raw.Interval != "" {
+		d, err := time.ParseDuration(raw.Interval)
+		if err != nil {
+			return nil, fmt.Errorf("healthcheck.interval: %w", err)
+		}
+		out.Interval = d
+	}
+	if raw.Timeout != "" {
+		d, err := time.ParseDuration(raw.Timeout)
+		if err != nil {
+			return nil, fmt.Errorf("healthcheck.timeout: %w", err)
+		}
+		out.Timeout = d
+	}
+	if raw.FailureThreshold != nil {
+		out.FailureThreshold = *raw.FailureThreshold
+	}
+	if raw.SuccessThreshold != nil {
+		out.SuccessThreshold = *raw.SuccessThreshold
+	}
+	if raw.SendAuthorization != nil {
+		out.SendAuthorization = *raw.SendAuthorization
+	}
+	if err := validateHealthcheckFields(out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
 
 func parseRetryStatusCodes(raw []string) ([]int, error) {
 	if len(raw) == 0 {

@@ -140,6 +140,7 @@ type Provider struct {
 	CopilotToken          string
 	Enabled               bool
 	Models                []Model
+	Healthcheck           *ProviderHealthcheck
 
 	ModelByName map[string]Model
 }
@@ -154,6 +155,18 @@ type CopilotCredentialRef struct {
 	Path     string
 	Name     string
 	Resolved bool
+}
+
+type ProviderHealthcheck struct {
+	Path              string
+	Method            string
+	ExpectedStatus    int
+	ExpectedBody      string
+	Interval          time.Duration
+	Timeout           time.Duration
+	FailureThreshold  int
+	SuccessThreshold  int
+	SendAuthorization bool
 }
 
 type Model struct {

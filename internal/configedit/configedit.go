@@ -63,6 +63,7 @@ type ProviderInput struct {
 	UserAgent             string
 	Credential            ProviderCredentialInput
 	Enabled               *bool
+	Healthcheck           *ProviderHealthcheckInput
 	Models                []ProviderModelInput
 }
 
@@ -85,6 +86,18 @@ type ProviderModelInput struct {
 	UpstreamName string
 	Protocol     string
 	Capabilities []string
+}
+
+type ProviderHealthcheckInput struct {
+	Path              string
+	Method            string
+	ExpectedStatus    string
+	ExpectedBody      string
+	Interval          string
+	Timeout           string
+	FailureThreshold  string
+	SuccessThreshold  string
+	SendAuthorization *bool
 }
 
 type AliasInput struct {
@@ -269,6 +282,9 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 		b.WriteString("\n")
 		renderProviderCredential(&b, input, defaultSecretsPath)
 	}
+	if input.Healthcheck != nil {
+		b.WriteString(renderProviderHealthcheckBlock(input.Healthcheck))
+	}
 	for _, model := range input.Models {
 		b.WriteString("\n  model ")
 		b.WriteString(strconv.Quote(model.Name))
@@ -331,6 +347,63 @@ func renderProviderCredential(b *strings.Builder, input ProviderInput, defaultSe
 		b.WriteString(RenderStringOrExpression(input.Credential.APIKeyValue))
 		b.WriteString("\n")
 	}
+}
+
+func renderProviderHealthcheckBlock(input *ProviderHealthcheckInput) string {
+	var b strings.Builder
+	b.WriteString("\n  healthcheck {\n")
+	b.WriteString("    path = ")
+	b.WriteString(strconv.Quote(input.Path))
+	b.WriteString("\n")
+	if input.Method != "" {
+		b.WriteString("    method = ")
+		b.WriteString(strconv.Quote(input.Method))
+		b.WriteString("\n")
+	}
+	if input.ExpectedStatus != "" {
+		b.WriteString("    expected_status = ")
+		b.WriteString(renderIntOrQuoted(input.ExpectedStatus))
+		b.WriteString("\n")
+	}
+	if input.ExpectedBody != "" {
+		b.WriteString("    expected_body = ")
+		b.WriteString(RenderStringOrExpression(input.ExpectedBody))
+		b.WriteString("\n")
+	}
+	if input.Interval != "" {
+		b.WriteString("    interval = ")
+		b.WriteString(strconv.Quote(input.Interval))
+		b.WriteString("\n")
+	}
+	if input.Timeout != "" {
+		b.WriteString("    timeout = ")
+		b.WriteString(strconv.Quote(input.Timeout))
+		b.WriteString("\n")
+	}
+	if input.FailureThreshold != "" {
+		b.WriteString("    failure_threshold = ")
+		b.WriteString(renderIntOrQuoted(input.FailureThreshold))
+		b.WriteString("\n")
+	}
+	if input.SuccessThreshold != "" {
+		b.WriteString("    success_threshold = ")
+		b.WriteString(renderIntOrQuoted(input.SuccessThreshold))
+		b.WriteString("\n")
+	}
+	if input.SendAuthorization != nil {
+		b.WriteString("    send_authorization = ")
+		b.WriteString(strconv.FormatBool(*input.SendAuthorization))
+		b.WriteString("\n")
+	}
+	b.WriteString("  }\n")
+	return b.String()
+}
+
+func renderIntOrQuoted(value string) string {
+	if _, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
+		return strings.TrimSpace(value)
+	}
+	return strconv.Quote(value)
 }
 
 func RenderAliasBlock(input AliasInput) string {

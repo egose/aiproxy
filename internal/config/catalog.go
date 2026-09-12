@@ -129,6 +129,10 @@ func cloneProvider(provider Provider) Provider {
 		ref := *provider.CopilotCredentialRef
 		out.CopilotCredentialRef = &ref
 	}
+	if provider.Healthcheck != nil {
+		hc := *provider.Healthcheck
+		out.Healthcheck = &hc
+	}
 	out.Models = cloneModels(provider.Models)
 	out.ModelByName = make(map[string]Model, len(out.Models)+len(provider.ModelByName))
 	for _, model := range out.Models {

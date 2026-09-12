@@ -111,3 +111,22 @@ func TestSnapshotFromTransportHandlesEmptyTransport(t *testing.T) {
 		t.Fatalf("Logs should be nil: %+v", got)
 	}
 }
+
+func TestSnapshotFromTransportCarriesHealthchecks(t *testing.T) {
+	transport := dashrpc.Snapshot{
+		Healthchecks: []dashrpc.HealthcheckStatus{
+			{Provider: "local", Configured: true, Checked: true, Healthy: false, StatusCode: 500, Message: "unexpected status 500 (want 200)", Path: "/health"},
+		},
+	}
+	snap := SnapshotFromTransport(transport)
+	if len(snap.Healthchecks) != 1 {
+		t.Fatalf("Healthchecks = %+v", snap.Healthchecks)
+	}
+	hc := snap.Healthchecks[0]
+	if hc.Provider != "local" || !hc.Configured || !hc.Checked || hc.Healthy || hc.StatusCode != 500 || hc.Path != "/health" {
+		t.Fatalf("Healthcheck = %+v", hc)
+	}
+	if len(SnapshotFromTransport(dashrpc.Snapshot{}).Healthchecks) != 0 {
+		t.Fatalf("empty transport should yield no healthchecks")
+	}
+}

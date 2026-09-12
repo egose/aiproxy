@@ -34,6 +34,7 @@ type topLevelBlock = configedit.TopLevelBlock
 type providerInput = configedit.ProviderInput
 type providerCredentialInput = configedit.ProviderCredentialInput
 type providerModelInput = configedit.ProviderModelInput
+type providerHealthcheckInput = configedit.ProviderHealthcheckInput
 type listenerInput = configedit.ListenerInput
 type authInput = configedit.AuthInput
 type authRateLimitInput = configedit.AuthRateLimitInput
@@ -66,29 +67,43 @@ type authOptions struct {
 }
 
 type providerOptions struct {
-	ProviderType          string
-	Name                  string
-	Extends               string
-	DisplayName           string
-	BaseURL               string
-	UpstreamHeaderTimeout string
-	UserAgent             string
-	APIKey                string
-	APIKeyEnv             string
-	SecretsPath           string
-	SecretsKey            string
-	Credential            string
-	CredentialPath        string
-	Models                []string
-	ModelUpstreams        []string
-	ModelDisplayName      []string
-	ModelCaps             []string
-	ModelProtocols        []string
-	Enabled               bool
-	HasEnabled            bool
-	NonInteractive        bool
-	BaseProviderNames     []string
-	BaseProviderTypes     map[string]string
+	ProviderType            string
+	Name                    string
+	Extends                 string
+	DisplayName             string
+	BaseURL                 string
+	UpstreamHeaderTimeout   string
+	UserAgent               string
+	APIKey                  string
+	APIKeyEnv               string
+	SecretsPath             string
+	SecretsKey              string
+	Credential              string
+	CredentialPath          string
+	Models                  []string
+	ModelUpstreams          []string
+	ModelDisplayName        []string
+	ModelCaps               []string
+	ModelProtocols          []string
+	HealthcheckPath         string
+	HealthcheckMethod       string
+	HealthcheckStatus       int
+	HasHealthcheckStatus    bool
+	HealthcheckBody         string
+	HealthcheckInterval     string
+	HealthcheckTimeout      string
+	HealthcheckFailures     int
+	HasHealthcheckFailures  bool
+	HealthcheckSuccesses    int
+	HasHealthcheckSuccesses bool
+	HealthcheckSendAuth     bool
+	HasHealthcheckSendAuth  bool
+	NoHealthcheck           bool
+	Enabled                 bool
+	HasEnabled              bool
+	NonInteractive          bool
+	BaseProviderNames       []string
+	BaseProviderTypes       map[string]string
 }
 
 func isGitHubCopilotProviderType(providerType string) bool {
@@ -250,6 +265,10 @@ func newConfigureProviderCommand() *cobra.Command {
 			"aiproxy configure provider --config /etc/aiproxy/config.hcl --delete --name backup",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.HasEnabled = cmd.Flags().Changed("enabled")
+			options.HasHealthcheckStatus = cmd.Flags().Changed("healthcheck-expected-status")
+			options.HasHealthcheckFailures = cmd.Flags().Changed("healthcheck-failure-threshold")
+			options.HasHealthcheckSuccesses = cmd.Flags().Changed("healthcheck-success-threshold")
+			options.HasHealthcheckSendAuth = cmd.Flags().Changed("healthcheck-send-authorization")
 			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureProvider(&prompts, inheritedConfigPath(cmd), deleteBlock, options)
 		},
@@ -273,6 +292,16 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&options.ModelDisplayName, "model-display-name", nil, "model display name spec: name=display")
 	cmd.Flags().StringArrayVar(&options.ModelCaps, "model-capabilities", nil, "model capabilities spec: name=cap1,cap2")
 	cmd.Flags().StringArrayVar(&options.ModelProtocols, "model-protocol", nil, "model protocol spec: name=protocol (required for opencode-zen and opencode-go: chat, responses, messages, or gemini; gemini is zen-only)")
+	cmd.Flags().StringVar(&options.HealthcheckPath, "healthcheck-path", "", "healthcheck path relative to base_url (e.g. /health); omit to leave unchanged")
+	cmd.Flags().StringVar(&options.HealthcheckMethod, "healthcheck-method", "", "healthcheck method: GET or HEAD")
+	cmd.Flags().IntVar(&options.HealthcheckStatus, "healthcheck-expected-status", 0, "healthcheck expected HTTP status code")
+	cmd.Flags().StringVar(&options.HealthcheckBody, "healthcheck-expected-body", "", "healthcheck expected body substring, or \"*\" to skip body matching")
+	cmd.Flags().StringVar(&options.HealthcheckInterval, "healthcheck-interval", "", "healthcheck probe interval (e.g. 30s)")
+	cmd.Flags().StringVar(&options.HealthcheckTimeout, "healthcheck-timeout", "", "healthcheck probe timeout, must be less than interval (e.g. 5s)")
+	cmd.Flags().IntVar(&options.HealthcheckFailures, "healthcheck-failure-threshold", 0, "consecutive failures before marking unhealthy")
+	cmd.Flags().IntVar(&options.HealthcheckSuccesses, "healthcheck-success-threshold", 0, "consecutive successes before marking healthy")
+	cmd.Flags().BoolVar(&options.HealthcheckSendAuth, "healthcheck-send-authorization", false, "forward the provider api_key as bearer auth on healthcheck probes")
+	cmd.Flags().BoolVar(&options.NoHealthcheck, "no-healthcheck", false, "remove the healthcheck block from the provider")
 	cmd.Flags().BoolVar(&options.Enabled, "enabled", false, "provider enabled state (use --enabled=false to disable; default preserves existing)")
 	cmd.Flags().Lookup("enabled").NoOptDefVal = "true"
 	cmd.Flags().BoolVar(&options.NonInteractive, "non-interactive", false, "fail instead of prompting for missing values")
@@ -1115,6 +1144,78 @@ func providerSecretsUpdate(input providerInput, options providerOptions) secrets
 	return secretsUpdate{path: input.Credential.SecretsPath, key: input.Credential.SecretsKey, value: options.APIKey}
 }
 
+func hasProviderHealthcheckOptions(options providerOptions) bool {
+	return options.HealthcheckPath != "" || options.HealthcheckMethod != "" || options.HasHealthcheckStatus ||
+		options.HealthcheckBody != "" || options.HealthcheckInterval != "" || options.HealthcheckTimeout != "" ||
+		options.HasHealthcheckFailures || options.HasHealthcheckSuccesses || options.HasHealthcheckSendAuth || options.NoHealthcheck
+}
+
+func applyProviderHealthcheckOptions(input *providerInput, options providerOptions) error {
+	if options.NoHealthcheck && hasProviderHealthcheckOptionsExceptNo(options) {
+		return fmt.Errorf("--no-healthcheck cannot be combined with other healthcheck flags")
+	}
+	if options.NoHealthcheck {
+		input.Healthcheck = nil
+		return nil
+	}
+	if !hasProviderHealthcheckOptions(options) {
+		return nil
+	}
+	if isGitHubCopilotProviderType(input.ProviderType) {
+		return fmt.Errorf("healthcheck is not supported by github-copilot providers")
+	}
+	hc := input.Healthcheck
+	if hc == nil {
+		hc = &providerHealthcheckInput{}
+	} else {
+		clone := *hc
+		hc = &clone
+	}
+	if options.HealthcheckPath != "" {
+		hc.Path = options.HealthcheckPath
+	}
+	if options.HealthcheckMethod != "" {
+		hc.Method = options.HealthcheckMethod
+	}
+	if options.HasHealthcheckStatus {
+		hc.ExpectedStatus = strconv.Itoa(options.HealthcheckStatus)
+	}
+	if options.HealthcheckBody != "" {
+		hc.ExpectedBody = options.HealthcheckBody
+	}
+	if options.HealthcheckInterval != "" {
+		hc.Interval = options.HealthcheckInterval
+	}
+	if options.HealthcheckTimeout != "" {
+		hc.Timeout = options.HealthcheckTimeout
+	}
+	if options.HasHealthcheckFailures {
+		hc.FailureThreshold = strconv.Itoa(options.HealthcheckFailures)
+	}
+	if options.HasHealthcheckSuccesses {
+		hc.SuccessThreshold = strconv.Itoa(options.HealthcheckSuccesses)
+	}
+	if options.HasHealthcheckSendAuth {
+		value := options.HealthcheckSendAuth
+		hc.SendAuthorization = &value
+	}
+	input.Healthcheck = hc
+	return nil
+}
+
+func hasProviderHealthcheckOptionsExceptNo(options providerOptions) bool {
+	return options.HealthcheckPath != "" || options.HealthcheckMethod != "" || options.HasHealthcheckStatus ||
+		options.HealthcheckBody != "" || options.HealthcheckInterval != "" || options.HealthcheckTimeout != "" ||
+		options.HasHealthcheckFailures || options.HasHealthcheckSuccesses || options.HasHealthcheckSendAuth
+}
+
+func preservedProviderHealthcheck(hc *providerHealthcheckInput, extends, providerType string) *providerHealthcheckInput {
+	if strings.TrimSpace(extends) != "" || isGitHubCopilotProviderType(providerType) {
+		return nil
+	}
+	return hc
+}
+
 func hasProviderModelOptions(options providerOptions) bool {
 	return len(options.Models) > 0 || len(options.ModelUpstreams) > 0 || len(options.ModelDisplayName) > 0 || len(options.ModelCaps) > 0 || len(options.ModelProtocols) > 0
 }
@@ -1658,7 +1759,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if options.DisplayName != "" {
 		defaults.DisplayName = options.DisplayName
 	}
-	if defaults.Extends != "" && (options.BaseURL != "" || options.UpstreamHeaderTimeout != "" || options.UserAgent != "" || options.HasEnabled || hasProviderModelOptions(options)) {
+	if defaults.Extends != "" && (options.BaseURL != "" || options.UpstreamHeaderTimeout != "" || options.UserAgent != "" || options.HasEnabled || hasProviderModelOptions(options) || hasProviderHealthcheckOptions(options)) {
 		return providerInput{}, secretsUpdate{}, fmt.Errorf("--extends cannot be combined with inherited-field flags")
 	}
 	if options.BaseURL != "" {
@@ -1680,6 +1781,9 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		defaults.UserAgent = options.UserAgent
 	}
 	if err := applyProviderCredentialOptions(&defaults, options); err != nil {
+		return providerInput{}, secretsUpdate{}, err
+	}
+	if err := applyProviderHealthcheckOptions(&defaults, options); err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
 	if options.HasEnabled && !options.Enabled {
@@ -1722,6 +1826,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			defaults.UserAgent = ""
 			defaults.Enabled = nil
 			defaults.Models = nil
+			defaults.Healthcheck = nil
 			return defaults, providerSecretsUpdate(defaults, options), nil
 		}
 		if defaults.IsExplicitlyDisabled() {
@@ -1738,6 +1843,9 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		}
 		if isGitHubCopilotProviderType(defaults.ProviderType) && defaults.Credential.Mode != "credential_ref" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("github-copilot providers use --credential/--credential-path referencing a saved login, not API key flags")
+		}
+		if isGitHubCopilotProviderType(defaults.ProviderType) && defaults.Healthcheck != nil {
+			return providerInput{}, secretsUpdate{}, fmt.Errorf("healthcheck is not supported by github-copilot providers (remove it or use --no-healthcheck)")
 		}
 		if len(defaults.Models) == 0 {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider requires at least one model in non-interactive mode")
@@ -1947,6 +2055,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			UserAgent:             strings.TrimSpace(userAgent),
 			Credential:            credential,
 			Enabled:               defaults.Enabled,
+			Healthcheck:           preservedProviderHealthcheck(defaults.Healthcheck, extends, providerType),
 			Models:                models,
 		}, update, nil
 	}
@@ -2109,6 +2218,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		UserAgent:             userAgent,
 		Credential:            credential,
 		Enabled:               defaults.Enabled,
+		Healthcheck:           preservedProviderHealthcheck(defaults.Healthcheck, extends, providerType),
 		Models:                models,
 	}, update, nil
 }
@@ -3643,6 +3753,36 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 		model.Protocol = parseLiteralOrExpression(attributeExpr(src, modelBlock.Body, "protocol"))
 		model.Capabilities = parseQuotedListExpr(attributeExpr(src, modelBlock.Body, "capabilities"))
 		input.Models = append(input.Models, model)
+	}
+	if hcBlock := findNestedBlock(parsed.Body, "healthcheck"); hcBlock != nil {
+		input.Healthcheck = parseProviderHealthcheckInput(src, hcBlock)
+	}
+	return input
+}
+
+func parseProviderHealthcheckInput(src []byte, block *hclsyntax.Block) *providerHealthcheckInput {
+	if block == nil {
+		return nil
+	}
+	input := &providerHealthcheckInput{}
+	input.Path = parseLiteralOrExpression(attributeExpr(src, block.Body, "path"))
+	input.Method = parseLiteralOrExpression(attributeExpr(src, block.Body, "method"))
+	input.ExpectedStatus = parseLiteralOrExpression(attributeExpr(src, block.Body, "expected_status"))
+	input.ExpectedBody = parseLiteralOrExpression(attributeExpr(src, block.Body, "expected_body"))
+	input.Interval = parseLiteralOrExpression(attributeExpr(src, block.Body, "interval"))
+	input.Timeout = parseLiteralOrExpression(attributeExpr(src, block.Body, "timeout"))
+	input.FailureThreshold = parseLiteralOrExpression(attributeExpr(src, block.Body, "failure_threshold"))
+	input.SuccessThreshold = parseLiteralOrExpression(attributeExpr(src, block.Body, "success_threshold"))
+	if raw := strings.TrimSpace(attributeExpr(src, block.Body, "send_authorization")); raw != "" {
+		value := parseBoolExpr(raw, false)
+		if raw == "true" || raw == "false" {
+			input.SendAuthorization = &value
+		}
+	}
+	if input.Path == "" && input.Method == "" && input.ExpectedStatus == "" && input.ExpectedBody == "" &&
+		input.Interval == "" && input.Timeout == "" && input.FailureThreshold == "" &&
+		input.SuccessThreshold == "" && input.SendAuthorization == nil {
+		return nil
 	}
 	return input
 }

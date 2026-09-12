@@ -159,6 +159,9 @@ func validateProviders(providers []Provider, requireCredential bool) error {
 		if err := validateProviderUserAgent(p); err != nil {
 			return err
 		}
+		if err := validateProviderHealthcheck(p); err != nil {
+			return err
+		}
 		if requireCredential && p.Type == ProviderTypeGitHubCopilot && p.CopilotToken == "" {
 			return fmt.Errorf("provider %q: enabled github-copilot providers require a resolvable credential_ref (run login first; set enabled = false to disable a provider intentionally)", p.Name)
 		}
@@ -251,6 +254,56 @@ func validateProviderUserAgent(p Provider) error {
 	}
 	if len(p.UserAgent) > 256 || !isValidUserAgent(p.UserAgent) {
 		return fmt.Errorf("provider %q: user_agent must be 1-256 printable ASCII characters without newlines", p.Name)
+	}
+	return nil
+}
+
+func validateProviderHealthcheck(p Provider) error {
+	hc := p.Healthcheck
+	if hc == nil {
+		return nil
+	}
+	if p.Type == ProviderTypeGitHubCopilot {
+		return fmt.Errorf("provider %q: healthcheck is not supported by github-copilot", p.Name)
+	}
+	if err := validateHealthcheckFields(hc); err != nil {
+		return fmt.Errorf("provider %q: %w", p.Name, err)
+	}
+	return nil
+}
+
+func validateHealthcheckFields(hc *ProviderHealthcheck) error {
+	if hc.Path == "" {
+		return fmt.Errorf("healthcheck.path is required")
+	}
+	if !strings.HasPrefix(hc.Path, "/") {
+		return fmt.Errorf("healthcheck.path must start with '/'")
+	}
+	if strings.Contains(hc.Path, "://") {
+		return fmt.Errorf("healthcheck.path must be a path relative to base_url, not a URL")
+	}
+	switch strings.ToUpper(hc.Method) {
+	case "GET", "HEAD":
+	default:
+		return fmt.Errorf("healthcheck.method must be GET or HEAD")
+	}
+	if hc.ExpectedStatus < 100 || hc.ExpectedStatus > 599 {
+		return fmt.Errorf("healthcheck.expected_status must be between 100 and 599")
+	}
+	if hc.Interval <= 0 {
+		return fmt.Errorf("healthcheck.interval must be greater than zero")
+	}
+	if hc.Timeout <= 0 {
+		return fmt.Errorf("healthcheck.timeout must be greater than zero")
+	}
+	if hc.Timeout >= hc.Interval {
+		return fmt.Errorf("healthcheck.timeout must be less than healthcheck.interval")
+	}
+	if hc.FailureThreshold < 1 {
+		return fmt.Errorf("healthcheck.failure_threshold must be at least 1")
+	}
+	if hc.SuccessThreshold < 1 {
+		return fmt.Errorf("healthcheck.success_threshold must be at least 1")
 	}
 	return nil
 }

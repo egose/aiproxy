@@ -83,7 +83,20 @@ type rawProvider struct {
 	APIKeyRef             *rawAPIKeyRef     `hcl:"api_key_ref,block"`
 	CredentialRef         *rawCredentialRef `hcl:"credential_ref,block"`
 	Enabled               *bool             `hcl:"enabled,optional"`
+	Healthcheck           *rawHealthcheck   `hcl:"healthcheck,block"`
 	Models                []rawModel        `hcl:"model,block"`
+}
+
+type rawHealthcheck struct {
+	Path              string `hcl:"path"`
+	Method            string `hcl:"method,optional"`
+	ExpectedStatus    *int   `hcl:"expected_status,optional"`
+	ExpectedBody      string `hcl:"expected_body,optional"`
+	Interval          string `hcl:"interval,optional"`
+	Timeout           string `hcl:"timeout,optional"`
+	FailureThreshold  *int   `hcl:"failure_threshold,optional"`
+	SuccessThreshold  *int   `hcl:"success_threshold,optional"`
+	SendAuthorization *bool  `hcl:"send_authorization,optional"`
 }
 
 type rawAPIKeyRef struct {
