@@ -200,7 +200,8 @@ changing the static inventory.
 
 The server supports live config reload on `SIGHUP` for auth, providers, models,
 aliases, root and provider upstream header timeouts, access-log enablement,
-metrics config, provider-health config, and metrics-backed inventory state.
+payload-log configuration, metrics config, provider-health config, and
+metrics-backed inventory state.
 Listener address, listener timeout, logging level, and enabling the dashboard
 after startup require a restart. Unchanged rate-limit settings preserve existing
 buckets; changed rate-limit settings reset limiter state.

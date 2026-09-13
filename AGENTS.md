@@ -68,7 +68,7 @@ JSON config form, where `env("VAR")` is written bare as the value. Run
 
 The server supports `SIGHUP`-triggered live config reload for auth, providers,
 models, aliases, root and provider upstream header timeouts, access-log
-enablement, metrics config, provider-health config, and metrics-backed inventory
+enablement, payload-log configuration, metrics config, provider-health config, and metrics-backed inventory
 state. Listener address, listener timeout, logging level, and enabling the
 dashboard after startup require restart.
 

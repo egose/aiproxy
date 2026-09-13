@@ -1148,6 +1148,7 @@ Reload currently rebuilds and swaps:
 - alias routing state
 - root and provider upstream header timeouts
 - access-log enablement
+- payload-log configuration
 - metrics configuration
 - provider-health configuration
 - readiness and startup inventory metrics

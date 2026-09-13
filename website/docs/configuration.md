@@ -124,6 +124,43 @@ Defaults:
 - `level = "info"`
 - `access_log = true`
 
+The nested `payload_log` block is optional and disabled by default. When
+enabled, the proxy appends one JSON object per line (JSONL) per inference
+request with full request/response headers and bodies:
+
+```hcl
+logging {
+  level      = "info"
+  access_log = true
+
+  payload_log {
+    enabled        = true
+    dir            = "/var/log/aiproxy/payloads"
+    rotation       = "daily"
+    retention      = "168h"
+    max_body_bytes = 1048576
+  }
+}
+```
+
+- `enabled` defaults to `false`; nothing is written unless it is `true`
+- `dir` is required when enabled and holds the `payload-<date>.jsonl` files
+- `rotation` splits files by datetime to bound single-file growth: `daily`
+  writes `payload-YYYYMMDD.jsonl`, `hourly` writes `payload-YYYYMMDD-HH.jsonl`
+  (UTC). Defaults to `daily`.
+- `retention` is the configurable file retention period (Go duration string,
+  default `"168h"` / 7 days). Files whose modification time is older than the
+  retention window are deleted on rotation and by an hourly background sweep.
+  `0` (for example `"0s"`) keeps files forever.
+- `max_body_bytes` caps the stored bytes per request/response body
+  (default `1048576`); larger bodies are truncated and marked
+  `"truncated": true`. `0` stores full bodies. Binary bodies are base64
+  encoded.
+- `authorization`, `proxy-authorization`, `cookie`, `set-cookie`, and
+  `x-api-key` header values are always recorded as `[REDACTED]`.
+
+Payload-log changes apply on `SIGHUP` reload without a restart.
+
 ## Auth
 
 Supported inbound auth modes:
