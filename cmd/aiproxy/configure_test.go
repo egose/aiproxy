@@ -842,6 +842,94 @@ provider "openai" "primary" {
 	}
 }
 
+func TestConfigureAliasSessionAffinityFlags(t *testing.T) {
+	seed := func() string {
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, "config.hcl")
+		seed := strings.TrimSpace(`listener "http" "public" {
+  address = ":8080"
+}
+
+auth "main" {
+  mode = "none"
+}
+
+provider "openai" "primary" {
+  api_key = "sk-test"
+
+  model "gpt-4o-mini" {}
+}`) + "\n"
+		if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+			t.Fatalf("WriteFile(seed): %v", err)
+		}
+		return configPath
+	}
+	run := func(configPath string, args ...string) string {
+		t.Helper()
+		base := []string{"configure", "alias", "--config", configPath, "--non-interactive", "--name", "chat_default", "--algorithm", "round_robin", "--target", "primary/gpt-4o-mini"}
+		_, stderr, err := executeRootCommand("", append(base, args...)...)
+		if err != nil {
+			t.Fatalf("Execute(%v): %v\nstderr:\n%s", args, err, stderr)
+		}
+		configData, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("ReadFile(config): %v", err)
+		}
+		return string(configData)
+	}
+
+	t.Run("enables with custom headers", func(t *testing.T) {
+		configText := run(seed(), "--affinity-header", "X-Custom-Session", "--affinity-header", "session-id")
+		if !strings.Contains(configText, "session_affinity {") {
+			t.Fatalf("alias config missing session_affinity block:\n%s", configText)
+		}
+		if !strings.Contains(configText, `"x-custom-session"`) || !strings.Contains(configText, `"session-id"`) {
+			t.Fatalf("alias config missing affinity headers:\n%s", configText)
+		}
+	})
+
+	t.Run("disables with flag", func(t *testing.T) {
+		configPath := seed()
+		withAffinity := run(configPath, "--affinity-header", "x-custom-session")
+		if !strings.Contains(withAffinity, "session_affinity {") {
+			t.Fatalf("alias config missing session_affinity block:\n%s", withAffinity)
+		}
+		withoutAffinity := run(configPath, "--no-session-affinity")
+		if strings.Contains(withoutAffinity, "session_affinity") {
+			t.Fatalf("alias config still has session_affinity:\n%s", withoutAffinity)
+		}
+	})
+
+	t.Run("existing affinity round-trips", func(t *testing.T) {
+		configPath := seed()
+		_ = run(configPath, "--affinity-header", "x-custom-session")
+		blocks, err := parseTopLevelBlocks(mustReadFile(t, configPath))
+		if err != nil {
+			t.Fatalf("parse blocks: %v", err)
+		}
+		existing := existingAliasInput(blocks, "chat_default")
+		if existing == nil || existing.SessionAffinity == nil {
+			t.Fatalf("existingAliasInput = %+v, want affinity", existing)
+		}
+		if len(existing.SessionAffinity.Headers) != 1 || existing.SessionAffinity.Headers[0] != "x-custom-session" {
+			t.Fatalf("existing affinity headers = %v", existing.SessionAffinity.Headers)
+		}
+		rendered := renderAliasBlock(*existing)
+		if !strings.Contains(rendered, "session_affinity {") {
+			t.Fatalf("rendered alias missing session_affinity:\n%s", rendered)
+		}
+	})
+}
+
+func mustReadFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", path, err)
+	}
+	return string(data)
+}
+
 func TestConfigureAuthNonInteractiveFlags(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.hcl")

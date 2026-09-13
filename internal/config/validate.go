@@ -343,6 +343,9 @@ func validateAliases(aliases []Alias, catalog Catalog) error {
 				return fmt.Errorf("alias %q: invalid retry status code %d: must be between 400 and 599", a.Name, code)
 			}
 		}
+		if err := validateSessionAffinity(a); err != nil {
+			return err
+		}
 		seen := make(map[string]bool)
 		for _, t := range a.Targets {
 			_, _, ok := catalog.Model(t.Provider, t.Model)
@@ -363,6 +366,53 @@ func validateAliases(aliases []Alias, catalog Catalog) error {
 		}
 	}
 	return nil
+}
+
+func validateSessionAffinity(a Alias) error {
+	if a.SessionAffinity == nil {
+		return nil
+	}
+	headers := a.SessionAffinity.Headers
+	if len(headers) == 0 {
+		return fmt.Errorf("alias %q: session_affinity.headers must not be empty", a.Name)
+	}
+	if len(headers) > 16 {
+		return fmt.Errorf("alias %q: session_affinity.headers must list at most 16 headers", a.Name)
+	}
+	seen := make(map[string]bool, len(headers))
+	for _, h := range headers {
+		if h == "" {
+			return fmt.Errorf("alias %q: session_affinity.headers must not contain empty values", a.Name)
+		}
+		if !isValidHeaderName(h) {
+			return fmt.Errorf("alias %q: session_affinity.headers has invalid header name %q", a.Name, h)
+		}
+		lower := strings.ToLower(h)
+		if seen[lower] {
+			return fmt.Errorf("alias %q: session_affinity.headers has duplicate header %q", a.Name, h)
+		}
+		seen[lower] = true
+	}
+	return nil
+}
+
+func isValidHeaderName(s string) bool {
+	if len(s) == 0 || len(s) > 256 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' {
+			continue
+		}
+		switch c {
+		case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func isValidCapability(c Capability) bool {

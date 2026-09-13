@@ -181,7 +181,34 @@ type Alias struct {
 	Name             string
 	Algorithm        Algorithm
 	RetryStatusCodes []int
+	SessionAffinity  *SessionAffinity
 	Targets          []AliasTarget
+}
+
+type SessionAffinity struct {
+	Headers []string
+}
+
+var DefaultSessionAffinityHeaders = []string{
+	"x-opencode-session",
+	"x-session-affinity",
+	"x-session-id",
+	"x-opencode-session-id",
+	"x-claude-code-session-id",
+	"session-id",
+	"thread-id",
+	"x-codex-window-id",
+	"x-client-request-id",
+}
+
+func SessionAffinityHeaders(a Alias) []string {
+	if a.SessionAffinity == nil {
+		return nil
+	}
+	if len(a.SessionAffinity.Headers) == 0 {
+		return append([]string(nil), DefaultSessionAffinityHeaders...)
+	}
+	return append([]string(nil), a.SessionAffinity.Headers...)
 }
 
 type AliasTarget struct {

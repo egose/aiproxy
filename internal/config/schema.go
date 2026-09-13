@@ -118,10 +118,15 @@ type rawModel struct {
 }
 
 type rawAlias struct {
-	Name             string      `hcl:"name,label"`
-	Algorithm        string      `hcl:"algorithm"`
-	RetryStatusCodes []string    `hcl:"retry_status_codes,optional"`
-	Targets          []rawTarget `hcl:"target,block"`
+	Name             string              `hcl:"name,label"`
+	Algorithm        string              `hcl:"algorithm"`
+	RetryStatusCodes []string            `hcl:"retry_status_codes,optional"`
+	SessionAffinity  *rawSessionAffinity `hcl:"session_affinity,block"`
+	Targets          []rawTarget         `hcl:"target,block"`
+}
+
+type rawSessionAffinity struct {
+	Headers []string `hcl:"headers,optional"`
 }
 
 type rawTarget struct {

@@ -211,6 +211,21 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 	if remaining, ok := allCoolingRemaining(cooldowns, pool); ok {
 		return provider.SyntheticCooldownResult(remaining), nil
 	}
+	sessionKey, hasSession := "", false
+	var affinityPool []alias.Target
+	if r.Alias.SessionAffinity != nil && inbound != nil {
+		if key, ok := alias.SessionKey(r.Alias, inbound.Header); ok {
+			sessionKey, hasSession = key, true
+			for _, entry := range pool {
+				if entry.ok {
+					affinityPool = append(affinityPool, entry.target)
+				}
+			}
+			if len(affinityPool) == 0 {
+				hasSession = false
+			}
+		}
+	}
 	var pending *provider.Result
 	var pendingRetryProvider, pendingRetryModel, pendingRetryReason string
 	var hasPendingRetry bool
@@ -224,8 +239,21 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 			pending = nil
 		}
 	}
+	affinityPending := hasSession
 	for {
-		t, releaseLease := r.Selector.Acquire(coolingExclusions(cooldowns, pool, tried))
+		var t alias.Target
+		var releaseLease func()
+		if affinityPending {
+			affinityPending = false
+			if preferred, ok := alias.PreferredTarget(affinityPool, sessionKey); ok {
+				if acquired, release, ok := r.Selector.AcquireSpecific(preferred, coolingExclusions(cooldowns, pool, tried)); ok {
+					t, releaseLease = acquired, release
+				}
+			}
+		}
+		if releaseLease == nil && (t == alias.Target{}) {
+			t, releaseLease = r.Selector.Acquire(coolingExclusions(cooldowns, pool, tried))
+		}
 		if t.Provider == "" && t.Model == "" {
 			if pending != nil {
 				return pending, nil

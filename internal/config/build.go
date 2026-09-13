@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -120,6 +121,16 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 			return nil, fmt.Errorf("alias %q: %w", al.Name, err)
 		}
 		alias := Alias{Name: al.Name, Algorithm: Algorithm(al.Algorithm), RetryStatusCodes: retryCodes}
+		if al.SessionAffinity != nil {
+			headers := make([]string, 0, len(al.SessionAffinity.Headers))
+			for _, h := range al.SessionAffinity.Headers {
+				headers = append(headers, strings.ToLower(strings.TrimSpace(h)))
+			}
+			if len(headers) == 0 {
+				headers = append([]string(nil), DefaultSessionAffinityHeaders...)
+			}
+			alias.SessionAffinity = &SessionAffinity{Headers: headers}
+		}
 		for _, t := range al.Targets {
 			if disabledProviderNames[t.Provider] {
 				continue

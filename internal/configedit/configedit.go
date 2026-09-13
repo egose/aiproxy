@@ -104,7 +104,12 @@ type AliasInput struct {
 	Name             string
 	Algorithm        string
 	RetryStatusCodes []string
+	SessionAffinity  *AliasSessionAffinityInput
 	Targets          []AliasTargetInput
+}
+
+type AliasSessionAffinityInput struct {
+	Headers []string
 }
 
 type AliasTargetInput struct {
@@ -418,6 +423,15 @@ func RenderAliasBlock(input AliasInput) string {
 		b.WriteString("  retry_status_codes = ")
 		b.WriteString(RenderQuotedList(input.RetryStatusCodes))
 		b.WriteString("\n")
+	}
+	if input.SessionAffinity != nil {
+		b.WriteString("\n  session_affinity {\n")
+		if len(input.SessionAffinity.Headers) > 0 {
+			b.WriteString("    headers = ")
+			b.WriteString(RenderQuotedList(input.SessionAffinity.Headers))
+			b.WriteString("\n")
+		}
+		b.WriteString("  }\n")
 	}
 	for _, target := range input.Targets {
 		b.WriteString("\n  target {\n")
