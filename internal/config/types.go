@@ -11,6 +11,7 @@ type Runtime struct {
 	ProviderHealth        ProviderHealth
 	Metrics               Metrics
 	Dashboard             Dashboard
+	IngressGuardrails     IngressGuardrails
 	UpstreamHeaderTimeout time.Duration
 	Catalog               Catalog
 }
@@ -26,6 +27,20 @@ type Dashboard struct {
 	ExplicitAllowInsecure bool
 	TokenFromConfig       bool
 	Enabled               bool
+}
+
+type GuardrailMode string
+
+const (
+	GuardrailModeAudit GuardrailMode = "audit"
+	GuardrailModeBlock GuardrailMode = "block"
+)
+
+type IngressGuardrails struct {
+	Enabled      bool
+	Mode         GuardrailMode
+	MaxTextBytes int
+	MaxStrings   int
 }
 
 type Listener struct {

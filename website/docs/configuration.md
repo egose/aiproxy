@@ -563,3 +563,29 @@ failure rejects the reload and keeps the old runtime unchanged. The dashboard co
 connects over loopback plain HTTP and refuses concrete non-loopback listener
 hosts. HTTPS and remote dashboard URLs are not supported by the current
 configuration model.
+
+### `ingress_guardrails`
+
+```hcl
+ingress_guardrails {
+  enabled        = true
+  mode           = "block"
+  max_text_bytes = 65536
+  max_strings    = 512
+}
+```
+
+Opt-in secret scanning of inbound `POST /v1/chat/completions` and
+`POST /v1/responses` requests using the embedded Gitleaks rule set. Absent or
+`enabled = false` preserves existing behavior. `mode` is `block` (default,
+rejects with `400 secret_blocked` / `400 scan_incomplete` and zero upstream
+I/O) or `audit` (forwards and records
+`aiproxy_guardrail_scans_total{operation,mode,outcome}`). Scanned text is the
+JSON-decoded message content, tool arguments (plus one JSON-decoded level),
+tool results, and responses instructions/input; images, audio, embeddings,
+attachments, encoded blobs, and response/SSE output are out of scope and
+`gitleaks:allow` cannot suppress scans. Bounds default to 65536 text bytes
+and 512 strings (zeros select defaults); over-limit or canceled scans are
+visible `incomplete` outcomes. While enabled, covered-operation request
+bodies are omitted from payload-log entries. Policy changes apply on `SIGHUP`
+with atomic rollback on failure.

@@ -894,6 +894,8 @@ The config loader should validate:
 - aliases without any targets
 - alias targets pointing to unknown providers
 - alias targets pointing to unknown models
+- `ingress_guardrails` with an unknown mode, out-of-range `max_text_bytes`
+  or `max_strings`, or duplicate blocks
 
 The service should fail startup on invalid config.
 
@@ -902,6 +904,43 @@ Providers default to enabled. To intentionally disable a provider, declare
 type, base URL, models, capabilities) but do not require a usable credential.
 The disabled state is reported explicitly in startup logs and dashboard
 snapshots rather than inferred from missing secret state.
+
+## Ingress Secret Guardrails
+
+Inbound `POST /v1/chat/completions` and `POST /v1/responses` requests can be
+scanned for suspected secrets before any provider call when the optional
+`ingress_guardrails` block is enabled. The scanner reuses the embedded
+Gitleaks default rule set as a pinned Go module behind the small
+`internal/guardrails` interface (complete-clean, findings, and
+incomplete/error outcomes); only bounded safe metadata (outcome, rule IDs,
+counts, reason) leaves the wrapper.
+
+- Coverage is decoded text: chat message content (string and text parts),
+  tool-call arguments (plus one JSON-decoded level for stringified
+  arguments), tool results, and responses instructions/input items. JSON keys,
+  unknown fields, images, audio, embeddings, attachments, encoded blobs,
+  multipart bodies, response bodies, and SSE streams are out of scope and are
+  never asserted clean for those bytes.
+- `mode = "block"` (default) rejects flagged scans with
+  `400 secret_blocked` and unscannable required scans with
+  `400 scan_incomplete`, with zero upstream I/O (no adapter call, retries,
+  cooldowns, health updates, or upstream usage). `mode = "audit"` forwards
+  unchanged and records the outcome. `gitleaks:allow` never suppresses a
+  finding; cancellation and bound overruns are visible `incomplete`
+  outcomes, never clean scans.
+- `max_text_bytes` (default 65536) and `max_strings` (default 512) bound the
+  per-request work; clean 64 KiB scans average about 11 ms on the reference
+  host while full 8 MiB bodies take seconds, so the cap is the latency
+  budget. Scanning runs synchronously in the request goroutine against one
+  immutable shared detector per policy generation.
+- While enabled, covered-operation request bodies are omitted from
+  payload-log entries on success, blocked, and early-rejected paths.
+  Response capture is unchanged (response scanning is deferred). Findings
+  never appear in logs, metrics, or client errors.
+- Policy compiles at startup (failure fails startup) and rebuilds before
+  publication on `SIGHUP` (failure rejects the reload with the active policy
+  intact). Custom rules, rule subsets, and operator allowlists are not v1
+  scope; use the full default rule set or leave the block disabled.
 
 ## Observability And Security
 
@@ -938,6 +977,8 @@ Initial `/metrics` coverage includes:
 - readiness state
 - readiness reason state
 - upstream response body size histograms by operation/provider/outcome
+- ingress guardrail scan counts by operation/mode/outcome
+  (`clean`, `flagged`, `incomplete`; labels stay bounded)
 - upstream request counts by operation/provider/outcome
 - upstream request latency by operation/provider/outcome
 - provider health backend error counts

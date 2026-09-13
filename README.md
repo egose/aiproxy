@@ -200,7 +200,8 @@ changing the static inventory.
 
 The server supports live config reload on `SIGHUP` for auth, providers, models,
 aliases, root and provider upstream header timeouts, access-log enablement,
-payload-log configuration, metrics config, provider-health config, and
+payload-log configuration, metrics config, provider-health config,
+ingress-guardrail policy, and
 metrics-backed inventory state.
 Listener address, listener timeout, logging level, and enabling the dashboard
 after startup require a restart. Unchanged rate-limit settings preserve existing
@@ -559,6 +560,41 @@ dashboard {
   over loopback plain HTTP with bearer authentication and refuses non-loopback
   listener hosts. Remote dashboard access requires a future explicit transport
   design.
+
+### `ingress_guardrails`
+
+The optional `ingress_guardrails` block enables opt-in secret scanning of
+inbound inference requests using the embedded Gitleaks rule set (v8.30.1,
+MIT; see `THIRD-PARTY-NOTICES`). When absent or `enabled = false`, request
+handling is unchanged.
+
+```hcl
+ingress_guardrails {
+  enabled        = true
+  mode           = "block"
+  max_text_bytes = 65536
+  max_strings    = 512
+}
+```
+
+- `mode` is `block` (default) or `audit`. Block mode rejects flagged or
+  unscannable covered requests with `400 secret_blocked` or
+  `400 scan_incomplete` and zero upstream I/O; audit mode forwards and only
+  records `aiproxy_guardrail_scans_total{operation,mode,outcome}`.
+- Coverage is `POST /v1/chat/completions` and `POST /v1/responses` decoded
+  text (message content, tool arguments including one JSON-decoded level,
+  tool results, responses instructions/input). Images, audio, embeddings,
+  attachments, encoded blobs, response bodies, and SSE streams are out of
+  scope. Callers cannot suppress scans with `gitleaks:allow`.
+- `max_text_bytes` (1024..8MiB, default 65536) and `max_strings` (1..4096,
+  default 512) bound the work; over-limit or canceled scans are visible
+  `incomplete` outcomes, never clean scans. Zeros select defaults.
+- While enabled, request bodies for covered operations are omitted from
+  payload-log entries on all paths. Scanner findings are never logged or
+  returned; only rule IDs, counts, and reasons are recorded.
+- Policy changes apply on `SIGHUP`; a failed candidate rejects the reload
+  and keeps the active policy. The block has no `aiproxy configure`
+  subcommand yet; edit HCL/JSON directly and validate with `make validate`.
 
 ### `provider { enabled = false }`
 
