@@ -20,6 +20,7 @@ import (
 	"github.com/egose/aiproxy/internal/dashrpc"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
+	"github.com/egose/aiproxy/internal/payloadlog"
 	"github.com/egose/aiproxy/internal/provider"
 	"github.com/egose/aiproxy/internal/providerhealth"
 	"github.com/egose/aiproxy/internal/ratelimit"
@@ -41,6 +42,7 @@ type Dependencies struct {
 	Usage             accounting.Reader
 	AccessLog         bool
 	HasAccessLog      bool
+	PayloadLog        *payloadlog.Logger
 	Logger            *slog.Logger
 	Dashboard         dashrpc.Source
 	Version           string
@@ -254,6 +256,54 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestBytes = len(body)
+	var payloadCapture *payloadlog.Capture
+	if deps.PayloadLog != nil {
+		reqHeaders := payloadlog.RedactHeaders(r.Header)
+		reqBody := body
+		defer func() {
+			entry := payloadlog.Entry{
+				RequestID:   requestID,
+				Method:      r.Method,
+				Path:        r.URL.Path,
+				Status:      rw.statusCode,
+				DurationMs:  time.Since(start).Milliseconds(),
+				Streaming:   responseStreaming,
+				PublicModel: publicModel,
+				Provider:    accountingProvider,
+				Request: payloadlog.EntrySide{
+					Headers: reqHeaders,
+					Body:    payloadlog.EncodeBody(reqBody, deps.PayloadLog.MaxBodyBytes()),
+				},
+			}
+			if opKnown {
+				entry.Operation = op.String()
+			}
+			if principal != nil {
+				entry.Client = principalName(principal)
+				entry.Tenant = principalTenant(principal)
+			}
+			switch {
+			case result != nil && result.Streaming && payloadCapture != nil:
+				entry.UpstreamModel = accountingUpstream
+				entry.Response = payloadlog.EntrySide{
+					Headers: payloadlog.RedactHeaders(result.Header),
+					Body:    payloadCapture.Body(),
+				}
+			case result != nil && !result.Streaming:
+				entry.UpstreamModel = accountingUpstream
+				entry.Response = payloadlog.EntrySide{
+					Headers: payloadlog.RedactHeaders(result.Header),
+					Body:    payloadlog.EncodeBody(result.Body, deps.PayloadLog.MaxBodyBytes()),
+				}
+			default:
+				entry.Response = payloadlog.EntrySide{
+					Headers: payloadlog.RedactHeaders(rw.Header()),
+					Body:    payloadlog.EncodeBody(nil, 0),
+				}
+			}
+			_ = deps.PayloadLog.Record(entry)
+		}()
+	}
 	publicModel = extractModelForRequest(r.Header.Get("Content-Type"), body)
 	if publicModel == "" {
 		accountingModel = accountingModelInvalidBody
@@ -312,6 +362,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	accountingProvider = result.Provider
 	accountingUpstream = result.UpstreamModel
+
+	if deps.PayloadLog != nil && result.Streaming && result.StreamBody != nil {
+		payloadCapture = payloadlog.NewCapture(result.StreamBody, deps.PayloadLog.MaxBodyBytes())
+		result.StreamBody = payloadCapture
+	}
 
 	if result.Streaming {
 		responseStreaming = true
