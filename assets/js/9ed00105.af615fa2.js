@@ -253,6 +253,83 @@ function _createMdxContent(props) {
           children: "access_log = true"
         })
       }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The nested ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "payload_log"
+      }), " block is optional and disabled by default. When\nenabled, the proxy appends one JSON object per line (JSONL) per inference\nrequest with full request/response headers and bodies:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "logging {\n  level      = \"info\"\n  access_log = true\n\n  payload_log {\n    enabled        = true\n    dir            = \"/var/log/aiproxy/payloads\"\n    rotation       = \"daily\"\n    retention      = \"168h\"\n    max_body_bytes = 1048576\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "enabled"
+        }), " defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "false"
+        }), "; nothing is written unless it is ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "true"
+        })]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "dir"
+        }), " is required when enabled and holds the ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "payload-<date>.jsonl"
+        }), " files"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "rotation"
+        }), " splits files by datetime to bound single-file growth: ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "daily"
+        }), "\nwrites ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "payload-YYYYMMDD.jsonl"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "hourly"
+        }), " writes ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "payload-YYYYMMDD-HH.jsonl"
+        }), "\n(UTC). Defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "daily"
+        }), "."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "retention"
+        }), " is the configurable file retention period (Go duration string,\ndefault ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "\"168h\""
+        }), " / 7 days). Files whose modification time is older than the\nretention window are deleted on rotation and by an hourly background sweep.\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "0"
+        }), " (for example ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "\"0s\""
+        }), ") keeps files forever."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "max_body_bytes"
+        }), " caps the stored bytes per request/response body\n(default ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "1048576"
+        }), "); larger bodies are truncated and marked\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "\"truncated\": true"
+        }), ". ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "0"
+        }), " stores full bodies. Binary bodies are base64\nencoded."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "authorization"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "proxy-authorization"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "cookie"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "set-cookie"
+        }), ", and\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "x-api-key"
+        }), " header values are always recorded as ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "[REDACTED]"
+        }), "."]
+      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Payload-log changes apply on ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), " reload without a restart."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "auth",
       children: "Auth"

@@ -243,7 +243,7 @@ function _createMdxContent(props) {
         children: "aiproxy"
       }), " supports runtime reload on ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
-      }), " for auth, providers, models, aliases, root and provider upstream header timeouts, access-log enablement, metrics config, provider-health config, and metrics-backed inventory state."]
+      }), " for auth, providers, models, aliases, root and provider upstream header timeouts, access-log enablement, payload-log configuration, metrics config, provider-health config, and metrics-backed inventory state."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Reload with:"
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {

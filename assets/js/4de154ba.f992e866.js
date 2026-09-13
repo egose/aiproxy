@@ -78,6 +78,10 @@ const toc = [{
   "id": "logging",
   "level": 2
 }, {
+  "value": "Payload logging",
+  "id": "payload-logging",
+  "level": 3
+}, {
   "value": "Secret Handling",
   "id": "secret-handling",
   "level": 2
@@ -91,6 +95,7 @@ function _createMdxContent(props) {
     code: "code",
     h1: "h1",
     h2: "h2",
+    h3: "h3",
     header: "header",
     li: "li",
     p: "p",
@@ -356,6 +361,8 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "access-log enablement"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "payload-log configuration"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "metrics configuration"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "provider-health configuration"
@@ -522,6 +529,62 @@ function _createMdxContent(props) {
       children: ["When ", (0,jsx_runtime.jsx)(_components.code, {
         children: "access_log = true"
       }), ", request logs include events for request receipt, upstream provider/model selection and completion, and the final response or streaming start and end."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "payload-logging",
+      children: "Payload logging"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The optional nested ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "payload_log"
+      }), " block records full request/response headers\nand bodies as JSONL (one JSON object per line per inference request). It is\ndisabled by default."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "logging {\n  level      = \"info\"\n  access_log = true\n\n  payload_log {\n    enabled        = true\n    dir            = \"/var/log/aiproxy/payloads\"\n    rotation       = \"daily\"\n    retention      = \"168h\"\n    max_body_bytes = 1048576\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Files are split by datetime so no single file grows without bound: ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "daily"
+      }), "\nrotation writes ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "payload-YYYYMMDD.jsonl"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "hourly"
+      }), " writes\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "payload-YYYYMMDD-HH.jsonl"
+      }), " (UTC) under ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "dir"
+      }), " (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "0600"
+      }), " files, ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "0700"
+      }), "\ndirectory). ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "retention"
+      }), " (default 7 days, ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"168h\""
+      }), ") controls how long files are\nkept: files older than the retention window are removed on rotation and by an\nhourly sweep; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"0s\""
+      }), " disables expiry. Bodies larger than ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "max_body_bytes"
+      }), " per\nside are truncated with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"truncated\": true"
+      }), " (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "0"
+      }), " stores full bodies), and\nsensitive headers (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "authorization"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "proxy-authorization"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "cookie"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "set-cookie"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "x-api-key"
+      }), ") are stored as ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "[REDACTED]"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Only enable payload logging when you can protect the output directory:\nbodies contain prompts and completions. Changes apply on ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), " reload."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "secret-handling",
       children: "Secret Handling"

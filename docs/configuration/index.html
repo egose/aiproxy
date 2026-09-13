@@ -6,7 +6,7 @@
 <title data-rh="true">Configuration | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/configuration/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Configuration | aiproxy"><meta data-rh="true" name="description" content="aiproxy uses labeled HCL blocks. The core building blocks are:"><meta data-rh="true" property="og:description" content="aiproxy uses labeled HCL blocks. The core building blocks are:"><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/configuration/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/configuration/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/configuration/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Configuration","item":"https://aiproxy.pages.dev/docs/configuration"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
 <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.0700b446.css">
-<script src="/assets/js/runtime~main.2b6dcc4e.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.43c39fa6.js" defer="defer"></script>
 <script src="/assets/js/main.8b8c49ad.js" defer="defer"></script>
 </head>
 <body>
@@ -52,6 +52,28 @@
 <li class=""><code>level = &quot;info&quot;</code></li>
 <li class=""><code>access_log = true</code></li>
 </ul>
+<p>The nested <code>payload_log</code> block is optional and disabled by default. When
+enabled, the proxy appends one JSON object per line (JSONL) per inference
+request with full request/response headers and bodies:</p>
+<div class="language-hcl mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-hcl codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">logging {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  level      = &quot;info&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  access_log = true</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  payload_log {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    enabled        = true</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    dir            = &quot;/var/log/aiproxy/payloads&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    rotation       = &quot;daily&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    retention      = &quot;168h&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    max_body_bytes = 1048576</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  }</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">}</span><br></div></code></pre></div></div>
+<ul>
+<li class=""><code>enabled</code> defaults to <code>false</code>; nothing is written unless it is <code>true</code></li>
+<li class=""><code>dir</code> is required when enabled and holds the <code>payload-&lt;date&gt;.jsonl</code> files</li>
+<li class=""><code>rotation</code> splits files by datetime to bound single-file growth: <code>daily</code>
+writes <code>payload-YYYYMMDD.jsonl</code>, <code>hourly</code> writes <code>payload-YYYYMMDD-HH.jsonl</code>
+(UTC). Defaults to <code>daily</code>.</li>
+<li class=""><code>retention</code> is the configurable file retention period (Go duration string,
+default <code>&quot;168h&quot;</code> / 7 days). Files whose modification time is older than the
+retention window are deleted on rotation and by an hourly background sweep.
+<code>0</code> (for example <code>&quot;0s&quot;</code>) keeps files forever.</li>
+<li class=""><code>max_body_bytes</code> caps the stored bytes per request/response body
+(default <code>1048576</code>); larger bodies are truncated and marked
+<code>&quot;truncated&quot;: true</code>. <code>0</code> stores full bodies. Binary bodies are base64
+encoded.</li>
+<li class=""><code>authorization</code>, <code>proxy-authorization</code>, <code>cookie</code>, <code>set-cookie</code>, and
+<code>x-api-key</code> header values are always recorded as <code>[REDACTED]</code>.</li>
+</ul>
+<p>Payload-log changes apply on <code>SIGHUP</code> reload without a restart.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="auth">Auth<a href="#auth" class="hash-link" aria-label="Direct link to Auth" title="Direct link to Auth" translate="no">​</a></h2>
 <p>Supported inbound auth modes:</p>
 <ul>
