@@ -1,5 +1,7 @@
 # Self-hosted provider with an active upstream healthcheck. The proxy polls
-# `path` relative to `base_url` and feeds the result into the same provider
+# `path` relative to `base_url` (or an absolute http(s) URL when the health
+# endpoint lives outside `base_url`, e.g. `base_url = ".../v1"` with
+# `path = "https://host/healthz"`) and feeds the result into the same provider
 # health state used for alias routing and /readyz. Providers without a
 # `healthcheck` block keep the default passive-only behavior. For the
 # Redis-shared variant of passive health see operations.hcl.

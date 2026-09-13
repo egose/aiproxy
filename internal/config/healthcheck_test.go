@@ -106,7 +106,7 @@ func TestLoadProviderHealthcheckInvalid(t *testing.T) {
 		message string
 	}{
 		{"relative_path", "path = \"health\"\n", "must start with '/'"},
-		{"absolute_url", "path = \"/foo://bar\"\n", "not a URL"},
+		{"absolute_url", "path = \"/foo://bar\"\n", "absolute http(s) URL"},
 		{"bad_method", "path = \"/health\"\n method = \"POST\"\n", "must be GET or HEAD"},
 		{"bad_status", "path = \"/health\"\n expected_status = 99\n", "expected_status"},
 		{"timeout_exceeds_interval", "path = \"/health\"\n interval = \"5s\"\n timeout = \"5s\"\n", "must be less than"},
