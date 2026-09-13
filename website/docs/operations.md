@@ -237,6 +237,7 @@ build` from the `website` directory.
 - root and provider upstream header timeouts
 - alias routing state
 - access-log enablement
+- payload-log configuration
 - metrics configuration
 - provider-health configuration
 - metrics-backed inventory state
@@ -352,6 +353,40 @@ logging {
 ```
 
 When `access_log = true`, request logs include events for request receipt, upstream provider/model selection and completion, and the final response or streaming start and end.
+
+### Payload logging
+
+The optional nested `payload_log` block records full request/response headers
+and bodies as JSONL (one JSON object per line per inference request). It is
+disabled by default.
+
+```hcl
+logging {
+  level      = "info"
+  access_log = true
+
+  payload_log {
+    enabled        = true
+    dir            = "/var/log/aiproxy/payloads"
+    rotation       = "daily"
+    retention      = "168h"
+    max_body_bytes = 1048576
+  }
+}
+```
+
+Files are split by datetime so no single file grows without bound: `daily`
+rotation writes `payload-YYYYMMDD.jsonl` and `hourly` writes
+`payload-YYYYMMDD-HH.jsonl` (UTC) under `dir` (`0600` files, `0700`
+directory). `retention` (default 7 days, `"168h"`) controls how long files are
+kept: files older than the retention window are removed on rotation and by an
+hourly sweep; `"0s"` disables expiry. Bodies larger than `max_body_bytes` per
+side are truncated with `"truncated": true` (`0` stores full bodies), and
+sensitive headers (`authorization`, `proxy-authorization`, `cookie`,
+`set-cookie`, `x-api-key`) are stored as `[REDACTED]`.
+
+Only enable payload logging when you can protect the output directory:
+bodies contain prompts and completions. Changes apply on `SIGHUP` reload.
 
 ## Secret Handling
 

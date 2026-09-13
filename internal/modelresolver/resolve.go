@@ -88,6 +88,19 @@ func aliasesShareSelectorState(a, b config.Alias) bool {
 			return false
 		}
 	}
+	if (a.SessionAffinity == nil) != (b.SessionAffinity == nil) {
+		return false
+	}
+	if a.SessionAffinity != nil && b.SessionAffinity != nil {
+		if len(a.SessionAffinity.Headers) != len(b.SessionAffinity.Headers) {
+			return false
+		}
+		for i := range a.SessionAffinity.Headers {
+			if a.SessionAffinity.Headers[i] != b.SessionAffinity.Headers[i] {
+				return false
+			}
+		}
+	}
 	return true
 }
 

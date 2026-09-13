@@ -51,8 +51,35 @@ const (
 )
 
 type Logging struct {
-	Level     LogLevel
-	AccessLog bool
+	Level      LogLevel
+	AccessLog  bool
+	PayloadLog PayloadLog
+}
+
+type PayloadLogRotation string
+
+const (
+	PayloadLogRotationDaily  PayloadLogRotation = "daily"
+	PayloadLogRotationHourly PayloadLogRotation = "hourly"
+)
+
+const (
+	DefaultPayloadLogRotation   = PayloadLogRotationDaily
+	DefaultPayloadLogRetention  = 7 * 24 * time.Hour
+	DefaultPayloadLogMaxBody    = 1 << 20
+	PayloadLogFilePrefix        = "payload-"
+	PayloadLogFileExt           = ".jsonl"
+	PayloadLogRetentionDisabled = time.Duration(0)
+)
+
+type PayloadLog struct {
+	Enabled      bool
+	Dir          string
+	Rotation     PayloadLogRotation
+	Retention    time.Duration
+	MaxBodyBytes int
+	HasRetention bool
+	HasMaxBody   bool
 }
 
 type AuthMode string
@@ -181,7 +208,34 @@ type Alias struct {
 	Name             string
 	Algorithm        Algorithm
 	RetryStatusCodes []int
+	SessionAffinity  *SessionAffinity
 	Targets          []AliasTarget
+}
+
+type SessionAffinity struct {
+	Headers []string
+}
+
+var DefaultSessionAffinityHeaders = []string{
+	"x-opencode-session",
+	"x-session-affinity",
+	"x-session-id",
+	"x-opencode-session-id",
+	"x-claude-code-session-id",
+	"session-id",
+	"thread-id",
+	"x-codex-window-id",
+	"x-client-request-id",
+}
+
+func SessionAffinityHeaders(a Alias) []string {
+	if a.SessionAffinity == nil {
+		return nil
+	}
+	if len(a.SessionAffinity.Headers) == 0 {
+		return append([]string(nil), DefaultSessionAffinityHeaders...)
+	}
+	return append([]string(nil), a.SessionAffinity.Headers...)
 }
 
 type AliasTarget struct {

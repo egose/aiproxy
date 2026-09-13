@@ -179,5 +179,10 @@ func cloneAliases(in []Alias) []Alias {
 func cloneAlias(alias Alias) Alias {
 	alias.RetryStatusCodes = append([]int(nil), alias.RetryStatusCodes...)
 	alias.Targets = append([]AliasTarget(nil), alias.Targets...)
+	if alias.SessionAffinity != nil {
+		affinity := *alias.SessionAffinity
+		affinity.Headers = append([]string(nil), alias.SessionAffinity.Headers...)
+		alias.SessionAffinity = &affinity
+	}
 	return alias
 }

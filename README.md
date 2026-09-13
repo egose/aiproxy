@@ -183,6 +183,10 @@ changing the static inventory.
 - Alias addressing: `alias/<alias-name>`
 - An alias is a virtual model backed by one or more concrete provider/model targets
 - Alias algorithms: `round_robin`, `least_connections`
+- Alias session affinity: optional `session_affinity` block pins a session
+  (first matching header, e.g. `x-opencode-session`,
+  `x-claude-code-session-id`, `session-id`) to a stable pool target as a
+  routing hint; cooling/unhealthy targets still fall back and fail over
 - Alias failover: retry the next target on transport errors, timeouts, and
   upstream statuses listed in `retry_status_codes`. The default is `500`, `502`,
   `503`, and `504`; configured `4xx` statuses such as `429` can be retried.
@@ -196,7 +200,8 @@ changing the static inventory.
 
 The server supports live config reload on `SIGHUP` for auth, providers, models,
 aliases, root and provider upstream header timeouts, access-log enablement,
-metrics config, provider-health config, and metrics-backed inventory state.
+payload-log configuration, metrics config, provider-health config, and
+metrics-backed inventory state.
 Listener address, listener timeout, logging level, and enabling the dashboard
 after startup require a restart. Unchanged rate-limit settings preserve existing
 buckets; changed rate-limit settings reset limiter state.

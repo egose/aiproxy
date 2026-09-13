@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -120,6 +121,16 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 			return nil, fmt.Errorf("alias %q: %w", al.Name, err)
 		}
 		alias := Alias{Name: al.Name, Algorithm: Algorithm(al.Algorithm), RetryStatusCodes: retryCodes}
+		if al.SessionAffinity != nil {
+			headers := make([]string, 0, len(al.SessionAffinity.Headers))
+			for _, h := range al.SessionAffinity.Headers {
+				headers = append(headers, strings.ToLower(strings.TrimSpace(h)))
+			}
+			if len(headers) == 0 {
+				headers = append([]string(nil), DefaultSessionAffinityHeaders...)
+			}
+			alias.SessionAffinity = &SessionAffinity{Headers: headers}
+		}
 		for _, t := range al.Targets {
 			if disabledProviderNames[t.Provider] {
 				continue
@@ -225,7 +236,7 @@ func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderS
 }
 
 func buildLogging(rawLogging *rawLogging) (Logging, error) {
-	out := Logging{Level: LogLevelInfo, AccessLog: true}
+	out := Logging{Level: LogLevelInfo, AccessLog: true, PayloadLog: PayloadLog{Rotation: DefaultPayloadLogRotation, Retention: DefaultPayloadLogRetention, MaxBodyBytes: DefaultPayloadLogMaxBody}}
 	if rawLogging == nil {
 		return out, nil
 	}
@@ -234,6 +245,28 @@ func buildLogging(rawLogging *rawLogging) (Logging, error) {
 	}
 	if rawLogging.AccessLog != nil {
 		out.AccessLog = *rawLogging.AccessLog
+	}
+	if rawLogging.PayloadLog != nil {
+		raw := rawLogging.PayloadLog
+		if raw.Enabled != nil {
+			out.PayloadLog.Enabled = *raw.Enabled
+		}
+		out.PayloadLog.Dir = raw.Dir
+		if raw.Rotation != "" {
+			out.PayloadLog.Rotation = PayloadLogRotation(raw.Rotation)
+		}
+		if raw.Retention != "" {
+			d, err := time.ParseDuration(raw.Retention)
+			if err != nil {
+				return Logging{}, fmt.Errorf("logging.payload_log.retention: %w", err)
+			}
+			out.PayloadLog.Retention = d
+			out.PayloadLog.HasRetention = true
+		}
+		if raw.MaxBodyBytes != nil {
+			out.PayloadLog.MaxBodyBytes = *raw.MaxBodyBytes
+			out.PayloadLog.HasMaxBody = true
+		}
 	}
 	return out, nil
 }

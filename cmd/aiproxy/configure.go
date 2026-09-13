@@ -40,6 +40,7 @@ type authInput = configedit.AuthInput
 type authRateLimitInput = configedit.AuthRateLimitInput
 type authClientInput = configedit.AuthClientInput
 type aliasInput = configedit.AliasInput
+type aliasSessionAffinityInput = configedit.AliasSessionAffinityInput
 type aliasTargetInput = configedit.AliasTargetInput
 type providerHealthInput = configedit.ProviderHealthInput
 type loggingInput = configedit.LoggingInput
@@ -111,10 +112,13 @@ func isGitHubCopilotProviderType(providerType string) bool {
 }
 
 type aliasOptions struct {
-	Name           string
-	Algorithm      string
-	Targets        []string
-	NonInteractive bool
+	Name               string
+	Algorithm          string
+	Targets            []string
+	AffinityHeaders    []string
+	HasAffinityHeaders bool
+	NoSessionAffinity  bool
+	NonInteractive     bool
 }
 
 type providerHealthOptions struct {
@@ -318,6 +322,7 @@ func newConfigureAliasCommand() *cobra.Command {
 			"aiproxy configure alias --config /etc/aiproxy/config.hcl --non-interactive --name chat_default --algorithm round_robin --target primary/gpt-4o-mini --target backup/qwen3-32b\n" +
 			"aiproxy configure alias --config /etc/aiproxy/config.hcl --delete --name chat_default",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			options.HasAffinityHeaders = cmd.Flags().Changed("affinity-header")
 			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureAlias(&prompts, inheritedConfigPath(cmd), deleteBlock, options)
 		},
@@ -326,6 +331,8 @@ func newConfigureAliasCommand() *cobra.Command {
 	cmd.Flags().StringVar(&options.Name, "name", "", "alias name")
 	cmd.Flags().StringVar(&options.Algorithm, "algorithm", "", "alias routing algorithm")
 	cmd.Flags().StringArrayVar(&options.Targets, "target", nil, "alias target spec: provider/model")
+	cmd.Flags().StringArrayVar(&options.AffinityHeaders, "affinity-header", nil, "session affinity header (repeatable; defaults cover opencode, Claude Code, and Codex session headers)")
+	cmd.Flags().BoolVar(&options.NoSessionAffinity, "no-session-affinity", false, "disable session affinity for the alias")
 	cmd.Flags().BoolVar(&options.NonInteractive, "non-interactive", false, "fail instead of prompting for missing values")
 	return cmd
 }
@@ -2516,6 +2523,11 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 		if defaults.Name == "" || defaults.Algorithm == "" || len(defaults.Targets) == 0 {
 			return aliasInput{}, fmt.Errorf("alias requires name, algorithm, and at least one target in non-interactive mode")
 		}
+		affinity, err := promptAliasSessionAffinity(prompts, defaults.SessionAffinity, options)
+		if err != nil {
+			return aliasInput{}, err
+		}
+		defaults.SessionAffinity = affinity
 		return defaults, nil
 	}
 	available := availableProviderModels(blocks)
@@ -2546,7 +2558,7 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 				return aliasInput{}, err
 			}
 			input.Targets = targets
-			return input, nil
+			return finishAliasInput(prompts, input, defaults.SessionAffinity, options)
 		}
 		if len(defaults.Targets) > 0 {
 			keepTargets, err := prompts.askYesNo("Keep existing targets", true)
@@ -2555,7 +2567,7 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 			}
 			if keepTargets {
 				input.Targets = append(input.Targets, defaults.Targets...)
-				return input, nil
+				return finishAliasInput(prompts, input, defaults.SessionAffinity, options)
 			}
 		}
 		for {
@@ -2576,7 +2588,7 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 				break
 			}
 		}
-		return input, nil
+		return finishAliasInput(prompts, input, defaults.SessionAffinity, options)
 	}
 	name, err := prompts.askValidated("Alias name", defaults.Name, validateAliasName)
 	if err != nil {
@@ -2593,7 +2605,7 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 			return aliasInput{}, err
 		}
 		input.Targets = targets
-		return input, nil
+		return finishAliasInput(prompts, input, defaults.SessionAffinity, options)
 	}
 	if len(defaults.Targets) > 0 {
 		keepTargets, err := prompts.askYesNo("Keep existing targets", true)
@@ -2602,7 +2614,7 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 		}
 		if keepTargets {
 			input.Targets = append(input.Targets, defaults.Targets...)
-			return input, nil
+			return finishAliasInput(prompts, input, defaults.SessionAffinity, options)
 		}
 	}
 	for {
@@ -2623,7 +2635,60 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 			break
 		}
 	}
+	return finishAliasInput(prompts, input, defaults.SessionAffinity, options)
+}
+
+func finishAliasInput(prompts *promptSession, input aliasInput, existingAffinity *aliasSessionAffinityInput, options aliasOptions) (aliasInput, error) {
+	affinity, err := promptAliasSessionAffinity(prompts, existingAffinity, options)
+	if err != nil {
+		return aliasInput{}, err
+	}
+	input.SessionAffinity = affinity
 	return input, nil
+}
+
+func promptAliasSessionAffinity(prompts *promptSession, existing *aliasSessionAffinityInput, options aliasOptions) (*aliasSessionAffinityInput, error) {
+	if options.NoSessionAffinity {
+		return nil, nil
+	}
+	if options.HasAffinityHeaders {
+		return &aliasSessionAffinityInput{Headers: normalizeAffinityHeaders(options.AffinityHeaders)}, nil
+	}
+	if options.NonInteractive {
+		return existing, nil
+	}
+	enabled, err := prompts.askYesNo("Enable session affinity", existing != nil)
+	if err != nil {
+		return nil, err
+	}
+	if !enabled {
+		return nil, nil
+	}
+	def := ""
+	if existing != nil && len(existing.Headers) > 0 {
+		def = strings.Join(existing.Headers, ", ")
+	}
+	raw, err := prompts.askValidated("Affinity headers (comma-separated, empty for defaults)", def, func(string) error { return nil })
+	if err != nil {
+		return nil, err
+	}
+	return &aliasSessionAffinityInput{Headers: normalizeAffinityHeaders(strings.Split(raw, ","))}, nil
+}
+
+func normalizeAffinityHeaders(values []string) []string {
+	var out []string
+	seen := make(map[string]bool)
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			name := strings.ToLower(strings.TrimSpace(part))
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func promptProviderHealthInput(prompts *promptSession, existing *providerHealthInput, options providerHealthOptions) (providerHealthInput, error) {
@@ -2744,7 +2809,7 @@ func promptLoggingInput(prompts *promptSession, existing *loggingInput, options 
 		); err != nil {
 			return loggingInput{}, err
 		}
-		return loggingInput{Level: level, AccessLog: accessLog}, nil
+		return loggingInput{Level: level, AccessLog: accessLog, PayloadLog: defaults.PayloadLog}, nil
 	}
 	level, err := prompts.askChoiceWithDescription("Log level", loggingLevelDescription(), []string{"debug", "info", "warn", "error"}, defaults.Level)
 	if err != nil {
@@ -2754,7 +2819,7 @@ func promptLoggingInput(prompts *promptSession, existing *loggingInput, options 
 	if err != nil {
 		return loggingInput{}, err
 	}
-	return loggingInput{Level: level, AccessLog: accessLog}, nil
+	return loggingInput{Level: level, AccessLog: accessLog, PayloadLog: defaults.PayloadLog}, nil
 }
 
 func newPromptSession(in io.Reader, out io.Writer) promptSession {
@@ -3875,6 +3940,11 @@ func existingAliasInput(blocks []topLevelBlock, name string) *aliasInput {
 	}
 	input.Algorithm = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "algorithm"))
 	input.RetryStatusCodes = parseQuotedListExpr(attributeExpr(src, parsed.Body, "retry_status_codes"))
+	if affinityBlock := findNestedBlock(parsed.Body, "session_affinity"); affinityBlock != nil {
+		input.SessionAffinity = &aliasSessionAffinityInput{
+			Headers: normalizeAffinityHeaders(parseQuotedListExpr(attributeExpr(src, affinityBlock.Body, "headers"))),
+		}
+	}
 	for _, targetBlock := range findNestedBlocks(parsed.Body, "target") {
 		input.Targets = append(input.Targets, aliasTargetInput{
 			Provider: parseLiteralOrExpression(attributeExpr(src, targetBlock.Body, "provider")),
@@ -3918,7 +3988,26 @@ func existingLoggingInput(blocks []topLevelBlock) *loggingInput {
 	if expr := attributeExpr(src, parsed.Body, "access_log"); strings.TrimSpace(expr) != "" {
 		input.AccessLog = parseBoolExpr(expr, true)
 	}
+	if nested := findNestedBlock(parsed.Body, "payload_log"); nested != nil {
+		input.PayloadLog = parsePayloadLogInput(src, nested)
+	}
 	return input
+}
+
+func parsePayloadLogInput(src []byte, block *hclsyntax.Block) *configedit.PayloadLogInput {
+	out := &configedit.PayloadLogInput{}
+	if expr := attributeExpr(src, block.Body, "enabled"); strings.TrimSpace(expr) != "" {
+		out.Enabled = parseBoolExpr(expr, false)
+	}
+	out.Dir = parseLiteralOrExpression(attributeExpr(src, block.Body, "dir"))
+	out.Rotation = parseLiteralOrExpression(attributeExpr(src, block.Body, "rotation"))
+	out.Retention = parseLiteralOrExpression(attributeExpr(src, block.Body, "retention"))
+	if expr := strings.TrimSpace(attributeExpr(src, block.Body, "max_body_bytes")); expr != "" {
+		if n, err := strconv.Atoi(expr); err == nil {
+			out.MaxBodyBytes = &n
+		}
+	}
+	return out
 }
 
 func parseBlockSyntax(blockText string) (*hclsyntax.Block, []byte, error) {

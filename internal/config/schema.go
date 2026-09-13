@@ -28,8 +28,17 @@ type rawDashboard struct {
 }
 
 type rawLogging struct {
-	Level     string `hcl:"level,optional"`
-	AccessLog *bool  `hcl:"access_log,optional"`
+	Level      string         `hcl:"level,optional"`
+	AccessLog  *bool          `hcl:"access_log,optional"`
+	PayloadLog *rawPayloadLog `hcl:"payload_log,block"`
+}
+
+type rawPayloadLog struct {
+	Enabled      *bool  `hcl:"enabled,optional"`
+	Dir          string `hcl:"dir,optional"`
+	Rotation     string `hcl:"rotation,optional"`
+	Retention    string `hcl:"retention,optional"`
+	MaxBodyBytes *int   `hcl:"max_body_bytes,optional"`
 }
 
 type rawListener struct {
@@ -118,10 +127,15 @@ type rawModel struct {
 }
 
 type rawAlias struct {
-	Name             string      `hcl:"name,label"`
-	Algorithm        string      `hcl:"algorithm"`
-	RetryStatusCodes []string    `hcl:"retry_status_codes,optional"`
-	Targets          []rawTarget `hcl:"target,block"`
+	Name             string              `hcl:"name,label"`
+	Algorithm        string              `hcl:"algorithm"`
+	RetryStatusCodes []string            `hcl:"retry_status_codes,optional"`
+	SessionAffinity  *rawSessionAffinity `hcl:"session_affinity,block"`
+	Targets          []rawTarget         `hcl:"target,block"`
+}
+
+type rawSessionAffinity struct {
+	Headers []string `hcl:"headers,optional"`
 }
 
 type rawTarget struct {

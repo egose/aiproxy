@@ -12,6 +12,16 @@ auth "main" {
 logging {
   level      = "info"
   access_log = true
+
+  # Optional full request/response payload capture as JSONL. Disabled by
+  # default; files rotate by date and expire after the retention window.
+  # payload_log {
+  #   enabled        = true
+  #   dir            = "/var/log/aiproxy/payloads"
+  #   rotation       = "daily"
+  #   retention      = "168h"
+  #   max_body_bytes = 1048576
+  # }
 }
 
 metrics {

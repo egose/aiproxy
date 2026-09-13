@@ -104,7 +104,12 @@ type AliasInput struct {
 	Name             string
 	Algorithm        string
 	RetryStatusCodes []string
+	SessionAffinity  *AliasSessionAffinityInput
 	Targets          []AliasTargetInput
+}
+
+type AliasSessionAffinityInput struct {
+	Headers []string
 }
 
 type AliasTargetInput struct {
@@ -120,8 +125,17 @@ type ProviderHealthInput struct {
 }
 
 type LoggingInput struct {
-	Level     string
-	AccessLog bool
+	Level      string
+	AccessLog  bool
+	PayloadLog *PayloadLogInput
+}
+
+type PayloadLogInput struct {
+	Enabled      bool
+	Dir          string
+	Rotation     string
+	Retention    string
+	MaxBodyBytes *int
 }
 
 type SecretsUpdate struct {
@@ -419,6 +433,15 @@ func RenderAliasBlock(input AliasInput) string {
 		b.WriteString(RenderQuotedList(input.RetryStatusCodes))
 		b.WriteString("\n")
 	}
+	if input.SessionAffinity != nil {
+		b.WriteString("\n  session_affinity {\n")
+		if len(input.SessionAffinity.Headers) > 0 {
+			b.WriteString("    headers = ")
+			b.WriteString(RenderQuotedList(input.SessionAffinity.Headers))
+			b.WriteString("\n")
+		}
+		b.WriteString("  }\n")
+	}
 	for _, target := range input.Targets {
 		b.WriteString("\n  target {\n")
 		b.WriteString("    provider = ")
@@ -469,6 +492,33 @@ func RenderLoggingBlock(input LoggingInput) string {
 	b.WriteString("  access_log = ")
 	b.WriteString(strconv.FormatBool(input.AccessLog))
 	b.WriteString("\n")
+	if input.PayloadLog != nil {
+		b.WriteString("  payload_log {\n")
+		b.WriteString("    enabled = ")
+		b.WriteString(strconv.FormatBool(input.PayloadLog.Enabled))
+		b.WriteString("\n")
+		if input.PayloadLog.Dir != "" {
+			b.WriteString("    dir = ")
+			b.WriteString(strconv.Quote(input.PayloadLog.Dir))
+			b.WriteString("\n")
+		}
+		if input.PayloadLog.Rotation != "" {
+			b.WriteString("    rotation = ")
+			b.WriteString(strconv.Quote(input.PayloadLog.Rotation))
+			b.WriteString("\n")
+		}
+		if input.PayloadLog.Retention != "" {
+			b.WriteString("    retention = ")
+			b.WriteString(strconv.Quote(input.PayloadLog.Retention))
+			b.WriteString("\n")
+		}
+		if input.PayloadLog.MaxBodyBytes != nil {
+			b.WriteString("    max_body_bytes = ")
+			b.WriteString(strconv.Itoa(*input.PayloadLog.MaxBodyBytes))
+			b.WriteString("\n")
+		}
+		b.WriteString("  }\n")
+	}
 	b.WriteString("}\n")
 	return b.String()
 }

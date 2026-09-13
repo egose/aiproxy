@@ -22,6 +22,7 @@ import (
 	"github.com/egose/aiproxy/internal/httpapi"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
+	"github.com/egose/aiproxy/internal/payloadlog"
 	"github.com/egose/aiproxy/internal/provider"
 	"github.com/egose/aiproxy/internal/providerhealth"
 	"github.com/egose/aiproxy/internal/ratelimit"
@@ -57,6 +58,7 @@ type App struct {
 	rateLimiter           ratelimit.Limiter
 	usage                 *accounting.Aggregator
 	logs                  *observability.LogBuffer
+	payloadLog            *payloadlog.Logger
 	buildOpt              BuildOptions
 	startTime             time.Time
 	dashboardTokenMinted  bool
@@ -99,17 +101,22 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	healthchecks.SetProviders(rt.Catalog)
 	rateLimiter := ratelimit.New(rt.Auth)
 
+	payloadLog, err := payloadlog.New(rt.Logging.PayloadLog)
+	if err != nil {
+		return nil, fmt.Errorf("payload log: %w", err)
+	}
+
 	httpClients := newUpstreamClientPool()
 
 	startTime := time.Now()
 	resolver := modelresolver.New(rt)
-	handler := httpapi.NewHandler(buildDependencies(rt, resolver, logger, adapter, metrics, health, healthchecks, rateLimiter, usage, httpClients, logs, startTime, opts.Version))
+	handler := httpapi.NewHandler(buildDependencies(rt, resolver, logger, adapter, metrics, health, healthchecks, rateLimiter, usage, httpClients, logs, startTime, opts.Version, payloadLog))
 	server := &http.Server{
 		Handler: handler,
 	}
 	applyServerConfig(server, rt.Listener)
 
-	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, resolver: resolver, clients: httpClients, health: health, healthchecks: healthchecks, rateLimiter: rateLimiter, usage: usage, logs: logs, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}, nil
+	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, resolver: resolver, clients: httpClients, health: health, healthchecks: healthchecks, rateLimiter: rateLimiter, usage: usage, logs: logs, payloadLog: payloadLog, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -250,24 +257,33 @@ func (a *App) Reload() error {
 	nextHealth.SetProviders(rt.Catalog)
 	a.healthchecks.SetTracker(nextHealth)
 	a.healthchecks.SetProviders(rt.Catalog)
+	nextPayloadLog, err := reloadPayloadLog(a.payloadLog, current, rt)
+	if err != nil {
+		return fmt.Errorf("payload log: %w", err)
+	}
 	nextRateLimiter := a.rateLimiter
 	if current == nil || !ratelimit.ConfigEqual(current.Auth, rt.Auth) {
 		nextRateLimiter = ratelimit.New(rt.Auth)
 	}
 	a.metrics.SetBuildInfo(a.buildOpt.Version)
 	a.metrics.RecordConfig(rt)
-	a.handler.UpdateDependencies(buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version))
+	a.handler.UpdateDependencies(buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadLog))
 	oldHealth := a.health
+	oldPayloadLog := a.payloadLog
 	a.mu.Lock()
 	a.Config = rt
 	a.resolver = nextResolver
 	a.health = nextHealth
 	a.rateLimiter = nextRateLimiter
+	a.payloadLog = nextPayloadLog
 	a.dashboardTokenMinted = dashboardTokenMinted
 	a.dashboardTokenWritten = a.dashboardTokenWritten || dashboardTokenPublished
 	a.mu.Unlock()
 	if oldHealth != nil && oldHealth != nextHealth {
 		_ = oldHealth.Close()
+	}
+	if oldPayloadLog != nil && oldPayloadLog != nextPayloadLog {
+		_ = oldPayloadLog.Close()
 	}
 	observability.LogStartup(a.logger, rt)
 	return nil
@@ -282,6 +298,7 @@ func (a *App) Close() error {
 		clients := a.clients
 		health := a.health
 		healthchecks := a.healthchecks
+		payloadLog := a.payloadLog
 		a.mu.RUnlock()
 		if healthchecks != nil {
 			healthchecks.Close()
@@ -291,6 +308,11 @@ func (a *App) Close() error {
 		}
 		if health != nil {
 			a.closeErr = health.Close()
+		}
+		if payloadLog != nil {
+			if err := payloadLog.Close(); err != nil && a.closeErr == nil {
+				a.closeErr = err
+			}
 		}
 	})
 	return a.closeErr
@@ -309,7 +331,7 @@ func (a *App) persistDashboardTokenIfNeeded() error {
 	return nil
 }
 
-func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, healthchecks *healthcheck.Manager, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string) httpapi.Dependencies {
+func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, healthchecks *healthcheck.Manager, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string, payloadLog *payloadlog.Logger) httpapi.Dependencies {
 	if resolver == nil {
 		resolver = modelresolver.New(rt)
 	}
@@ -332,6 +354,7 @@ func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, log
 		Usage:             aOrUsage(usage),
 		AccessLog:         rt.Logging.AccessLog,
 		HasAccessLog:      true,
+		PayloadLog:        payloadLog,
 		Logger:            logger,
 		Dashboard:         dashboard,
 		Version:           version,
@@ -451,6 +474,20 @@ func newHTTPClient(upstreamHeaderTimeout time.Duration) *http.Client {
 	}
 	transport.ResponseHeaderTimeout = upstreamHeaderTimeout
 	return &http.Client{Transport: transport}
+}
+
+func reloadPayloadLog(existing *payloadlog.Logger, current, next *config.Runtime) (*payloadlog.Logger, error) {
+	var currentCfg config.PayloadLog
+	if current != nil {
+		currentCfg = current.Logging.PayloadLog
+	}
+	if next.Logging.PayloadLog == currentCfg {
+		return existing, nil
+	}
+	if !next.Logging.PayloadLog.Enabled {
+		return nil, nil
+	}
+	return payloadlog.New(next.Logging.PayloadLog)
 }
 
 func reloadHealthTracker(existing *providerhealth.Tracker, metrics *observability.Metrics, current, next *config.Runtime) *providerhealth.Tracker {
