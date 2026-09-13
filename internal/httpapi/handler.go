@@ -18,6 +18,7 @@ import (
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/dashrpc"
+	"github.com/egose/aiproxy/internal/guardrails"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/payloadlog"
@@ -46,6 +47,7 @@ type Dependencies struct {
 	Logger            *slog.Logger
 	Dashboard         dashrpc.Source
 	Version           string
+	Guardrails        *guardrails.Scanner
 }
 
 const maxRequestBodyBytes int64 = 8 << 20
@@ -256,10 +258,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestBytes = len(body)
+	omitRequestBody := deps.Guardrails != nil && guardrailCovered(op)
 	var payloadCapture *payloadlog.Capture
 	if deps.PayloadLog != nil {
 		reqHeaders := payloadlog.RedactHeaders(r.Header)
-		reqBody := body
+		var reqBody []byte
+		if !omitRequestBody {
+			reqBody = body
+		}
 		defer func() {
 			entry := payloadlog.Entry{
 				RequestID:   requestID,
@@ -334,6 +340,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := ensureOperationSupported(op, resolved, deps.Catalog); err != nil {
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadRequest, "unsupported_operation", err.Error())
 		return
+	}
+
+	if deps.Guardrails != nil && guardrailCovered(op) {
+		if h.checkGuardrails(deps, rw, r, op, body, deps.Guardrails, logger) {
+			return
+		}
 	}
 
 	if resolved.Kind == modelresolver.KindDirect {

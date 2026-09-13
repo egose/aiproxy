@@ -18,6 +18,7 @@ import (
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/dashrpc"
+	"github.com/egose/aiproxy/internal/guardrails"
 	"github.com/egose/aiproxy/internal/healthcheck"
 	"github.com/egose/aiproxy/internal/httpapi"
 	"github.com/egose/aiproxy/internal/modelresolver"
@@ -59,6 +60,7 @@ type App struct {
 	usage                 *accounting.Aggregator
 	logs                  *observability.LogBuffer
 	payloadLog            *payloadlog.Logger
+	guardrails            *guardrails.Scanner
 	buildOpt              BuildOptions
 	startTime             time.Time
 	dashboardTokenMinted  bool
@@ -106,17 +108,22 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 		return nil, fmt.Errorf("payload log: %w", err)
 	}
 
+	scanner, err := guardrails.New(guardrailPolicy(rt))
+	if err != nil {
+		return nil, fmt.Errorf("ingress guardrails: %w", err)
+	}
+
 	httpClients := newUpstreamClientPool()
 
 	startTime := time.Now()
 	resolver := modelresolver.New(rt)
-	handler := httpapi.NewHandler(buildDependencies(rt, resolver, logger, adapter, metrics, health, healthchecks, rateLimiter, usage, httpClients, logs, startTime, opts.Version, payloadLog))
+	handler := httpapi.NewHandler(buildDependencies(rt, resolver, logger, adapter, metrics, health, healthchecks, rateLimiter, usage, httpClients, logs, startTime, opts.Version, payloadLog, scanner))
 	server := &http.Server{
 		Handler: handler,
 	}
 	applyServerConfig(server, rt.Listener)
 
-	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, resolver: resolver, clients: httpClients, health: health, healthchecks: healthchecks, rateLimiter: rateLimiter, usage: usage, logs: logs, payloadLog: payloadLog, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}, nil
+	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, resolver: resolver, clients: httpClients, health: health, healthchecks: healthchecks, rateLimiter: rateLimiter, usage: usage, logs: logs, payloadLog: payloadLog, guardrails: scanner, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -261,13 +268,17 @@ func (a *App) Reload() error {
 	if err != nil {
 		return fmt.Errorf("payload log: %w", err)
 	}
+	nextGuardrails, err := guardrails.New(guardrailPolicy(rt))
+	if err != nil {
+		return fmt.Errorf("ingress guardrails: %w", err)
+	}
 	nextRateLimiter := a.rateLimiter
 	if current == nil || !ratelimit.ConfigEqual(current.Auth, rt.Auth) {
 		nextRateLimiter = ratelimit.New(rt.Auth)
 	}
 	a.metrics.SetBuildInfo(a.buildOpt.Version)
 	a.metrics.RecordConfig(rt)
-	a.handler.UpdateDependencies(buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadLog))
+	a.handler.UpdateDependencies(buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadLog, nextGuardrails))
 	oldHealth := a.health
 	oldPayloadLog := a.payloadLog
 	a.mu.Lock()
@@ -276,6 +287,7 @@ func (a *App) Reload() error {
 	a.health = nextHealth
 	a.rateLimiter = nextRateLimiter
 	a.payloadLog = nextPayloadLog
+	a.guardrails = nextGuardrails
 	a.dashboardTokenMinted = dashboardTokenMinted
 	a.dashboardTokenWritten = a.dashboardTokenWritten || dashboardTokenPublished
 	a.mu.Unlock()
@@ -331,7 +343,7 @@ func (a *App) persistDashboardTokenIfNeeded() error {
 	return nil
 }
 
-func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, healthchecks *healthcheck.Manager, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string, payloadLog *payloadlog.Logger) httpapi.Dependencies {
+func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, healthchecks *healthcheck.Manager, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string, payloadLog *payloadlog.Logger, scanner *guardrails.Scanner) httpapi.Dependencies {
 	if resolver == nil {
 		resolver = modelresolver.New(rt)
 	}
@@ -361,6 +373,20 @@ func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, log
 		Logger:            logger,
 		Dashboard:         dashboard,
 		Version:           version,
+		Guardrails:        scanner,
+	}
+}
+
+func guardrailPolicy(rt *config.Runtime) guardrails.Policy {
+	if rt == nil {
+		return guardrails.Policy{}
+	}
+	g := rt.IngressGuardrails
+	return guardrails.Policy{
+		Enabled:      g.Enabled,
+		Mode:         guardrails.Mode(g.Mode),
+		MaxTextBytes: g.MaxTextBytes,
+		MaxStrings:   g.MaxStrings,
 	}
 }
 

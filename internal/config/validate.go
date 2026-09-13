@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/egose/aiproxy/internal/guardrails"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -26,6 +27,9 @@ func Validate(rt *Runtime) error {
 		return err
 	}
 	if err := validateDashboard(rt.Dashboard); err != nil {
+		return err
+	}
+	if err := validateIngressGuardrails(rt.IngressGuardrails); err != nil {
 		return err
 	}
 	if err := validateProviders(rt.Catalog.Providers(), true); err != nil {
@@ -107,6 +111,32 @@ func validateMetrics(m Metrics) error {
 	}
 	if m.Token == "" {
 		return fmt.Errorf("metrics: token is required when metrics block is present")
+	}
+	return nil
+}
+
+func validateIngressGuardrails(g IngressGuardrails) error {
+	if !g.Enabled {
+		return nil
+	}
+	switch g.Mode {
+	case GuardrailModeAudit, GuardrailModeBlock:
+	default:
+		return fmt.Errorf("ingress_guardrails: invalid mode %q (must be audit or block)", g.Mode)
+	}
+	maxTextBytes := g.MaxTextBytes
+	if maxTextBytes == 0 {
+		maxTextBytes = guardrails.DefaultMaxTextBytes
+	}
+	if maxTextBytes < guardrails.MinMaxTextBytes || maxTextBytes > guardrails.MaxMaxTextBytes {
+		return fmt.Errorf("ingress_guardrails: max_text_bytes must be between %d and %d", guardrails.MinMaxTextBytes, guardrails.MaxMaxTextBytes)
+	}
+	maxStrings := g.MaxStrings
+	if maxStrings == 0 {
+		maxStrings = guardrails.DefaultMaxStrings
+	}
+	if maxStrings < guardrails.MinMaxStrings || maxStrings > guardrails.MaxMaxStrings {
+		return fmt.Errorf("ingress_guardrails: max_strings must be between %d and %d", guardrails.MinMaxStrings, guardrails.MaxMaxStrings)
 	}
 	return nil
 }

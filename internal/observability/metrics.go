@@ -40,6 +40,7 @@ type Metrics struct {
 	healthcheckLatency     *prometheus.HistogramVec
 	healthcheckUp          *prometheus.GaugeVec
 	skippedProviders       *prometheus.GaugeVec
+	guardrailScans         *prometheus.CounterVec
 	buildInfo              *prometheus.GaugeVec
 	authModeInfo           *prometheus.GaugeVec
 	providersByType        *prometheus.GaugeVec
@@ -148,6 +149,10 @@ func NewMetrics() *Metrics {
 			Name: "aiproxy_skipped_provider_info",
 			Help: "Static gauge for providers skipped during startup because they are not active.",
 		}, []string{"name", "type"}),
+		guardrailScans: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "aiproxy_guardrail_scans_total",
+			Help: "Total number of ingress secret-guardrail scans by operation, mode, and outcome. Labels are bounded; rule IDs and request content are never exported.",
+		}, []string{"operation", "mode", "outcome"}),
 		buildInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "aiproxy_build_info",
 			Help: "Static gauge describing the running build version.",
@@ -207,6 +212,7 @@ func NewMetrics() *Metrics {
 		m.healthcheckLatency,
 		m.healthcheckUp,
 		m.skippedProviders,
+		m.guardrailScans,
 		m.buildInfo,
 		m.authModeInfo,
 		m.providersByType,
@@ -360,6 +366,22 @@ func (m *Metrics) RecordProviderHealthFallback(operation, reason string) {
 		reason = "unknown"
 	}
 	m.providerHealthFallback.WithLabelValues(operation, reason).Inc()
+}
+
+func (m *Metrics) RecordGuardrailScan(operation, mode, outcome string) {
+	if m == nil {
+		return
+	}
+	if operation == "" {
+		operation = "unknown"
+	}
+	if mode == "" {
+		mode = "unknown"
+	}
+	if outcome == "" {
+		outcome = "unknown"
+	}
+	m.guardrailScans.WithLabelValues(operation, mode, outcome).Inc()
 }
 
 func (m *Metrics) RecordHealthcheck(provider string, success bool, latency time.Duration) {

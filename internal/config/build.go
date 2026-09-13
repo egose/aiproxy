@@ -69,6 +69,16 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		}
 		rt.Metrics = Metrics{Token: raw.Metrics[0].Token, Enabled: true}
 	}
+	if len(raw.IngressGuardrails) > 0 {
+		if len(raw.IngressGuardrails) > 1 {
+			return nil, fmt.Errorf("only one ingress_guardrails block is supported")
+		}
+		guardrails, err := buildIngressGuardrails(raw.IngressGuardrails[0])
+		if err != nil {
+			return nil, err
+		}
+		rt.IngressGuardrails = guardrails
+	}
 
 	providerByRawName := make(map[string]rawProvider)
 	providerSyntaxByName := make(map[string]rawProviderSyntax)
@@ -267,6 +277,26 @@ func buildLogging(rawLogging *rawLogging) (Logging, error) {
 			out.PayloadLog.MaxBodyBytes = *raw.MaxBodyBytes
 			out.PayloadLog.HasMaxBody = true
 		}
+	}
+	return out, nil
+}
+
+func buildIngressGuardrails(raw *rawGuardrails) (IngressGuardrails, error) {
+	out := IngressGuardrails{Mode: GuardrailModeBlock}
+	if raw == nil {
+		return out, nil
+	}
+	if raw.Enabled != nil {
+		out.Enabled = *raw.Enabled
+	}
+	if raw.Mode != "" {
+		out.Mode = GuardrailMode(raw.Mode)
+	}
+	if raw.MaxTextBytes != nil {
+		out.MaxTextBytes = *raw.MaxTextBytes
+	}
+	if raw.MaxStrings != nil {
+		out.MaxStrings = *raw.MaxStrings
 	}
 	return out, nil
 }
