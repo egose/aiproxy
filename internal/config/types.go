@@ -51,8 +51,35 @@ const (
 )
 
 type Logging struct {
-	Level     LogLevel
-	AccessLog bool
+	Level      LogLevel
+	AccessLog  bool
+	PayloadLog PayloadLog
+}
+
+type PayloadLogRotation string
+
+const (
+	PayloadLogRotationDaily  PayloadLogRotation = "daily"
+	PayloadLogRotationHourly PayloadLogRotation = "hourly"
+)
+
+const (
+	DefaultPayloadLogRotation   = PayloadLogRotationDaily
+	DefaultPayloadLogRetention  = 7 * 24 * time.Hour
+	DefaultPayloadLogMaxBody    = 1 << 20
+	PayloadLogFilePrefix        = "payload-"
+	PayloadLogFileExt           = ".jsonl"
+	PayloadLogRetentionDisabled = time.Duration(0)
+)
+
+type PayloadLog struct {
+	Enabled      bool
+	Dir          string
+	Rotation     PayloadLogRotation
+	Retention    time.Duration
+	MaxBodyBytes int
+	HasRetention bool
+	HasMaxBody   bool
 }
 
 type AuthMode string

@@ -2809,7 +2809,7 @@ func promptLoggingInput(prompts *promptSession, existing *loggingInput, options 
 		); err != nil {
 			return loggingInput{}, err
 		}
-		return loggingInput{Level: level, AccessLog: accessLog}, nil
+		return loggingInput{Level: level, AccessLog: accessLog, PayloadLog: defaults.PayloadLog}, nil
 	}
 	level, err := prompts.askChoiceWithDescription("Log level", loggingLevelDescription(), []string{"debug", "info", "warn", "error"}, defaults.Level)
 	if err != nil {
@@ -2819,7 +2819,7 @@ func promptLoggingInput(prompts *promptSession, existing *loggingInput, options 
 	if err != nil {
 		return loggingInput{}, err
 	}
-	return loggingInput{Level: level, AccessLog: accessLog}, nil
+	return loggingInput{Level: level, AccessLog: accessLog, PayloadLog: defaults.PayloadLog}, nil
 }
 
 func newPromptSession(in io.Reader, out io.Writer) promptSession {
@@ -3988,7 +3988,26 @@ func existingLoggingInput(blocks []topLevelBlock) *loggingInput {
 	if expr := attributeExpr(src, parsed.Body, "access_log"); strings.TrimSpace(expr) != "" {
 		input.AccessLog = parseBoolExpr(expr, true)
 	}
+	if nested := findNestedBlock(parsed.Body, "payload_log"); nested != nil {
+		input.PayloadLog = parsePayloadLogInput(src, nested)
+	}
 	return input
+}
+
+func parsePayloadLogInput(src []byte, block *hclsyntax.Block) *configedit.PayloadLogInput {
+	out := &configedit.PayloadLogInput{}
+	if expr := attributeExpr(src, block.Body, "enabled"); strings.TrimSpace(expr) != "" {
+		out.Enabled = parseBoolExpr(expr, false)
+	}
+	out.Dir = parseLiteralOrExpression(attributeExpr(src, block.Body, "dir"))
+	out.Rotation = parseLiteralOrExpression(attributeExpr(src, block.Body, "rotation"))
+	out.Retention = parseLiteralOrExpression(attributeExpr(src, block.Body, "retention"))
+	if expr := strings.TrimSpace(attributeExpr(src, block.Body, "max_body_bytes")); expr != "" {
+		if n, err := strconv.Atoi(expr); err == nil {
+			out.MaxBodyBytes = &n
+		}
+	}
+	return out
 }
 
 func parseBlockSyntax(blockText string) (*hclsyntax.Block, []byte, error) {

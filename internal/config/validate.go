@@ -43,10 +43,46 @@ func Validate(rt *Runtime) error {
 func validateLogging(l Logging) error {
 	switch l.Level {
 	case LogLevelDebug, LogLevelInfo, LogLevelWarn, LogLevelError:
-		return nil
 	default:
 		return fmt.Errorf("logging: invalid level %q (must be debug, info, warn, or error)", l.Level)
 	}
+	return validatePayloadLog(l.PayloadLog)
+}
+
+func validatePayloadLog(p PayloadLog) error {
+	if !p.Enabled && p.Dir == "" {
+		switch p.Rotation {
+		case "", PayloadLogRotationDaily, PayloadLogRotationHourly:
+		default:
+			return fmt.Errorf("logging.payload_log: invalid rotation %q (must be daily or hourly)", p.Rotation)
+		}
+		if p.Retention < 0 {
+			return fmt.Errorf("logging.payload_log: retention must not be negative (0 keeps files forever)")
+		}
+		if p.MaxBodyBytes < 0 {
+			return fmt.Errorf("logging.payload_log: max_body_bytes must not be negative (0 stores full bodies)")
+		}
+		return nil
+	}
+	return validatePayloadLogFields(p)
+}
+
+func validatePayloadLogFields(p PayloadLog) error {
+	if p.Dir == "" {
+		return fmt.Errorf("logging.payload_log: dir is required when payload logging is configured")
+	}
+	switch p.Rotation {
+	case "", PayloadLogRotationDaily, PayloadLogRotationHourly:
+	default:
+		return fmt.Errorf("logging.payload_log: invalid rotation %q (must be daily or hourly)", p.Rotation)
+	}
+	if p.Retention < 0 {
+		return fmt.Errorf("logging.payload_log: retention must not be negative (0 keeps files forever)")
+	}
+	if p.MaxBodyBytes < 0 {
+		return fmt.Errorf("logging.payload_log: max_body_bytes must not be negative (0 stores full bodies)")
+	}
+	return nil
 }
 
 func validateProviderHealth(h ProviderHealth) error {

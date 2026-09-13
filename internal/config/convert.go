@@ -36,6 +36,7 @@ var jsonBlockLabels = map[string]int{
 	"credential_ref":   0,
 	"healthcheck":      0,
 	"model":            1,
+	"payload_log":      0,
 }
 
 func Convert(src []byte, filename string, compact bool) ([]byte, string, string, error) {

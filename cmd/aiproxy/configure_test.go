@@ -1051,6 +1051,48 @@ func TestConfigureLoggingNonInteractiveFlags(t *testing.T) {
 	}
 }
 
+func TestConfigureLoggingPreservesPayloadLog(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := `logging {
+  level = "info"
+  access_log = true
+  payload_log {
+    enabled = true
+    dir = "/tmp/payloads"
+    rotation = "hourly"
+    retention = "72h"
+    max_body_bytes = 1024
+  }
+}
+`
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(config): %v", err)
+	}
+
+	_, stderr, err := executeRootCommand(
+		"",
+		"configure", "logging",
+		"--config", configPath,
+		"--non-interactive",
+		"--level", "warn",
+	)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstderr:\n%s", err, stderr)
+	}
+
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	for _, check := range []string{`level = "warn"`, "payload_log {", "rotation = \"hourly\"", "retention = \"72h\""} {
+		if !strings.Contains(configText, check) {
+			t.Fatalf("logging config missing %q:\n%s", check, configText)
+		}
+	}
+}
+
 func TestConfigureRootCommandPromptsForBlockSelection(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.hcl")

@@ -28,8 +28,17 @@ type rawDashboard struct {
 }
 
 type rawLogging struct {
-	Level     string `hcl:"level,optional"`
-	AccessLog *bool  `hcl:"access_log,optional"`
+	Level      string         `hcl:"level,optional"`
+	AccessLog  *bool          `hcl:"access_log,optional"`
+	PayloadLog *rawPayloadLog `hcl:"payload_log,block"`
+}
+
+type rawPayloadLog struct {
+	Enabled      *bool  `hcl:"enabled,optional"`
+	Dir          string `hcl:"dir,optional"`
+	Rotation     string `hcl:"rotation,optional"`
+	Retention    string `hcl:"retention,optional"`
+	MaxBodyBytes *int   `hcl:"max_body_bytes,optional"`
 }
 
 type rawListener struct {

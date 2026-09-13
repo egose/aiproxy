@@ -125,8 +125,17 @@ type ProviderHealthInput struct {
 }
 
 type LoggingInput struct {
-	Level     string
-	AccessLog bool
+	Level      string
+	AccessLog  bool
+	PayloadLog *PayloadLogInput
+}
+
+type PayloadLogInput struct {
+	Enabled      bool
+	Dir          string
+	Rotation     string
+	Retention    string
+	MaxBodyBytes *int
 }
 
 type SecretsUpdate struct {
@@ -483,6 +492,33 @@ func RenderLoggingBlock(input LoggingInput) string {
 	b.WriteString("  access_log = ")
 	b.WriteString(strconv.FormatBool(input.AccessLog))
 	b.WriteString("\n")
+	if input.PayloadLog != nil {
+		b.WriteString("  payload_log {\n")
+		b.WriteString("    enabled = ")
+		b.WriteString(strconv.FormatBool(input.PayloadLog.Enabled))
+		b.WriteString("\n")
+		if input.PayloadLog.Dir != "" {
+			b.WriteString("    dir = ")
+			b.WriteString(strconv.Quote(input.PayloadLog.Dir))
+			b.WriteString("\n")
+		}
+		if input.PayloadLog.Rotation != "" {
+			b.WriteString("    rotation = ")
+			b.WriteString(strconv.Quote(input.PayloadLog.Rotation))
+			b.WriteString("\n")
+		}
+		if input.PayloadLog.Retention != "" {
+			b.WriteString("    retention = ")
+			b.WriteString(strconv.Quote(input.PayloadLog.Retention))
+			b.WriteString("\n")
+		}
+		if input.PayloadLog.MaxBodyBytes != nil {
+			b.WriteString("    max_body_bytes = ")
+			b.WriteString(strconv.Itoa(*input.PayloadLog.MaxBodyBytes))
+			b.WriteString("\n")
+		}
+		b.WriteString("  }\n")
+	}
 	b.WriteString("}\n")
 	return b.String()
 }

@@ -236,7 +236,7 @@ func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderS
 }
 
 func buildLogging(rawLogging *rawLogging) (Logging, error) {
-	out := Logging{Level: LogLevelInfo, AccessLog: true}
+	out := Logging{Level: LogLevelInfo, AccessLog: true, PayloadLog: PayloadLog{Rotation: DefaultPayloadLogRotation, Retention: DefaultPayloadLogRetention, MaxBodyBytes: DefaultPayloadLogMaxBody}}
 	if rawLogging == nil {
 		return out, nil
 	}
@@ -245,6 +245,28 @@ func buildLogging(rawLogging *rawLogging) (Logging, error) {
 	}
 	if rawLogging.AccessLog != nil {
 		out.AccessLog = *rawLogging.AccessLog
+	}
+	if rawLogging.PayloadLog != nil {
+		raw := rawLogging.PayloadLog
+		if raw.Enabled != nil {
+			out.PayloadLog.Enabled = *raw.Enabled
+		}
+		out.PayloadLog.Dir = raw.Dir
+		if raw.Rotation != "" {
+			out.PayloadLog.Rotation = PayloadLogRotation(raw.Rotation)
+		}
+		if raw.Retention != "" {
+			d, err := time.ParseDuration(raw.Retention)
+			if err != nil {
+				return Logging{}, fmt.Errorf("logging.payload_log.retention: %w", err)
+			}
+			out.PayloadLog.Retention = d
+			out.PayloadLog.HasRetention = true
+		}
+		if raw.MaxBodyBytes != nil {
+			out.PayloadLog.MaxBodyBytes = *raw.MaxBodyBytes
+			out.PayloadLog.HasMaxBody = true
+		}
 	}
 	return out, nil
 }
