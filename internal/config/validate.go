@@ -308,15 +308,39 @@ func validateProviderHealthcheck(p Provider) error {
 	return nil
 }
 
+func IsHealthcheckAbsoluteURL(path string) bool {
+	lower := strings.ToLower(path)
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+func ResolveHealthcheckURL(baseURL, path string) string {
+	if IsHealthcheckAbsoluteURL(path) {
+		return path
+	}
+	return strings.TrimRight(baseURL, "/") + path
+}
+
 func validateHealthcheckFields(hc *ProviderHealthcheck) error {
 	if hc.Path == "" {
 		return fmt.Errorf("healthcheck.path is required")
 	}
-	if !strings.HasPrefix(hc.Path, "/") {
-		return fmt.Errorf("healthcheck.path must start with '/'")
-	}
-	if strings.Contains(hc.Path, "://") {
-		return fmt.Errorf("healthcheck.path must be a path relative to base_url, not a URL")
+	if IsHealthcheckAbsoluteURL(hc.Path) {
+		u, err := url.Parse(hc.Path)
+		if err != nil || u.Host == "" {
+			return fmt.Errorf("healthcheck.path must be a valid http(s) URL or a path starting with '/'")
+		}
+		switch strings.ToLower(u.Scheme) {
+		case "http", "https":
+		default:
+			return fmt.Errorf("healthcheck.path must be a valid http(s) URL or a path starting with '/'")
+		}
+	} else {
+		if !strings.HasPrefix(hc.Path, "/") {
+			return fmt.Errorf("healthcheck.path must start with '/' or be an absolute http(s) URL")
+		}
+		if strings.Contains(hc.Path, "://") {
+			return fmt.Errorf("healthcheck.path must be a path relative to base_url or an absolute http(s) URL")
+		}
 	}
 	switch strings.ToUpper(hc.Method) {
 	case "GET", "HEAD":

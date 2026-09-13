@@ -296,7 +296,7 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&options.ModelDisplayName, "model-display-name", nil, "model display name spec: name=display")
 	cmd.Flags().StringArrayVar(&options.ModelCaps, "model-capabilities", nil, "model capabilities spec: name=cap1,cap2")
 	cmd.Flags().StringArrayVar(&options.ModelProtocols, "model-protocol", nil, "model protocol spec: name=protocol (required for opencode-zen and opencode-go: chat, responses, messages, or gemini; gemini is zen-only)")
-	cmd.Flags().StringVar(&options.HealthcheckPath, "healthcheck-path", "", "healthcheck path relative to base_url (e.g. /health); omit to leave unchanged")
+	cmd.Flags().StringVar(&options.HealthcheckPath, "healthcheck-path", "", "healthcheck path relative to base_url (e.g. /health) or absolute http(s) URL (e.g. https://host/healthz); omit to leave unchanged")
 	cmd.Flags().StringVar(&options.HealthcheckMethod, "healthcheck-method", "", "healthcheck method: GET or HEAD")
 	cmd.Flags().IntVar(&options.HealthcheckStatus, "healthcheck-expected-status", 0, "healthcheck expected HTTP status code")
 	cmd.Flags().StringVar(&options.HealthcheckBody, "healthcheck-expected-body", "", "healthcheck expected body substring, or \"*\" to skip body matching")

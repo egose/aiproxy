@@ -254,11 +254,18 @@ func evaluate(hc *config.ProviderHealthcheck, code int, body string, err error) 
 
 func (m *Manager) probe(ctx context.Context, p config.Provider) (int, string, error) {
 	hc := p.Healthcheck
+	if config.IsHealthcheckAbsoluteURL(hc.Path) {
+		return m.probeURL(ctx, p, hc.Path)
+	}
 	base := provider.EffectiveBaseURL(p.Type, p.BaseURL)
 	if base == "" {
 		return 0, "", fmt.Errorf("no base_url for healthcheck")
 	}
-	target := strings.TrimRight(base, "/") + hc.Path
+	return m.probeURL(ctx, p, config.ResolveHealthcheckURL(base, hc.Path))
+}
+
+func (m *Manager) probeURL(ctx context.Context, p config.Provider, target string) (int, string, error) {
+	hc := p.Healthcheck
 	method := strings.ToUpper(hc.Method)
 	if method == "" {
 		method = "GET"
