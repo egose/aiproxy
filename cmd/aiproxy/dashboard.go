@@ -18,6 +18,7 @@ import (
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/dashboard"
 	"github.com/egose/aiproxy/internal/dashrpc"
+	"github.com/egose/aiproxy/internal/payloadlog"
 	"github.com/spf13/cobra"
 )
 
@@ -82,7 +83,7 @@ func runDashboard(parentCtx context.Context, cfgPath string, explicit bool, stdo
 	}
 
 	snap := dashboard.SnapshotFromTransport(initial)
-	prog := dashboard.Run(ctx, snap)
+	prog := dashboard.Run(ctx, snap, &dashboardPayloadFetcher{client: dashrpc.NewClient(baseURL, token)})
 	defer prog.Close()
 
 	ticker := time.NewTicker(dashPollInterval)
@@ -105,6 +106,31 @@ func runDashboard(parentCtx context.Context, cfgPath string, explicit bool, stdo
 			prog.Refresh(dashboard.SnapshotFromTransport(updated))
 		}
 	}
+}
+
+// dashboardPayloadFetcher adapts the dashrpc HTTP client to the dashboard
+// TUI's payload viewer: newest-first on-disk payload log summaries plus
+// on-demand prettified single entries.
+type dashboardPayloadFetcher struct {
+	client *dashrpc.AuthenticatedClient
+}
+
+func (f *dashboardPayloadFetcher) ListPayloads(ctx context.Context, limit int, errorsOnly bool) (dashrpc.PayloadList, error) {
+	if f == nil || f.client == nil {
+		return dashrpc.PayloadList{}, errors.New("payload client not configured")
+	}
+	return f.client.FetchPayloads(ctx, limit, errorsOnly)
+}
+
+func (f *dashboardPayloadFetcher) GetPayload(ctx context.Context, requestID string) (string, error) {
+	if f == nil || f.client == nil {
+		return "", errors.New("payload client not configured")
+	}
+	raw, err := f.client.FetchPayload(ctx, requestID)
+	if err != nil {
+		return "", err
+	}
+	return payloadlog.Pretty(raw, 64<<10), nil
 }
 
 func normalizeBaseURL(addr string) string {

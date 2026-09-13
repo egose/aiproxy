@@ -113,6 +113,7 @@ func SnapshotFromTransport(s dashrpc.Snapshot) *RuntimeSnapshot {
 		Usage:             &remoteUsage{summaries: s.Usage, recent: s.Recent, providers: s.ProviderStats, upstream: s.Upstream},
 		Health:            &remoteHealth{states: s.Health},
 		Logs:              &remoteLogs{entries: s.Logs},
+		PayloadEnabled:    s.PayloadEnabled,
 	}
 }
 

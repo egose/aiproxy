@@ -126,6 +126,15 @@ func (l *Logger) MaxBodyBytes() int {
 	return l.maxBody
 }
 
+func (l *Logger) Dir() string {
+	if l == nil {
+		return ""
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.dir
+}
+
 func (l *Logger) Config() config.PayloadLog {
 	return config.PayloadLog{Enabled: true, Dir: l.dir, Rotation: l.rotation, Retention: l.retention, MaxBodyBytes: l.maxBody}
 }
