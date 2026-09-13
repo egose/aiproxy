@@ -61,7 +61,7 @@ jobs:
         RELEASE_TAG: ${{ inputs.tag_name }}
 
     - name: Build, scan, and publish verified image
-      uses: egose/actions/docker-build-push@6e49f5129448cff1d901b16032c09445bd49dde1
+      uses: egose/actions/docker-build-push@b5084ae08d5d42dda515204f5df7b1e7f464b74e
       env:
         RELEASE_TAG: ${{ inputs.tag_name }}
         REVISION: ${{ steps.release.outputs.revision }}
@@ -82,7 +82,7 @@ jobs:
         docker-context: .
         docker-file: Dockerfile
         docker-args: VERSION=${{ steps.release.outputs.version }}
-        publish-mode: gated
+        publish-mode: direct
         pre-push-command: |
           command -v jq >/dev/null 2>&1 || {
             printf 'jq is required for fail-closed published digest verification\n' >&2
