@@ -338,6 +338,9 @@ func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, log
 	dashboard := dashrpc.NewRuntimeSource(rt.Dashboard, version, rt.Listener.Address, string(rt.Auth.Mode), startTime, rt.Catalog, aOrAggregator(usage), health, logs)
 	dashboard.SetCooldownSource(cooldownSourceFor(resolver))
 	dashboard.SetHealthcheckSource(healthcheckSourceFor(healthchecks))
+	if payloadLog != nil {
+		dashboard.SetPayloadSource(payloadLog.Dir(), true)
+	}
 	return httpapi.Dependencies{
 		Resolver:          resolver,
 		Adapter:           adapter,

@@ -73,6 +73,7 @@ type RuntimeSnapshot struct {
 	Usage             UsageViewer
 	Health            HealthViewer
 	Logs              LogsViewer
+	PayloadEnabled    bool
 }
 
 type snapshotMsg struct {
@@ -106,39 +107,54 @@ type bottomTab int
 const (
 	bottomTabLogs bottomTab = iota
 	bottomTabAliases
+	bottomTabPayload
 )
 
 type model struct {
-	snapshot       *RuntimeSnapshot
-	pending        *RuntimeSnapshot
-	hasPending     bool
-	health         map[string]bool
-	width          int
-	height         int
-	now            time.Time
-	quit           bool
-	dirty          bool
-	rendered       string
-	focus          focusArea
-	bottomTab      bottomTab
-	bottomHeight   int
-	statsHeight    int
-	lastRefresh    time.Time
-	staleErr       string
-	staleAt        time.Time
-	paused         bool
-	showHelp       bool
-	zoomed         bool
-	usageScroll    int
-	providerScroll int
-	aliasScroll    int
-	logScroll      int
-	logMinLevel    slog.Level
-	logFilterOn    bool
-	tenantIndex    int
-	errorsOnly     bool
-	usageUpstream  bool
-	ipCache        map[string]string
+	snapshot            *RuntimeSnapshot
+	pending             *RuntimeSnapshot
+	hasPending          bool
+	health              map[string]bool
+	width               int
+	height              int
+	now                 time.Time
+	quit                bool
+	dirty               bool
+	rendered            string
+	focus               focusArea
+	bottomTab           bottomTab
+	bottomHeight        int
+	statsHeight         int
+	lastRefresh         time.Time
+	staleErr            string
+	staleAt             time.Time
+	paused              bool
+	showHelp            bool
+	zoomed              bool
+	usageScroll         int
+	providerScroll      int
+	aliasScroll         int
+	logScroll           int
+	logMinLevel         slog.Level
+	logFilterOn         bool
+	tenantIndex         int
+	errorsOnly          bool
+	usageUpstream       bool
+	ipCache             map[string]string
+	payloadFetcher      PayloadFetcher
+	payloads            []PayloadSummary
+	payloadKnown        bool
+	payloadEnabled      bool
+	payloadCursor       int
+	payloadOffset       int
+	payloadErrorsOnly   bool
+	payloadLoading      bool
+	payloadErr          string
+	payloadDetail       string
+	payloadDetailErr    string
+	payloadDetailID     string
+	payloadPendingID    string
+	payloadDetailScroll int
 }
 
 type tickMsg time.Time
@@ -166,6 +182,15 @@ func InitialModel(s *RuntimeSnapshot) tea.Model {
 	} else {
 		m.lastRefresh = m.now
 	}
+	if s != nil {
+		m.payloadEnabled = s.PayloadEnabled
+	}
+	return m
+}
+
+func InitialModelWithPayloadFetcher(s *RuntimeSnapshot, f PayloadFetcher) tea.Model {
+	m := InitialModel(s).(*model)
+	m.payloadFetcher = f
 	return m
 }
 
@@ -183,6 +208,26 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dirty = true
 		return m, nil
 	case tea.KeyMsg:
+		if m.payloadDetailOpen() || m.payloadPendingID != "" {
+			if msg.String() == "esc" || msg.String() == "enter" {
+				m.payloadDetailID = ""
+				m.payloadPendingID = ""
+				m.payloadDetail = ""
+				m.payloadDetailErr = ""
+				m.payloadDetailScroll = 0
+				m.dirty = true
+				return m, nil
+			}
+			if shouldQuit(msg) {
+				m.quit = true
+				return m, tea.Quit
+			}
+			if handled, cmd := m.handlePayloadKey(msg); handled {
+				m.dirty = true
+				return m, cmd
+			}
+			return m, nil
+		}
 		if m.zoomed && msg.String() == "esc" {
 			m.zoomed = false
 			m.dirty = true
@@ -192,9 +237,20 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quit = true
 			return m, tea.Quit
 		}
+		if m.focus == focusBottom && m.bottomTab == bottomTabPayload {
+			if handled, cmd := m.handlePayloadKey(msg); handled {
+				m.dirty = true
+				return m, cmd
+			}
+		}
 		handled := m.handleKey(msg)
 		if handled {
 			m.dirty = true
+			if m.bottomTab == bottomTabPayload && !m.payloadKnown {
+				if cmd := m.requestPayloads(); cmd != nil {
+					return m, cmd
+				}
+			}
 		}
 		return m, nil
 	case snapshotMsg:
@@ -213,6 +269,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.staleAt = msg.at
 		m.dirty = true
 		return m, nil
+	case payloadListMsg:
+		m.applyPayloadList(msg)
+		return m, nil
+	case payloadDetailMsg:
+		m.applyPayloadDetail(msg)
+		return m, nil
 	case tickMsg:
 		m.now = time.Now()
 		if m.snapshot != nil && m.snapshot.Health != nil {
@@ -220,6 +282,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.clampScroll()
 		m.dirty = true
+		if m.bottomTab == bottomTabPayload && m.payloadKnown && !m.payloadDetailOpen() &&
+			m.payloadPendingID == "" && m.payloadFetcher != nil && !m.payloadLoading && m.payloadErr == "" {
+			m.payloadLoading = true
+			return m, tea.Batch(tickCmd(), fetchPayloadsCmd(m.payloadFetcher, payloadFetchLimit, m.payloadErrorsOnly))
+		}
 		return m, tickCmd()
 	}
 	return m, nil
@@ -232,6 +299,7 @@ func (m *model) applySnapshot(s *RuntimeSnapshot) {
 	if s.Health != nil {
 		m.health = s.Health.Snapshot()
 	}
+	m.payloadEnabled = s.PayloadEnabled
 	if !s.SnapshotAt.IsZero() {
 		m.lastRefresh = s.SnapshotAt
 	} else {
@@ -270,10 +338,17 @@ func (m *model) handleKey(msg tea.KeyMsg) bool {
 		m.bottomTab = bottomTabLogs
 		m.focus = focusBottom
 		return true
+	case "3":
+		m.bottomTab = bottomTabPayload
+		m.focus = focusBottom
+		return true
 	case "[", "]":
-		if m.bottomTab == bottomTabLogs {
+		switch m.bottomTab {
+		case bottomTabLogs:
 			m.bottomTab = bottomTabAliases
-		} else {
+		case bottomTabAliases:
+			m.bottomTab = bottomTabPayload
+		default:
 			m.bottomTab = bottomTabLogs
 		}
 		m.focus = focusBottom
@@ -359,6 +434,9 @@ func (m *model) scrollFocused(delta int) bool {
 		if m.bottomTab == bottomTabAliases {
 			return m.scrollAliases(delta)
 		}
+		if m.bottomTab == bottomTabPayload {
+			return m.movePayloadCursor(delta)
+		}
 		return m.scrollLogs(delta)
 	}
 }
@@ -384,6 +462,9 @@ func (m *model) scrollTop() bool {
 			}
 			m.aliasScroll = 0
 			return true
+		}
+		if m.bottomTab == bottomTabPayload {
+			return m.payloadCursorTop()
 		}
 		total := len(m.filteredLogs(1 << 30))
 		max := total - m.bottomVisibleRows()
@@ -422,6 +503,9 @@ func (m *model) scrollBottom() bool {
 			}
 			m.aliasScroll = max
 			return true
+		}
+		if m.bottomTab == bottomTabPayload {
+			return m.payloadCursorBottom()
 		}
 		if m.logScroll == 0 {
 			return false
@@ -518,6 +602,7 @@ func (m *model) clampScroll() {
 	if m.aliasScroll < 0 {
 		m.aliasScroll = 0
 	}
+	m.clampPayloadCursor()
 	m.clampLogScroll()
 }
 
@@ -733,6 +818,11 @@ func (m *model) render() string {
 	}
 	header := renderHeader(m)
 	rate := renderRate(m, m.width)
+	if m.payloadDetailOpen() || m.payloadPendingID != "" {
+		bodyHeight := zoomBodyHeight(m.height)
+		body := renderPayloadDetail(m, m.width, bodyHeight)
+		return fitView(lipgloss.JoinVertical(lipgloss.Left, header, rate, body, renderFooter(m)), m.width)
+	}
 	if m.zoomed {
 		bodyHeight := zoomBodyHeight(m.height)
 		var body string
@@ -794,9 +884,12 @@ func renderBottom(m *model, width, height int) string {
 	}
 	strip := renderTabStrip(m, width)
 	var pane string
-	if m.bottomTab == bottomTabAliases {
+	switch m.bottomTab {
+	case bottomTabAliases:
 		pane = renderAliases(m, width, paneHeight)
-	} else {
+	case bottomTabPayload:
+		pane = renderPayloads(m, width, paneHeight)
+	default:
 		pane = renderLogs(m, width, paneHeight)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, strip, pane)
@@ -811,15 +904,28 @@ func renderTabStrip(m *model, width int) string {
 		level = ">=" + m.logMinLevel.String()
 	}
 	logsLabel := fmt.Sprintf("2:Logs(%s)", level)
-	var left, right string
-	if m.bottomTab == bottomTabAliases {
-		left = activeStyle.Render("▸ " + aliasLabel)
-		right = dimStyle.Render("  " + logsLabel)
-	} else {
-		left = dimStyle.Render("  " + aliasLabel)
-		right = activeStyle.Render("▸ " + logsLabel)
+	payloadLabel := "3:Payloads"
+	if m.payloadKnown {
+		filter := ""
+		if m.payloadErrorsOnly {
+			filter = " errs"
+		}
+		payloadLabel = fmt.Sprintf("3:Payloads(%d%s)", len(m.payloads), filter)
+	} else if !m.payloadEnabled {
+		payloadLabel = "3:Payloads(off)"
 	}
-	return left + "  " + right
+	alias := dimStyle.Render("  " + aliasLabel)
+	logs := dimStyle.Render("  " + logsLabel)
+	payload := dimStyle.Render("  " + payloadLabel)
+	switch m.bottomTab {
+	case bottomTabAliases:
+		alias = activeStyle.Render("▸ " + aliasLabel)
+	case bottomTabLogs:
+		logs = activeStyle.Render("▸ " + logsLabel)
+	default:
+		payload = activeStyle.Render("▸ " + payloadLabel)
+	}
+	return alias + "  " + logs + "  " + payload
 }
 
 func (m *model) renderHelp() string {
@@ -827,12 +933,14 @@ func (m *model) renderHelp() string {
 		"aiproxy dashboard — keys",
 		"",
 		"  tab        cycle focus PROVIDERS / USAGE / bottom tabs",
-		"  1/2 or [/] switch bottom tab (Aliases / Logs)",
-		"  enter      zoom focused pane to full screen",
-		"  esc        unzoom (or quit when not zoomed)",
+		"  1/2/3 or [/] switch bottom tab (Aliases / Logs / Payloads)",
+		"  enter      zoom focused pane to full screen (payloads: open entry)",
+		"  esc        unzoom / close payload detail (or quit when not zoomed)",
 		"  j/k dn/up  scroll focused pane   g/G,home/end top/bottom",
 		"  +/- J/K    resize bottom pane",
 		"  t          cycle tenant filter    e toggle errors-only",
+		"  s          toggle payload errs filter (payloads tab)",
+		"  r          refresh payload list (payloads tab)",
 		"  u          toggle usage view (public vs upstream model)",
 		"  l          cycle log level filter (all/debug/info/warn/error)",
 		"  p          pause live updates (buffer one snapshot)",
@@ -855,8 +963,11 @@ func renderFooter(m *model) string {
 		focusName = "PROVIDERS"
 	} else if m.focus == focusBottom {
 		focusName = "ALIASES"
-		if m.bottomTab == bottomTabLogs {
+		switch m.bottomTab {
+		case bottomTabLogs:
 			focusName = "LOGS"
+		case bottomTabPayload:
+			focusName = "PAYLOADS"
 		}
 	}
 	state := "LIVE"
@@ -869,7 +980,7 @@ func renderFooter(m *model) string {
 	if m.zoomed {
 		zoomHint = "[esc] unzoom"
 	}
-	base := fmt.Sprintf("%s focus:%s [tab] pane [1/2] tabs [j/k] scroll [t]enant [e]rrs [u]pstream [l]evel [p]ause %s [?]help [q]uit", state, focusName, zoomHint)
+	base := fmt.Sprintf("%s focus:%s [tab] pane [1/2/3] tabs [j/k] scroll [t]enant [e]rrs [s]tatus [r]efresh [u]pstream [l]evel [p]ause %s [?]help [q]uit", state, focusName, zoomHint)
 	if len([]rune(base)) > m.width && m.width > 20 {
 		base = truncate(base, m.width)
 	}
@@ -1881,12 +1992,12 @@ type RefreshHook interface {
 	Refresh(snap *RuntimeSnapshot)
 }
 
-func Run(ctx context.Context, snap *RuntimeSnapshot) *Program {
+func Run(ctx context.Context, snap *RuntimeSnapshot, fetcher PayloadFetcher) *Program {
 	opts := []tea.ProgramOption{
 		tea.WithContext(ctx),
 		tea.WithoutCatchPanics(),
 	}
-	p := tea.NewProgram(InitialModel(snap), opts...)
+	p := tea.NewProgram(InitialModelWithPayloadFetcher(snap, fetcher), opts...)
 	go func() {
 		_, _ = p.Run()
 	}()

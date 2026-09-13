@@ -3,12 +3,15 @@ package httpapi
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/egose/aiproxy/internal/dashrpc"
+	"github.com/egose/aiproxy/internal/payloadlog"
 )
 
 const dashboardRecentN = 200
@@ -95,6 +98,32 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 		h.writeDashboardLogs(deps, w, r)
 		return true
 	}
+	if r.URL.Path == dashrpc.PayloadsPath {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return true
+		}
+		if !dashboardAuthorized(deps.Dashboard, r) {
+			h.respondDashboardAuthFailure(w, r)
+			return true
+		}
+		h.writeDashboardPayloads(deps, w, r)
+		return true
+	}
+	if strings.HasPrefix(r.URL.Path, dashrpc.PayloadPathPrefix) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return true
+		}
+		if !dashboardAuthorized(deps.Dashboard, r) {
+			h.respondDashboardAuthFailure(w, r)
+			return true
+		}
+		h.writeDashboardPayload(deps, w, r)
+		return true
+	}
 	return false
 }
 
@@ -144,4 +173,69 @@ func (h *Handler) writeDashboardLogs(deps Dependencies, w http.ResponseWriter, r
 	since, _ := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(deps.Dashboard.Logs(since))
+}
+
+type dashboardPayloadSource interface {
+	PayloadEnabled() bool
+	ListPayloads(limit int, errorsOnly bool) ([]payloadlog.Summary, error)
+	GetPayload(requestID string) (json.RawMessage, error)
+}
+
+func dashboardPayloads(source dashrpc.Source) (dashboardPayloadSource, bool) {
+	ps, ok := source.(dashboardPayloadSource)
+	if !ok || ps == nil {
+		return nil, false
+	}
+	return ps, true
+}
+
+func (h *Handler) writeDashboardPayloads(deps Dependencies, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ps, ok := dashboardPayloads(deps.Dashboard)
+	if !ok || !ps.PayloadEnabled() {
+		_ = json.NewEncoder(w).Encode(dashrpc.PayloadList{Enabled: false})
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = dashrpc.PayloadListDefault
+	}
+	if limit > dashrpc.PayloadListMax {
+		limit = dashrpc.PayloadListMax
+	}
+	q := r.URL.Query()
+	errorsOnly := q.Get("errors_only") == "true" || q.Get("errors_only") == "1"
+	entries, err := ps.ListPayloads(limit, errorsOnly)
+	if err != nil {
+		http.Error(w, "read payload log: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if entries == nil {
+		entries = []payloadlog.Summary{}
+	}
+	_ = json.NewEncoder(w).Encode(dashrpc.PayloadList{Enabled: true, Payloads: entries})
+}
+
+func (h *Handler) writeDashboardPayload(deps Dependencies, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ps, ok := dashboardPayloads(deps.Dashboard)
+	if !ok || !ps.PayloadEnabled() {
+		http.Error(w, "payload log not enabled", http.StatusNotFound)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, dashrpc.PayloadPathPrefix)
+	if id == "" || strings.Contains(id, "/") {
+		http.Error(w, "invalid request id", http.StatusBadRequest)
+		return
+	}
+	raw, err := ps.GetPayload(id)
+	if err != nil {
+		if errors.Is(err, payloadlog.ErrPayloadNotFound) {
+			http.Error(w, "payload entry not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "read payload log: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_, _ = w.Write(append(raw, '\n'))
 }

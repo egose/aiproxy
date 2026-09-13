@@ -1,15 +1,19 @@
 package dashrpc
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,15 +21,20 @@ import (
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/filestore"
 	"github.com/egose/aiproxy/internal/observability"
+	"github.com/egose/aiproxy/internal/payloadlog"
 	"github.com/egose/aiproxy/internal/provider"
 	"github.com/egose/aiproxy/internal/providerhealth"
 )
 
 const (
-	SnapshotPath   = "/_internal/dashboard/snapshot"
-	LogsPath       = "/_internal/dashboard/logs"
-	AuthHeaderName = "Authorization"
-	AuthScheme     = "Bearer "
+	SnapshotPath       = "/_internal/dashboard/snapshot"
+	LogsPath           = "/_internal/dashboard/logs"
+	PayloadsPath       = "/_internal/dashboard/payloads"
+	PayloadPathPrefix  = "/_internal/dashboard/payloads/"
+	AuthHeaderName     = "Authorization"
+	AuthScheme         = "Bearer "
+	PayloadListDefault = 100
+	PayloadListMax     = 500
 )
 
 type Snapshot struct {
@@ -46,6 +55,7 @@ type Snapshot struct {
 	Recent            []Recent                 `json:"recent"`
 	Logs              []observability.LogEntry `json:"logs"`
 	LastSeq           uint64                   `json:"last_seq"`
+	PayloadEnabled    bool                     `json:"payload_enabled,omitempty"`
 }
 
 type CooldownInfo struct {
@@ -96,6 +106,13 @@ type Logs struct {
 	LastSeq uint64                   `json:"last_seq"`
 }
 
+type PayloadSummary = payloadlog.Summary
+
+type PayloadList struct {
+	Enabled  bool             `json:"enabled"`
+	Payloads []PayloadSummary `json:"payloads"`
+}
+
 type Source interface {
 	Enabled() bool
 	Token() string
@@ -115,6 +132,34 @@ type RuntimeSource struct {
 	logs         *observability.LogBuffer
 	cooldowns    func() []CooldownInfo
 	healthchecks func() []HealthcheckStatus
+	payloadDir   string
+	payloadOn    bool
+}
+
+func (s *RuntimeSource) SetPayloadSource(dir string, enabled bool) {
+	if s == nil {
+		return
+	}
+	s.payloadDir = dir
+	s.payloadOn = enabled
+}
+
+func (s *RuntimeSource) PayloadEnabled() bool {
+	return s != nil && s.payloadOn && s.payloadDir != ""
+}
+
+func (s *RuntimeSource) ListPayloads(limit int, errorsOnly bool) ([]PayloadSummary, error) {
+	if s == nil || !s.PayloadEnabled() {
+		return nil, nil
+	}
+	return payloadlog.ListRecent(s.payloadDir, limit, errorsOnly)
+}
+
+func (s *RuntimeSource) GetPayload(requestID string) (json.RawMessage, error) {
+	if s == nil || !s.PayloadEnabled() {
+		return nil, payloadlog.ErrPayloadNotFound
+	}
+	return payloadlog.Get(s.payloadDir, requestID)
 }
 
 func (s *RuntimeSource) SetCooldownSource(fn func() []CooldownInfo) {
@@ -171,6 +216,7 @@ func (s *RuntimeSource) Snapshot(ctx context.Context, recentN int) Snapshot {
 		snap.ProviderStats = s.usage.ProviderSummaries()
 		snap.Upstream = s.usage.UpstreamSummaries()
 	}
+	snap.PayloadEnabled = s.PayloadEnabled()
 	return snap
 }
 
@@ -279,6 +325,63 @@ func NewClient(baseURL, token string) *AuthenticatedClient {
 
 func (c *AuthenticatedClient) authHeader() string {
 	return AuthScheme + c.Token
+}
+
+func (c *AuthenticatedClient) doGet(ctx context.Context, path string) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set(AuthHeaderName, c.authHeader())
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return body, resp.StatusCode, nil
+}
+
+func (c *AuthenticatedClient) FetchPayloads(ctx context.Context, limit int, errorsOnly bool) (PayloadList, error) {
+	if limit <= 0 {
+		limit = PayloadListDefault
+	}
+	if limit > PayloadListMax {
+		limit = PayloadListMax
+	}
+	path := PayloadsPath + "?limit=" + strconv.Itoa(limit)
+	if errorsOnly {
+		path += "&errors_only=true"
+	}
+	body, status, err := c.doGet(ctx, path)
+	if err != nil {
+		return PayloadList{}, err
+	}
+	if status != http.StatusOK {
+		return PayloadList{}, fmt.Errorf("payloads endpoint returned %d: %s", status, bytes.TrimSpace(body))
+	}
+	var out PayloadList
+	if err := json.Unmarshal(body, &out); err != nil {
+		return PayloadList{}, fmt.Errorf("decode payloads: %w", err)
+	}
+	return out, nil
+}
+
+func (c *AuthenticatedClient) FetchPayload(ctx context.Context, requestID string) (json.RawMessage, error) {
+	body, status, err := c.doGet(ctx, PayloadPathPrefix+requestID)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusNotFound {
+		return nil, payloadlog.ErrPayloadNotFound
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("payload endpoint returned %d: %s", status, bytes.TrimSpace(body))
+	}
+	return json.RawMessage(append([]byte(nil), bytes.TrimSpace(body)...)), nil
 }
 
 // TokenFilePath returns the canonical location of the persisted dashboard

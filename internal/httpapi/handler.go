@@ -413,7 +413,7 @@ func metricsPathLabel(r *http.Request) string {
 	switch r.URL.Path {
 	case "/healthz", "/readyz", "/metrics", "/v1/models", "/v1/billing/usage":
 		return r.URL.Path
-	case dashrpc.SnapshotPath, dashrpc.LogsPath:
+	case dashrpc.SnapshotPath, dashrpc.LogsPath, dashrpc.PayloadsPath:
 		return r.URL.Path
 	}
 	if strings.HasPrefix(r.URL.Path, "/_internal/dashboard") {
