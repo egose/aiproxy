@@ -109,6 +109,10 @@ const toc = [{
   "value": "<code>dashboard</code>",
   "id": "dashboard",
   "level": 3
+}, {
+  "value": "<code>ingress_guardrails</code>",
+  "id": "ingress_guardrails",
+  "level": 3
 }];
 function _createMdxContent(props) {
   const _components = {
@@ -1085,6 +1089,42 @@ function _createMdxContent(props) {
       }), "; the ", (0,jsx_runtime.jsx)(_components.code, {
         children: "dashboard"
       }), "\ncommand reads that file to authenticate. If a reload drops a previously\ndeclared token, the carried-over secret is published to the file before the\nnew runtime activates, so tokenless discovery keeps working; a persistence\nfailure rejects the reload and keeps the old runtime unchanged. The dashboard command is local-only: it\nconnects over loopback plain HTTP and refuses concrete non-loopback listener\nhosts. HTTPS and remote dashboard URLs are not supported by the current\nconfiguration model."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "ingress_guardrails",
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        children: "ingress_guardrails"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "ingress_guardrails {\n  enabled        = true\n  mode           = \"block\"\n  max_text_bytes = 65536\n  max_strings    = 512\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Opt-in secret scanning of inbound ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/chat/completions"
+      }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/responses"
+      }), " requests using the embedded Gitleaks rule set. Absent or\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "enabled = false"
+      }), " preserves existing behavior. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "mode"
+      }), " is ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "block"
+      }), " (default,\nrejects with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "400 secret_blocked"
+      }), " / ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "400 scan_incomplete"
+      }), " and zero upstream\nI/O) or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "audit"
+      }), " (forwards and records\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy_guardrail_scans_total{operation,mode,outcome}"
+      }), "). Scanned text is the\nJSON-decoded message content, tool arguments (plus one JSON-decoded level),\ntool results, and responses instructions/input; images, audio, embeddings,\nattachments, encoded blobs, and response/SSE output are out of scope and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gitleaks:allow"
+      }), " cannot suppress scans. Bounds default to 65536 text bytes\nand 512 strings (zeros select defaults); over-limit or canceled scans are\nvisible ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "incomplete"
+      }), " outcomes. While enabled, covered-operation request\nbodies are omitted from payload-log entries. Policy changes apply on ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), "\nwith atomic rollback on failure."]
     })]
   });
 }
