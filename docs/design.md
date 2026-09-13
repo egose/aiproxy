@@ -464,6 +464,7 @@ alias "<name>" {}
 Alias attributes:
 
 - `algorithm`
+- optional nested `session_affinity` block
 - nested `target` blocks
 
 Each `target` block contains:
@@ -477,6 +478,10 @@ Example:
 alias "chat_default" {
   algorithm = "round_robin"
 
+  session_affinity {
+    headers = ["x-opencode-session", "x-claude-code-session-id"]
+  }
+
   target {
     provider = "openai"
     model    = "gpt-4o-mini"
@@ -488,6 +493,14 @@ alias "chat_default" {
   }
 }
 ```
+
+The `session_affinity` block is optional; omitting it disables affinity and
+keeps pure `algorithm` routing. When present with no `headers`, the proxy uses
+a built-in default list covering opencode (`x-opencode-session`,
+`x-session-affinity`, `x-session-id`), Claude Code
+(`x-claude-code-session-id`), and Codex (`session-id`, `thread-id`,
+`x-codex-window-id`, `x-client-request-id`) session headers. A custom
+`headers` list overrides the defaults.
 
 Aliases can serve any operation included in the intersection of their targets'
 effective capabilities. Operators should only combine targets that are safe to
@@ -533,6 +546,22 @@ requests.
 This is:
 
 - per-process
+- best-effort
+- not coordinated across multiple proxy instances
+
+### Session Affinity
+
+An alias pool may pin sessions to a stable target for upstream prompt-cache
+locality. The first non-empty header in the alias's configured precedence
+selects the session key; the key hashes to a preferred pool target. Affinity
+is a hint, never a guarantee: a cooling, unhealthy, or already-tried preferred
+target falls back to normal `algorithm` selection, and retry failover proceeds
+across the remaining pool exactly as without affinity. Requests without any
+affinity header use normal selection directly.
+
+This is:
+
+- per-process and stateless (no session table, nothing to expire)
 - best-effort
 - not coordinated across multiple proxy instances
 
