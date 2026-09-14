@@ -135,11 +135,18 @@ type rawModel struct {
 }
 
 type rawAlias struct {
-	Name             string              `hcl:"name,label"`
-	Algorithm        string              `hcl:"algorithm"`
-	RetryStatusCodes []string            `hcl:"retry_status_codes,optional"`
-	SessionAffinity  *rawSessionAffinity `hcl:"session_affinity,block"`
-	Targets          []rawTarget         `hcl:"target,block"`
+	Name               string                 `hcl:"name,label"`
+	Algorithm          string                 `hcl:"algorithm"`
+	RetryStatusCodes   []string               `hcl:"retry_status_codes,optional"`
+	SessionAffinity    *rawSessionAffinity    `hcl:"session_affinity,block"`
+	EncryptedReasoning *rawEncryptedReasoning `hcl:"encrypted_reasoning,block"`
+	Targets            []rawTarget            `hcl:"target,block"`
+}
+
+type rawEncryptedReasoning struct {
+	Passthrough      *bool    `hcl:"passthrough,optional"`
+	OnCallerMismatch string   `hcl:"on_caller_mismatch,optional"`
+	MatchMessages    []string `hcl:"match_messages,optional"`
 }
 
 type rawSessionAffinity struct {

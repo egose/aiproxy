@@ -86,6 +86,27 @@ This avoids masking client-side request problems as routing problems.
 
 Retryable `4xx` statuses are an alias failover policy only. They do not mark the provider unhealthy; provider health is mutated by transport/upstream request errors and upstream `5xx` responses.
 
+## Alias Encrypted Reasoning
+
+Clients that replay prior-turn thinking blocks (extended thinking / reasoning passthrough) send caller-bound opaque blobs (`encrypted_content`, `signature`, redacted thinking) that the issuing model rejects when the pool routes the next turn to a different credential (`not issued to this caller`, `invalid_encrypted_content`, `Invalid signature`). The optional `encrypted_reasoning` block controls this per alias for `POST /v1/chat/completions` and `POST /v1/responses`:
+
+```hcl
+alias "chat_default" {
+  algorithm = "round_robin"
+  encrypted_reasoning {
+    passthrough        = true
+    on_caller_mismatch = "strip_and_retry"
+  }
+  target { provider = "spark-a" model = "muse-spark" }
+  target { provider = "spark-b" model = "muse-spark" }
+}
+```
+
+- `passthrough = false` strips opaque reasoning blocks before fan-out (one upstream call, deterministic). `passthrough = true` (default) sends history intact.
+- `on_caller_mismatch = "strip_and_retry"` (default `"fail"`) retries the same target once with opaque blocks stripped when an upstream `400` matches `match_messages`. Unrelated `400`s return verbatim; streaming responses are never retried.
+- `match_messages` lists case-insensitive substrings matched against the upstream `400` body. Omitting it uses built-ins covering Console, OpenAI, and Anthropic phrasings; a non-empty list replaces them. Keep entries specific: a generic entry like `"error"` matches every `400`.
+- Plaintext reasoning summaries without opaque blobs are never stripped or matched. Direct `<provider>/<model>` requests are never stripped.
+
 ## Upstream Retry Cooldown
 
 Alias targets additionally honor upstream retry advice as a cross-request cooldown, so a throttled upstream is not called again until its deadline expires.

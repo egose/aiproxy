@@ -41,6 +41,7 @@ type authRateLimitInput = configedit.AuthRateLimitInput
 type authClientInput = configedit.AuthClientInput
 type aliasInput = configedit.AliasInput
 type aliasSessionAffinityInput = configedit.AliasSessionAffinityInput
+type aliasEncryptedReasoningInput = configedit.AliasEncryptedReasoningInput
 type aliasTargetInput = configedit.AliasTargetInput
 type providerHealthInput = configedit.ProviderHealthInput
 type loggingInput = configedit.LoggingInput
@@ -112,13 +113,19 @@ func isGitHubCopilotProviderType(providerType string) bool {
 }
 
 type aliasOptions struct {
-	Name               string
-	Algorithm          string
-	Targets            []string
-	AffinityHeaders    []string
-	HasAffinityHeaders bool
-	NoSessionAffinity  bool
-	NonInteractive     bool
+	Name                             string
+	Algorithm                        string
+	Targets                          []string
+	AffinityHeaders                  []string
+	HasAffinityHeaders               bool
+	NoSessionAffinity                bool
+	EncryptedReasoningPassthrough    bool
+	HasEncryptedReasoningPassthrough bool
+	EncryptedReasoningOnMismatch     string
+	EncryptedReasoningMatchMessages  []string
+	HasEncryptedReasoningMatchMsgs   bool
+	NoEncryptedReasoning             bool
+	NonInteractive                   bool
 }
 
 type providerHealthOptions struct {
@@ -323,6 +330,8 @@ func newConfigureAliasCommand() *cobra.Command {
 			"aiproxy configure alias --config /etc/aiproxy/config.hcl --delete --name chat_default",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.HasAffinityHeaders = cmd.Flags().Changed("affinity-header")
+			options.HasEncryptedReasoningPassthrough = cmd.Flags().Changed("encrypted-reasoning-passthrough")
+			options.HasEncryptedReasoningMatchMsgs = cmd.Flags().Changed("encrypted-reasoning-match-message")
 			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureAlias(&prompts, inheritedConfigPath(cmd), deleteBlock, options)
 		},
@@ -333,6 +342,10 @@ func newConfigureAliasCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&options.Targets, "target", nil, "alias target spec: provider/model")
 	cmd.Flags().StringArrayVar(&options.AffinityHeaders, "affinity-header", nil, "session affinity header (repeatable; defaults cover opencode, Claude Code, and Codex session headers)")
 	cmd.Flags().BoolVar(&options.NoSessionAffinity, "no-session-affinity", false, "disable session affinity for the alias")
+	cmd.Flags().BoolVar(&options.EncryptedReasoningPassthrough, "encrypted-reasoning-passthrough", true, "forward caller-bound encrypted reasoning blocks in alias requests")
+	cmd.Flags().StringVar(&options.EncryptedReasoningOnMismatch, "encrypted-reasoning-on-caller-mismatch", "", "caller-mismatch policy: fail or strip_and_retry")
+	cmd.Flags().StringArrayVar(&options.EncryptedReasoningMatchMessages, "encrypted-reasoning-match-message", nil, "caller-mismatch error substring (repeatable; replaces defaults)")
+	cmd.Flags().BoolVar(&options.NoEncryptedReasoning, "no-encrypted-reasoning", false, "remove the encrypted_reasoning block from the alias")
 	cmd.Flags().BoolVar(&options.NonInteractive, "non-interactive", false, "fail instead of prompting for missing values")
 	return cmd
 }
@@ -2528,6 +2541,7 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 			return aliasInput{}, err
 		}
 		defaults.SessionAffinity = affinity
+		defaults.EncryptedReasoning = applyAliasEncryptedReasoning(defaults.EncryptedReasoning, options)
 		return defaults, nil
 	}
 	available := availableProviderModels(blocks)
@@ -2558,7 +2572,7 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 				return aliasInput{}, err
 			}
 			input.Targets = targets
-			return finishAliasInput(prompts, input, defaults.SessionAffinity, options)
+			return finishAliasInput(prompts, input, defaults, options)
 		}
 		if len(defaults.Targets) > 0 {
 			keepTargets, err := prompts.askYesNo("Keep existing targets", true)
@@ -2567,7 +2581,7 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 			}
 			if keepTargets {
 				input.Targets = append(input.Targets, defaults.Targets...)
-				return finishAliasInput(prompts, input, defaults.SessionAffinity, options)
+				return finishAliasInput(prompts, input, defaults, options)
 			}
 		}
 		for {
@@ -2588,7 +2602,7 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 				break
 			}
 		}
-		return finishAliasInput(prompts, input, defaults.SessionAffinity, options)
+		return finishAliasInput(prompts, input, defaults, options)
 	}
 	name, err := prompts.askValidated("Alias name", defaults.Name, validateAliasName)
 	if err != nil {
@@ -2605,7 +2619,7 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 			return aliasInput{}, err
 		}
 		input.Targets = targets
-		return finishAliasInput(prompts, input, defaults.SessionAffinity, options)
+		return finishAliasInput(prompts, input, defaults, options)
 	}
 	if len(defaults.Targets) > 0 {
 		keepTargets, err := prompts.askYesNo("Keep existing targets", true)
@@ -2614,7 +2628,7 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 		}
 		if keepTargets {
 			input.Targets = append(input.Targets, defaults.Targets...)
-			return finishAliasInput(prompts, input, defaults.SessionAffinity, options)
+			return finishAliasInput(prompts, input, defaults, options)
 		}
 	}
 	for {
@@ -2635,16 +2649,41 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 			break
 		}
 	}
-	return finishAliasInput(prompts, input, defaults.SessionAffinity, options)
+	return finishAliasInput(prompts, input, defaults, options)
 }
 
-func finishAliasInput(prompts *promptSession, input aliasInput, existingAffinity *aliasSessionAffinityInput, options aliasOptions) (aliasInput, error) {
-	affinity, err := promptAliasSessionAffinity(prompts, existingAffinity, options)
+func finishAliasInput(prompts *promptSession, input aliasInput, defaults aliasInput, options aliasOptions) (aliasInput, error) {
+	affinity, err := promptAliasSessionAffinity(prompts, defaults.SessionAffinity, options)
 	if err != nil {
 		return aliasInput{}, err
 	}
 	input.SessionAffinity = affinity
+	input.EncryptedReasoning = applyAliasEncryptedReasoning(defaults.EncryptedReasoning, options)
 	return input, nil
+}
+
+func applyAliasEncryptedReasoning(existing *aliasEncryptedReasoningInput, options aliasOptions) *aliasEncryptedReasoningInput {
+	if options.NoEncryptedReasoning {
+		return nil
+	}
+	if !options.HasEncryptedReasoningPassthrough && options.EncryptedReasoningOnMismatch == "" && !options.HasEncryptedReasoningMatchMsgs {
+		return existing
+	}
+	er := &aliasEncryptedReasoningInput{}
+	if existing != nil {
+		*er = *existing
+		er.MatchMessages = append([]string(nil), existing.MatchMessages...)
+	}
+	if options.HasEncryptedReasoningPassthrough {
+		er.Passthrough = boolPtr(options.EncryptedReasoningPassthrough)
+	}
+	if options.EncryptedReasoningOnMismatch != "" {
+		er.OnCallerMismatch = options.EncryptedReasoningOnMismatch
+	}
+	if options.HasEncryptedReasoningMatchMsgs {
+		er.MatchMessages = append([]string(nil), options.EncryptedReasoningMatchMessages...)
+	}
+	return er
 }
 
 func promptAliasSessionAffinity(prompts *promptSession, existing *aliasSessionAffinityInput, options aliasOptions) (*aliasSessionAffinityInput, error) {
@@ -3945,6 +3984,17 @@ func existingAliasInput(blocks []topLevelBlock, name string) *aliasInput {
 			Headers: normalizeAffinityHeaders(parseQuotedListExpr(attributeExpr(src, affinityBlock.Body, "headers"))),
 		}
 	}
+	if erBlock := findNestedBlock(parsed.Body, "encrypted_reasoning"); erBlock != nil {
+		er := &aliasEncryptedReasoningInput{}
+		if expr := strings.TrimSpace(attributeExpr(src, erBlock.Body, "passthrough")); expr != "" {
+			er.Passthrough = boolPtr(parseBoolExpr(expr, true))
+		}
+		if mismatch := strings.TrimSpace(parseLiteralOrExpression(attributeExpr(src, erBlock.Body, "on_caller_mismatch"))); mismatch != "" {
+			er.OnCallerMismatch = mismatch
+		}
+		er.MatchMessages = parseQuotedListExpr(attributeExpr(src, erBlock.Body, "match_messages"))
+		input.EncryptedReasoning = er
+	}
 	for _, targetBlock := range findNestedBlocks(parsed.Body, "target") {
 		input.Targets = append(input.Targets, aliasTargetInput{
 			Provider: parseLiteralOrExpression(attributeExpr(src, targetBlock.Body, "provider")),
@@ -4066,6 +4116,10 @@ func parseLiteralOrExpression(expr string) string {
 		return unquoted
 	}
 	return expr
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 func parseBoolExpr(expr string, def bool) bool {
