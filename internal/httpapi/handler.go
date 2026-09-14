@@ -43,7 +43,7 @@ type Dependencies struct {
 	Usage             accounting.Reader
 	AccessLog         bool
 	HasAccessLog      bool
-	PayloadLog        *payloadlog.Logger
+	PayloadLog        payloadlog.Recorder
 	Logger            *slog.Logger
 	Dashboard         dashrpc.Source
 	Version           string

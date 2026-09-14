@@ -200,8 +200,13 @@ func newPathsCommand() *cobra.Command {
 				}
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "config: %s\nsecrets: %s\n", configDisplay, defaultSecretsPath())
-			if rt, err := loadConfigForCommand(cfgPath, cmd); err == nil && rt.Logging.PayloadLog.Enabled && rt.Logging.PayloadLog.Dir != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "payload_log: %s\n", rt.Logging.PayloadLog.Dir)
+			if rt, err := loadConfigForCommand(cfgPath, cmd); err == nil && rt.Logging.PayloadLog.Enabled {
+				if rt.Logging.PayloadLog.Dir != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "payload_log: %s\n", rt.Logging.PayloadLog.Dir)
+				}
+				if rt.Logging.PayloadLog.Mongo.URI != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "payload_mongo: %s.%s\n", rt.Logging.PayloadLog.Mongo.Database, rt.Logging.PayloadLog.Mongo.Collection)
+				}
 			}
 		},
 	}

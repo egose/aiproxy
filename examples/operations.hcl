@@ -21,6 +21,16 @@ logging {
   #   rotation       = "daily"
   #   retention      = "168h"
   #   max_body_bytes = 1048576
+  #
+  #   # Optional MongoDB sink for the same entries (one document per
+  #   # request). Either backend — or both — can be enabled; omit dir to
+  #   # log to MongoDB only. Disabled when uri is empty.
+  #   mongodb {
+  #     uri        = env("AIPROXY_PAYLOAD_MONGO_URI")
+  #     database   = "aiproxy"
+  #     collection = "payloads"
+  #     timeout    = "5s"
+  #   }
   # }
 }
 

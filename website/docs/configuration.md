@@ -139,12 +139,32 @@ logging {
     rotation       = "daily"
     retention      = "168h"
     max_body_bytes = 1048576
+
+    mongodb {
+      uri        = env("AIPROXY_PAYLOAD_MONGO_URI")
+      database   = "aiproxy"
+      collection = "payloads"
+      timeout    = "5s"
+    }
   }
 }
 ```
 
 - `enabled` defaults to `false`; nothing is written unless it is `true`
-- `dir` is required when enabled and holds the `payload-<date>.jsonl` files
+- `dir` selects the disk backend and holds the `payload-<date>.jsonl` files.
+  When enabled, at least one of `dir` or `mongodb.uri` is required: set only
+  `dir` for disk logging, only `mongodb` for MongoDB-only logging, or both to
+  fan out to both backends. Omit `dir` (or leave it empty) to disable the disk
+  backend.
+- The optional nested `mongodb` block selects the MongoDB backend, which
+  inserts one document per inference request with the same JSON field names as
+  the disk entries. It is disabled when `uri` is empty, so keep the secret in
+  the environment and reference it with `env("...")`. `database` defaults to
+  `"aiproxy"`, `collection` to `"payloads"`, and `timeout` (per-operation
+  connect/ping/insert timeout, Go duration string) to `"5s"`. Recording is
+  best-effort: a MongoDB outage after startup is dropped without failing the
+  request, but a bad URI fails startup fast. Consider an index on
+  `{request_id: 1}` for single-request lookups.
 - `rotation` splits files by datetime to bound single-file growth: `daily`
   writes `payload-YYYYMMDD.jsonl`, `hourly` writes `payload-YYYYMMDD-HH.jsonl`
   (UTC). Defaults to `daily`.

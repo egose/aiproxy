@@ -54,7 +54,10 @@ func validateLogging(l Logging) error {
 }
 
 func validatePayloadLog(p PayloadLog) error {
-	if !p.Enabled && p.Dir == "" {
+	if !p.Enabled && p.Dir == "" && p.Mongo.URI == "" {
+		if err := validatePayloadMongo(p.Mongo); err != nil {
+			return err
+		}
 		switch p.Rotation {
 		case "", PayloadLogRotationDaily, PayloadLogRotationHourly:
 		default:
@@ -72,8 +75,11 @@ func validatePayloadLog(p PayloadLog) error {
 }
 
 func validatePayloadLogFields(p PayloadLog) error {
-	if p.Dir == "" {
-		return fmt.Errorf("logging.payload_log: dir is required when payload logging is configured")
+	if p.Dir == "" && p.Mongo.URI == "" {
+		return fmt.Errorf("logging.payload_log: dir is required when payload logging is enabled without mongodb.uri")
+	}
+	if err := validatePayloadMongo(p.Mongo); err != nil {
+		return err
 	}
 	switch p.Rotation {
 	case "", PayloadLogRotationDaily, PayloadLogRotationHourly:
@@ -85,6 +91,13 @@ func validatePayloadLogFields(p PayloadLog) error {
 	}
 	if p.MaxBodyBytes < 0 {
 		return fmt.Errorf("logging.payload_log: max_body_bytes must not be negative (0 stores full bodies)")
+	}
+	return nil
+}
+
+func validatePayloadMongo(m PayloadMongo) error {
+	if m.Timeout < 0 {
+		return fmt.Errorf("logging.payload_log.mongodb: timeout must not be negative")
 	}
 	return nil
 }

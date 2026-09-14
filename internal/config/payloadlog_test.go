@@ -70,6 +70,58 @@ func TestLoadPayloadLogFull(t *testing.T) {
 	}
 }
 
+func TestLoadPayloadMongoOnly(t *testing.T) {
+	rt, err := Load([]byte(payloadTestConfig(`
+  payload_log {
+    enabled = true
+    mongodb {
+      uri = "mongodb://localhost:27017"
+    }
+  }
+`)), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	p := rt.Logging.PayloadLog
+	if !p.Enabled || p.Dir != "" {
+		t.Fatalf("payload = %+v", p)
+	}
+	if p.Mongo.URI != "mongodb://localhost:27017" {
+		t.Fatalf("mongo uri = %q", p.Mongo.URI)
+	}
+	if p.Mongo.Database != DefaultPayloadMongoDatabase {
+		t.Fatalf("mongo database = %q", p.Mongo.Database)
+	}
+	if p.Mongo.Collection != DefaultPayloadMongoCollection {
+		t.Fatalf("mongo collection = %q", p.Mongo.Collection)
+	}
+	if p.Mongo.Timeout != DefaultPayloadMongoTimeout {
+		t.Fatalf("mongo timeout = %v", p.Mongo.Timeout)
+	}
+}
+
+func TestLoadPayloadMongoFull(t *testing.T) {
+	rt, err := Load([]byte(payloadTestConfig(`
+  payload_log {
+    enabled = true
+    dir = "/tmp/payloads"
+    mongodb {
+      uri = "mongodb://localhost:27017"
+      database = "logs"
+      collection = "requests"
+      timeout = "10s"
+    }
+  }
+`)), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	m := rt.Logging.PayloadLog.Mongo
+	if m.URI != "mongodb://localhost:27017" || m.Database != "logs" || m.Collection != "requests" || m.Timeout != 10*time.Second {
+		t.Fatalf("mongo = %+v", m)
+	}
+}
+
 func TestLoadPayloadLogValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -81,6 +133,7 @@ func TestLoadPayloadLogValidation(t *testing.T) {
 		{name: "negative retention", block: "payload_log {\n enabled = true\n dir = \"/tmp/x\"\n retention = \"-1h\"\n}", want: "retention must not be negative"},
 		{name: "negative max", block: "payload_log {\n enabled = true\n dir = \"/tmp/x\"\n max_body_bytes = -1\n}", want: "max_body_bytes must not be negative"},
 		{name: "bad duration", block: "payload_log {\n enabled = true\n dir = \"/tmp/x\"\n retention = \"later\"\n}", want: "retention"},
+		{name: "bad mongo timeout", block: "payload_log {\n enabled = true\n dir = \"/tmp/x\"\n mongodb {\n uri = \"mongodb://localhost:27017\"\n timeout = \"later\"\n }\n}", want: "mongodb.timeout"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Load([]byte(payloadTestConfig(tc.block)), "test.hcl")
@@ -109,6 +162,12 @@ func TestConvertPayloadLogRoundTrip(t *testing.T) {
     rotation = "hourly"
     retention = "72h"
     max_body_bytes = 1024
+    mongodb {
+      uri = "mongodb://localhost:27017"
+      database = "logs"
+      collection = "requests"
+      timeout = "10s"
+    }
   }
 `)
 	jsonOut, _, _, err := Convert([]byte(hclCfg), "test.hcl", false)
@@ -126,5 +185,8 @@ func TestConvertPayloadLogRoundTrip(t *testing.T) {
 	p := got.Logging.PayloadLog
 	if !p.Enabled || p.Dir != "/tmp/payloads" || p.Rotation != PayloadLogRotationHourly || p.Retention != 72*time.Hour || p.MaxBodyBytes != 1024 {
 		t.Fatalf("payload = %+v", p)
+	}
+	if p.Mongo.URI != "mongodb://localhost:27017" || p.Mongo.Database != "logs" || p.Mongo.Collection != "requests" || p.Mongo.Timeout != 10*time.Second {
+		t.Fatalf("mongo = %+v", p.Mongo)
 	}
 }
