@@ -539,8 +539,22 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
-        children: "logging {\n  level      = \"info\"\n  access_log = true\n\n  payload_log {\n    enabled        = true\n    dir            = \"/var/log/aiproxy/payloads\"\n    rotation       = \"daily\"\n    retention      = \"168h\"\n    max_body_bytes = 1048576\n  }\n}\n"
+        children: "logging {\n  level      = \"info\"\n  access_log = true\n\n  payload_log {\n    enabled        = true\n    dir            = \"/var/log/aiproxy/payloads\"\n    rotation       = \"daily\"\n    retention      = \"168h\"\n    max_body_bytes = 1048576\n\n    mongodb {\n      uri        = env(\"AIPROXY_PAYLOAD_MONGO_URI\")\n      database   = \"aiproxy\"\n      collection = \"payloads\"\n      timeout    = \"5s\"\n    }\n  }\n}\n"
       })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The disk backend (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "dir"
+      }), ") and the MongoDB backend (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "mongodb"
+      }), ") are enabled\nindependently: set ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "dir"
+      }), " for JSONL files, ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "uri"
+      }), " for one MongoDB document per\nrequest with the same JSON field names, or both to fan out to both. When\nenabled, at least one backend is required. Recording is best-effort and never\nfails a request; a bad MongoDB URI fails startup fast instead."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The dashboard and TUI payload viewer read from the disk backend only: with\nMongoDB-only logging (no ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "dir"
+      }), "), the viewer reports payload logging as\ndisabled."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Files are split by datetime so no single file grows without bound: ", (0,jsx_runtime.jsx)(_components.code, {
         children: "daily"

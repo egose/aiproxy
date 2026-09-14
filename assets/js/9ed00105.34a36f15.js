@@ -264,7 +264,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
-        children: "logging {\n  level      = \"info\"\n  access_log = true\n\n  payload_log {\n    enabled        = true\n    dir            = \"/var/log/aiproxy/payloads\"\n    rotation       = \"daily\"\n    retention      = \"168h\"\n    max_body_bytes = 1048576\n  }\n}\n"
+        children: "logging {\n  level      = \"info\"\n  access_log = true\n\n  payload_log {\n    enabled        = true\n    dir            = \"/var/log/aiproxy/payloads\"\n    rotation       = \"daily\"\n    retention      = \"168h\"\n    max_body_bytes = 1048576\n\n    mongodb {\n      uri        = env(\"AIPROXY_PAYLOAD_MONGO_URI\")\n      database   = \"aiproxy\"\n      collection = \"payloads\"\n      timeout    = \"5s\"\n    }\n  }\n}\n"
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
       children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
@@ -278,9 +278,41 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "dir"
-        }), " is required when enabled and holds the ", (0,jsx_runtime.jsx)(_components.code, {
+        }), " selects the disk backend and holds the ", (0,jsx_runtime.jsx)(_components.code, {
           children: "payload-<date>.jsonl"
-        }), " files"]
+        }), " files.\nWhen enabled, at least one of ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "dir"
+        }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "mongodb.uri"
+        }), " is required: set only\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "dir"
+        }), " for disk logging, only ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "mongodb"
+        }), " for MongoDB-only logging, or both to\nfan out to both backends. Omit ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "dir"
+        }), " (or leave it empty) to disable the disk\nbackend."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["The optional nested ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "mongodb"
+        }), " block selects the MongoDB backend, which\ninserts one document per inference request with the same JSON field names as\nthe disk entries. It is disabled when ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "uri"
+        }), " is empty, so keep the secret in\nthe environment and reference it with ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "env(\"...\")"
+        }), ". ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "database"
+        }), " defaults to\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "\"aiproxy\""
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "collection"
+        }), " to ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "\"payloads\""
+        }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "timeout"
+        }), " (per-operation\nconnect/ping/insert timeout, Go duration string) to ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "\"5s\""
+        }), ". Recording is\nbest-effort: a MongoDB outage after startup is dropped without failing the\nrequest, but a bad URI fails startup fast. Consider an index on\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "{request_id: 1}"
+        }), " for single-request lookups."]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "rotation"
