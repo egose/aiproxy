@@ -299,7 +299,7 @@ function _createMdxContent(props) {
           children: "match_messages"
         }), ". Unrelated ", (0,jsx_runtime.jsx)(_components.code, {
           children: "400"
-        }), "s return verbatim; streaming responses are never retried."]
+        }), "s return verbatim; established SSE streams are never retried (immediate error responses to streaming requests are retried normally)."]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "match_messages"
