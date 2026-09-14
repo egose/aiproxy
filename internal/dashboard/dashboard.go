@@ -134,7 +134,11 @@ type model struct {
 	usageScroll         int
 	providerScroll      int
 	aliasScroll         int
-	logScroll           int
+	logCursor           int
+	logOffset           int
+	logDetailOpen       bool
+	logDetailEntry      observability.LogEntry
+	logDetailScroll     int
 	logMinLevel         slog.Level
 	logFilterOn         bool
 	tenantIndex         int
@@ -229,8 +233,31 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.zoomed && msg.String() == "esc" {
+			if m.logDetailOpen {
+				m.logDetailOpen = false
+				m.logDetailScroll = 0
+				m.dirty = true
+				return m, nil
+			}
 			m.zoomed = false
 			m.dirty = true
+			return m, nil
+		}
+		if m.logDetailOpen {
+			if msg.String() == "esc" || msg.String() == "enter" {
+				m.logDetailOpen = false
+				m.logDetailScroll = 0
+				m.dirty = true
+				return m, nil
+			}
+			if shouldQuit(msg) {
+				m.quit = true
+				return m, tea.Quit
+			}
+			if handled := m.handleLogDetailKey(msg); handled {
+				m.dirty = true
+				return m, nil
+			}
 			return m, nil
 		}
 		if shouldQuit(msg) {
@@ -241,6 +268,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if handled, cmd := m.handlePayloadKey(msg); handled {
 				m.dirty = true
 				return m, cmd
+			}
+		}
+		if m.focus == focusBottom && m.bottomTab == bottomTabLogs {
+			if handled := m.handleLogKey(msg); handled {
+				m.dirty = true
+				return m, nil
 			}
 		}
 		handled := m.handleKey(msg)
@@ -382,7 +415,10 @@ func (m *model) handleKey(msg tea.KeyMsg) bool {
 		return true
 	case "l":
 		m.cycleLogLevel()
-		m.logScroll = 0
+		m.logCursor = 0
+		m.logOffset = 0
+		m.logDetailOpen = false
+		m.logDetailScroll = 0
 		m.bottomTab = bottomTabLogs
 		return true
 	case "j", "down":
@@ -437,7 +473,10 @@ func (m *model) scrollFocused(delta int) bool {
 		if m.bottomTab == bottomTabPayload {
 			return m.movePayloadCursor(delta)
 		}
-		return m.scrollLogs(delta)
+		if m.logDetailOpen {
+			return m.scrollLogDetail(delta)
+		}
+		return m.moveLogCursor(delta)
 	}
 }
 
@@ -466,16 +505,14 @@ func (m *model) scrollTop() bool {
 		if m.bottomTab == bottomTabPayload {
 			return m.payloadCursorTop()
 		}
-		total := len(m.filteredLogs(1 << 30))
-		max := total - m.bottomVisibleRows()
-		if max < 0 {
-			max = 0
+		if m.logDetailOpen {
+			if m.logDetailScroll == 0 {
+				return false
+			}
+			m.logDetailScroll = 0
+			return true
 		}
-		if m.logScroll == max {
-			return false
-		}
-		m.logScroll = max
-		return true
+		return m.logCursorTop()
 	}
 }
 
@@ -507,11 +544,11 @@ func (m *model) scrollBottom() bool {
 		if m.bottomTab == bottomTabPayload {
 			return m.payloadCursorBottom()
 		}
-		if m.logScroll == 0 {
-			return false
+		if m.logDetailOpen {
+			m.logDetailScroll = 1 << 30
+			return true
 		}
-		m.logScroll = 0
-		return true
+		return m.logCursorBottom()
 	}
 }
 
@@ -563,21 +600,175 @@ func (m *model) scrollAliases(delta int) bool {
 	return true
 }
 
-func (m *model) scrollLogs(delta int) bool {
-	if delta < 0 {
-		m.logScroll -= delta
-		m.clampLogScroll()
+func (m *model) logEntriesNewestFirst() []observability.LogEntry {
+	all := m.filteredLogs(1 << 30)
+	for i, j := 0, len(all)-1; i < j; i, j = i+1, j-1 {
+		all[i], all[j] = all[j], all[i]
+	}
+	return all
+}
+
+func (m *model) clampLogCursor() {
+	n := len(m.filteredLogs(1 << 30))
+	if n == 0 {
+		m.logCursor = 0
+		m.logOffset = 0
+		return
+	}
+	if m.logCursor < 0 {
+		m.logCursor = 0
+	}
+	if m.logCursor >= n {
+		m.logCursor = n - 1
+	}
+	visible := m.bottomVisibleRows()
+	if visible < 1 {
+		visible = 1
+	}
+	if m.logOffset > m.logCursor {
+		m.logOffset = m.logCursor
+	}
+	if m.logOffset < m.logCursor-visible+1 {
+		m.logOffset = m.logCursor - visible + 1
+	}
+	if m.logOffset < 0 {
+		m.logOffset = 0
+	}
+	maxOff := n - visible
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if m.logOffset > maxOff {
+		m.logOffset = maxOff
+	}
+}
+
+func (m *model) moveLogCursor(delta int) bool {
+	if len(m.filteredLogs(1<<30)) == 0 {
+		return false
+	}
+	m.clampLogCursor()
+	next := m.logCursor + delta
+	n := len(m.filteredLogs(1 << 30))
+	if next < 0 {
+		next = 0
+	}
+	if next >= n {
+		next = n - 1
+	}
+	if next == m.logCursor {
+		return false
+	}
+	m.logCursor = next
+	m.clampLogCursor()
+	return true
+}
+
+func (m *model) logCursorTop() bool {
+	if m.logCursor == 0 && m.logOffset == 0 {
+		return false
+	}
+	m.logCursor = 0
+	m.logOffset = 0
+	return true
+}
+
+func (m *model) logCursorBottom() bool {
+	n := len(m.filteredLogs(1 << 30))
+	if n == 0 || m.logCursor == n-1 {
+		return false
+	}
+	m.logCursor = n - 1
+	m.clampLogCursor()
+	return true
+}
+
+func (m *model) scrollLogDetail(delta int) bool {
+	if delta > 0 {
+		m.logDetailScroll++
 		return true
 	}
-	if delta > 0 {
-		if m.logScroll < delta {
-			if m.logScroll == 0 {
-				return false
-			}
-			m.logScroll = 0
+	if delta < 0 {
+		if m.logDetailScroll <= 0 {
+			return false
+		}
+		m.logDetailScroll--
+		return true
+	}
+	return false
+}
+
+func (m *model) handleLogKey(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "j", "down":
+		if m.logDetailOpen {
+			m.logDetailScroll++
 			return true
 		}
-		m.logScroll -= delta
+		return m.moveLogCursor(1)
+	case "k", "up":
+		if m.logDetailOpen {
+			if m.logDetailScroll > 0 {
+				m.logDetailScroll--
+				return true
+			}
+			return false
+		}
+		return m.moveLogCursor(-1)
+	case "g", "home":
+		if m.logDetailOpen {
+			if m.logDetailScroll == 0 {
+				return false
+			}
+			m.logDetailScroll = 0
+			return true
+		}
+		return m.logCursorTop()
+	case "G", "end":
+		if m.logDetailOpen {
+			m.logDetailScroll = 1 << 30
+			return true
+		}
+		return m.logCursorBottom()
+	case "enter":
+		if m.logDetailOpen {
+			return true
+		}
+		entries := m.logEntriesNewestFirst()
+		if len(entries) == 0 {
+			return false
+		}
+		m.clampLogCursor()
+		if m.logCursor < 0 || m.logCursor >= len(entries) {
+			return false
+		}
+		m.logDetailEntry = entries[m.logCursor]
+		m.logDetailOpen = true
+		m.logDetailScroll = 0
+		return true
+	}
+	return false
+}
+
+func (m *model) handleLogDetailKey(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "j", "down":
+		m.logDetailScroll++
+		return true
+	case "k", "up":
+		if m.logDetailScroll > 0 {
+			m.logDetailScroll--
+			return true
+		}
+		return false
+	case "g", "home":
+		if m.logDetailScroll == 0 {
+			return false
+		}
+		m.logDetailScroll = 0
+		return true
+	case "G", "end":
+		m.logDetailScroll = 1 << 30
 		return true
 	}
 	return false
@@ -603,28 +794,7 @@ func (m *model) clampScroll() {
 		m.aliasScroll = 0
 	}
 	m.clampPayloadCursor()
-	m.clampLogScroll()
-}
-
-func (m *model) clampLogScroll() {
-	if m.logScroll < 0 {
-		m.logScroll = 0
-	}
-	if m.snapshot == nil || m.snapshot.Logs == nil {
-		if m.logScroll > 0 && m.snapshot == nil {
-			m.logScroll = 0
-		}
-		return
-	}
-	total := len(m.filteredLogs(1 << 30))
-	visible := m.logVisibleRows()
-	max := total - visible
-	if max < 0 {
-		max = 0
-	}
-	if m.logScroll > max {
-		m.logScroll = max
-	}
+	m.clampLogCursor()
 }
 
 func providerNoteCount(summaries []accounting.Summary) int {
@@ -823,6 +993,11 @@ func (m *model) render() string {
 		body := renderPayloadDetail(m, m.width, bodyHeight)
 		return fitView(lipgloss.JoinVertical(lipgloss.Left, header, rate, body, renderFooter(m)), m.width)
 	}
+	if m.logDetailOpen {
+		bodyHeight := zoomBodyHeight(m.height)
+		body := renderLogDetail(m, m.width, bodyHeight)
+		return fitView(lipgloss.JoinVertical(lipgloss.Left, header, rate, body, renderFooter(m)), m.width)
+	}
 	if m.zoomed {
 		bodyHeight := zoomBodyHeight(m.height)
 		var body string
@@ -934,8 +1109,8 @@ func (m *model) renderHelp() string {
 		"",
 		"  tab        cycle focus PROVIDERS / USAGE / bottom tabs",
 		"  1/2/3 or [/] switch bottom tab (Aliases / Logs / Payloads)",
-		"  enter      zoom focused pane to full screen (payloads: open entry)",
-		"  esc        unzoom / close payload detail (or quit when not zoomed)",
+		"  enter      zoom focused pane to full screen (logs/payloads: open entry)",
+		"  esc        unzoom / close log/payload detail (or quit when not zoomed)",
 		"  j/k dn/up  scroll focused pane   g/G,home/end top/bottom",
 		"  +/- J/K    resize bottom pane",
 		"  t          cycle tenant filter    e toggle errors-only",
@@ -1823,18 +1998,18 @@ func renderLogs(m *model, width, height int) string {
 	if m.focus == focusBottom && m.bottomTab == bottomTabLogs {
 		borderStyle = borderStyle.BorderForeground(lipgloss.Color("#38BDF8"))
 	}
-	var page []observability.LogEntry
-	var total int
-	if height > 3 {
-		visible := m.logVisibleRows()
-		total = len(m.filteredLogs(1 << 30))
-		all := m.filteredLogs(m.logScroll + visible)
-		start := 0
-		if len(all) > visible {
-			start = len(all) - visible
-		}
-		page = all[start:]
+	m.clampLogCursor()
+	entries := m.logEntriesNewestFirst()
+	visible := m.logVisibleRows()
+	start := m.logOffset
+	if start > len(entries) {
+		start = len(entries)
 	}
+	end := start + visible
+	if end > len(entries) {
+		end = len(entries)
+	}
+	page := entries[start:end]
 	attrsWidth := len("ATTRS")
 	for _, e := range page {
 		attrsWidth = max(attrsWidth, runeLen(orDash(e.Attrs)))
@@ -1851,21 +2026,92 @@ func renderLogs(m *model, width, height int) string {
 	if m.logFilterOn {
 		levelName = ">=" + m.logMinLevel.String()
 	}
-	title := fmt.Sprintf("LOGS (%s scroll:%d)", levelName, m.logScroll)
-	rows := []string{title, headerRow([]col{{"AT", 8}, {"LEVEL", 6}, {"MESSAGE", msgWidth}, {"ATTRS", attrsWidth}})}
-	if height > 3 {
-		visible := m.logVisibleRows()
-		for _, e := range page {
-			rows = append(rows, renderLogEntry(msgWidth, attrsWidth, e))
+	title := fmt.Sprintf("LOGS newest-first (%s)", levelName)
+	inner := width - 2
+	rows := []string{title, headerStyle.Render(fitRow(headerCells([]col{{"AT", 8}, {"LEVEL", 6}, {"MESSAGE", msgWidth}, {"ATTRS", attrsWidth}}), inner))}
+	if height <= 3 {
+		return borderStyle.Render(strings.Join(rows, "\n"))
+	}
+	if len(entries) == 0 {
+		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("no logs captured"))
+		return borderStyle.Render(strings.Join(rows, "\n"))
+	}
+	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
+	for i, e := range page {
+		idx := start + i
+		line := renderLogEntry(msgWidth, attrsWidth, e)
+		if idx == m.logCursor {
+			line = cursorStyle.Render("▸ " + line)
+		} else {
+			line = "  " + line
 		}
-		if len(page) == 0 {
-			rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("no logs captured"))
-		} else if total > visible {
-			shown := len(page)
-			rows[len(rows)-1] += fmt.Sprintf(" (%d/%d)", shown, total)
-		}
+		rows = append(rows, line)
+	}
+	if end < len(entries) {
+		rows = append(rows, fmt.Sprintf("… %d more (j/k move, enter detail)", len(entries)-end))
+	} else if len(entries) > visible {
+		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Render("[j/k] move [enter] detail"))
 	}
 	return borderStyle.Render(strings.Join(rows, "\n"))
+}
+
+func renderLogDetail(m *model, width, height int) string {
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#38BDF8")).
+		Width(width - 2).
+		Height(height - 2)
+	inner := width - 4
+	if inner < 10 {
+		inner = 10
+	}
+	e := m.logDetailEntry
+	title := "LOG " + e.Time.Format(time.RFC3339) + " " + e.Level.String()
+	lines := []string{title, "message: " + e.Message}
+	attrs := orDash(e.Attrs)
+	raw := []string{"level: " + e.Level.String(), "time: " + e.Time.Format(time.RFC3339Nano)}
+	raw = append(raw, wrapText("message: "+e.Message, inner)...)
+	raw = append(raw, wrapText("attrs: "+attrs, inner)...)
+	visible := height - 5
+	if visible < 1 {
+		visible = 1
+	}
+	_ = lines
+	start := m.logDetailScroll
+	if start > len(raw)-1 {
+		start = len(raw) - 1
+	}
+	if start < 0 {
+		start = 0
+	}
+	m.logDetailScroll = start
+	end := start + visible
+	if end > len(raw) {
+		end = len(raw)
+	}
+	for _, l := range raw[start:end] {
+		lines = append(lines, truncate(l, inner))
+	}
+	if end < len(raw) {
+		lines = append(lines, fmt.Sprintf("… %d more lines (j/k scroll, esc back)", len(raw)-end))
+	} else {
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Render("[j/k] scroll [esc] back"))
+	}
+	return borderStyle.Render(strings.Join(lines, "\n"))
+}
+
+func wrapText(s string, width int) []string {
+	if width < 1 {
+		return []string{s}
+	}
+	r := []rune(s)
+	var out []string
+	for len(r) > width {
+		out = append(out, string(r[:width]))
+		r = r[width:]
+	}
+	out = append(out, string(r))
+	return out
 }
 
 func renderLogEntry(msgWidth, attrsWidth int, e observability.LogEntry) string {

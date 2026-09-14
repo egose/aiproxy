@@ -4057,6 +4057,18 @@ func parsePayloadLogInput(src []byte, block *hclsyntax.Block) *configedit.Payloa
 			out.MaxBodyBytes = &n
 		}
 	}
+	if nested := findNestedBlock(block.Body, "mongodb"); nested != nil {
+		out.Mongo = parsePayloadMongoInput(src, nested)
+	}
+	return out
+}
+
+func parsePayloadMongoInput(src []byte, block *hclsyntax.Block) *configedit.PayloadMongoInput {
+	out := &configedit.PayloadMongoInput{}
+	out.URI = parseLiteralOrExpression(attributeExpr(src, block.Body, "uri"))
+	out.Database = parseLiteralOrExpression(attributeExpr(src, block.Body, "database"))
+	out.Collection = parseLiteralOrExpression(attributeExpr(src, block.Body, "collection"))
+	out.Timeout = parseLiteralOrExpression(attributeExpr(src, block.Body, "timeout"))
 	return out
 }
 

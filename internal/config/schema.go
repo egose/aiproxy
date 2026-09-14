@@ -42,11 +42,19 @@ type rawLogging struct {
 }
 
 type rawPayloadLog struct {
-	Enabled      *bool  `hcl:"enabled,optional"`
-	Dir          string `hcl:"dir,optional"`
-	Rotation     string `hcl:"rotation,optional"`
-	Retention    string `hcl:"retention,optional"`
-	MaxBodyBytes *int   `hcl:"max_body_bytes,optional"`
+	Enabled      *bool            `hcl:"enabled,optional"`
+	Dir          string           `hcl:"dir,optional"`
+	Rotation     string           `hcl:"rotation,optional"`
+	Retention    string           `hcl:"retention,optional"`
+	MaxBodyBytes *int             `hcl:"max_body_bytes,optional"`
+	Mongo        *rawPayloadMongo `hcl:"mongodb,block"`
+}
+
+type rawPayloadMongo struct {
+	URI        string `hcl:"uri,optional"`
+	Database   string `hcl:"database,optional"`
+	Collection string `hcl:"collection,optional"`
+	Timeout    string `hcl:"timeout,optional"`
 }
 
 type rawListener struct {

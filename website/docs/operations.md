@@ -371,9 +371,26 @@ logging {
     rotation       = "daily"
     retention      = "168h"
     max_body_bytes = 1048576
+
+    mongodb {
+      uri        = env("AIPROXY_PAYLOAD_MONGO_URI")
+      database   = "aiproxy"
+      collection = "payloads"
+      timeout    = "5s"
+    }
   }
 }
 ```
+
+The disk backend (`dir`) and the MongoDB backend (`mongodb`) are enabled
+independently: set `dir` for JSONL files, `uri` for one MongoDB document per
+request with the same JSON field names, or both to fan out to both. When
+enabled, at least one backend is required. Recording is best-effort and never
+fails a request; a bad MongoDB URI fails startup fast instead.
+
+The dashboard and TUI payload viewer read from the disk backend only: with
+MongoDB-only logging (no `dir`), the viewer reports payload logging as
+disabled.
 
 Files are split by datetime so no single file grows without bound: `daily`
 rotation writes `payload-YYYYMMDD.jsonl` and `hourly` writes

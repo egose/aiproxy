@@ -85,6 +85,10 @@ const (
 	PayloadLogFilePrefix        = "payload-"
 	PayloadLogFileExt           = ".jsonl"
 	PayloadLogRetentionDisabled = time.Duration(0)
+
+	DefaultPayloadMongoDatabase   = "aiproxy"
+	DefaultPayloadMongoCollection = "payloads"
+	DefaultPayloadMongoTimeout    = 5 * time.Second
 )
 
 type PayloadLog struct {
@@ -95,6 +99,15 @@ type PayloadLog struct {
 	MaxBodyBytes int
 	HasRetention bool
 	HasMaxBody   bool
+	Mongo        PayloadMongo
+}
+
+type PayloadMongo struct {
+	URI        string
+	Database   string
+	Collection string
+	Timeout    time.Duration
+	HasTimeout bool
 }
 
 type AuthMode string

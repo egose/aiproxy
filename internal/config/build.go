@@ -293,6 +293,33 @@ func buildLogging(rawLogging *rawLogging) (Logging, error) {
 			out.PayloadLog.MaxBodyBytes = *raw.MaxBodyBytes
 			out.PayloadLog.HasMaxBody = true
 		}
+		if raw.Mongo != nil {
+			mongo, err := buildPayloadMongo(raw.Mongo)
+			if err != nil {
+				return Logging{}, err
+			}
+			out.PayloadLog.Mongo = mongo
+		}
+	}
+	return out, nil
+}
+
+func buildPayloadMongo(raw *rawPayloadMongo) (PayloadMongo, error) {
+	out := PayloadMongo{Database: DefaultPayloadMongoDatabase, Collection: DefaultPayloadMongoCollection, Timeout: DefaultPayloadMongoTimeout}
+	out.URI = raw.URI
+	if raw.Database != "" {
+		out.Database = raw.Database
+	}
+	if raw.Collection != "" {
+		out.Collection = raw.Collection
+	}
+	if raw.Timeout != "" {
+		d, err := time.ParseDuration(raw.Timeout)
+		if err != nil {
+			return PayloadMongo{}, fmt.Errorf("logging.payload_log.mongodb.timeout: %w", err)
+		}
+		out.Timeout = d
+		out.HasTimeout = true
 	}
 	return out, nil
 }

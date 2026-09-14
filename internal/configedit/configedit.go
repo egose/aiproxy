@@ -143,6 +143,14 @@ type PayloadLogInput struct {
 	Rotation     string
 	Retention    string
 	MaxBodyBytes *int
+	Mongo        *PayloadMongoInput
+}
+
+type PayloadMongoInput struct {
+	URI        string
+	Database   string
+	Collection string
+	Timeout    string
 }
 
 type SecretsUpdate struct {
@@ -544,6 +552,30 @@ func RenderLoggingBlock(input LoggingInput) string {
 			b.WriteString("    max_body_bytes = ")
 			b.WriteString(strconv.Itoa(*input.PayloadLog.MaxBodyBytes))
 			b.WriteString("\n")
+		}
+		if input.PayloadLog.Mongo != nil {
+			b.WriteString("    mongodb {\n")
+			if input.PayloadLog.Mongo.URI != "" {
+				b.WriteString("      uri = ")
+				b.WriteString(RenderStringOrExpression(input.PayloadLog.Mongo.URI))
+				b.WriteString("\n")
+			}
+			if input.PayloadLog.Mongo.Database != "" {
+				b.WriteString("      database = ")
+				b.WriteString(strconv.Quote(input.PayloadLog.Mongo.Database))
+				b.WriteString("\n")
+			}
+			if input.PayloadLog.Mongo.Collection != "" {
+				b.WriteString("      collection = ")
+				b.WriteString(strconv.Quote(input.PayloadLog.Mongo.Collection))
+				b.WriteString("\n")
+			}
+			if input.PayloadLog.Mongo.Timeout != "" {
+				b.WriteString("      timeout = ")
+				b.WriteString(strconv.Quote(input.PayloadLog.Mongo.Timeout))
+				b.WriteString("\n")
+			}
+			b.WriteString("    }\n")
 		}
 		b.WriteString("  }\n")
 	}

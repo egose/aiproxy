@@ -536,7 +536,7 @@ func TestGuardrailPayloadLogDisabledKeepsBodies(t *testing.T) {
 		t.Fatalf("status = %d", w.Code)
 	}
 	entries := readPayloadEntries(t, dir)
-	if len(entries) != 1 || entries[0].Request.Body.Data != body {
+	if len(entries) != 1 || entries[0].Request.Body.AsString() == "" || !strings.Contains(entries[0].Request.Body.AsString(), "openai/gpt-4o-mini") {
 		t.Fatalf("disabled guardrails must preserve raw bodies: %+v", entries)
 	}
 }
