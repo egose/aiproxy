@@ -103,7 +103,7 @@ alias "chat_default" {
 ```
 
 - `passthrough = false` strips opaque reasoning blocks before fan-out (one upstream call, deterministic). `passthrough = true` (default) sends history intact.
-- `on_caller_mismatch = "strip_and_retry"` (default `"fail"`) retries the same target once with opaque blocks stripped when an upstream `400` matches `match_messages`. Unrelated `400`s return verbatim; streaming responses are never retried.
+- `on_caller_mismatch = "strip_and_retry"` (default `"fail"`) retries the same target once with opaque blocks stripped when an upstream `400` matches `match_messages`. Unrelated `400`s return verbatim; established SSE streams are never retried (immediate error responses to streaming requests are retried normally).
 - `match_messages` lists case-insensitive substrings matched against the upstream `400` body. Omitting it uses built-ins covering Console, OpenAI, and Anthropic phrasings; a non-empty list replaces them. Keep entries specific: a generic entry like `"error"` matches every `400`.
 - Plaintext reasoning summaries without opaque blobs are never stripped or matched. Direct `<provider>/<model>` requests are never stripped.
 
