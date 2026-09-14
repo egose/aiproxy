@@ -61,7 +61,7 @@ jobs:
         RELEASE_TAG: ${{ inputs.tag_name }}
 
     - name: Build, scan, and publish verified image
-      uses: egose/actions/docker-build-push@b5084ae08d5d42dda515204f5df7b1e7f464b74e
+      uses: egose/actions/docker-build-push@8921fa8a9af6c3b7c7d8ed2b2137527991681dec
       env:
         RELEASE_TAG: ${{ inputs.tag_name }}
         REVISION: ${{ steps.release.outputs.revision }}
@@ -82,7 +82,7 @@ jobs:
         docker-context: .
         docker-file: Dockerfile
         docker-args: VERSION=${{ steps.release.outputs.version }}
-        publish-mode: direct
+        publish-mode: gated
         pre-push-command: |
           command -v jq >/dev/null 2>&1 || {
             printf 'jq is required for fail-closed published digest verification\n' >&2
@@ -112,7 +112,7 @@ jobs:
             printf -- '- OCI revision label: `%s`\n' "$revision_label"
           } >> "$GITHUB_STEP_SUMMARY"
         trivy: 'true'
-        trivy-severity: HIGH,CRITICAL
+        trivy-severity: CRITICAL
         trivy-ignore-unfixed: 'true'
         sbom: 'true'
         attest-provenance: 'true'
