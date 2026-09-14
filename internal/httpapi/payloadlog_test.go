@@ -91,14 +91,20 @@ func TestPayloadLogUnary(t *testing.T) {
 	if e.PublicModel != "openai/gpt-4o-mini" || e.Provider != "openai" || e.Status != http.StatusOK {
 		t.Fatalf("entry = %+v", e)
 	}
-	if e.Request.Body.Data != body {
-		t.Fatalf("request body = %q", e.Request.Body.Data)
+	if e.Request.Body.AsString() == "" || !strings.Contains(e.Request.Body.AsString(), "openai/gpt-4o-mini") {
+		t.Fatalf("request body = %q", e.Request.Body.AsString())
+	}
+	if _, ok := e.Request.Body.Data.(map[string]any); !ok {
+		t.Fatalf("request body should decode as JSON object, got %T", e.Request.Body.Data)
 	}
 	if got := e.Request.Headers["Authorization"]; len(got) != 1 || got[0] != "[REDACTED]" {
 		t.Fatalf("request auth header = %v", got)
 	}
-	if !strings.Contains(e.Response.Body.Data, "chatcmpl-stub") {
-		t.Fatalf("response body = %q", e.Response.Body.Data)
+	if !strings.Contains(e.Response.Body.AsString(), "chatcmpl-stub") {
+		t.Fatalf("response body = %q", e.Response.Body.AsString())
+	}
+	if _, ok := e.Response.Body.Data.(map[string]any); !ok {
+		t.Fatalf("response body should decode as JSON object, got %T", e.Response.Body.Data)
 	}
 	if e.Streaming {
 		t.Fatalf("streaming should be false")
@@ -142,7 +148,7 @@ func TestPayloadLogStreaming(t *testing.T) {
 	if !e.Streaming {
 		t.Fatalf("streaming should be true: %+v", e)
 	}
-	if e.Response.Body.Data != streamBody || e.Response.Body.Bytes != len(streamBody) {
+	if e.Response.Body.AsString() != streamBody || e.Response.Body.Bytes != len(streamBody) {
 		t.Fatalf("response body = %+v", e.Response.Body)
 	}
 }

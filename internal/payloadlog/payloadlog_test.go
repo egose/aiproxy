@@ -113,8 +113,60 @@ func TestRecordRedactsAndTruncates(t *testing.T) {
 
 func TestEncodeBinaryBody(t *testing.T) {
 	b := EncodeBody([]byte{0xff, 0xfe, 0x00}, 0)
-	if b.Encoding != "base64" || b.Data == "" {
+	if b.Encoding != "base64" || b.AsString() == "" {
 		t.Fatalf("body = %+v, want base64", b)
+	}
+}
+
+func TestEncodeJSONBodyAsObject(t *testing.T) {
+	raw := `{"model":"m","messages":[]}`
+	b := EncodeBodyWithContentType([]byte(raw), 0, "application/json")
+	if b.Truncated || b.Encoding != "" {
+		t.Fatalf("body = %+v, want untruncated plain", b)
+	}
+	if s, ok := b.Data.(json.RawMessage); !ok || string(s) != raw {
+		t.Fatalf("data = %#v, want RawMessage %q", b.Data, raw)
+	}
+	line, err := json.Marshal(b)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(line), `"data":{`) {
+		t.Fatalf("line should embed object, got %s", line)
+	}
+	var decoded Body
+	if err := json.Unmarshal(line, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.AsString() == "" || !strings.Contains(decoded.AsString(), `"model"`) {
+		t.Fatalf("decoded = %+v", decoded)
+	}
+}
+
+func TestEncodeJSONBodyVariants(t *testing.T) {
+	raw := `{"ok":true}`
+	for _, ct := range []string{"application/json; charset=utf-8", "Application/JSON", "application/vnd.api+json", "application/problem+json"} {
+		b := EncodeBodyWithContentType([]byte(raw), 0, ct)
+		if _, ok := b.Data.(json.RawMessage); !ok {
+			t.Fatalf("ct %q: data = %#v, want object", ct, b.Data)
+		}
+	}
+	for _, ct := range []string{"", "text/plain", "text/event-stream"} {
+		b := EncodeBodyWithContentType([]byte(raw), 0, ct)
+		if s, ok := b.Data.(string); !ok || s != raw {
+			t.Fatalf("ct %q: data = %#v, want string", ct, b.Data)
+		}
+	}
+	b := EncodeBodyWithContentType([]byte(`not json`), 0, "application/json")
+	if s, ok := b.Data.(string); !ok || s != `not json` {
+		t.Fatalf("invalid json: data = %#v", b.Data)
+	}
+	b = EncodeBodyWithContentType([]byte(raw), 2, "application/json")
+	if !b.Truncated {
+		t.Fatalf("expected truncation: %+v", b)
+	}
+	if s, ok := b.Data.(string); !ok || s != raw[:2] {
+		t.Fatalf("truncated json should stay string: %#v", b.Data)
 	}
 }
 

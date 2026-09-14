@@ -262,6 +262,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var payloadCapture *payloadlog.Capture
 	if deps.PayloadLog != nil {
 		reqHeaders := payloadlog.RedactHeaders(r.Header)
+		reqContentType := r.Header.Get("Content-Type")
 		var reqBody []byte
 		if !omitRequestBody {
 			reqBody = body
@@ -278,7 +279,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Provider:    accountingProvider,
 				Request: payloadlog.EntrySide{
 					Headers: reqHeaders,
-					Body:    payloadlog.EncodeBody(reqBody, deps.PayloadLog.MaxBodyBytes()),
+					Body:    payloadlog.EncodeBodyWithContentType(reqBody, deps.PayloadLog.MaxBodyBytes(), reqContentType),
 				},
 			}
 			if opKnown {
@@ -293,18 +294,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				entry.UpstreamModel = accountingUpstream
 				entry.Response = payloadlog.EntrySide{
 					Headers: payloadlog.RedactHeaders(result.Header),
-					Body:    payloadCapture.Body(),
+					Body:    payloadCapture.BodyWithContentType(result.Header.Get("Content-Type")),
 				}
 			case result != nil && !result.Streaming:
 				entry.UpstreamModel = accountingUpstream
 				entry.Response = payloadlog.EntrySide{
 					Headers: payloadlog.RedactHeaders(result.Header),
-					Body:    payloadlog.EncodeBody(result.Body, deps.PayloadLog.MaxBodyBytes()),
+					Body:    payloadlog.EncodeBodyWithContentType(result.Body, deps.PayloadLog.MaxBodyBytes(), result.Header.Get("Content-Type")),
 				}
 			default:
 				entry.Response = payloadlog.EntrySide{
 					Headers: payloadlog.RedactHeaders(rw.Header()),
-					Body:    payloadlog.EncodeBody(nil, 0),
+					Body:    payloadlog.EncodeBodyWithContentType(nil, 0, rw.Header().Get("Content-Type")),
 				}
 			}
 			_ = deps.PayloadLog.Record(entry)

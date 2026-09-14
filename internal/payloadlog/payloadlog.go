@@ -20,7 +20,7 @@ type Body struct {
 	Bytes     int    `json:"bytes"`
 	Truncated bool   `json:"truncated,omitempty"`
 	Encoding  string `json:"encoding,omitempty"`
-	Data      string `json:"data"`
+	Data      any    `json:"data"`
 }
 
 type Entry struct {
@@ -71,6 +71,15 @@ func RedactHeaders(h http.Header) map[string][]string {
 }
 
 func EncodeBody(b []byte, max int) Body {
+	return EncodeBodyWithContentType(b, max, "")
+}
+
+func isJSONContentType(contentType string) bool {
+	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	return mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")
+}
+
+func EncodeBodyWithContentType(b []byte, max int, contentType string) Body {
 	out := Body{Bytes: len(b)}
 	data := b
 	if max > 0 && len(data) > max {
@@ -82,8 +91,31 @@ func EncodeBody(b []byte, max int) Body {
 		out.Data = base64.StdEncoding.EncodeToString(data)
 		return out
 	}
+	if !out.Truncated && isJSONContentType(contentType) && len(data) > 0 && json.Valid(data) {
+		out.Data = append(json.RawMessage(nil), data...)
+		return out
+	}
 	out.Data = string(data)
 	return out
+}
+
+func (b Body) AsString() string {
+	switch v := b.Data.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case json.RawMessage:
+		return string(v)
+	case []byte:
+		return string(v)
+	default:
+		out, err := json.Marshal(v)
+		if err != nil {
+			return ""
+		}
+		return string(out)
+	}
 }
 
 type Logger struct {
@@ -301,8 +333,19 @@ func (c *Capture) Close() error {
 }
 
 func (c *Capture) Body() Body {
-	out := EncodeBody(c.buf, 0)
+	return c.BodyWithContentType("")
+}
+
+func (c *Capture) BodyWithContentType(contentType string) Body {
+	truncated := c.truncated || (c.max > 0 && c.total > c.max)
+	if truncated {
+		out := EncodeBody(c.buf, 0)
+		out.Bytes = c.total
+		out.Truncated = true
+		return out
+	}
+	out := EncodeBodyWithContentType(c.buf, 0, contentType)
 	out.Bytes = c.total
-	out.Truncated = c.truncated || (c.max > 0 && c.total > c.max)
+	out.Truncated = false
 	return out
 }
