@@ -408,8 +408,8 @@ func TestAdapterUsesProvidedBodyWithoutReadingInboundBody(t *testing.T) {
 func TestExecuteUpstreamPrefersStreamingWhenConfigured(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte("data: boom\n\n"))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: hello\n\n"))
 	}))
 	defer upstream.Close()
 
@@ -470,6 +470,34 @@ func TestExecuteUpstreamUsesErrorHandlerForNonStreamingErrors(t *testing.T) {
 		t.Fatalf("status = %d", result.StatusCode)
 	}
 	if string(result.Body) != `wrapped:{"error":"boom"}` {
+		t.Fatalf("body = %s", result.Body)
+	}
+}
+
+func TestExecuteUpstreamErrorNeverStreamsForStreamingRequest(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"reasoning encrypted_content was not issued to this caller"}}`))
+	}))
+	defer upstream.Close()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, upstream.URL, http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	r := Request{Client: upstream.Client(), Body: []byte(`{"model":"m","stream":true}`)}
+	result, err := executeUpstream(r, req, openAIPassthroughHandlers(r, isStream(r.Body)))
+	if err != nil {
+		t.Fatalf("executeUpstream: %v", err)
+	}
+	if result.Streaming {
+		t.Fatalf("error result must not stream, got %+v", result)
+	}
+	if result.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d", result.StatusCode)
+	}
+	if !strings.Contains(string(result.Body), "not issued to this caller") {
 		t.Fatalf("body = %s", result.Body)
 	}
 }

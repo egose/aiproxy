@@ -136,6 +136,7 @@ type model struct {
 	aliasScroll         int
 	logCursor           int
 	logOffset           int
+	logCursorSeq        uint64
 	logDetailOpen       bool
 	logDetailEntry      observability.LogEntry
 	logDetailScroll     int
@@ -417,6 +418,7 @@ func (m *model) handleKey(msg tea.KeyMsg) bool {
 		m.cycleLogLevel()
 		m.logCursor = 0
 		m.logOffset = 0
+		m.logCursorSeq = 0
 		m.logDetailOpen = false
 		m.logDetailScroll = 0
 		m.bottomTab = bottomTabLogs
@@ -609,11 +611,28 @@ func (m *model) logEntriesNewestFirst() []observability.LogEntry {
 }
 
 func (m *model) clampLogCursor() {
-	n := len(m.filteredLogs(1 << 30))
+	m.clampLogCursorTo(m.logEntriesNewestFirst())
+}
+
+func (m *model) clampLogCursorTo(entries []observability.LogEntry) {
+	n := len(entries)
 	if n == 0 {
 		m.logCursor = 0
 		m.logOffset = 0
+		m.logCursorSeq = 0
 		return
+	}
+	if m.logCursor == 0 && m.logOffset == 0 {
+		m.logCursorSeq = entries[0].Seq
+		return
+	}
+	if m.logCursorSeq != 0 {
+		for i, e := range entries {
+			if e.Seq == m.logCursorSeq {
+				m.logCursor = i
+				break
+			}
+		}
 	}
 	if m.logCursor < 0 {
 		m.logCursor = 0
@@ -621,6 +640,7 @@ func (m *model) clampLogCursor() {
 	if m.logCursor >= n {
 		m.logCursor = n - 1
 	}
+	m.logCursorSeq = entries[m.logCursor].Seq
 	visible := m.bottomVisibleRows()
 	if visible < 1 {
 		visible = 1
@@ -644,42 +664,49 @@ func (m *model) clampLogCursor() {
 }
 
 func (m *model) moveLogCursor(delta int) bool {
-	if len(m.filteredLogs(1<<30)) == 0 {
+	entries := m.logEntriesNewestFirst()
+	if len(entries) == 0 {
 		return false
 	}
-	m.clampLogCursor()
+	m.clampLogCursorTo(entries)
 	next := m.logCursor + delta
-	n := len(m.filteredLogs(1 << 30))
 	if next < 0 {
 		next = 0
 	}
-	if next >= n {
-		next = n - 1
+	if next >= len(entries) {
+		next = len(entries) - 1
 	}
 	if next == m.logCursor {
 		return false
 	}
 	m.logCursor = next
-	m.clampLogCursor()
+	m.logCursorSeq = entries[next].Seq
+	m.clampLogCursorTo(entries)
 	return true
 }
 
 func (m *model) logCursorTop() bool {
+	entries := m.logEntriesNewestFirst()
+	if len(entries) == 0 {
+		return false
+	}
 	if m.logCursor == 0 && m.logOffset == 0 {
 		return false
 	}
 	m.logCursor = 0
 	m.logOffset = 0
+	m.logCursorSeq = entries[0].Seq
 	return true
 }
 
 func (m *model) logCursorBottom() bool {
-	n := len(m.filteredLogs(1 << 30))
-	if n == 0 || m.logCursor == n-1 {
+	entries := m.logEntriesNewestFirst()
+	if len(entries) == 0 || m.logCursor == len(entries)-1 {
 		return false
 	}
-	m.logCursor = n - 1
-	m.clampLogCursor()
+	m.logCursor = len(entries) - 1
+	m.logCursorSeq = entries[m.logCursor].Seq
+	m.clampLogCursorTo(entries)
 	return true
 }
 
@@ -738,11 +765,12 @@ func (m *model) handleLogKey(msg tea.KeyMsg) bool {
 		if len(entries) == 0 {
 			return false
 		}
-		m.clampLogCursor()
+		m.clampLogCursorTo(entries)
 		if m.logCursor < 0 || m.logCursor >= len(entries) {
 			return false
 		}
 		m.logDetailEntry = entries[m.logCursor]
+		m.logCursorSeq = entries[m.logCursor].Seq
 		m.logDetailOpen = true
 		m.logDetailScroll = 0
 		return true
@@ -1998,20 +2026,46 @@ func renderLogs(m *model, width, height int) string {
 	if m.focus == focusBottom && m.bottomTab == bottomTabLogs {
 		borderStyle = borderStyle.BorderForeground(lipgloss.Color("#38BDF8"))
 	}
-	m.clampLogCursor()
 	entries := m.logEntriesNewestFirst()
 	visible := m.logVisibleRows()
-	start := m.logOffset
-	if start > len(entries) {
-		start = len(entries)
+	if visible < 1 {
+		visible = 1
 	}
+	cursor := m.logCursor
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= len(entries) {
+		cursor = len(entries) - 1
+	}
+	offset := m.logOffset
+	if offset < 0 {
+		offset = 0
+	}
+	maxOff := len(entries) - visible
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if offset > maxOff {
+		offset = maxOff
+	}
+	if offset > cursor {
+		offset = cursor
+	}
+	if offset < cursor-visible+1 {
+		offset = cursor - visible + 1
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	start := offset
 	end := start + visible
 	if end > len(entries) {
 		end = len(entries)
 	}
 	page := entries[start:end]
 	attrsWidth := len("ATTRS")
-	for _, e := range page {
+	for _, e := range entries {
 		attrsWidth = max(attrsWidth, runeLen(orDash(e.Attrs)))
 	}
 	msgWidth := width - 8 - 6 - 4 - attrsWidth - 8
@@ -2040,7 +2094,7 @@ func renderLogs(m *model, width, height int) string {
 	for i, e := range page {
 		idx := start + i
 		line := renderLogEntry(msgWidth, attrsWidth, e)
-		if idx == m.logCursor {
+		if idx == cursor {
 			line = cursorStyle.Render("▸ " + line)
 		} else {
 			line = "  " + line
@@ -2067,7 +2121,7 @@ func renderLogDetail(m *model, width, height int) string {
 	}
 	e := m.logDetailEntry
 	title := "LOG " + e.Time.Format(time.RFC3339) + " " + e.Level.String()
-	lines := []string{title, "message: " + e.Message}
+	lines := []string{title}
 	attrs := orDash(e.Attrs)
 	raw := []string{"level: " + e.Level.String(), "time: " + e.Time.Format(time.RFC3339Nano)}
 	raw = append(raw, wrapText("message: "+e.Message, inner)...)
@@ -2076,7 +2130,6 @@ func renderLogDetail(m *model, width, height int) string {
 	if visible < 1 {
 		visible = 1
 	}
-	_ = lines
 	start := m.logDetailScroll
 	if start > len(raw)-1 {
 		start = len(raw) - 1

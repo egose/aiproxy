@@ -348,11 +348,6 @@ func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHand
 		return nil, fmt.Errorf("upstream call: %w", err)
 	}
 	delay, hasDelay := ParseRetryCooldown(resp.Header, time.Now())
-	isStreaming := handlers.IsStreaming != nil && handlers.IsStreaming(resp)
-	if handlers.PreferStreaming && isStreaming {
-		res, streamErr := handlers.OnStream(resp)
-		return attachCooldownDelay(res, delay, hasDelay), withCooldownError(streamErr, delay, hasDelay)
-	}
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
 		body, err := readUpstreamBody(resp.Body)
@@ -364,6 +359,11 @@ func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHand
 		}
 		res, handlerErr := handlers.OnError(resp, body)
 		return attachCooldownDelay(res, delay, hasDelay), withCooldownError(handlerErr, delay, hasDelay)
+	}
+	isStreaming := handlers.IsStreaming != nil && handlers.IsStreaming(resp)
+	if handlers.PreferStreaming && isStreaming {
+		res, streamErr := handlers.OnStream(resp)
+		return attachCooldownDelay(res, delay, hasDelay), withCooldownError(streamErr, delay, hasDelay)
 	}
 	if isStreaming {
 		res, streamErr := handlers.OnStream(resp)
