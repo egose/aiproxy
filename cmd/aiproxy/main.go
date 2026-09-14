@@ -188,17 +188,25 @@ func currentConfigStatusText() string {
 }
 
 func newPathsCommand() *cobra.Command {
-	return &cobra.Command{
+	var cfgPath string
+	cmd := &cobra.Command{
 		Use:   "paths",
-		Short: "Print resolved default config and secrets paths",
+		Short: "Print resolved default config, secrets, and payload log paths",
 		Run: func(cmd *cobra.Command, args []string) {
-			configDisplay := defaultConfigPath()
-			if _, ok := config.EnvConfigContent(); ok {
-				configDisplay = config.EnvConfigFilename + " (AIPROXY_CONFIG is set; --config overrides)"
+			configDisplay := cfgPath
+			if !configFlagExplicit(cmd) {
+				if _, ok := config.EnvConfigContent(); ok {
+					configDisplay = config.EnvConfigFilename + " (AIPROXY_CONFIG is set; --config overrides)"
+				}
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "config: %s\nsecrets: %s\n", configDisplay, defaultSecretsPath())
+			if rt, err := loadConfigForCommand(cfgPath, cmd); err == nil && rt.Logging.PayloadLog.Enabled && rt.Logging.PayloadLog.Dir != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "payload_log: %s\n", rt.Logging.PayloadLog.Dir)
+			}
 		},
 	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", defaultConfigPath(), "path to config file (overrides $AIPROXY_CONFIG)")
+	return cmd
 }
 
 func newExamplesCommand() *cobra.Command {
