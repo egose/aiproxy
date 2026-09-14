@@ -58,6 +58,10 @@ const toc = [{
   "id": "failover-rules",
   "level": 2
 }, {
+  "value": "Alias Encrypted Reasoning",
+  "id": "alias-encrypted-reasoning",
+  "level": 2
+}, {
   "value": "Upstream Retry Cooldown",
   "id": "upstream-retry-cooldown",
   "level": 2
@@ -251,6 +255,66 @@ function _createMdxContent(props) {
       }), " statuses are an alias failover policy only. They do not mark the provider unhealthy; provider health is mutated by transport/upstream request errors and upstream ", (0,jsx_runtime.jsx)(_components.code, {
         children: "5xx"
       }), " responses."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "alias-encrypted-reasoning",
+      children: "Alias Encrypted Reasoning"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Clients that replay prior-turn thinking blocks (extended thinking / reasoning passthrough) send caller-bound opaque blobs (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "encrypted_content"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "signature"
+      }), ", redacted thinking) that the issuing model rejects when the pool routes the next turn to a different credential (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "not issued to this caller"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "invalid_encrypted_content"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Invalid signature"
+      }), "). The optional ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "encrypted_reasoning"
+      }), " block controls this per alias for ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/chat/completions"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/responses"
+      }), ":"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "alias \"chat_default\" {\n  algorithm = \"round_robin\"\n  encrypted_reasoning {\n    passthrough        = true\n    on_caller_mismatch = \"strip_and_retry\"\n  }\n  target { provider = \"spark-a\" model = \"muse-spark\" }\n  target { provider = \"spark-b\" model = \"muse-spark\" }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "passthrough = false"
+        }), " strips opaque reasoning blocks before fan-out (one upstream call, deterministic). ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "passthrough = true"
+        }), " (default) sends history intact."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "on_caller_mismatch = \"strip_and_retry\""
+        }), " (default ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "\"fail\""
+        }), ") retries the same target once with opaque blocks stripped when an upstream ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "400"
+        }), " matches ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "match_messages"
+        }), ". Unrelated ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "400"
+        }), "s return verbatim; streaming responses are never retried."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "match_messages"
+        }), " lists case-insensitive substrings matched against the upstream ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "400"
+        }), " body. Omitting it uses built-ins covering Console, OpenAI, and Anthropic phrasings; a non-empty list replaces them. Keep entries specific: a generic entry like ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "\"error\""
+        }), " matches every ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "400"
+        }), "."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Plaintext reasoning summaries without opaque blobs are never stripped or matched. Direct ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "<provider>/<model>"
+        }), " requests are never stripped."]
+      }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "upstream-retry-cooldown",
       children: "Upstream Retry Cooldown"
