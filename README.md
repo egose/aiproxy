@@ -191,6 +191,11 @@ changing the static inventory.
   upstream statuses listed in `retry_status_codes`. The default is `500`, `502`,
   `503`, and `504`; configured `4xx` statuses such as `429` can be retried.
   Other upstream `4xx` responses are returned verbatim.
+- Alias encrypted reasoning: optional `encrypted_reasoning` block strips
+  caller-bound opaque reasoning blobs (`encrypted_content`, `signature`,
+  redacted thinking) before fan-out (`passthrough = false`), or retries
+  the same target once stripped when an upstream `400` matches
+  `match_messages` (`on_caller_mismatch = "strip_and_retry")
 
 ### Not Implemented
 

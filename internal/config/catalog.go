@@ -184,5 +184,10 @@ func cloneAlias(alias Alias) Alias {
 		affinity.Headers = append([]string(nil), alias.SessionAffinity.Headers...)
 		alias.SessionAffinity = &affinity
 	}
+	if alias.EncryptedReasoning != nil {
+		er := *alias.EncryptedReasoning
+		er.MatchMessages = append([]string(nil), alias.EncryptedReasoning.MatchMessages...)
+		alias.EncryptedReasoning = &er
+	}
 	return alias
 }

@@ -141,6 +141,22 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 			}
 			alias.SessionAffinity = &SessionAffinity{Headers: headers}
 		}
+		if al.EncryptedReasoning != nil {
+			er := &EncryptedReasoning{Passthrough: true, OnCallerMismatch: EncryptedReasoningFail}
+			if al.EncryptedReasoning.Passthrough != nil {
+				er.Passthrough = *al.EncryptedReasoning.Passthrough
+			}
+			if al.EncryptedReasoning.OnCallerMismatch != "" {
+				er.OnCallerMismatch = al.EncryptedReasoning.OnCallerMismatch
+			}
+			for _, m := range al.EncryptedReasoning.MatchMessages {
+				er.MatchMessages = append(er.MatchMessages, strings.ToLower(strings.TrimSpace(m)))
+			}
+			if len(er.MatchMessages) == 0 {
+				er.MatchMessages = append([]string(nil), DefaultEncryptedReasoningMatchMessages...)
+			}
+			alias.EncryptedReasoning = er
+		}
 		for _, t := range al.Targets {
 			if disabledProviderNames[t.Provider] {
 				continue

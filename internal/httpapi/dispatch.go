@@ -204,6 +204,16 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 		retryCodes[code] = true
 	}
 	pool := resolveAliasPool(deps, r.Alias.Name, r.Alias.Targets)
+	er := encryptedReasoningEffective(r.Alias)
+	stripApplies := encryptedReasoningApplies(op)
+	conditionalRetry := stripApplies && er.Passthrough && er.OnCallerMismatch == config.EncryptedReasoningStripAndRetry
+	strippedAttempted := false
+	if stripApplies && !er.Passthrough {
+		if stripped, ok := stripOpaqueBlocks(op, body); ok {
+			body = stripped
+			strippedAttempted = true
+		}
+	}
 	var cooldowns *modelresolver.CooldownStore
 	if deps.Resolver != nil {
 		cooldowns = deps.Resolver.Cooldowns()
@@ -240,6 +250,7 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 		}
 	}
 	affinityPending := hasSession
+targetLoop:
 	for {
 		var t alias.Target
 		var releaseLease func()
@@ -317,107 +328,121 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 				}
 			})
 		}
-		req := cloneRequestWithBody(ctx, inbound, body)
-		start := time.Now()
-		result, err := deps.Adapter.Do(ctx, provider.Request{
-			Operation:     op,
-			ProviderType:  prov.Type,
-			PublicModel:   "alias/" + r.Alias.Name,
-			BaseURL:       prov.BaseURL,
-			APIKey:        prov.APIKey,
-			CopilotToken:  prov.CopilotToken,
-			UpstreamModel: model.UpstreamName,
-			ModelProtocol: model.Protocol,
-			UserAgent:     prov.UserAgent,
-			Version:       deps.Version,
-			Body:          body,
-			Inbound:       req,
-			Client:        clientForProvider(deps, prov),
-		})
-		if result != nil {
-			result.Provider = t.Provider
-			result.UpstreamModel = upstreamDisplayName(model)
-		}
-		if deps.Metrics != nil && (result == nil || !result.Streaming) {
-			status := 0
-			if result != nil {
-				status = result.StatusCode
-			}
-			deps.Metrics.RecordUpstream(op, t.Provider, status, err, time.Since(start).Seconds())
-		}
-		if deps.AccessLog && (result == nil || !result.Streaming) {
-			attrs := []any{
-				"alias", r.Alias.Name,
-				"provider", t.Provider,
-				"provider_type", prov.Type,
-				"upstream_model", model.UpstreamName,
-				"duration_ms", time.Since(start).Milliseconds(),
-			}
-			if result != nil {
-				attrs = append(attrs, "status", result.StatusCode)
-			}
-			if err != nil {
-				attrs = append(attrs, "error", err)
-			}
-			targetLogger.Info("upstream request finished", attrs...)
-		}
-		if result != nil && result.Streaming && err == nil {
-			h.attachStreamFinalizers(deps, ctx, op, t.Provider, result, start, targetLogger, []any{
-				"alias", r.Alias.Name,
-				"provider", t.Provider,
-				"provider_type", prov.Type,
-				"upstream_model", model.UpstreamName,
+		currentBody := body
+		for {
+			req := cloneRequestWithBody(ctx, inbound, currentBody)
+			start := time.Now()
+			result, err := deps.Adapter.Do(ctx, provider.Request{
+				Operation:     op,
+				ProviderType:  prov.Type,
+				PublicModel:   "alias/" + r.Alias.Name,
+				BaseURL:       prov.BaseURL,
+				APIKey:        prov.APIKey,
+				CopilotToken:  prov.CopilotToken,
+				UpstreamModel: model.UpstreamName,
+				ModelProtocol: model.Protocol,
+				UserAgent:     prov.UserAgent,
+				Version:       deps.Version,
+				Body:          currentBody,
+				Inbound:       req,
+				Client:        clientForProvider(deps, prov),
 			})
-		} else {
-			h.recordProviderHealth(deps, ctx, t.Provider, result, err, false)
-		}
-		h.instrumentUpstreamResponseSize(deps, op, t.Provider, result, err)
-		if err != nil {
-			releaseTarget()
-			var invalid provider.ErrInvalidRequest
-			if errors.As(err, &invalid) {
-				if pending != nil {
-					closeResult(pending)
-					pending = nil
+			if result != nil {
+				result.Provider = t.Provider
+				result.UpstreamModel = upstreamDisplayName(model)
+			}
+			if deps.Metrics != nil && (result == nil || !result.Streaming) {
+				status := 0
+				if result != nil {
+					status = result.StatusCode
 				}
-				return nil, err
+				deps.Metrics.RecordUpstream(op, t.Provider, status, err, time.Since(start).Seconds())
 			}
-			observeCooldownError(cooldowns, ctx, fp, err)
-			lastErr = err
-			pendingRetryProvider, pendingRetryModel, pendingRetryReason = t.Provider, t.Model, "error"
-			hasPendingRetry = true
-			targetLogger.Warn("alias target failed", "error", err)
-			continue
-		}
-		observeCooldownResult(cooldowns, ctx, fp, result)
-		existingClose := result.OnClose
-		result.OnClose = func() {
-			if existingClose != nil {
-				existingClose()
-			}
-			releaseTarget()
-		}
-		if retryCodes[result.StatusCode] {
-			if remaining, ok := allCoolingRemaining(cooldowns, pool); ok {
-				if pending != nil {
-					closeResult(pending)
-					pending = nil
+			if deps.AccessLog && (result == nil || !result.Streaming) {
+				attrs := []any{
+					"alias", r.Alias.Name,
+					"provider", t.Provider,
+					"provider_type", prov.Type,
+					"upstream_model", model.UpstreamName,
+					"duration_ms", time.Since(start).Milliseconds(),
 				}
-				closeResult(result)
-				return provider.SyntheticCooldownResult(remaining), nil
+				if result != nil {
+					attrs = append(attrs, "status", result.StatusCode)
+				}
+				if err != nil {
+					attrs = append(attrs, "error", err)
+				}
+				targetLogger.Info("upstream request finished", attrs...)
 			}
-			reason := "upstream_status"
-			if result.StatusCode >= 500 {
-				reason = "upstream_5xx"
+			if result != nil && result.Streaming && err == nil {
+				h.attachStreamFinalizers(deps, ctx, op, t.Provider, result, start, targetLogger, []any{
+					"alias", r.Alias.Name,
+					"provider", t.Provider,
+					"provider_type", prov.Type,
+					"upstream_model", model.UpstreamName,
+				})
+			} else {
+				h.recordProviderHealth(deps, ctx, t.Provider, result, err, false)
 			}
-			pending = result
-			pendingRetryProvider, pendingRetryModel, pendingRetryReason = t.Provider, t.Model, reason
-			hasPendingRetry = true
-			lastErr = fmt.Errorf("upstream returned status %d", result.StatusCode)
-			targetLogger.Warn("alias target returned retryable status, retrying", "status", result.StatusCode)
-			continue
+			h.instrumentUpstreamResponseSize(deps, op, t.Provider, result, err)
+			if err != nil {
+				releaseTarget()
+				var invalid provider.ErrInvalidRequest
+				if errors.As(err, &invalid) {
+					if pending != nil {
+						closeResult(pending)
+						pending = nil
+					}
+					return nil, err
+				}
+				observeCooldownError(cooldowns, ctx, fp, err)
+				lastErr = err
+				pendingRetryProvider, pendingRetryModel, pendingRetryReason = t.Provider, t.Model, "error"
+				hasPendingRetry = true
+				targetLogger.Warn("alias target failed", "error", err)
+				continue targetLoop
+			}
+			observeCooldownResult(cooldowns, ctx, fp, result)
+			if err == nil && !strippedAttempted && conditionalRetry && result != nil && !result.Streaming &&
+				isCallerMismatch(result.StatusCode, result.Body, er.MatchMessages) && requestHadOpaqueBlocks(currentBody) {
+				if stripped, ok := stripOpaqueBlocks(op, currentBody); ok {
+					closeResult(result)
+					strippedAttempted = true
+					body = stripped
+					currentBody = stripped
+					targetLogger.Warn("alias target rejected encrypted reasoning, retrying stripped")
+					continue
+				}
+			}
+			existingClose := result.OnClose
+			result.OnClose = func() {
+				if existingClose != nil {
+					existingClose()
+				}
+				releaseTarget()
+			}
+			if retryCodes[result.StatusCode] {
+				if remaining, ok := allCoolingRemaining(cooldowns, pool); ok {
+					if pending != nil {
+						closeResult(pending)
+						pending = nil
+					}
+					closeResult(result)
+					return provider.SyntheticCooldownResult(remaining), nil
+				}
+				reason := "upstream_status"
+				if result.StatusCode >= 500 {
+					reason = "upstream_5xx"
+				}
+				pending = result
+				pendingRetryProvider, pendingRetryModel, pendingRetryReason = t.Provider, t.Model, reason
+				hasPendingRetry = true
+				lastErr = fmt.Errorf("upstream returned status %d", result.StatusCode)
+				targetLogger.Warn("alias target returned retryable status, retrying", "status", result.StatusCode)
+				continue targetLoop
+			}
+			return result, nil
 		}
-		return result, nil
 	}
 	if lastErr == nil {
 		lastErr = errors.New("alias has no healthy targets")

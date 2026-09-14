@@ -220,11 +220,39 @@ type Model struct {
 }
 
 type Alias struct {
-	Name             string
-	Algorithm        Algorithm
-	RetryStatusCodes []int
-	SessionAffinity  *SessionAffinity
-	Targets          []AliasTarget
+	Name               string
+	Algorithm          Algorithm
+	RetryStatusCodes   []int
+	SessionAffinity    *SessionAffinity
+	EncryptedReasoning *EncryptedReasoning
+	Targets            []AliasTarget
+}
+
+const (
+	EncryptedReasoningFail          = "fail"
+	EncryptedReasoningStripAndRetry = "strip_and_retry"
+)
+
+type EncryptedReasoning struct {
+	Passthrough      bool
+	OnCallerMismatch string
+	MatchMessages    []string
+}
+
+var DefaultEncryptedReasoningMatchMessages = []string{
+	"not issued to this caller",
+	"invalid_encrypted_content",
+	"could not be verified",
+	"could not be decrypted",
+	"item_id did not match",
+	"invalid signature",
+}
+
+func EncryptedReasoningMatchMessages(a Alias) []string {
+	if a.EncryptedReasoning == nil || len(a.EncryptedReasoning.MatchMessages) == 0 {
+		return append([]string(nil), DefaultEncryptedReasoningMatchMessages...)
+	}
+	return append([]string(nil), a.EncryptedReasoning.MatchMessages...)
 }
 
 type SessionAffinity struct {

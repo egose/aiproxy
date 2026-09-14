@@ -101,15 +101,22 @@ type ProviderHealthcheckInput struct {
 }
 
 type AliasInput struct {
-	Name             string
-	Algorithm        string
-	RetryStatusCodes []string
-	SessionAffinity  *AliasSessionAffinityInput
-	Targets          []AliasTargetInput
+	Name               string
+	Algorithm          string
+	RetryStatusCodes   []string
+	SessionAffinity    *AliasSessionAffinityInput
+	EncryptedReasoning *AliasEncryptedReasoningInput
+	Targets            []AliasTargetInput
 }
 
 type AliasSessionAffinityInput struct {
 	Headers []string
+}
+
+type AliasEncryptedReasoningInput struct {
+	Passthrough      *bool
+	OnCallerMismatch string
+	MatchMessages    []string
 }
 
 type AliasTargetInput struct {
@@ -438,6 +445,27 @@ func RenderAliasBlock(input AliasInput) string {
 		if len(input.SessionAffinity.Headers) > 0 {
 			b.WriteString("    headers = ")
 			b.WriteString(RenderQuotedList(input.SessionAffinity.Headers))
+			b.WriteString("\n")
+		}
+		b.WriteString("  }\n")
+	}
+	if input.EncryptedReasoning != nil {
+		b.WriteString("\n  encrypted_reasoning {\n")
+		if input.EncryptedReasoning.Passthrough != nil {
+			if *input.EncryptedReasoning.Passthrough {
+				b.WriteString("    passthrough = true\n")
+			} else {
+				b.WriteString("    passthrough = false\n")
+			}
+		}
+		if input.EncryptedReasoning.OnCallerMismatch != "" {
+			b.WriteString("    on_caller_mismatch = ")
+			b.WriteString(strconv.Quote(input.EncryptedReasoning.OnCallerMismatch))
+			b.WriteString("\n")
+		}
+		if len(input.EncryptedReasoning.MatchMessages) > 0 {
+			b.WriteString("    match_messages = ")
+			b.WriteString(RenderQuotedList(input.EncryptedReasoning.MatchMessages))
 			b.WriteString("\n")
 		}
 		b.WriteString("  }\n")
