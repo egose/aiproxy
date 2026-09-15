@@ -17,6 +17,7 @@ type apiError struct {
 	Error struct {
 		Type    string `json:"type"`
 		Message string `json:"message"`
+		BlockID string `json:"block_id,omitempty"`
 	} `json:"error"`
 }
 
@@ -126,19 +127,28 @@ func (h *Handler) writeBillingUsage(w http.ResponseWriter, summaries []accountin
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, status int, errType, message string) {
+	h.writeErrorWithBlock(w, status, errType, message, "")
+}
+
+func (h *Handler) writeErrorWithBlock(w http.ResponseWriter, status int, errType, message, blockID string) {
 	e := apiError{}
 	e.Error.Type = errType
 	e.Error.Message = message
+	e.Error.BlockID = blockID
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(e)
 }
 
 func (h *Handler) writeRequestError(metrics *observability.Metrics, w http.ResponseWriter, r *http.Request, status int, errType, message string) {
+	h.writeRequestErrorWithBlock(metrics, w, r, status, errType, message, "")
+}
+
+func (h *Handler) writeRequestErrorWithBlock(metrics *observability.Metrics, w http.ResponseWriter, r *http.Request, status int, errType, message, blockID string) {
 	if metrics != nil {
 		metrics.RecordHTTPError(r.Method, metricsPathLabel(r), status, errType)
 	}
-	h.writeError(w, status, errType, message)
+	h.writeErrorWithBlock(w, status, errType, message, blockID)
 }
 
 func closeResult(r *provider.Result) {

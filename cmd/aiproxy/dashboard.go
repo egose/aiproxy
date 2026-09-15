@@ -83,7 +83,8 @@ func runDashboard(parentCtx context.Context, cfgPath string, explicit bool, stdo
 	}
 
 	snap := dashboard.SnapshotFromTransport(initial)
-	prog := dashboard.Run(ctx, snap, &dashboardPayloadFetcher{client: dashrpc.NewClient(baseURL, token)})
+	fetcher := &dashboardPayloadFetcher{client: dashrpc.NewClient(baseURL, token)}
+	prog := dashboard.RunWithBlockFetcher(ctx, snap, fetcher, fetcher)
 	defer prog.Close()
 
 	ticker := time.NewTicker(dashPollInterval)
@@ -131,6 +132,20 @@ func (f *dashboardPayloadFetcher) GetPayload(ctx context.Context, requestID stri
 		return "", err
 	}
 	return payloadlog.Pretty(raw, 64<<10), nil
+}
+
+func (f *dashboardPayloadFetcher) ListBlocks(ctx context.Context) (dashrpc.BlockList, error) {
+	if f == nil || f.client == nil {
+		return dashrpc.BlockList{}, errors.New("block client not configured")
+	}
+	return f.client.FetchBlocks(ctx)
+}
+
+func (f *dashboardPayloadFetcher) GetBlock(ctx context.Context, blockID string) (dashrpc.BlockCapture, error) {
+	if f == nil || f.client == nil {
+		return dashrpc.BlockCapture{}, errors.New("block client not configured")
+	}
+	return f.client.FetchBlock(ctx, blockID)
 }
 
 func normalizeBaseURL(addr string) string {

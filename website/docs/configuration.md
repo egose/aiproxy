@@ -592,6 +592,13 @@ ingress_guardrails {
   mode           = "block"
   max_text_bytes = 65536
   max_strings    = 512
+
+  quarantine {
+    enabled           = true
+    max_entries       = 128
+    ttl               = "15m"
+    max_snippet_bytes = 512
+  }
 }
 ```
 
@@ -600,7 +607,8 @@ Opt-in secret scanning of inbound `POST /v1/chat/completions` and
 `enabled = false` preserves existing behavior. `mode` is `block` (default,
 rejects with `400 secret_blocked` / `400 scan_incomplete` and zero upstream
 I/O) or `audit` (forwards and records
-`aiproxy_guardrail_scans_total{operation,mode,outcome}`). Scanned text is the
+`aiproxy_guardrail_scans_total{operation,mode,outcome}`). A blocked flagged
+request carries `block_id` in the error body. Scanned text is the
 JSON-decoded message content, tool arguments (plus one JSON-decoded level),
 tool results, and responses instructions/input; images, audio, embeddings,
 attachments, encoded blobs, and response/SSE output are out of scope and
@@ -609,3 +617,15 @@ and 512 strings (zeros select defaults); over-limit or canceled scans are
 visible `incomplete` outcomes. While enabled, covered-operation request
 bodies are omitted from payload-log entries. Policy changes apply on `SIGHUP`
 with atomic rollback on failure.
+
+The nested `quarantine` block is optional and disabled by default. When
+enabled, matched snippets (`secret`/`match`/`line`, truncated to
+`max_snippet_bytes`, default 512) are kept in process memory (bounded by
+`max_entries`, default 128, and `ttl`, default `15m`) so an operator can
+triage false positives by `block_id` through the dashboard-gated
+`GET /_internal/dashboard/blocks` (metadata only) and
+`GET /_internal/dashboard/blocks/<block_id>` (full capture, take-once)
+endpoints, or the `4:Blocks` tab in `aiproxy dashboard`. Dashboard token
+holders can read live matched secrets while quarantine is on; state is
+process-local, lost on restart, and rebuilt empty whenever its config
+changes on `SIGHUP`.

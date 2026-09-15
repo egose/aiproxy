@@ -579,6 +579,13 @@ ingress_guardrails {
   mode           = "block"
   max_text_bytes = 65536
   max_strings    = 512
+
+  quarantine {
+    enabled           = true
+    max_entries       = 128
+    ttl               = "15m"
+    max_snippet_bytes = 512
+  }
 }
 ```
 
@@ -596,10 +603,41 @@ ingress_guardrails {
   `incomplete` outcomes, never clean scans. Zeros select defaults.
 - While enabled, request bodies for covered operations are omitted from
   payload-log entries on all paths. Scanner findings are never logged or
-  returned; only rule IDs, counts, and reasons are recorded.
+  returned; only rule IDs, counts, and reasons are recorded — unless the
+  optional `quarantine` block is enabled (see below).
 - Policy changes apply on `SIGHUP`; a failed candidate rejects the reload
   and keeps the active policy. The block has no `aiproxy configure`
   subcommand yet; edit HCL/JSON directly and validate with `make validate`.
+
+#### Guardrail quarantine (`block_id` triage)
+
+Blocked requests normally carry no trace of what matched, which makes
+false-positive triage (e.g. `generic-api-key`) guesswork. The optional
+`quarantine` block keeps the matched snippets in memory only so an operator
+can inspect what was flagged:
+
+- `enabled` defaults to `false`; nothing secret-bearing is retained unless
+  it is `true`.
+- `max_entries` (1..4096, default 128) bounds memory; oldest entries evict
+  first. `ttl` (default `15m`, max `24h`) expires entries; zeros select
+  defaults. `max_snippet_bytes` (16..8192, default 512) truncates each kept
+  `secret`/`match`/`line`. Only matched snippets are stored — never the
+  full request body.
+- A blocked flagged request returns `block_id` (`blk_` + 32 hex chars, fresh
+  server-side randomness, never the client-controlled `X-Request-Id`) in the
+  `400 secret_blocked` error body, and the server log carries
+  `block_id=...` alongside `request_id` for correlation. Incomplete scans
+  (`scan_incomplete`) never mint a `block_id`.
+- Lookup is dashboard-gated: `GET /_internal/dashboard/blocks` lists
+  metadata only (`block_id`, time, operation, model, rule IDs, counts — no
+  secret text) and `GET /_internal/dashboard/blocks/<block_id>` returns the
+  full capture **once** (second read is `404`). The `aiproxy dashboard` TUI
+  shows them under the `4:Blocks` tab (`enter` opens, detail is take-once).
+- Treat the dashboard token as secret-read capable while quarantine is on:
+  anyone holding it can read live matched secrets. Quarantine state is
+  process-local (no Redis sharing, lost on restart), and survives `SIGHUP`
+  only when its config is unchanged — editing the block rebuilds an empty
+  store.
 
 ### `provider { enabled = false }`
 

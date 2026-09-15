@@ -171,8 +171,12 @@ func TestPayloadTabStripAndCycle(t *testing.T) {
 		t.Fatalf("[ from aliases should reach payload, got %v", mod.bottomTab)
 	}
 	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "]"}))
+	if mod := mm.(*model); mod.bottomTab != bottomTabBlocks {
+		t.Fatalf("] from payload should reach blocks, got %v", mod.bottomTab)
+	}
+	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "]"}))
 	if mod := mm.(*model); mod.bottomTab != bottomTabLogs {
-		t.Fatalf("] from payload should wrap to logs, got %v", mod.bottomTab)
+		t.Fatalf("] from blocks should wrap to logs, got %v", mod.bottomTab)
 	}
 }
 

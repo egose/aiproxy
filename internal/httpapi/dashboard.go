@@ -124,6 +124,32 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 		h.writeDashboardPayload(deps, w, r)
 		return true
 	}
+	if r.URL.Path == dashrpc.BlocksPath {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return true
+		}
+		if !dashboardAuthorized(deps.Dashboard, r) {
+			h.respondDashboardAuthFailure(w, r)
+			return true
+		}
+		h.writeDashboardBlocks(deps, w, r)
+		return true
+	}
+	if strings.HasPrefix(r.URL.Path, dashrpc.BlockPathPrefix) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return true
+		}
+		if !dashboardAuthorized(deps.Dashboard, r) {
+			h.respondDashboardAuthFailure(w, r)
+			return true
+		}
+		h.writeDashboardBlock(deps, w, r)
+		return true
+	}
 	return false
 }
 
@@ -238,4 +264,67 @@ func (h *Handler) writeDashboardPayload(deps Dependencies, w http.ResponseWriter
 		return
 	}
 	_, _ = w.Write(append(raw, '\n'))
+}
+
+type dashboardBlockSource interface {
+	BlocksEnabled() bool
+	ListBlocks() []dashrpc.BlockSummary
+	TakeBlock(blockID string) (dashrpc.BlockCapture, bool)
+}
+
+func dashboardBlocks(source dashrpc.Source) (dashboardBlockSource, bool) {
+	bs, ok := source.(dashboardBlockSource)
+	if !ok || bs == nil {
+		return nil, false
+	}
+	return bs, true
+}
+
+func validBlockID(id string) bool {
+	if !strings.HasPrefix(id, "blk_") || len(id) != len("blk_")+32 {
+		return false
+	}
+	for _, c := range id[len("blk_"):] {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func (h *Handler) writeDashboardBlocks(deps Dependencies, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	bs, ok := dashboardBlocks(deps.Dashboard)
+	if !ok || !bs.BlocksEnabled() {
+		_ = json.NewEncoder(w).Encode(dashrpc.BlockList{Enabled: false})
+		return
+	}
+	blocks := bs.ListBlocks()
+	if blocks == nil {
+		blocks = []dashrpc.BlockSummary{}
+	}
+	if len(blocks) > dashrpc.BlocksListMax {
+		blocks = blocks[len(blocks)-dashrpc.BlocksListMax:]
+	}
+	_ = json.NewEncoder(w).Encode(dashrpc.BlockList{Enabled: true, Blocks: blocks})
+}
+
+func (h *Handler) writeDashboardBlock(deps Dependencies, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	bs, ok := dashboardBlocks(deps.Dashboard)
+	if !ok || !bs.BlocksEnabled() {
+		http.Error(w, "guardrail quarantine not enabled", http.StatusNotFound)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, dashrpc.BlockPathPrefix)
+	if !validBlockID(id) {
+		http.Error(w, "invalid block id", http.StatusBadRequest)
+		return
+	}
+	capture, found := bs.TakeBlock(id)
+	if !found {
+		http.Error(w, "block not found (expired or already consumed)", http.StatusNotFound)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(capture)
 }

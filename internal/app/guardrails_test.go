@@ -154,3 +154,102 @@ ingress_guardrails {
 		t.Fatalf("mode = %q, want preserved audit policy", mode)
 	}
 }
+
+func TestBuildWithQuarantineCreatesStore(t *testing.T) {
+	upstream := guardrailTestUpstream(t)
+	defer upstream.Close()
+	configPath := writeConfigFile(t, guardrailTestConfig(upstream.URL, `
+ingress_guardrails {
+  enabled = true
+  quarantine {
+    enabled = true
+    max_entries = 16
+    ttl = "5m"
+  }
+}
+`))
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test", LogOutput: io.Discard})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	defer func() { _ = a.Close() }()
+	if a.quarantine == nil {
+		t.Fatalf("quarantine should be created when enabled")
+	}
+	policy := a.quarantine.Policy()
+	if policy.MaxEntries != 16 {
+		t.Fatalf("max entries = %d, want 16", policy.MaxEntries)
+	}
+}
+
+func TestReloadPreservesQuarantineEntries(t *testing.T) {
+	upstream := guardrailTestUpstream(t)
+	defer upstream.Close()
+	configPath := writeConfigFile(t, guardrailTestConfig(upstream.URL, `
+ingress_guardrails {
+  enabled = true
+  quarantine {
+    enabled = true
+  }
+}
+`))
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test", LogOutput: io.Discard})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	defer func() { _ = a.Close() }()
+	if a.quarantine == nil {
+		t.Fatalf("quarantine should be active")
+	}
+	a.quarantine.Store("blk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", guardrails.Capture{RuleIDs: []string{"x"}})
+	before := a.quarantine
+	if err := a.Reload(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if a.quarantine != before {
+		t.Fatalf("unchanged quarantine config should preserve the store")
+	}
+	if _, ok := a.quarantine.Take("blk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); !ok {
+		t.Fatalf("reload dropped quarantined entry")
+	}
+}
+
+func TestReloadRebuildsQuarantineOnConfigChange(t *testing.T) {
+	upstream := guardrailTestUpstream(t)
+	defer upstream.Close()
+	configPath := writeConfigFile(t, guardrailTestConfig(upstream.URL, `
+ingress_guardrails {
+  enabled = true
+  quarantine {
+    enabled = true
+    max_entries = 16
+  }
+}
+`))
+	a, err := Build(context.Background(), BuildOptions{ConfigPath: configPath, Version: "test", LogOutput: io.Discard})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	defer func() { _ = a.Close() }()
+	before := a.quarantine
+	if err := os.WriteFile(configPath, []byte(guardrailTestConfig(upstream.URL, `
+ingress_guardrails {
+  enabled = true
+  quarantine {
+    enabled = true
+    max_entries = 32
+  }
+}
+`)), 0o600); err != nil {
+		t.Fatalf("rewrite config: %v", err)
+	}
+	if err := a.Reload(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if a.quarantine == before {
+		t.Fatalf("changed quarantine config should rebuild the store")
+	}
+	if got := a.quarantine.Policy().MaxEntries; got != 32 {
+		t.Fatalf("max entries = %d, want 32", got)
+	}
+}

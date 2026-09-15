@@ -108,6 +108,7 @@ const (
 	bottomTabLogs bottomTab = iota
 	bottomTabAliases
 	bottomTabPayload
+	bottomTabBlocks
 )
 
 type model struct {
@@ -166,6 +167,19 @@ type model struct {
 	payloadDetailID     string
 	payloadPendingID    string
 	payloadDetailScroll int
+	blockFetcher        BlockFetcher
+	blocks              []BlockSummary
+	blockKnown          bool
+	blockEnabled        bool
+	blockCursor         int
+	blockOffset         int
+	blockLoading        bool
+	blockErr            string
+	blockDetail         BlockCapture
+	blockDetailErr      string
+	blockDetailID       string
+	blockPendingID      string
+	blockDetailScroll   int
 }
 
 type tickMsg time.Time
@@ -203,6 +217,12 @@ func InitialModel(s *RuntimeSnapshot) tea.Model {
 func InitialModelWithPayloadFetcher(s *RuntimeSnapshot, f PayloadFetcher) tea.Model {
 	m := InitialModel(s).(*model)
 	m.payloadFetcher = f
+	return m
+}
+
+func InitialModelWithBlockFetcher(s *RuntimeSnapshot, f PayloadFetcher, b BlockFetcher) tea.Model {
+	m := InitialModelWithPayloadFetcher(s, f).(*model)
+	m.blockFetcher = b
 	return m
 }
 
@@ -252,6 +272,26 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			if handled, cmd := m.handlePayloadKey(msg); handled {
+				m.dirty = true
+				return m, cmd
+			}
+			return m, nil
+		}
+		if m.blockDetailOpen() || m.blockPendingID != "" {
+			if msg.String() == "esc" || msg.String() == "enter" {
+				m.blockDetailID = ""
+				m.blockPendingID = ""
+				m.blockDetail = BlockCapture{}
+				m.blockDetailErr = ""
+				m.blockDetailScroll = 0
+				m.dirty = true
+				return m, nil
+			}
+			if shouldQuit(msg) {
+				m.quit = true
+				return m, tea.Quit
+			}
+			if handled, cmd := m.handleBlockKey(msg); handled {
 				m.dirty = true
 				return m, cmd
 			}
@@ -307,6 +347,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 		}
+		if m.focus == focusBottom && m.bottomTab == bottomTabBlocks {
+			if handled, cmd := m.handleBlockKey(msg); handled {
+				m.dirty = true
+				return m, cmd
+			}
+		}
 		if m.focus == focusBottom && m.bottomTab == bottomTabLogs {
 			if handled := m.handleLogKey(msg); handled {
 				m.dirty = true
@@ -317,6 +363,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dirty = true
 			if m.bottomTab == bottomTabPayload && !m.payloadKnown {
 				if cmd := m.requestPayloads(); cmd != nil {
+					return m, cmd
+				}
+			}
+			if m.bottomTab == bottomTabBlocks && !m.blockKnown {
+				if cmd := m.requestBlocks(); cmd != nil {
 					return m, cmd
 				}
 			}
@@ -344,6 +395,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case payloadDetailMsg:
 		m.applyPayloadDetail(msg)
 		return m, nil
+	case blockListMsg:
+		m.applyBlockList(msg)
+		return m, nil
+	case blockDetailMsg:
+		m.applyBlockDetail(msg)
+		return m, nil
 	case tickMsg:
 		m.now = time.Now()
 		if m.snapshot != nil && m.snapshot.Health != nil {
@@ -355,6 +412,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.payloadPendingID == "" && m.payloadFetcher != nil && !m.payloadLoading && m.payloadErr == "" {
 			m.payloadLoading = true
 			return m, tea.Batch(tickCmd(), fetchPayloadsCmd(m.payloadFetcher, payloadFetchLimit, m.payloadErrorsOnly))
+		}
+		if m.bottomTab == bottomTabBlocks && m.blockKnown && !m.blockDetailOpen() &&
+			m.blockPendingID == "" && m.blockFetcher != nil && !m.blockLoading && m.blockErr == "" {
+			m.blockLoading = true
+			return m, tea.Batch(tickCmd(), fetchBlocksCmd(m.blockFetcher))
 		}
 		return m, tickCmd()
 	}
@@ -432,12 +494,18 @@ func (m *model) handleKey(msg tea.KeyMsg) bool {
 		m.bottomTab = bottomTabPayload
 		m.focus = focusBottom
 		return true
+	case "4":
+		m.bottomTab = bottomTabBlocks
+		m.focus = focusBottom
+		return true
 	case "[", "]":
 		switch m.bottomTab {
 		case bottomTabLogs:
 			m.bottomTab = bottomTabAliases
 		case bottomTabAliases:
 			m.bottomTab = bottomTabPayload
+		case bottomTabPayload:
+			m.bottomTab = bottomTabBlocks
 		default:
 			m.bottomTab = bottomTabLogs
 		}
@@ -546,6 +614,9 @@ func (m *model) scrollFocused(delta int) bool {
 		if m.bottomTab == bottomTabPayload {
 			return m.movePayloadCursor(delta)
 		}
+		if m.bottomTab == bottomTabBlocks {
+			return m.moveBlockCursor(delta)
+		}
 		if m.logDetailOpen {
 			return m.scrollLogDetail(delta)
 		}
@@ -580,6 +651,9 @@ func (m *model) scrollTop() bool {
 		}
 		if m.bottomTab == bottomTabPayload {
 			return m.payloadCursorTop()
+		}
+		if m.bottomTab == bottomTabBlocks {
+			return m.blockCursorTop()
 		}
 		if m.logDetailOpen {
 			if m.logDetailScroll == 0 {
@@ -618,6 +692,9 @@ func (m *model) scrollBottom() bool {
 		}
 		if m.bottomTab == bottomTabPayload {
 			return m.payloadCursorBottom()
+		}
+		if m.bottomTab == bottomTabBlocks {
+			return m.blockCursorBottom()
 		}
 		if m.logDetailOpen {
 			m.logDetailScroll = 1 << 30
@@ -1028,6 +1105,7 @@ func (m *model) clampScroll() {
 	}
 	m.clampAliasCursor()
 	m.clampPayloadCursor()
+	m.clampBlockCursor()
 	m.clampLogCursor()
 }
 
@@ -1222,6 +1300,11 @@ func (m *model) render() string {
 		body := renderPayloadDetail(m, m.width, bodyHeight)
 		return fitView(lipgloss.JoinVertical(lipgloss.Left, header, rate, body, renderFooter(m)), m.width)
 	}
+	if m.blockDetailOpen() || m.blockPendingID != "" {
+		bodyHeight := zoomBodyHeight(m.height)
+		body := renderBlockDetail(m, m.width, bodyHeight)
+		return fitView(lipgloss.JoinVertical(lipgloss.Left, header, rate, body, renderFooter(m)), m.width)
+	}
 	if m.logDetailOpen {
 		bodyHeight := zoomBodyHeight(m.height)
 		body := renderLogDetail(m, m.width, bodyHeight)
@@ -1293,6 +1376,8 @@ func renderBottom(m *model, width, height int) string {
 		pane = renderAliases(m, width, paneHeight)
 	case bottomTabPayload:
 		pane = renderPayloads(m, width, paneHeight)
+	case bottomTabBlocks:
+		pane = renderBlocks(m, width, paneHeight)
 	default:
 		pane = renderLogs(m, width, paneHeight)
 	}
@@ -1321,15 +1406,22 @@ func renderTabStrip(m *model, width int) string {
 	alias := dimStyle.Render("  " + aliasLabel)
 	logs := dimStyle.Render("  " + logsLabel)
 	payload := dimStyle.Render("  " + payloadLabel)
+	blocksLabel := "4:Blocks"
+	if m.blockKnown {
+		blocksLabel = fmt.Sprintf("4:Blocks(%d)", len(m.blocks))
+	}
+	blocks := dimStyle.Render("  " + blocksLabel)
 	switch m.bottomTab {
 	case bottomTabAliases:
 		alias = activeStyle.Render("▸ " + aliasLabel)
 	case bottomTabLogs:
 		logs = activeStyle.Render("▸ " + logsLabel)
+	case bottomTabBlocks:
+		blocks = activeStyle.Render("▸ " + blocksLabel)
 	default:
 		payload = activeStyle.Render("▸ " + payloadLabel)
 	}
-	return alias + "  " + logs + "  " + payload
+	return alias + "  " + logs + "  " + payload + "  " + blocks
 }
 
 func (m *model) renderHelp() string {
@@ -1337,7 +1429,7 @@ func (m *model) renderHelp() string {
 		"aiproxy dashboard — keys",
 		"",
 		"  tab        cycle focus PROVIDERS / USAGE / bottom tabs",
-		"  1/2/3 or [/] switch bottom tab (Aliases / Logs / Payloads)",
+		"  1/2/3/4 or [/] switch bottom tab (Aliases / Logs / Payloads / Blocks)",
 		"  enter      open selected row detail (all bottom tabs)",
 		"  z          zoom focused pane to full screen",
 		"  esc        unzoom / close detail (or quit when not zoomed)",
@@ -1374,6 +1466,8 @@ func renderFooter(m *model) string {
 			focusName = "LOGS"
 		case bottomTabPayload:
 			focusName = "PAYLOADS"
+		case bottomTabBlocks:
+			focusName = "BLOCKS"
 		}
 	}
 	state := "LIVE"
@@ -1386,7 +1480,7 @@ func renderFooter(m *model) string {
 	if m.zoomed {
 		zoomHint = "[esc] unzoom"
 	}
-	base := fmt.Sprintf("%s focus:%s [tab] pane [1/2/3] tabs [j/k] scroll [t]enant [e]rrs [s]tatus [r]efresh [o]rder [u]pstream [l]evel [p]ause %s [?]help [q]uit", state, focusName, zoomHint)
+	base := fmt.Sprintf("%s focus:%s [tab] pane [1/2/3/4] tabs [j/k] scroll [t]enant [e]rrs [s]tatus [r]efresh [o]rder [u]pstream [l]evel [p]ause %s [?]help [q]uit", state, focusName, zoomHint)
 	if len([]rune(base)) > m.width && m.width > 20 {
 		base = truncate(base, m.width)
 	}
@@ -2731,11 +2825,15 @@ type RefreshHook interface {
 }
 
 func Run(ctx context.Context, snap *RuntimeSnapshot, fetcher PayloadFetcher) *Program {
+	return RunWithBlockFetcher(ctx, snap, fetcher, nil)
+}
+
+func RunWithBlockFetcher(ctx context.Context, snap *RuntimeSnapshot, fetcher PayloadFetcher, blocks BlockFetcher) *Program {
 	opts := []tea.ProgramOption{
 		tea.WithContext(ctx),
 		tea.WithoutCatchPanics(),
 	}
-	p := tea.NewProgram(InitialModelWithPayloadFetcher(snap, fetcher), opts...)
+	p := tea.NewProgram(InitialModelWithBlockFetcher(snap, fetcher, blocks), opts...)
 	go func() {
 		_, _ = p.Run()
 	}()
