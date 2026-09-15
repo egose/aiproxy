@@ -194,6 +194,24 @@ func (m *model) payloadCursorBottom() bool {
 	return true
 }
 
+func (m *model) payloadAt(i int) PayloadSummary {
+	if m.payloadOldestFirst {
+		return m.payloads[len(m.payloads)-1-i]
+	}
+	return m.payloads[i]
+}
+
+func (m *model) orderedPayloads() []PayloadSummary {
+	if !m.payloadOldestFirst {
+		return m.payloads
+	}
+	out := make([]PayloadSummary, len(m.payloads))
+	for i, j := 0, len(m.payloads)-1; i < len(m.payloads); i, j = i+1, j-1 {
+		out[i] = m.payloads[j]
+	}
+	return out
+}
+
 func (m *model) handlePayloadKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	switch msg.String() {
 	case "s", "e":
@@ -202,6 +220,12 @@ func (m *model) handlePayloadKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.payloadOffset = 0
 		m.payloadKnown = false
 		return true, m.requestPayloads()
+	case "o":
+		if m.payloadDetailOpen() {
+			return false, nil
+		}
+		m.togglePayloadOrder()
+		return true, nil
 	case "j", "down":
 		if m.payloadDetailOpen() {
 			m.payloadDetailScroll++
@@ -242,7 +266,7 @@ func (m *model) handlePayloadKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		if len(m.payloads) == 0 || m.payloadFetcher == nil {
 			return false, nil
 		}
-		id := m.payloads[m.payloadCursor].RequestID
+		id := m.payloadAt(m.payloadCursor).RequestID
 		if id == "" {
 			return false, nil
 		}
@@ -306,7 +330,11 @@ func renderPayloads(m *model, width, height int) string {
 	if m.payloadErrorsOnly {
 		filter = "errs-only"
 	}
-	title := fmt.Sprintf("PAYLOADS newest-first (%s)", filter)
+	order := "newest-first"
+	if m.payloadOldestFirst {
+		order = "oldest-first"
+	}
+	title := fmt.Sprintf("PAYLOADS %s (%s) [o]rder", order, filter)
 	rows := []string{title}
 	if m.payloadFetcher == nil {
 		rows = append(rows, "payload viewer unavailable")
@@ -344,14 +372,15 @@ func renderPayloads(m *model, width, height int) string {
 	}
 	rows = append(rows, headerStyle.Render(fitRow(headerCells([]col{{"AT", 8}, {"METHOD", methodW}, {"ST", 4}, {"DUR", 8}, {"MODEL", modelW}, {"PATH", pathW}}), inner)))
 	visible := m.bottomVisibleRows()
+	view := m.orderedPayloads()
 	start := m.payloadOffset
 	end := start + visible
-	if end > len(m.payloads) {
-		end = len(m.payloads)
+	if end > len(view) {
+		end = len(view)
 	}
 	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
 	for i := start; i < end; i++ {
-		line := fitRow(payloadRow(m.payloads[i], methodW, modelW, pathW), inner-2)
+		line := fitRow(payloadRow(view[i], methodW, modelW, pathW), inner-2)
 		if i == m.payloadCursor {
 			line = cursorStyle.Render("▸ " + line)
 		} else {
@@ -359,8 +388,8 @@ func renderPayloads(m *model, width, height int) string {
 		}
 		rows = append(rows, line)
 	}
-	if end < len(m.payloads) {
-		rows = append(rows, fmt.Sprintf("… %d more (j/k move)", len(m.payloads)-end))
+	if end < len(view) {
+		rows = append(rows, fmt.Sprintf("… %d more (j/k move)", len(view)-end))
 	}
 	return borderStyle.Render(strings.Join(rows, "\n"))
 }

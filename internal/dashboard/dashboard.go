@@ -133,10 +133,15 @@ type model struct {
 	zoomed              bool
 	usageScroll         int
 	providerScroll      int
-	aliasScroll         int
+	aliasCursor         int
+	aliasOffset         int
+	aliasDetailName     string
+	aliasDetailScroll   int
 	logCursor           int
 	logOffset           int
 	logCursorSeq        uint64
+	logFollow           bool
+	logOldestFirst      bool
 	logDetailOpen       bool
 	logDetailEntry      observability.LogEntry
 	logDetailScroll     int
@@ -153,6 +158,7 @@ type model struct {
 	payloadCursor       int
 	payloadOffset       int
 	payloadErrorsOnly   bool
+	payloadOldestFirst  bool
 	payloadLoading      bool
 	payloadErr          string
 	payloadDetail       string
@@ -178,6 +184,7 @@ func InitialModel(s *RuntimeSnapshot) tea.Model {
 		statsHeight:  12,
 		bottomHeight: 14,
 		logMinLevel:  slog.LevelDebug,
+		logFollow:    true,
 	}
 	if s != nil && s.Health != nil {
 		m.health = s.Health.Snapshot()
@@ -213,6 +220,23 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dirty = true
 		return m, nil
 	case tea.KeyMsg:
+		if m.aliasDetailOpen() {
+			if msg.String() == "esc" || msg.String() == "enter" {
+				m.aliasDetailName = ""
+				m.aliasDetailScroll = 0
+				m.dirty = true
+				return m, nil
+			}
+			if shouldQuit(msg) {
+				m.quit = true
+				return m, tea.Quit
+			}
+			if handled := m.handleAliasDetailKey(msg); handled {
+				m.dirty = true
+				return m, nil
+			}
+			return m, nil
+		}
 		if m.payloadDetailOpen() || m.payloadPendingID != "" {
 			if msg.String() == "esc" || msg.String() == "enter" {
 				m.payloadDetailID = ""
@@ -234,6 +258,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.zoomed && msg.String() == "esc" {
+			if m.aliasDetailOpen() {
+				m.aliasDetailName = ""
+				m.aliasDetailScroll = 0
+				m.dirty = true
+				return m, nil
+			}
 			if m.logDetailOpen {
 				m.logDetailOpen = false
 				m.logDetailScroll = 0
@@ -265,6 +295,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quit = true
 			return m, tea.Quit
 		}
+		if m.focus == focusBottom && m.bottomTab == bottomTabAliases {
+			if handled := m.handleAliasKey(msg); handled {
+				m.dirty = true
+				return m, nil
+			}
+		}
 		if m.focus == focusBottom && m.bottomTab == bottomTabPayload {
 			if handled, cmd := m.handlePayloadKey(msg); handled {
 				m.dirty = true
@@ -277,8 +313,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		handled := m.handleKey(msg)
-		if handled {
+		if handled := m.handleKey(msg); handled {
 			m.dirty = true
 			if m.bottomTab == bottomTabPayload && !m.payloadKnown {
 				if cmd := m.requestPayloads(); cmd != nil {
@@ -342,7 +377,6 @@ func (m *model) applySnapshot(s *RuntimeSnapshot) {
 	m.staleErr = ""
 	m.usageScroll = 0
 	m.providerScroll = 0
-	m.aliasScroll = 0
 	m.clampScroll()
 	m.dirty = true
 }
@@ -361,6 +395,28 @@ func (m *model) handleKey(msg tea.KeyMsg) bool {
 		m.focus = (m.focus + 1) % 3
 		return true
 	case "enter":
+		if m.focus == focusBottom {
+			switch m.bottomTab {
+			case bottomTabAliases:
+				if m.handleAliasKey(msg) {
+					return true
+				}
+			case bottomTabPayload:
+				if handled, cmd := m.handlePayloadKey(msg); handled {
+					_ = cmd
+					return true
+				}
+			default:
+				if m.handleLogKey(msg) {
+					return true
+				}
+			}
+			return false
+		}
+		m.zoomed = !m.zoomed
+		m.clampScroll()
+		return true
+	case "z":
 		m.zoomed = !m.zoomed
 		m.clampScroll()
 		return true
@@ -419,10 +475,22 @@ func (m *model) handleKey(msg tea.KeyMsg) bool {
 		m.logCursor = 0
 		m.logOffset = 0
 		m.logCursorSeq = 0
+		m.logFollow = true
 		m.logDetailOpen = false
 		m.logDetailScroll = 0
 		m.bottomTab = bottomTabLogs
+		m.clampLogCursor()
 		return true
+	case "o":
+		switch m.bottomTab {
+		case bottomTabLogs:
+			m.toggleLogOrder()
+			return true
+		case bottomTabPayload:
+			m.togglePayloadOrder()
+			return true
+		}
+		return false
 	case "j", "down":
 		return m.scrollFocused(1)
 	case "k", "up":
@@ -470,7 +538,10 @@ func (m *model) scrollFocused(delta int) bool {
 		return m.scrollUsage(delta)
 	default:
 		if m.bottomTab == bottomTabAliases {
-			return m.scrollAliases(delta)
+			if m.aliasDetailOpen() {
+				return m.scrollAliasDetail(delta)
+			}
+			return m.moveAliasCursor(delta)
 		}
 		if m.bottomTab == bottomTabPayload {
 			return m.movePayloadCursor(delta)
@@ -498,11 +569,14 @@ func (m *model) scrollTop() bool {
 		return true
 	default:
 		if m.bottomTab == bottomTabAliases {
-			if m.aliasScroll == 0 {
-				return false
+			if m.aliasDetailOpen() {
+				if m.aliasDetailScroll == 0 {
+					return false
+				}
+				m.aliasDetailScroll = 0
+				return true
 			}
-			m.aliasScroll = 0
-			return true
+			return m.aliasCursorTop()
 		}
 		if m.bottomTab == bottomTabPayload {
 			return m.payloadCursorTop()
@@ -536,12 +610,11 @@ func (m *model) scrollBottom() bool {
 		return true
 	default:
 		if m.bottomTab == bottomTabAliases {
-			max := m.maxAliasScroll()
-			if m.aliasScroll == max {
-				return false
+			if m.aliasDetailOpen() {
+				m.aliasDetailScroll = 1 << 30
+				return true
 			}
-			m.aliasScroll = max
-			return true
+			return m.aliasCursorBottom()
 		}
 		if m.bottomTab == bottomTabPayload {
 			return m.payloadCursorBottom()
@@ -586,32 +659,170 @@ func (m *model) scrollUsage(delta int) bool {
 	return true
 }
 
-func (m *model) scrollAliases(delta int) bool {
-	max := m.maxAliasScroll()
-	next := m.aliasScroll + delta
+func (m *model) aliasList() []config.Alias {
+	if m.snapshot == nil {
+		return nil
+	}
+	return m.snapshot.Aliases
+}
+
+func (m *model) clampAliasCursor() {
+	n := len(m.aliasList())
+	if n == 0 {
+		m.aliasCursor = 0
+		m.aliasOffset = 0
+		return
+	}
+	if m.aliasCursor < 0 {
+		m.aliasCursor = 0
+	}
+	if m.aliasCursor >= n {
+		m.aliasCursor = n - 1
+	}
+	visible := m.bottomVisibleRows()
+	if visible < 1 {
+		visible = 1
+	}
+	if m.aliasOffset > m.aliasCursor {
+		m.aliasOffset = m.aliasCursor
+	}
+	if m.aliasOffset < m.aliasCursor-visible+1 {
+		m.aliasOffset = m.aliasCursor - visible + 1
+	}
+	if m.aliasOffset < 0 {
+		m.aliasOffset = 0
+	}
+	maxOff := n - visible
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if m.aliasOffset > maxOff {
+		m.aliasOffset = maxOff
+	}
+}
+
+func (m *model) moveAliasCursor(delta int) bool {
+	if len(m.aliasList()) == 0 {
+		return false
+	}
+	m.clampAliasCursor()
+	next := m.aliasCursor + delta
 	if next < 0 {
 		next = 0
 	}
-	if next > max {
-		next = max
+	if next >= len(m.aliasList()) {
+		next = len(m.aliasList()) - 1
 	}
-	if next == m.aliasScroll {
+	if next == m.aliasCursor {
 		return false
 	}
-	m.aliasScroll = next
+	m.aliasCursor = next
+	m.clampAliasCursor()
 	return true
 }
 
-func (m *model) logEntriesNewestFirst() []observability.LogEntry {
-	all := m.filteredLogs(1 << 30)
-	for i, j := 0, len(all)-1; i < j; i, j = i+1, j-1 {
-		all[i], all[j] = all[j], all[i]
+func (m *model) aliasCursorTop() bool {
+	if m.aliasCursor == 0 && m.aliasOffset == 0 {
+		return false
 	}
-	return all
+	m.aliasCursor = 0
+	m.aliasOffset = 0
+	return true
+}
+
+func (m *model) aliasCursorBottom() bool {
+	n := len(m.aliasList())
+	if n == 0 || m.aliasCursor == n-1 {
+		return false
+	}
+	m.aliasCursor = n - 1
+	m.clampAliasCursor()
+	return true
+}
+
+func (m *model) scrollAliasDetail(delta int) bool {
+	if delta > 0 {
+		m.aliasDetailScroll++
+		return true
+	}
+	if delta < 0 {
+		if m.aliasDetailScroll <= 0 {
+			return false
+		}
+		m.aliasDetailScroll--
+		return true
+	}
+	return false
+}
+
+func (m *model) handleAliasKey(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "j", "down":
+		return m.moveAliasCursor(1)
+	case "k", "up":
+		return m.moveAliasCursor(-1)
+	case "g", "home":
+		return m.aliasCursorTop()
+	case "G", "end":
+		return m.aliasCursorBottom()
+	case "enter":
+		aliases := m.aliasList()
+		if len(aliases) == 0 {
+			return false
+		}
+		m.clampAliasCursor()
+		if m.aliasCursor < 0 || m.aliasCursor >= len(aliases) {
+			return false
+		}
+		m.aliasDetailName = aliases[m.aliasCursor].Name
+		m.aliasDetailScroll = 0
+		return true
+	}
+	return false
+}
+
+func (m *model) handleAliasDetailKey(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "j", "down":
+		m.aliasDetailScroll++
+		return true
+	case "k", "up":
+		if m.aliasDetailScroll > 0 {
+			m.aliasDetailScroll--
+			return true
+		}
+		return false
+	case "g", "home":
+		if m.aliasDetailScroll == 0 {
+			return false
+		}
+		m.aliasDetailScroll = 0
+		return true
+	case "G", "end":
+		m.aliasDetailScroll = 1 << 30
+		return true
+	}
+	return false
+}
+
+func (m *model) logMaxOffset(n int) int {
+	visible := m.bottomVisibleRows()
+	if visible < 1 {
+		visible = 1
+	}
+	maxOff := n - visible
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	return maxOff
+}
+
+func (m *model) aliasDetailOpen() bool {
+	return m.aliasDetailName != ""
 }
 
 func (m *model) clampLogCursor() {
-	m.clampLogCursorTo(m.logEntriesNewestFirst())
+	m.clampLogCursorTo(m.filteredLogs(1 << 30))
 }
 
 func (m *model) clampLogCursorTo(entries []observability.LogEntry) {
@@ -620,18 +831,28 @@ func (m *model) clampLogCursorTo(entries []observability.LogEntry) {
 		m.logCursor = 0
 		m.logOffset = 0
 		m.logCursorSeq = 0
+		m.logFollow = true
 		return
 	}
-	if m.logCursor == 0 && m.logOffset == 0 {
-		m.logCursorSeq = entries[0].Seq
+	maxOff := m.logMaxOffset(n)
+	if m.logFollow {
+		newest := m.logNewestIdx(n)
+		m.logCursor = newest
+		if newest == 0 {
+			m.logOffset = 0
+		} else {
+			m.logOffset = maxOff
+		}
+		if n > 0 {
+			m.logCursorSeq = entries[newest].Seq
+		} else {
+			m.logCursorSeq = 0
+		}
 		return
 	}
 	if m.logCursorSeq != 0 {
-		for i, e := range entries {
-			if e.Seq == m.logCursorSeq {
-				m.logCursor = i
-				break
-			}
+		if idx, ok := findLogSeq(entries, m.logCursorSeq); ok {
+			m.logCursor = idx
 		}
 	}
 	if m.logCursor < 0 {
@@ -654,17 +875,22 @@ func (m *model) clampLogCursorTo(entries []observability.LogEntry) {
 	if m.logOffset < 0 {
 		m.logOffset = 0
 	}
-	maxOff := n - visible
-	if maxOff < 0 {
-		maxOff = 0
-	}
 	if m.logOffset > maxOff {
 		m.logOffset = maxOff
 	}
 }
 
+func findLogSeq(entries []observability.LogEntry, seq uint64) (int, bool) {
+	for i, e := range entries {
+		if e.Seq == seq {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 func (m *model) moveLogCursor(delta int) bool {
-	entries := m.logEntriesNewestFirst()
+	entries := m.filteredLogs(1 << 30)
 	if len(entries) == 0 {
 		return false
 	}
@@ -676,6 +902,7 @@ func (m *model) moveLogCursor(delta int) bool {
 	if next >= len(entries) {
 		next = len(entries) - 1
 	}
+	m.logFollow = next == m.logNewestIdx(len(entries))
 	if next == m.logCursor {
 		return false
 	}
@@ -686,7 +913,7 @@ func (m *model) moveLogCursor(delta int) bool {
 }
 
 func (m *model) logCursorTop() bool {
-	entries := m.logEntriesNewestFirst()
+	entries := m.filteredLogs(1 << 30)
 	if len(entries) == 0 {
 		return false
 	}
@@ -696,17 +923,23 @@ func (m *model) logCursorTop() bool {
 	m.logCursor = 0
 	m.logOffset = 0
 	m.logCursorSeq = entries[0].Seq
+	m.logFollow = !m.logOldestFirst
 	return true
 }
 
 func (m *model) logCursorBottom() bool {
-	entries := m.logEntriesNewestFirst()
-	if len(entries) == 0 || m.logCursor == len(entries)-1 {
+	entries := m.filteredLogs(1 << 30)
+	if len(entries) == 0 {
+		return false
+	}
+	maxOff := m.logMaxOffset(len(entries))
+	if m.logCursor == len(entries)-1 && m.logOffset == maxOff {
 		return false
 	}
 	m.logCursor = len(entries) - 1
 	m.logCursorSeq = entries[m.logCursor].Seq
-	m.clampLogCursorTo(entries)
+	m.logOffset = maxOff
+	m.logFollow = m.logOldestFirst
 	return true
 }
 
@@ -728,40 +961,18 @@ func (m *model) scrollLogDetail(delta int) bool {
 func (m *model) handleLogKey(msg tea.KeyMsg) bool {
 	switch msg.String() {
 	case "j", "down":
-		if m.logDetailOpen {
-			m.logDetailScroll++
-			return true
-		}
 		return m.moveLogCursor(1)
 	case "k", "up":
-		if m.logDetailOpen {
-			if m.logDetailScroll > 0 {
-				m.logDetailScroll--
-				return true
-			}
-			return false
-		}
 		return m.moveLogCursor(-1)
 	case "g", "home":
-		if m.logDetailOpen {
-			if m.logDetailScroll == 0 {
-				return false
-			}
-			m.logDetailScroll = 0
-			return true
-		}
 		return m.logCursorTop()
 	case "G", "end":
-		if m.logDetailOpen {
-			m.logDetailScroll = 1 << 30
-			return true
-		}
 		return m.logCursorBottom()
+	case "o":
+		m.toggleLogOrder()
+		return true
 	case "enter":
-		if m.logDetailOpen {
-			return true
-		}
-		entries := m.logEntriesNewestFirst()
+		entries := m.filteredLogs(1 << 30)
 		if len(entries) == 0 {
 			return false
 		}
@@ -815,12 +1026,7 @@ func (m *model) clampScroll() {
 	if m.providerScroll < 0 {
 		m.providerScroll = 0
 	}
-	if m.aliasScroll > m.maxAliasScroll() {
-		m.aliasScroll = m.maxAliasScroll()
-	}
-	if m.aliasScroll < 0 {
-		m.aliasScroll = 0
-	}
+	m.clampAliasCursor()
 	m.clampPayloadCursor()
 	m.clampLogCursor()
 }
@@ -867,16 +1073,6 @@ func (m *model) maxProviderScroll() int {
 func (m *model) maxUsageScroll() int {
 	total := len(m.filteredSummaries())
 	visible := m.usageVisibleRows()
-	max := total - visible
-	if max < 0 {
-		max = 0
-	}
-	return max
-}
-
-func (m *model) maxAliasScroll() int {
-	total := len(m.aliasRows())
-	visible := m.aliasVisibleRows()
 	max := total - visible
 	if max < 0 {
 		max = 0
@@ -1016,6 +1212,11 @@ func (m *model) render() string {
 	}
 	header := renderHeader(m)
 	rate := renderRate(m, m.width)
+	if m.aliasDetailOpen() {
+		bodyHeight := zoomBodyHeight(m.height)
+		body := renderAliasDetail(m, m.width, bodyHeight)
+		return fitView(lipgloss.JoinVertical(lipgloss.Left, header, rate, body, renderFooter(m)), m.width)
+	}
 	if m.payloadDetailOpen() || m.payloadPendingID != "" {
 		bodyHeight := zoomBodyHeight(m.height)
 		body := renderPayloadDetail(m, m.width, bodyHeight)
@@ -1106,14 +1307,14 @@ func renderTabStrip(m *model, width int) string {
 	if m.logFilterOn {
 		level = ">=" + m.logMinLevel.String()
 	}
-	logsLabel := fmt.Sprintf("2:Logs(%s)", level)
-	payloadLabel := "3:Payloads"
+	logsLabel := fmt.Sprintf("2:Logs(%s,%s)", level, m.logOrderLabel())
+	payloadLabel := fmt.Sprintf("3:Payloads(%s)", m.payloadOrderLabel())
 	if m.payloadKnown {
 		filter := ""
 		if m.payloadErrorsOnly {
 			filter = " errs"
 		}
-		payloadLabel = fmt.Sprintf("3:Payloads(%d%s)", len(m.payloads), filter)
+		payloadLabel = fmt.Sprintf("3:Payloads(%d%s,%s)", len(m.payloads), filter, m.payloadOrderLabel())
 	} else if !m.payloadEnabled {
 		payloadLabel = "3:Payloads(off)"
 	}
@@ -1137,13 +1338,15 @@ func (m *model) renderHelp() string {
 		"",
 		"  tab        cycle focus PROVIDERS / USAGE / bottom tabs",
 		"  1/2/3 or [/] switch bottom tab (Aliases / Logs / Payloads)",
-		"  enter      zoom focused pane to full screen (logs/payloads: open entry)",
-		"  esc        unzoom / close log/payload detail (or quit when not zoomed)",
-		"  j/k dn/up  scroll focused pane   g/G,home/end top/bottom",
+		"  enter      open selected row detail (all bottom tabs)",
+		"  z          zoom focused pane to full screen",
+		"  esc        unzoom / close detail (or quit when not zoomed)",
+		"  j/k dn/up  move selection / scroll   g/G,home/end top/bottom",
 		"  +/- J/K    resize bottom pane",
 		"  t          cycle tenant filter    e toggle errors-only",
 		"  s          toggle payload errs filter (payloads tab)",
 		"  r          refresh payload list (payloads tab)",
+		"  o          toggle newest/oldest order (logs/payloads tab)",
 		"  u          toggle usage view (public vs upstream model)",
 		"  l          cycle log level filter (all/debug/info/warn/error)",
 		"  p          pause live updates (buffer one snapshot)",
@@ -1179,11 +1382,11 @@ func renderFooter(m *model) string {
 	} else if m.staleErr != "" {
 		state = "STALE"
 	}
-	zoomHint := "[enter] zoom"
+	zoomHint := "[enter] detail [z] zoom"
 	if m.zoomed {
 		zoomHint = "[esc] unzoom"
 	}
-	base := fmt.Sprintf("%s focus:%s [tab] pane [1/2/3] tabs [j/k] scroll [t]enant [e]rrs [s]tatus [r]efresh [u]pstream [l]evel [p]ause %s [?]help [q]uit", state, focusName, zoomHint)
+	base := fmt.Sprintf("%s focus:%s [tab] pane [1/2/3] tabs [j/k] scroll [t]enant [e]rrs [s]tatus [r]efresh [o]rder [u]pstream [l]evel [p]ause %s [?]help [q]uit", state, focusName, zoomHint)
 	if len([]rune(base)) > m.width && m.width > 20 {
 		base = truncate(base, m.width)
 	}
@@ -1970,28 +2173,251 @@ func renderAliases(m *model, width, height int) string {
 	if m.focus == focusBottom && m.bottomTab == bottomTabAliases {
 		borderStyle = borderStyle.BorderForeground(lipgloss.Color("#38BDF8"))
 	}
-	rows := []string{fmt.Sprintf("ALIASES (%d) cool:%d", len(m.snapshot.Aliases), len(m.snapshot.Cooldowns))}
-	all := m.aliasRows()
-	if len(all) == 0 {
+	m.clampAliasCursor()
+	aliases := m.aliasList()
+	rows := []string{fmt.Sprintf("ALIASES (%d) cool:%d", len(aliases), len(m.snapshot.Cooldowns))}
+	if len(aliases) == 0 {
 		rows = append(rows, "no aliases configured")
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
-	visible := m.aliasVisibleRows()
-	start := m.aliasScroll
-	if start > len(all) {
-		start = len(all)
+	if height <= 3 {
+		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
+	visible := m.bottomVisibleRows()
+	if visible < 1 {
+		visible = 1
+	}
+	cursor := m.aliasCursor
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= len(aliases) {
+		cursor = len(aliases) - 1
+	}
+	offset := m.aliasOffset
+	if offset < 0 {
+		offset = 0
+	}
+	maxOff := len(aliases) - visible
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if offset > maxOff {
+		offset = maxOff
+	}
+	if offset > cursor {
+		offset = cursor
+	}
+	if offset < cursor-visible+1 {
+		offset = cursor - visible + 1
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	start := offset
 	end := start + visible
-	if end > len(all) {
-		end = len(all)
+	if end > len(aliases) {
+		end = len(aliases)
 	}
-	for _, r := range all[start:end] {
-		rows = append(rows, truncate(r, width-2))
+	cooldown := map[string]time.Duration{}
+	for _, c := range m.snapshot.Cooldowns {
+		key := c.Alias + "\x00" + c.Provider + "\x00" + c.Model
+		d := time.Duration(c.RemainingMs) * time.Millisecond
+		if d > cooldown[key] {
+			cooldown[key] = d
+		}
 	}
-	if end < len(all) {
-		rows = append(rows, fmt.Sprintf("… %d more (j/k scroll)", len(all)-end))
+	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
+	for i := start; i < end; i++ {
+		a := aliases[i]
+		retry := "default"
+		if len(a.RetryStatusCodes) > 0 {
+			parts := make([]string, len(a.RetryStatusCodes))
+			for j, code := range a.RetryStatusCodes {
+				parts[j] = fmt.Sprintf("%d", code)
+			}
+			retry = strings.Join(parts, ",")
+		}
+		algo := string(a.Algorithm)
+		if algo == "" {
+			algo = "-"
+		}
+		cool := 0
+		for _, t := range a.Targets {
+			key := a.Name + "\x00" + t.Provider + "\x00" + t.Model
+			if d, ok := cooldown[key]; ok && d > 0 {
+				cool++
+			}
+		}
+		line := fmt.Sprintf("alias/%s [%s] retry:%s targets:%d cool:%d", a.Name, algo, retry, len(a.Targets), cool)
+		if i == cursor {
+			line = cursorStyle.Render("▸ " + line)
+		} else {
+			line = "  " + line
+		}
+		rows = append(rows, truncate(line, width-2))
+	}
+	if end < len(aliases) {
+		rows = append(rows, fmt.Sprintf("… %d more (j/k move)", len(aliases)-end))
+	} else if len(aliases) > visible {
+		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Render("[j/k] move [enter] detail"))
 	}
 	return borderStyle.Render(strings.Join(rows, "\n"))
+}
+
+func renderAliasDetail(m *model, width, height int) string {
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#38BDF8")).
+		Width(width - 2).
+		Height(height - 2)
+	inner := width - 4
+	if inner < 10 {
+		inner = 10
+	}
+	var a *config.Alias
+	for i := range m.snapshot.Aliases {
+		if m.snapshot.Aliases[i].Name == m.aliasDetailName {
+			a = &m.snapshot.Aliases[i]
+			break
+		}
+	}
+	if a == nil {
+		return borderStyle.Render("alias not found\n[esc] back")
+	}
+	retry := "default"
+	if len(a.RetryStatusCodes) > 0 {
+		parts := make([]string, len(a.RetryStatusCodes))
+		for i, code := range a.RetryStatusCodes {
+			parts[i] = fmt.Sprintf("%d", code)
+		}
+		retry = strings.Join(parts, ",")
+	}
+	algo := string(a.Algorithm)
+	if algo == "" {
+		algo = "-"
+	}
+	affinity := "-"
+	if a.SessionAffinity != nil {
+		affinity = strings.Join(config.SessionAffinityHeaders(*a), ",")
+		if affinity == "" {
+			affinity = "default"
+		}
+	}
+	cooldown := map[string]time.Duration{}
+	for _, c := range m.snapshot.Cooldowns {
+		key := c.Alias + "\x00" + c.Provider + "\x00" + c.Model
+		d := time.Duration(c.RemainingMs) * time.Millisecond
+		if d > cooldown[key] {
+			cooldown[key] = d
+		}
+	}
+	stats := map[string]accounting.ProviderSummary{}
+	if m.snapshot.Usage != nil {
+		for _, ps := range m.snapshot.Usage.ProviderSummaries() {
+			stats[ps.Provider] = ps
+		}
+	}
+	hcByName := healthcheckMarks(m.snapshot.Healthchecks)
+	raw := []string{
+		"alias: " + a.Name,
+		"algorithm: " + algo,
+		"retry: " + retry,
+		"session_affinity: " + affinity,
+	}
+	for _, t := range a.Targets {
+		key := a.Name + "\x00" + t.Provider + "\x00" + t.Model
+		state := "-"
+		if d, ok := cooldown[key]; ok && d > 0 {
+			state = "cool " + d.Round(time.Second).String()
+		}
+		known, healthy := healthKnown(m.health, t.Provider)
+		mark := "✓"
+		if !known {
+			mark = "?"
+		} else if !healthy {
+			mark = "✗"
+		}
+		ps := stats[t.Provider]
+		hc := hcByName[t.Provider]
+		if hc == "" {
+			hc = "-"
+		}
+		line := fmt.Sprintf("%s %s/%s hc:%s reqs:%s errs:%s 429:%s tok:%s %s",
+			mark, t.Provider, t.Model, hc, comma(ps.Requests), comma(ps.Errors),
+			comma(ps.Throttled), comma(ps.TotalTokens), state)
+		raw = append(raw, wrapText(line, inner)...)
+		if detail := healthcheckDetail(m.snapshot.Healthchecks, t.Provider); detail != "" {
+			raw = append(raw, wrapText("  "+detail, inner)...)
+		}
+	}
+	lines := []string{"ALIAS " + a.Name}
+	visible := height - 5
+	if visible < 1 {
+		visible = 1
+	}
+	start := m.aliasDetailScroll
+	if start > len(raw)-1 {
+		start = len(raw) - 1
+	}
+	if start < 0 {
+		start = 0
+	}
+	m.aliasDetailScroll = start
+	end := start + visible
+	if end > len(raw) {
+		end = len(raw)
+	}
+	for _, l := range raw[start:end] {
+		lines = append(lines, truncate(l, inner))
+	}
+	if end < len(raw) {
+		lines = append(lines, fmt.Sprintf("… %d more lines (j/k scroll, esc back)", len(raw)-end))
+	} else {
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Render("[j/k] scroll [esc] back"))
+	}
+	return borderStyle.Render(strings.Join(lines, "\n"))
+}
+
+func (m *model) logNewestIdx(n int) int {
+	if m.logOldestFirst {
+		return n - 1
+	}
+	return 0
+}
+
+func (m *model) logOrderLabel() string {
+	if m.logOldestFirst {
+		return "old-first"
+	}
+	return "new-first"
+}
+
+func (m *model) payloadOrderLabel() string {
+	if m.payloadOldestFirst {
+		return "old-first"
+	}
+	return "new-first"
+}
+
+func (m *model) toggleLogOrder() {
+	m.logOldestFirst = !m.logOldestFirst
+	m.logFollow = true
+	m.logCursorSeq = 0
+	m.clampLogCursor()
+}
+
+func (m *model) togglePayloadOrder() {
+	m.payloadOldestFirst = !m.payloadOldestFirst
+	m.payloadCursor = 0
+	m.payloadOffset = 0
+	m.clampPayloadCursor()
+}
+
+func reverseLogEntries(in []observability.LogEntry) {
+	for i, j := 0, len(in)-1; i < j; i, j = i+1, j-1 {
+		in[i], in[j] = in[j], in[i]
+	}
 }
 
 func (m *model) filteredLogs(limit int) []observability.LogEntry {
@@ -1999,20 +2425,29 @@ func (m *model) filteredLogs(limit int) []observability.LogEntry {
 		return nil
 	}
 	all := m.snapshot.Logs.Since(1 << 30)
+	var out []observability.LogEntry
 	if !m.logFilterOn {
 		if len(all) > limit {
-			return all[len(all)-limit:]
+			out = all[len(all)-limit:]
+		} else {
+			out = all
 		}
-		return all
-	}
-	out := make([]observability.LogEntry, 0, len(all))
-	for _, e := range all {
-		if e.Level >= m.logMinLevel {
-			out = append(out, e)
+	} else {
+		out = make([]observability.LogEntry, 0, len(all))
+		for _, e := range all {
+			if e.Level >= m.logMinLevel {
+				out = append(out, e)
+			}
+		}
+		if len(out) > limit {
+			out = out[len(out)-limit:]
 		}
 	}
-	if len(out) > limit {
-		return out[len(out)-limit:]
+	if !m.logOldestFirst {
+		cp := make([]observability.LogEntry, len(out))
+		copy(cp, out)
+		reverseLogEntries(cp)
+		return cp
 	}
 	return out
 }
@@ -2026,7 +2461,7 @@ func renderLogs(m *model, width, height int) string {
 	if m.focus == focusBottom && m.bottomTab == bottomTabLogs {
 		borderStyle = borderStyle.BorderForeground(lipgloss.Color("#38BDF8"))
 	}
-	entries := m.logEntriesNewestFirst()
+	entries := m.filteredLogs(1 << 30)
 	visible := m.logVisibleRows()
 	if visible < 1 {
 		visible = 1
@@ -2080,7 +2515,11 @@ func renderLogs(m *model, width, height int) string {
 	if m.logFilterOn {
 		levelName = ">=" + m.logMinLevel.String()
 	}
-	title := fmt.Sprintf("LOGS newest-first (%s)", levelName)
+	order := "newest-first"
+	if m.logOldestFirst {
+		order = "oldest-first"
+	}
+	title := fmt.Sprintf("LOGS %s (%s) [o]rder", order, levelName)
 	inner := width - 2
 	rows := []string{title, headerStyle.Render(fitRow(headerCells([]col{{"AT", 8}, {"LEVEL", 6}, {"MESSAGE", msgWidth}, {"ATTRS", attrsWidth}}), inner))}
 	if height <= 3 {
@@ -2102,7 +2541,7 @@ func renderLogs(m *model, width, height int) string {
 		rows = append(rows, line)
 	}
 	if end < len(entries) {
-		rows = append(rows, fmt.Sprintf("… %d more (j/k move, enter detail)", len(entries)-end))
+		rows = append(rows, fmt.Sprintf("… %d more (j/k move)", len(entries)-end))
 	} else if len(entries) > visible {
 		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Render("[j/k] move [enter] detail"))
 	}
