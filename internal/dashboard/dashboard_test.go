@@ -567,10 +567,10 @@ func TestEnterZoomsFocusedPane(t *testing.T) {
 	snap := newSnapshot()
 	m := &model{snapshot: snap, health: map[string]bool{}, now: time.Now(), dirty: true, focus: focusUsage}
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
-	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "enter"}))
+	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "z"}))
 	mod := mm.(*model)
 	if !mod.zoomed {
-		t.Fatal("enter should zoom focused pane")
+		t.Fatal("z should zoom focused pane")
 	}
 	got := mm.View().Content
 	if !strings.Contains(got, "USAGE") {
@@ -591,7 +591,7 @@ func TestZoomedBottomKeepsTabs(t *testing.T) {
 	snap := newSnapshot()
 	m := &model{snapshot: snap, health: map[string]bool{}, now: time.Now(), dirty: true, focus: focusBottom}
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
-	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "enter"}))
+	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "z"}))
 	got := mm.View().Content
 	if !strings.Contains(got, "1:Aliases") || !strings.Contains(got, "2:Logs") {
 		t.Fatalf("zoomed bottom should keep tab strip:\n%s", got)
