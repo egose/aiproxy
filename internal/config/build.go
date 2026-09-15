@@ -341,6 +341,43 @@ func buildIngressGuardrails(raw *rawGuardrails) (IngressGuardrails, error) {
 	if raw.MaxStrings != nil {
 		out.MaxStrings = *raw.MaxStrings
 	}
+	if len(raw.Quarantine) > 0 {
+		if len(raw.Quarantine) > 1 {
+			return IngressGuardrails{}, fmt.Errorf("only one ingress_guardrails quarantine block is supported")
+		}
+		q, err := buildGuardrailQuarantine(raw.Quarantine[0])
+		if err != nil {
+			return IngressGuardrails{}, err
+		}
+		out.Quarantine = q
+	}
+	return out, nil
+}
+
+func buildGuardrailQuarantine(raw *rawQuarantine) (GuardrailQuarantine, error) {
+	out := GuardrailQuarantine{}
+	if raw == nil {
+		return out, nil
+	}
+	if raw.Enabled != nil {
+		out.Enabled = *raw.Enabled
+	}
+	if raw.MaxEntries != nil {
+		out.MaxEntries = *raw.MaxEntries
+		out.HasMax = true
+	}
+	if raw.TTL != "" {
+		d, err := time.ParseDuration(raw.TTL)
+		if err != nil {
+			return GuardrailQuarantine{}, fmt.Errorf("ingress_guardrails.quarantine.ttl: %w", err)
+		}
+		out.TTL = d
+		out.HasTTL = true
+	}
+	if raw.MaxSnippet != nil {
+		out.MaxSnippet = *raw.MaxSnippet
+		out.HasMax = true
+	}
 	return out, nil
 }
 

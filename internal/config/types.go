@@ -41,6 +41,16 @@ type IngressGuardrails struct {
 	Mode         GuardrailMode
 	MaxTextBytes int
 	MaxStrings   int
+	Quarantine   GuardrailQuarantine
+}
+
+type GuardrailQuarantine struct {
+	Enabled    bool
+	MaxEntries int
+	TTL        time.Duration
+	MaxSnippet int
+	HasTTL     bool
+	HasMax     bool
 }
 
 type Listener struct {

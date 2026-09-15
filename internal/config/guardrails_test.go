@@ -71,6 +71,73 @@ ingress_guardrails {
 	if !g.Enabled || g.Mode != GuardrailModeAudit || g.MaxTextBytes != 4096 || g.MaxStrings != 64 {
 		t.Fatalf("guardrails = %+v", g)
 	}
+	if g.Quarantine.Enabled {
+		t.Fatalf("quarantine should default disabled, got %+v", g.Quarantine)
+	}
+}
+
+func TestLoadIngressGuardrailsQuarantine(t *testing.T) {
+	rt, err := Load([]byte(guardrailTestBase()+`
+ingress_guardrails {
+  enabled = true
+  quarantine {
+    enabled = true
+    max_entries = 32
+    ttl = "30m"
+    max_snippet_bytes = 256
+  }
+}
+`), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	q := rt.IngressGuardrails.Quarantine
+	if !q.Enabled || q.MaxEntries != 32 || q.TTL.String() != "30m0s" || q.MaxSnippet != 256 {
+		t.Fatalf("quarantine = %+v", q)
+	}
+}
+
+func TestLoadIngressGuardrailsQuarantineJSON(t *testing.T) {
+	cfg := `{
+  "listener": {"http": {"public": {"address": ":8080"}}},
+  "auth": {"main": {"mode": "none"}},
+  "provider": {"openai": {"openai": {"api_key": "sk-test", "model": {"gpt-4o-mini": {}}}}},
+  "ingress_guardrails": {"enabled": true, "quarantine": {"enabled": true, "max_entries": 16}}
+}`
+	rt, err := Load([]byte(cfg), "test.json")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	q := rt.IngressGuardrails.Quarantine
+	if !q.Enabled || q.MaxEntries != 16 {
+		t.Fatalf("quarantine = %+v", q)
+	}
+}
+
+func TestLoadIngressGuardrailsQuarantineRejectsInvalid(t *testing.T) {
+	bases := []string{
+		`ingress_guardrails { enabled = true
+  quarantine { enabled = true
+    max_entries = 99999
+  }
+}`,
+		`ingress_guardrails { enabled = true
+  quarantine { enabled = true
+    ttl = "not-a-duration"
+  }
+}`,
+		`ingress_guardrails { enabled = true
+  quarantine { enabled = true
+  }
+  quarantine { enabled = false
+  }
+}`,
+	}
+	for i, block := range bases {
+		if _, err := Load([]byte(guardrailTestBase()+block), "test.hcl"); err == nil {
+			t.Fatalf("case %d: expected error", i)
+		}
+	}
 }
 
 func TestLoadIngressGuardrailsJSON(t *testing.T) {
@@ -123,6 +190,12 @@ ingress_guardrails {
   mode = "audit"
   max_text_bytes = 4096
   max_strings = 64
+  quarantine {
+    enabled = true
+    max_entries = 32
+    ttl = "30m"
+    max_snippet_bytes = 256
+  }
 }
 `
 	out, from, to, err := Convert([]byte(src), "test.hcl", false)
@@ -149,6 +222,10 @@ ingress_guardrails {
 	g := rt.IngressGuardrails
 	if !g.Enabled || g.Mode != GuardrailModeAudit || g.MaxTextBytes != 4096 || g.MaxStrings != 64 {
 		t.Fatalf("round-tripped guardrails = %+v", g)
+	}
+	q := g.Quarantine
+	if !q.Enabled || q.MaxEntries != 32 || q.TTL.String() != "30m0s" || q.MaxSnippet != 256 {
+		t.Fatalf("round-tripped quarantine = %+v", q)
 	}
 }
 

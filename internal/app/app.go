@@ -64,6 +64,7 @@ type App struct {
 	payloadMongo          *mongolog.Logger
 	payloadRecorder       payloadlog.Recorder
 	guardrails            *guardrails.Scanner
+	quarantine            *guardrails.Quarantine
 	buildOpt              BuildOptions
 	startTime             time.Time
 	dashboardTokenMinted  bool
@@ -115,18 +116,19 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ingress guardrails: %w", err)
 	}
+	quarantine := guardrails.NewQuarantine(quarantinePolicy(rt))
 
 	httpClients := newUpstreamClientPool()
 
 	startTime := time.Now()
 	resolver := modelresolver.New(rt)
-	handler := httpapi.NewHandler(buildDependencies(rt, resolver, logger, adapter, metrics, health, healthchecks, rateLimiter, usage, httpClients, logs, startTime, opts.Version, payloadRecorder, payloadDirOf(payloadLog), scanner))
+	handler := httpapi.NewHandler(buildDependencies(rt, resolver, logger, adapter, metrics, health, healthchecks, rateLimiter, usage, httpClients, logs, startTime, opts.Version, payloadRecorder, payloadDirOf(payloadLog), scanner, quarantine))
 	server := &http.Server{
 		Handler: handler,
 	}
 	applyServerConfig(server, rt.Listener)
 
-	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, resolver: resolver, clients: httpClients, health: health, healthchecks: healthchecks, rateLimiter: rateLimiter, usage: usage, logs: logs, payloadLog: payloadLog, payloadMongo: payloadMongo, payloadRecorder: payloadRecorder, guardrails: scanner, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}, nil
+	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, resolver: resolver, clients: httpClients, health: health, healthchecks: healthchecks, rateLimiter: rateLimiter, usage: usage, logs: logs, payloadLog: payloadLog, payloadMongo: payloadMongo, payloadRecorder: payloadRecorder, guardrails: scanner, quarantine: quarantine, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -275,13 +277,21 @@ func (a *App) Reload() error {
 	if err != nil {
 		return fmt.Errorf("ingress guardrails: %w", err)
 	}
+	nextQuarantine := a.quarantine
+	if current == nil || current.IngressGuardrails.Quarantine != rt.IngressGuardrails.Quarantine {
+		qpolicy := quarantinePolicy(rt)
+		if err := qpolicy.Validate(); err != nil {
+			return fmt.Errorf("ingress guardrails quarantine: %w", err)
+		}
+		nextQuarantine = guardrails.NewQuarantine(qpolicy)
+	}
 	nextRateLimiter := a.rateLimiter
 	if current == nil || !ratelimit.ConfigEqual(current.Auth, rt.Auth) {
 		nextRateLimiter = ratelimit.New(rt.Auth)
 	}
 	a.metrics.SetBuildInfo(a.buildOpt.Version)
 	a.metrics.RecordConfig(rt)
-	a.handler.UpdateDependencies(buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadRecorder, payloadDirOf(nextPayloadLog), nextGuardrails))
+	a.handler.UpdateDependencies(buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadRecorder, payloadDirOf(nextPayloadLog), nextGuardrails, nextQuarantine))
 	oldHealth := a.health
 	oldPayloadLog := a.payloadLog
 	oldPayloadMongo := a.payloadMongo
@@ -294,6 +304,7 @@ func (a *App) Reload() error {
 	a.payloadMongo = nextPayloadMongo
 	a.payloadRecorder = nextPayloadRecorder
 	a.guardrails = nextGuardrails
+	a.quarantine = nextQuarantine
 	a.dashboardTokenMinted = dashboardTokenMinted
 	a.dashboardTokenWritten = a.dashboardTokenWritten || dashboardTokenPublished
 	a.mu.Unlock()
@@ -358,7 +369,7 @@ func (a *App) persistDashboardTokenIfNeeded() error {
 	return nil
 }
 
-func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, healthchecks *healthcheck.Manager, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string, payloadRecorder payloadlog.Recorder, payloadDir string, scanner *guardrails.Scanner) httpapi.Dependencies {
+func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, healthchecks *healthcheck.Manager, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string, payloadRecorder payloadlog.Recorder, payloadDir string, scanner *guardrails.Scanner, quarantine *guardrails.Quarantine) httpapi.Dependencies {
 	if resolver == nil {
 		resolver = modelresolver.New(rt)
 	}
@@ -367,6 +378,9 @@ func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, log
 	dashboard.SetHealthcheckSource(healthcheckSourceFor(healthchecks))
 	if payloadDir != "" {
 		dashboard.SetPayloadSource(payloadDir, true)
+	}
+	if quarantine != nil {
+		dashboard.SetBlockSource(quarantineAdapter{quarantine})
 	}
 	return httpapi.Dependencies{
 		Resolver:          resolver,
@@ -389,6 +403,7 @@ func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, log
 		Dashboard:         dashboard,
 		Version:           version,
 		Guardrails:        scanner,
+		Quarantine:        quarantine,
 	}
 }
 
@@ -403,6 +418,63 @@ func guardrailPolicy(rt *config.Runtime) guardrails.Policy {
 		MaxTextBytes: g.MaxTextBytes,
 		MaxStrings:   g.MaxStrings,
 	}
+}
+
+func quarantinePolicy(rt *config.Runtime) guardrails.QuarantinePolicy {
+	if rt == nil || !rt.IngressGuardrails.Enabled {
+		return guardrails.QuarantinePolicy{}
+	}
+	q := rt.IngressGuardrails.Quarantine
+	return guardrails.QuarantinePolicy{
+		Enabled:    q.Enabled,
+		MaxEntries: q.MaxEntries,
+		TTL:        q.TTL,
+		MaxSnippet: q.MaxSnippet,
+	}
+}
+
+type quarantineAdapter struct {
+	q *guardrails.Quarantine
+}
+
+func (a quarantineAdapter) ListBlocks() []dashrpc.BlockSummary {
+	summaries := a.q.List()
+	out := make([]dashrpc.BlockSummary, 0, len(summaries))
+	for _, s := range summaries {
+		out = append(out, dashrpc.BlockSummary{
+			BlockID:      s.BlockID,
+			Timestamp:    s.Timestamp.Format(time.RFC3339Nano),
+			Operation:    s.Operation,
+			PublicModel:  s.PublicModel,
+			RuleIDs:      append([]string(nil), s.RuleIDs...),
+			FindingCount: s.FindingCount,
+		})
+	}
+	return out
+}
+
+func (a quarantineAdapter) TakeBlock(blockID string) (dashrpc.BlockCapture, bool) {
+	capture, ok := a.q.Take(blockID)
+	if !ok {
+		return dashrpc.BlockCapture{}, false
+	}
+	out := dashrpc.BlockCapture{
+		BlockID:     capture.BlockID,
+		Timestamp:   capture.Timestamp.Format(time.RFC3339Nano),
+		Operation:   capture.Operation,
+		PublicModel: capture.PublicModel,
+		RuleIDs:     append([]string(nil), capture.RuleIDs...),
+	}
+	for _, f := range capture.Findings {
+		out.Findings = append(out.Findings, dashrpc.BlockFinding{
+			RuleID:      f.RuleID,
+			Description: f.Description,
+			Secret:      f.Secret,
+			Match:       f.Match,
+			Line:        f.Line,
+		})
+	}
+	return out, true
 }
 
 func healthcheckSourceFor(manager *healthcheck.Manager) func() []dashrpc.HealthcheckStatus {

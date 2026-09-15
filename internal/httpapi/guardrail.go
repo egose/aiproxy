@@ -202,17 +202,21 @@ func collectStringLeaves(c *guardrailTextCollector, v any) {
 	}
 }
 
-func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *http.Request, op provider.Operation, body []byte, scanner *guardrails.Scanner, logger *slog.Logger) bool {
+func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *http.Request, op provider.Operation, body []byte, scanner *guardrails.Scanner, publicModel string, logger *slog.Logger) bool {
 	policy := scanner.Policy()
 	mode := string(policy.Mode)
 	texts, reason := extractGuardrailTexts(r.Header.Get("Content-Type"), op, body, policy.MaxStrings, policy.MaxTextBytes)
 	var res guardrails.Result
+	var captured []guardrails.CapturedFinding
 	if reason != "" {
 		res = guardrails.Result{Outcome: guardrails.OutcomeIncomplete, Reason: reason}
+	} else if deps.Quarantine != nil {
+		res, captured = scanner.ScanCapture(r.Context(), texts)
 	} else {
 		res = scanner.Scan(r.Context(), texts)
 	}
 	outcome := string(res.Outcome)
+	blockID := ""
 	if deps.Metrics != nil {
 		deps.Metrics.RecordGuardrailScan(op.String(), mode, outcome)
 	}
@@ -224,6 +228,9 @@ func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *h
 		if res.Reason != "" {
 			attrs = append(attrs, "reason", res.Reason)
 		}
+		if blockID != "" {
+			attrs = append(attrs, "block_id", blockID)
+		}
 		return attrs
 	}
 	switch res.Outcome {
@@ -234,9 +241,20 @@ func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *h
 			logger.Info("guardrail scan did not block request", safeAttrs()...)
 			return false
 		}
+		if res.Outcome == guardrails.OutcomeFlagged && deps.Quarantine != nil && len(captured) > 0 {
+			if id, err := guardrails.MintBlockID(); err == nil {
+				blockID = id
+				deps.Quarantine.Store(blockID, guardrails.Capture{
+					Operation:   op.String(),
+					PublicModel: publicModel,
+					RuleIDs:     append([]string(nil), res.RuleIDs...),
+					Findings:    captured,
+				})
+			}
+		}
 		logger.Warn("guardrail blocked request", safeAttrs()...)
 		if res.Outcome == guardrails.OutcomeFlagged {
-			h.writeRequestError(deps.Metrics, w, r, http.StatusBadRequest, guardrailBlockType, guardrailBlockMessage)
+			h.writeRequestErrorWithBlock(deps.Metrics, w, r, http.StatusBadRequest, guardrailBlockType, guardrailBlockMessage, blockID)
 		} else {
 			h.writeRequestError(deps.Metrics, w, r, http.StatusBadRequest, guardrailGapType, guardrailGapMessage)
 		}

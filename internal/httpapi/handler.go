@@ -48,6 +48,7 @@ type Dependencies struct {
 	Dashboard         dashrpc.Source
 	Version           string
 	Guardrails        *guardrails.Scanner
+	Quarantine        *guardrails.Quarantine
 }
 
 const maxRequestBodyBytes int64 = 8 << 20
@@ -344,7 +345,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if deps.Guardrails != nil && guardrailCovered(op) {
-		if h.checkGuardrails(deps, rw, r, op, body, deps.Guardrails, logger) {
+		if h.checkGuardrails(deps, rw, r, op, body, deps.Guardrails, publicModel, logger) {
 			return
 		}
 	}

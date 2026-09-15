@@ -31,10 +31,13 @@ const (
 	LogsPath           = "/_internal/dashboard/logs"
 	PayloadsPath       = "/_internal/dashboard/payloads"
 	PayloadPathPrefix  = "/_internal/dashboard/payloads/"
+	BlocksPath         = "/_internal/dashboard/blocks"
+	BlockPathPrefix    = "/_internal/dashboard/blocks/"
 	AuthHeaderName     = "Authorization"
 	AuthScheme         = "Bearer "
 	PayloadListDefault = 100
 	PayloadListMax     = 500
+	BlocksListMax      = 500
 )
 
 type Snapshot struct {
@@ -113,6 +116,37 @@ type PayloadList struct {
 	Payloads []PayloadSummary `json:"payloads"`
 }
 
+type BlockSummary struct {
+	BlockID      string   `json:"block_id"`
+	Timestamp    string   `json:"ts"`
+	Operation    string   `json:"operation,omitempty"`
+	PublicModel  string   `json:"public_model,omitempty"`
+	RuleIDs      []string `json:"rule_ids"`
+	FindingCount int      `json:"finding_count"`
+}
+
+type BlockCapture struct {
+	BlockID     string         `json:"block_id"`
+	Timestamp   string         `json:"ts"`
+	Operation   string         `json:"operation,omitempty"`
+	PublicModel string         `json:"public_model,omitempty"`
+	RuleIDs     []string       `json:"rule_ids"`
+	Findings    []BlockFinding `json:"findings"`
+}
+
+type BlockFinding struct {
+	RuleID      string `json:"rule_id"`
+	Description string `json:"description,omitempty"`
+	Secret      string `json:"secret"`
+	Match       string `json:"match,omitempty"`
+	Line        string `json:"line,omitempty"`
+}
+
+type BlockList struct {
+	Enabled bool           `json:"enabled"`
+	Blocks  []BlockSummary `json:"blocks"`
+}
+
 type Source interface {
 	Enabled() bool
 	Token() string
@@ -134,6 +168,12 @@ type RuntimeSource struct {
 	healthchecks func() []HealthcheckStatus
 	payloadDir   string
 	payloadOn    bool
+	blocks       BlockStore
+}
+
+type BlockStore interface {
+	ListBlocks() []BlockSummary
+	TakeBlock(blockID string) (BlockCapture, bool)
 }
 
 func (s *RuntimeSource) SetPayloadSource(dir string, enabled bool) {
@@ -142,6 +182,31 @@ func (s *RuntimeSource) SetPayloadSource(dir string, enabled bool) {
 	}
 	s.payloadDir = dir
 	s.payloadOn = enabled
+}
+
+func (s *RuntimeSource) SetBlockSource(store BlockStore) {
+	if s == nil {
+		return
+	}
+	s.blocks = store
+}
+
+func (s *RuntimeSource) BlocksEnabled() bool {
+	return s != nil && s.blocks != nil
+}
+
+func (s *RuntimeSource) ListBlocks() []BlockSummary {
+	if s == nil || s.blocks == nil {
+		return nil
+	}
+	return s.blocks.ListBlocks()
+}
+
+func (s *RuntimeSource) TakeBlock(blockID string) (BlockCapture, bool) {
+	if s == nil || s.blocks == nil {
+		return BlockCapture{}, false
+	}
+	return s.blocks.TakeBlock(blockID)
 }
 
 func (s *RuntimeSource) PayloadEnabled() bool {
@@ -382,6 +447,39 @@ func (c *AuthenticatedClient) FetchPayload(ctx context.Context, requestID string
 		return nil, fmt.Errorf("payload endpoint returned %d: %s", status, bytes.TrimSpace(body))
 	}
 	return json.RawMessage(append([]byte(nil), bytes.TrimSpace(body)...)), nil
+}
+
+func (c *AuthenticatedClient) FetchBlocks(ctx context.Context) (BlockList, error) {
+	body, status, err := c.doGet(ctx, BlocksPath)
+	if err != nil {
+		return BlockList{}, err
+	}
+	if status != http.StatusOK {
+		return BlockList{}, fmt.Errorf("blocks endpoint returned %d: %s", status, bytes.TrimSpace(body))
+	}
+	var out BlockList
+	if err := json.Unmarshal(body, &out); err != nil {
+		return BlockList{}, fmt.Errorf("decode blocks: %w", err)
+	}
+	return out, nil
+}
+
+func (c *AuthenticatedClient) FetchBlock(ctx context.Context, blockID string) (BlockCapture, error) {
+	body, status, err := c.doGet(ctx, BlockPathPrefix+blockID)
+	if err != nil {
+		return BlockCapture{}, err
+	}
+	if status == http.StatusNotFound {
+		return BlockCapture{}, fmt.Errorf("block %q not found (expired or already consumed)", blockID)
+	}
+	if status != http.StatusOK {
+		return BlockCapture{}, fmt.Errorf("block endpoint returned %d: %s", status, bytes.TrimSpace(body))
+	}
+	var out BlockCapture
+	if err := json.Unmarshal(body, &out); err != nil {
+		return BlockCapture{}, fmt.Errorf("decode block: %w", err)
+	}
+	return out, nil
 }
 
 // TokenFilePath returns the canonical location of the persisted dashboard
