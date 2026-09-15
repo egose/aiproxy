@@ -52,7 +52,9 @@ func (l *remoteLogs) Since(n int) []observability.LogEntry {
 	if n > len(l.entries) {
 		n = len(l.entries)
 	}
-	return l.entries[len(l.entries)-n:]
+	out := make([]observability.LogEntry, n)
+	copy(out, l.entries[len(l.entries)-n:])
+	return out
 }
 
 // SnapshotFromTransport converts a dashrpc.Snapshot into a dashboard

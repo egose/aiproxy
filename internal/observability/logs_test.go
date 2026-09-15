@@ -3,6 +3,7 @@ package observability
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strings"
 	"testing"
@@ -78,6 +79,22 @@ func TestWrapWithBufferForwardsAndBuffers(t *testing.T) {
 	out := sink.String()
 	if !strings.Contains(out, `"msg":"hello"`) {
 		t.Fatalf("sink = %q, want msg hello", out)
+	}
+}
+
+func TestLogEntrySeqRoundTripsJSON(t *testing.T) {
+	b := NewLogBuffer(10)
+	b.Add(LogEntry{Message: "hi"})
+	raw, err := json.Marshal(b.Since(10))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back []LogEntry
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(back) != 1 || back[0].Seq != 1 || back[0].Message != "hi" {
+		t.Fatalf("round trip = %+v, want seq=1 msg=hi", back)
 	}
 }
 

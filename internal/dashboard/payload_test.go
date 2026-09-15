@@ -186,6 +186,48 @@ func TestSnapshotFromTransportCarriesPayloadFlag(t *testing.T) {
 	}
 }
 
+func TestPayloadOrderToggle(t *testing.T) {
+	snap := payloadTestSnapshot()
+	mm := InitialModelWithPayloadFetcher(snap, payloadTestFetcher())
+	mm, _ = mm.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+	mm, cmd := mm.Update(tea.KeyPressMsg(tea.Key{Text: "3"}))
+	mm, _ = mm.Update(cmd())
+	got := mm.View().Content
+	if strings.Index(got, "gpt-4o") < 0 {
+		t.Fatalf("missing payload rows:\n%s", got)
+	}
+	if strings.Index(got, "gpt-4o") > strings.Index(got, "text-emb") {
+		t.Fatalf("default should be newest-first (req-new first):\n%s", got)
+	}
+	if !strings.Contains(got, "newest-first") {
+		t.Fatalf("default should be newest-first:\n%s", got)
+	}
+	mod := mm.(*model)
+	if mod.payloadAt(0).RequestID != "req-new" {
+		t.Fatalf("newest-first first = %q, want req-new", mod.payloadAt(0).RequestID)
+	}
+	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "o"}))
+	mod = mm.(*model)
+	if !mod.payloadOldestFirst {
+		t.Fatal("o should toggle payloads to oldest-first")
+	}
+	if mod.payloadAt(0).RequestID != "req-old" {
+		t.Fatalf("oldest-first first = %q, want req-old", mod.payloadAt(0).RequestID)
+	}
+	mod.dirty = true
+	if got := mm.View().Content; !strings.Contains(got, "oldest-first") {
+		t.Fatalf("title should show order:\n%s", got)
+	}
+	mm, cmd = mm.Update(tea.KeyPressMsg(tea.Key{Text: "enter"}))
+	if cmd == nil {
+		t.Fatal("expected detail fetch cmd on enter in oldest-first")
+	}
+	mm, _ = mm.Update(cmd())
+	if mod := mm.(*model); mod.payloadDetailID != "req-old" {
+		t.Fatalf("detail id = %q, want req-old", mod.payloadDetailID)
+	}
+}
+
 func TestPayloadCursorClamp(t *testing.T) {
 	snap := payloadTestSnapshot()
 	mm := InitialModelWithPayloadFetcher(snap, payloadTestFetcher())

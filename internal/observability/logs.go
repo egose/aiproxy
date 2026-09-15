@@ -25,7 +25,29 @@ func (e LogEntry) MarshalJSON() ([]byte, error) {
 		Level:   e.Level.String(),
 		Message: e.Message,
 		Attrs:   e.Attrs,
+		Seq:     e.Seq,
 	})
+}
+
+func (e *LogEntry) UnmarshalJSON(data []byte) error {
+	var v logEntryJSON
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	tm, err := time.Parse(time.RFC3339Nano, v.Time)
+	if err != nil {
+		return err
+	}
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(v.Level)); err != nil {
+		return err
+	}
+	e.Time = tm
+	e.Level = level
+	e.Message = v.Message
+	e.Attrs = v.Attrs
+	e.Seq = v.Seq
+	return nil
 }
 
 type logEntryJSON struct {
@@ -33,6 +55,7 @@ type logEntryJSON struct {
 	Level   string `json:"level"`
 	Message string `json:"message"`
 	Attrs   string `json:"attrs,omitempty"`
+	Seq     uint64 `json:"seq,omitempty"`
 }
 
 type LogBuffer struct {
