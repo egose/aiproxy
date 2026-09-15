@@ -1129,7 +1129,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
-        children: "ingress_guardrails {\n  enabled        = true\n  mode           = \"block\"\n  max_text_bytes = 65536\n  max_strings    = 512\n}\n"
+        children: "ingress_guardrails {\n  enabled        = true\n  mode           = \"block\"\n  max_text_bytes = 65536\n  max_strings    = 512\n\n  quarantine {\n    enabled           = true\n    max_entries       = 128\n    ttl               = \"15m\"\n    max_snippet_bytes = 512\n  }\n}\n"
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Opt-in secret scanning of inbound ", (0,jsx_runtime.jsx)(_components.code, {
@@ -1150,13 +1150,45 @@ function _createMdxContent(props) {
         children: "audit"
       }), " (forwards and records\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "aiproxy_guardrail_scans_total{operation,mode,outcome}"
-      }), "). Scanned text is the\nJSON-decoded message content, tool arguments (plus one JSON-decoded level),\ntool results, and responses instructions/input; images, audio, embeddings,\nattachments, encoded blobs, and response/SSE output are out of scope and\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), "). A blocked flagged\nrequest carries ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "block_id"
+      }), " in the error body. Scanned text is the\nJSON-decoded message content, tool arguments (plus one JSON-decoded level),\ntool results, and responses instructions/input; images, audio, embeddings,\nattachments, encoded blobs, and response/SSE output are out of scope and\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "gitleaks:allow"
       }), " cannot suppress scans. Bounds default to 65536 text bytes\nand 512 strings (zeros select defaults); over-limit or canceled scans are\nvisible ", (0,jsx_runtime.jsx)(_components.code, {
         children: "incomplete"
       }), " outcomes. While enabled, covered-operation request\nbodies are omitted from payload-log entries. Policy changes apply on ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
       }), "\nwith atomic rollback on failure."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The nested ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "quarantine"
+      }), " block is optional and disabled by default. When\nenabled, matched snippets (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "secret"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "match"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "line"
+      }), ", truncated to\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "max_snippet_bytes"
+      }), ", default 512) are kept in process memory (bounded by\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "max_entries"
+      }), ", default 128, and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "ttl"
+      }), ", default ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "15m"
+      }), ") so an operator can\ntriage false positives by ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "block_id"
+      }), " through the dashboard-gated\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "GET /_internal/dashboard/blocks"
+      }), " (metadata only) and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "GET /_internal/dashboard/blocks/<block_id>"
+      }), " (full capture, take-once)\nendpoints, or the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "4:Blocks"
+      }), " tab in ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy dashboard"
+      }), ". Dashboard token\nholders can read live matched secrets while quarantine is on; state is\nprocess-local, lost on restart, and rebuilt empty whenever its config\nchanges on ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), "."]
     })]
   });
 }
