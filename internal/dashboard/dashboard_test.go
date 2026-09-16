@@ -469,7 +469,7 @@ func TestUsageColumnsShrinkOnNarrowTerminal(t *testing.T) {
 }
 
 func TestProviderColumnsSizeToContent(t *testing.T) {
-	nameW, ipW, reqW, t429W, tokW := providerColWidths([]string{"zen", "render-coreanesque"}, []string{"-", "1.2.3.4"}, []int64{0, 1615}, []int64{0, 280}, []int64{0, 1234567}, 125)
+	nameW, ipW, reqW, t429W, tokW := providerColWidths([]string{"zen", "render-coreanesque"}, []string{"-", "1.2.3.4"}, []int64{0, 1615}, []int64{0, 280}, []string{"~", "1,234,567"}, 125)
 	if nameW != len("render-coreanesque") {
 		t.Fatalf("nameW = %d, want %d", nameW, len("render-coreanesque"))
 	}
