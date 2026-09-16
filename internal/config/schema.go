@@ -29,11 +29,13 @@ type rawDashboard struct {
 }
 
 type rawGuardrails struct {
-	Enabled      *bool            `hcl:"enabled,optional"`
-	Mode         string           `hcl:"mode,optional"`
-	MaxTextBytes *int             `hcl:"max_text_bytes,optional"`
-	MaxStrings   *int             `hcl:"max_strings,optional"`
-	Quarantine   []*rawQuarantine `hcl:"quarantine,block"`
+	Enabled           *bool            `hcl:"enabled,optional"`
+	Mode              string           `hcl:"mode,optional"`
+	MaxTextBytes      *int             `hcl:"max_text_bytes,optional"`
+	MaxStrings        *int             `hcl:"max_strings,optional"`
+	ExceptionsFile    string           `hcl:"exceptions_file,optional"`
+	RedactPlaceholder string           `hcl:"redact_placeholder,optional"`
+	Quarantine        []*rawQuarantine `hcl:"quarantine,block"`
 }
 
 type rawQuarantine struct {

@@ -79,6 +79,7 @@ type CapturedFinding struct {
 	RuleID      string `json:"rule_id"`
 	Description string `json:"description,omitempty"`
 	Secret      string `json:"secret"`
+	SecretSHA   string `json:"secret_sha256,omitempty"`
 	Match       string `json:"match,omitempty"`
 	Line        string `json:"line,omitempty"`
 }
@@ -171,6 +172,7 @@ func (s *Scanner) ScanCapture(ctx context.Context, texts []string) (Result, []Ca
 				RuleID:      f.RuleID,
 				Description: f.Description,
 				Secret:      truncateSecret(f.Secret, maxSnippet),
+				SecretSHA:   Fingerprint(f.Secret),
 				Match:       truncateSecret(f.Match, maxSnippet),
 				Line:        truncateSecret(f.Line, maxSnippet),
 			})
@@ -203,6 +205,9 @@ func (q *Quarantine) Store(blockID string, capture Capture) {
 	}
 	snippets := q.policy.MaxSnippet
 	for i := range capture.Findings {
+		if capture.Findings[i].SecretSHA == "" && capture.Findings[i].Secret != "" {
+			capture.Findings[i].SecretSHA = Fingerprint(capture.Findings[i].Secret)
+		}
 		capture.Findings[i].Secret = truncateSecret(capture.Findings[i].Secret, snippets)
 		capture.Findings[i].Match = truncateSecret(capture.Findings[i].Match, snippets)
 		capture.Findings[i].Line = truncateSecret(capture.Findings[i].Line, snippets)

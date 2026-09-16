@@ -27,17 +27,18 @@ import (
 )
 
 const (
-	SnapshotPath       = "/_internal/dashboard/snapshot"
-	LogsPath           = "/_internal/dashboard/logs"
-	PayloadsPath       = "/_internal/dashboard/payloads"
-	PayloadPathPrefix  = "/_internal/dashboard/payloads/"
-	BlocksPath         = "/_internal/dashboard/blocks"
-	BlockPathPrefix    = "/_internal/dashboard/blocks/"
-	AuthHeaderName     = "Authorization"
-	AuthScheme         = "Bearer "
-	PayloadListDefault = 100
-	PayloadListMax     = 500
-	BlocksListMax      = 500
+	SnapshotPath        = "/_internal/dashboard/snapshot"
+	LogsPath            = "/_internal/dashboard/logs"
+	PayloadsPath        = "/_internal/dashboard/payloads"
+	PayloadPathPrefix   = "/_internal/dashboard/payloads/"
+	BlocksPath          = "/_internal/dashboard/blocks"
+	BlockPathPrefix     = "/_internal/dashboard/blocks/"
+	BlockDecisionSuffix = "/decision"
+	AuthHeaderName      = "Authorization"
+	AuthScheme          = "Bearer "
+	PayloadListDefault  = 100
+	PayloadListMax      = 500
+	BlocksListMax       = 500
 )
 
 type Snapshot struct {
@@ -138,8 +139,20 @@ type BlockFinding struct {
 	RuleID      string `json:"rule_id"`
 	Description string `json:"description,omitempty"`
 	Secret      string `json:"secret"`
+	SecretSHA   string `json:"secret_sha256,omitempty"`
 	Match       string `json:"match,omitempty"`
 	Line        string `json:"line,omitempty"`
+}
+
+type BlockDecisionRequest struct {
+	Action      string   `json:"action"`
+	FindingSHAs []string `json:"finding_shas"`
+}
+
+type BlockDecisionResponse struct {
+	Ok     bool   `json:"ok"`
+	Action string `json:"action"`
+	Count  int    `json:"count"`
 }
 
 type BlockList struct {
@@ -460,6 +473,40 @@ func (c *AuthenticatedClient) FetchBlocks(ctx context.Context) (BlockList, error
 	var out BlockList
 	if err := json.Unmarshal(body, &out); err != nil {
 		return BlockList{}, fmt.Errorf("decode blocks: %w", err)
+	}
+	return out, nil
+}
+
+func BlockDecisionPath(blockID string) string {
+	return BlockPathPrefix + blockID + BlockDecisionSuffix
+}
+
+func (c *AuthenticatedClient) DecideBlock(ctx context.Context, blockID, action string, shas []string) (BlockDecisionResponse, error) {
+	payload, err := json.Marshal(BlockDecisionRequest{Action: action, FindingSHAs: shas})
+	if err != nil {
+		return BlockDecisionResponse{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+BlockDecisionPath(blockID), bytes.NewReader(payload))
+	if err != nil {
+		return BlockDecisionResponse{}, err
+	}
+	req.Header.Set(AuthHeaderName, c.authHeader())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return BlockDecisionResponse{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return BlockDecisionResponse{}, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return BlockDecisionResponse{}, fmt.Errorf("block decision endpoint returned %d: %s", resp.StatusCode, bytes.TrimSpace(body))
+	}
+	var out BlockDecisionResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return BlockDecisionResponse{}, fmt.Errorf("decode block decision: %w", err)
 	}
 	return out, nil
 }

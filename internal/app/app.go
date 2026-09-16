@@ -65,6 +65,7 @@ type App struct {
 	payloadRecorder       payloadlog.Recorder
 	guardrails            *guardrails.Scanner
 	quarantine            *guardrails.Quarantine
+	exceptions            *guardrails.Exceptions
 	buildOpt              BuildOptions
 	startTime             time.Time
 	dashboardTokenMinted  bool
@@ -117,18 +118,22 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 		return nil, fmt.Errorf("ingress guardrails: %w", err)
 	}
 	quarantine := guardrails.NewQuarantine(quarantinePolicy(rt))
+	exceptions, err := loadGuardrailExceptions(rt, scanner)
+	if err != nil {
+		return nil, err
+	}
 
 	httpClients := newUpstreamClientPool()
 
 	startTime := time.Now()
 	resolver := modelresolver.New(rt)
-	handler := httpapi.NewHandler(buildDependencies(rt, resolver, logger, adapter, metrics, health, healthchecks, rateLimiter, usage, httpClients, logs, startTime, opts.Version, payloadRecorder, payloadDirOf(payloadLog), scanner, quarantine))
+	handler := httpapi.NewHandler(buildDependencies(rt, resolver, logger, adapter, metrics, health, healthchecks, rateLimiter, usage, httpClients, logs, startTime, opts.Version, payloadRecorder, payloadDirOf(payloadLog), scanner, quarantine, exceptions))
 	server := &http.Server{
 		Handler: handler,
 	}
 	applyServerConfig(server, rt.Listener)
 
-	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, resolver: resolver, clients: httpClients, health: health, healthchecks: healthchecks, rateLimiter: rateLimiter, usage: usage, logs: logs, payloadLog: payloadLog, payloadMongo: payloadMongo, payloadRecorder: payloadRecorder, guardrails: scanner, quarantine: quarantine, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}, nil
+	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, resolver: resolver, clients: httpClients, health: health, healthchecks: healthchecks, rateLimiter: rateLimiter, usage: usage, logs: logs, payloadLog: payloadLog, payloadMongo: payloadMongo, payloadRecorder: payloadRecorder, guardrails: scanner, quarantine: quarantine, exceptions: exceptions, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -277,6 +282,10 @@ func (a *App) Reload() error {
 	if err != nil {
 		return fmt.Errorf("ingress guardrails: %w", err)
 	}
+	nextExceptions, err := loadGuardrailExceptions(rt, nextGuardrails)
+	if err != nil {
+		return err
+	}
 	nextQuarantine := a.quarantine
 	if current == nil || current.IngressGuardrails.Quarantine != rt.IngressGuardrails.Quarantine {
 		qpolicy := quarantinePolicy(rt)
@@ -291,7 +300,7 @@ func (a *App) Reload() error {
 	}
 	a.metrics.SetBuildInfo(a.buildOpt.Version)
 	a.metrics.RecordConfig(rt)
-	a.handler.UpdateDependencies(buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadRecorder, payloadDirOf(nextPayloadLog), nextGuardrails, nextQuarantine))
+	a.handler.UpdateDependencies(buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadRecorder, payloadDirOf(nextPayloadLog), nextGuardrails, nextQuarantine, nextExceptions))
 	oldHealth := a.health
 	oldPayloadLog := a.payloadLog
 	oldPayloadMongo := a.payloadMongo
@@ -305,6 +314,7 @@ func (a *App) Reload() error {
 	a.payloadRecorder = nextPayloadRecorder
 	a.guardrails = nextGuardrails
 	a.quarantine = nextQuarantine
+	a.exceptions = nextExceptions
 	a.dashboardTokenMinted = dashboardTokenMinted
 	a.dashboardTokenWritten = a.dashboardTokenWritten || dashboardTokenPublished
 	a.mu.Unlock()
@@ -369,7 +379,7 @@ func (a *App) persistDashboardTokenIfNeeded() error {
 	return nil
 }
 
-func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, healthchecks *healthcheck.Manager, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string, payloadRecorder payloadlog.Recorder, payloadDir string, scanner *guardrails.Scanner, quarantine *guardrails.Quarantine) httpapi.Dependencies {
+func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, healthchecks *healthcheck.Manager, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string, payloadRecorder payloadlog.Recorder, payloadDir string, scanner *guardrails.Scanner, quarantine *guardrails.Quarantine, exceptions *guardrails.Exceptions) httpapi.Dependencies {
 	if resolver == nil {
 		resolver = modelresolver.New(rt)
 	}
@@ -404,6 +414,7 @@ func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, log
 		Version:           version,
 		Guardrails:        scanner,
 		Quarantine:        quarantine,
+		Exceptions:        exceptions,
 	}
 }
 
@@ -418,6 +429,25 @@ func guardrailPolicy(rt *config.Runtime) guardrails.Policy {
 		MaxTextBytes: g.MaxTextBytes,
 		MaxStrings:   g.MaxStrings,
 	}
+}
+
+func loadGuardrailExceptions(rt *config.Runtime, scanner *guardrails.Scanner) (*guardrails.Exceptions, error) {
+	if rt == nil || !rt.IngressGuardrails.Enabled {
+		return nil, nil
+	}
+	path := config.ResolveGuardrailExceptionsPath(rt.IngressGuardrails)
+	placeholder := config.ResolveGuardrailPlaceholder(rt.IngressGuardrails)
+	exceptions, err := guardrails.LoadExceptions(path, placeholder)
+	if err != nil {
+		return nil, fmt.Errorf("ingress guardrails exceptions: %w", err)
+	}
+	if scanner != nil && placeholder != "" {
+		res := scanner.Scan(context.Background(), []string{placeholder})
+		if res.Outcome == guardrails.OutcomeFlagged {
+			return nil, fmt.Errorf("ingress guardrails: redact_placeholder is itself flagged as a secret")
+		}
+	}
+	return exceptions, nil
 }
 
 func quarantinePolicy(rt *config.Runtime) guardrails.QuarantinePolicy {
@@ -466,10 +496,15 @@ func (a quarantineAdapter) TakeBlock(blockID string) (dashrpc.BlockCapture, bool
 		RuleIDs:     append([]string(nil), capture.RuleIDs...),
 	}
 	for _, f := range capture.Findings {
+		sha := f.SecretSHA
+		if sha == "" && f.Secret != "" {
+			sha = guardrails.Fingerprint(f.Secret)
+		}
 		out.Findings = append(out.Findings, dashrpc.BlockFinding{
 			RuleID:      f.RuleID,
 			Description: f.Description,
 			Secret:      f.Secret,
+			SecretSHA:   sha,
 			Match:       f.Match,
 			Line:        f.Line,
 		})

@@ -148,6 +148,13 @@ func (f *dashboardPayloadFetcher) GetBlock(ctx context.Context, blockID string) 
 	return f.client.FetchBlock(ctx, blockID)
 }
 
+func (f *dashboardPayloadFetcher) DecideBlock(ctx context.Context, blockID, action string, shas []string) (dashrpc.BlockDecisionResponse, error) {
+	if f == nil || f.client == nil {
+		return dashrpc.BlockDecisionResponse{}, errors.New("block client not configured")
+	}
+	return f.client.DecideBlock(ctx, blockID, action, shas)
+}
+
 func normalizeBaseURL(addr string) string {
 	if addr == "" {
 		addr = ":8080"

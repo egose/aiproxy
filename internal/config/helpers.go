@@ -127,6 +127,27 @@ func defaultKeyFilePath() string {
 	return filepath.Join(home, ".config", "aiproxy", "keys.json")
 }
 
+func ResolveGuardrailExceptionsPath(g IngressGuardrails) string {
+	if g.ExceptionsFile != "" {
+		return g.ExceptionsFile
+	}
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "aiproxy", "guardrail-exceptions.json")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join("aiproxy", "guardrail-exceptions.json")
+	}
+	return filepath.Join(home, ".config", "aiproxy", "guardrail-exceptions.json")
+}
+
+func ResolveGuardrailPlaceholder(g IngressGuardrails) string {
+	if g.RedactPlaceholder != "" {
+		return g.RedactPlaceholder
+	}
+	return "REDACTED"
+}
+
 func parseTimeouts(t *rawTimeouts) (Timeouts, error) {
 	out := Timeouts{}
 	if t.ReadHeader != "" {

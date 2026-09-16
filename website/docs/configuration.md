@@ -593,6 +593,9 @@ ingress_guardrails {
   max_text_bytes = 65536
   max_strings    = 512
 
+  exceptions_file    = "/etc/aiproxy/guardrail-exceptions.json"
+  redact_placeholder = "REDACTED"
+
   quarantine {
     enabled           = true
     max_entries       = 128
@@ -612,7 +615,8 @@ request carries `block_id` in the error body. Scanned text is the
 JSON-decoded message content, tool arguments (plus one JSON-decoded level),
 tool results, and responses instructions/input; images, audio, embeddings,
 attachments, encoded blobs, and response/SSE output are out of scope and
-`gitleaks:allow` cannot suppress scans. Bounds default to 65536 text bytes
+`gitleaks:allow` cannot suppress scans. Bounds are 1024..32MiB text bytes
+and 1..16384 strings and default to 65536 text bytes
 and 512 strings (zeros select defaults); over-limit or canceled scans are
 visible `incomplete` outcomes. While enabled, covered-operation request
 bodies are omitted from payload-log entries. Policy changes apply on `SIGHUP`
@@ -629,3 +633,13 @@ endpoints, or the `4:Blocks` tab in `aiproxy dashboard`. Dashboard token
 holders can read live matched secrets while quarantine is on; state is
 process-local, lost on restart, and rebuilt empty whenever its config
 changes on `SIGHUP`.
+
+Triage decisions outlive quarantine: open a block and press `[a]llow`
+(non-secret), `[s]anitize` (replace with `redact_placeholder` upstream), or
+`[d]eny` (keep blocking). The decision fans out to every matched secret in
+the block via `POST /_internal/dashboard/blocks/<block_id>/decision` and is
+stored by SHA-256 fingerprint in `exceptions_file` (default
+`$XDG_CONFIG_HOME/aiproxy/guardrail-exceptions.json`, shown by
+`aiproxy paths`; fingerprints and actions only, never secret text).
+`redact_placeholder` defaults to `REDACTED` and is rejected at startup when
+flagged as a secret itself.

@@ -30,6 +30,13 @@ func (f *stubBlockFetcher) GetBlock(ctx context.Context, blockID string) (dashrp
 	return dashrpc.BlockCapture{}, errors.New("block not found (expired or already consumed)")
 }
 
+func (f *stubBlockFetcher) DecideBlock(ctx context.Context, blockID, action string, shas []string) (dashrpc.BlockDecisionResponse, error) {
+	if _, ok := f.detail[blockID]; !ok {
+		return dashrpc.BlockDecisionResponse{}, errors.New("block not found (expired or already consumed)")
+	}
+	return dashrpc.BlockDecisionResponse{Ok: true, Action: action, Count: len(shas)}, nil
+}
+
 func blockTestFetcher() *stubBlockFetcher {
 	return &stubBlockFetcher{
 		list: dashrpc.BlockList{Enabled: true, Blocks: []dashrpc.BlockSummary{
@@ -40,7 +47,7 @@ func blockTestFetcher() *stubBlockFetcher {
 				BlockID: "blk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Operation: "responses", PublicModel: "alias/x",
 				RuleIDs: []string{"generic-api-key"},
 				Findings: []dashrpc.BlockFinding{
-					{RuleID: "generic-api-key", Secret: "sk-test-secret", Match: "sk-test-secret"},
+					{RuleID: "generic-api-key", Secret: "sk-test-secret", SecretSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Match: "sk-test-secret"},
 				},
 			},
 		},
@@ -96,6 +103,50 @@ func TestBlockDetailShowsCapture(t *testing.T) {
 	}
 	if got := mm.View().Content; !strings.Contains(got, "take-once") {
 		t.Fatalf("detail missing take-once notice:\n%s", got)
+	}
+}
+
+func TestBlockDecisionKeys(t *testing.T) {
+	for _, tc := range []struct {
+		key    string
+		action string
+	}{
+		{"a", "allow"},
+		{"s", "redact"},
+		{"d", "deny"},
+	} {
+		snap := newSnapshot()
+		mm := InitialModelWithBlockFetcher(snap, nil, blockTestFetcher())
+		mm, _ = mm.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+		mm, cmd := mm.Update(tea.KeyPressMsg(tea.Key{Text: "4"}))
+		mm, _ = mm.Update(cmd())
+		mm, cmd = mm.Update(tea.KeyPressMsg(tea.Key{Text: "enter"}))
+		mm, _ = mm.Update(cmd())
+		mm, cmd = mm.Update(tea.KeyPressMsg(tea.Key{Text: tc.key}))
+		if cmd == nil {
+			t.Fatalf("%s: expected decision cmd", tc.key)
+		}
+		mm, _ = mm.Update(cmd())
+		mod := mm.(*model)
+		if mod.blockDecisionPending != "" {
+			t.Fatalf("%s: pending not cleared", tc.key)
+		}
+		if !strings.Contains(mod.blockDecisionMsg, tc.action) {
+			t.Fatalf("%s: status = %q, want %q", tc.key, mod.blockDecisionMsg, tc.action)
+		}
+	}
+}
+
+func TestBlockDecisionHintShown(t *testing.T) {
+	snap := newSnapshot()
+	mm := InitialModelWithBlockFetcher(snap, nil, blockTestFetcher())
+	mm, _ = mm.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+	mm, cmd := mm.Update(tea.KeyPressMsg(tea.Key{Text: "4"}))
+	mm, _ = mm.Update(cmd())
+	mm, cmd = mm.Update(tea.KeyPressMsg(tea.Key{Text: "enter"}))
+	mm, _ = mm.Update(cmd())
+	if got := mm.View().Content; !strings.Contains(got, "[a]llow non-secret") {
+		t.Fatalf("detail missing decision hint:\n%s", got)
 	}
 }
 

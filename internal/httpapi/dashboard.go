@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -138,6 +139,19 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 		return true
 	}
 	if strings.HasPrefix(r.URL.Path, dashrpc.BlockPathPrefix) {
+		if strings.HasSuffix(r.URL.Path, dashrpc.BlockDecisionSuffix) {
+			if r.Method != http.MethodPost {
+				w.Header().Set("Allow", http.MethodPost)
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return true
+			}
+			if !dashboardAuthorized(deps.Dashboard, r) {
+				h.respondDashboardAuthFailure(w, r)
+				return true
+			}
+			h.writeDashboardBlockDecision(deps, w, r)
+			return true
+		}
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -307,6 +321,61 @@ func (h *Handler) writeDashboardBlocks(deps Dependencies, w http.ResponseWriter,
 		blocks = blocks[len(blocks)-dashrpc.BlocksListMax:]
 	}
 	_ = json.NewEncoder(w).Encode(dashrpc.BlockList{Enabled: true, Blocks: blocks})
+}
+
+func (h *Handler) writeDashboardBlockDecision(deps Dependencies, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if deps.Exceptions == nil {
+		http.Error(w, "guardrail exceptions not enabled", http.StatusNotFound)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, dashrpc.BlockPathPrefix)
+	id = strings.TrimSuffix(id, dashrpc.BlockDecisionSuffix)
+	if !validBlockID(id) {
+		http.Error(w, "invalid block id", http.StatusBadRequest)
+		return
+	}
+	var req dashrpc.BlockDecisionRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil {
+		http.Error(w, "invalid decision body", http.StatusBadRequest)
+		return
+	}
+	if req.Action != "allow" && req.Action != "redact" && req.Action != "deny" {
+		http.Error(w, "invalid action (must be allow, redact, or deny)", http.StatusBadRequest)
+		return
+	}
+	if len(req.FindingSHAs) == 0 {
+		http.Error(w, "decision must list at least one secret fingerprint", http.StatusBadRequest)
+		return
+	}
+	for _, sha := range req.FindingSHAs {
+		if !validDecisionFingerprint(sha) {
+			http.Error(w, "invalid secret fingerprint", http.StatusBadRequest)
+			return
+		}
+	}
+	count, err := deps.Exceptions.Decide(req.FindingSHAs, req.Action, id, nil)
+	if err != nil {
+		if strings.Contains(err.Error(), "is full") {
+			http.Error(w, err.Error(), http.StatusTooManyRequests)
+			return
+		}
+		http.Error(w, "record decision: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(dashrpc.BlockDecisionResponse{Ok: true, Action: req.Action, Count: count})
+}
+
+func validDecisionFingerprint(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Handler) writeDashboardBlock(deps Dependencies, w http.ResponseWriter, r *http.Request) {

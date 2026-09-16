@@ -341,6 +341,8 @@ func buildIngressGuardrails(raw *rawGuardrails) (IngressGuardrails, error) {
 	if raw.MaxStrings != nil {
 		out.MaxStrings = *raw.MaxStrings
 	}
+	out.ExceptionsFile = raw.ExceptionsFile
+	out.RedactPlaceholder = raw.RedactPlaceholder
 	if len(raw.Quarantine) > 0 {
 		if len(raw.Quarantine) > 1 {
 			return IngressGuardrails{}, fmt.Errorf("only one ingress_guardrails quarantine block is supported")

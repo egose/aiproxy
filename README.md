@@ -580,6 +580,9 @@ ingress_guardrails {
   max_text_bytes = 65536
   max_strings    = 512
 
+  exceptions_file    = "/etc/aiproxy/guardrail-exceptions.json"
+  redact_placeholder = "REDACTED"
+
   quarantine {
     enabled           = true
     max_entries       = 128
@@ -598,7 +601,7 @@ ingress_guardrails {
   tool results, responses instructions/input). Images, audio, embeddings,
   attachments, encoded blobs, response bodies, and SSE streams are out of
   scope. Callers cannot suppress scans with `gitleaks:allow`.
-- `max_text_bytes` (1024..8MiB, default 65536) and `max_strings` (1..4096,
+- `max_text_bytes` (1024..32MiB, default 65536) and `max_strings` (1..16384,
   default 512) bound the work; over-limit or canceled scans are visible
   `incomplete` outcomes, never clean scans. Zeros select defaults.
 - While enabled, request bodies for covered operations are omitted from
@@ -633,11 +636,25 @@ can inspect what was flagged:
   secret text) and `GET /_internal/dashboard/blocks/<block_id>` returns the
   full capture **once** (second read is `404`). The `aiproxy dashboard` TUI
   shows them under the `4:Blocks` tab (`enter` opens, detail is take-once).
+- Triage decisions outlive quarantine: open a block in the TUI and press
+  `[a]llow` (flag as non-secret), `[s]anitize` (replace with the
+  `redact_placeholder` before forwarding upstream), or `[d]eny` (keep
+  blocking). The decision fans out to every matched secret in that block and
+  is recorded by SHA-256 fingerprint via
+  `POST /_internal/dashboard/blocks/<block_id>/decision`. Later requests
+  containing a decided secret are allowed, rewritten, or blocked
+  accordingly; undecided secrets keep blocking as before.
+- Decisions persist in `exceptions_file` (default
+  `$XDG_CONFIG_HOME/aiproxy/guardrail-exceptions.json`, shown by
+  `aiproxy paths`), which stores only fingerprints, actions, and rule IDs —
+  never secret text. `redact_placeholder` defaults to `REDACTED` and is
+  rejected at startup when it is itself flagged as a secret. The file
+  reloads on `SIGHUP` and rejects the reload when it fails to parse.
 - Treat the dashboard token as secret-read capable while quarantine is on:
   anyone holding it can read live matched secrets. Quarantine state is
   process-local (no Redis sharing, lost on restart), and survives `SIGHUP`
   only when its config is unchanged — editing the block rebuilds an empty
-  store.
+  store. Exception decisions are file-backed and survive both.
 
 ### `provider { enabled = false }`
 

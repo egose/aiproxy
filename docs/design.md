@@ -928,9 +928,9 @@ counts, reason) leaves the wrapper.
   unchanged and records the outcome. `gitleaks:allow` never suppresses a
   finding; cancellation and bound overruns are visible `incomplete`
   outcomes, never clean scans.
-- `max_text_bytes` (default 65536) and `max_strings` (default 512) bound the
+- `max_text_bytes` (default 65536, 1024..32MiB) and `max_strings` (default 512, 1..16384) bound the
   per-request work; clean 64 KiB scans average about 11 ms on the reference
-  host while full 8 MiB bodies take seconds, so the cap is the latency
+  host while full 32 MiB bodies take tens of seconds, so the cap is the latency
   budget. Scanning runs synchronously in the request goroutine against one
   immutable shared detector per policy generation.
 - While enabled, covered-operation request bodies are omitted from

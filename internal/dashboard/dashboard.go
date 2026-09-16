@@ -112,74 +112,77 @@ const (
 )
 
 type model struct {
-	snapshot            *RuntimeSnapshot
-	pending             *RuntimeSnapshot
-	hasPending          bool
-	health              map[string]bool
-	width               int
-	height              int
-	now                 time.Time
-	quit                bool
-	dirty               bool
-	rendered            string
-	focus               focusArea
-	bottomTab           bottomTab
-	bottomHeight        int
-	statsHeight         int
-	lastRefresh         time.Time
-	staleErr            string
-	staleAt             time.Time
-	paused              bool
-	showHelp            bool
-	zoomed              bool
-	usageScroll         int
-	providerScroll      int
-	aliasCursor         int
-	aliasOffset         int
-	aliasDetailName     string
-	aliasDetailScroll   int
-	logCursor           int
-	logOffset           int
-	logCursorSeq        uint64
-	logFollow           bool
-	logOldestFirst      bool
-	logDetailOpen       bool
-	logDetailEntry      observability.LogEntry
-	logDetailScroll     int
-	logMinLevel         slog.Level
-	logFilterOn         bool
-	tenantIndex         int
-	errorsOnly          bool
-	usageUpstream       bool
-	ipCache             map[string]string
-	payloadFetcher      PayloadFetcher
-	payloads            []PayloadSummary
-	payloadKnown        bool
-	payloadEnabled      bool
-	payloadCursor       int
-	payloadOffset       int
-	payloadErrorsOnly   bool
-	payloadOldestFirst  bool
-	payloadLoading      bool
-	payloadErr          string
-	payloadDetail       string
-	payloadDetailErr    string
-	payloadDetailID     string
-	payloadPendingID    string
-	payloadDetailScroll int
-	blockFetcher        BlockFetcher
-	blocks              []BlockSummary
-	blockKnown          bool
-	blockEnabled        bool
-	blockCursor         int
-	blockOffset         int
-	blockLoading        bool
-	blockErr            string
-	blockDetail         BlockCapture
-	blockDetailErr      string
-	blockDetailID       string
-	blockPendingID      string
-	blockDetailScroll   int
+	snapshot             *RuntimeSnapshot
+	pending              *RuntimeSnapshot
+	hasPending           bool
+	health               map[string]bool
+	width                int
+	height               int
+	now                  time.Time
+	quit                 bool
+	dirty                bool
+	rendered             string
+	focus                focusArea
+	bottomTab            bottomTab
+	bottomHeight         int
+	statsHeight          int
+	lastRefresh          time.Time
+	staleErr             string
+	staleAt              time.Time
+	paused               bool
+	showHelp             bool
+	zoomed               bool
+	usageScroll          int
+	providerScroll       int
+	aliasCursor          int
+	aliasOffset          int
+	aliasDetailName      string
+	aliasDetailScroll    int
+	logCursor            int
+	logOffset            int
+	logCursorSeq         uint64
+	logFollow            bool
+	logOldestFirst       bool
+	logDetailOpen        bool
+	logDetailEntry       observability.LogEntry
+	logDetailScroll      int
+	logMinLevel          slog.Level
+	logFilterOn          bool
+	tenantIndex          int
+	errorsOnly           bool
+	usageUpstream        bool
+	ipCache              map[string]string
+	payloadFetcher       PayloadFetcher
+	payloads             []PayloadSummary
+	payloadKnown         bool
+	payloadEnabled       bool
+	payloadCursor        int
+	payloadOffset        int
+	payloadErrorsOnly    bool
+	payloadOldestFirst   bool
+	payloadLoading       bool
+	payloadErr           string
+	payloadDetail        string
+	payloadDetailErr     string
+	payloadDetailID      string
+	payloadPendingID     string
+	payloadDetailScroll  int
+	blockFetcher         BlockFetcher
+	blocks               []BlockSummary
+	blockKnown           bool
+	blockEnabled         bool
+	blockCursor          int
+	blockOffset          int
+	blockLoading         bool
+	blockErr             string
+	blockDetail          BlockCapture
+	blockDetailErr       string
+	blockDetailID        string
+	blockPendingID       string
+	blockDetailScroll    int
+	blockDecisionPending string
+	blockDecisionMsg     string
+	blockDecisionErr     string
 }
 
 type tickMsg time.Time
@@ -284,6 +287,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.blockDetail = BlockCapture{}
 				m.blockDetailErr = ""
 				m.blockDetailScroll = 0
+				m.blockDecisionPending = ""
+				m.blockDecisionMsg = ""
+				m.blockDecisionErr = ""
 				m.dirty = true
 				return m, nil
 			}
@@ -401,6 +407,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case blockDetailMsg:
 		m.applyBlockDetail(msg)
 		return m, nil
+	case blockDecisionMsg:
+		m.applyBlockDecision(msg)
+		return m, nil
 	case tickMsg:
 		m.now = time.Now()
 		if m.snapshot != nil && m.snapshot.Health != nil {
@@ -455,6 +464,9 @@ func (m *model) handleKey(msg tea.KeyMsg) bool {
 	switch msg.String() {
 	case "tab":
 		m.focus = (m.focus + 1) % 3
+		return true
+	case "shift+tab":
+		m.focus = (m.focus + 2) % 3
 		return true
 	case "enter":
 		if m.focus == focusBottom {
@@ -563,6 +575,10 @@ func (m *model) handleKey(msg tea.KeyMsg) bool {
 		return m.scrollFocused(1)
 	case "k", "up":
 		return m.scrollFocused(-1)
+	case "pgdown", "shift+pgdown":
+		return m.scrollFocusedPage(1)
+	case "pgup", "shift+pgup":
+		return m.scrollFocusedPage(-1)
 	case "J":
 		return m.resize(2)
 	case "K":
@@ -622,6 +638,64 @@ func (m *model) scrollFocused(delta int) bool {
 		}
 		return m.moveLogCursor(delta)
 	}
+}
+
+func (m *model) scrollFocusedPage(sign int) bool {
+	if sign >= 0 {
+		sign = 1
+	} else {
+		sign = -1
+	}
+	switch m.focus {
+	case focusProviders:
+		step := m.providerVisibleRows()
+		if step < 1 {
+			step = 1
+		}
+		return m.scrollProviders(sign * step)
+	case focusUsage:
+		step := m.usageVisibleRows()
+		if step < 1 {
+			step = 1
+		}
+		return m.scrollUsage(sign * step)
+	default:
+		step := m.bottomVisibleRows()
+		if step < 1 {
+			step = 1
+		}
+		detailStep := m.detailVisibleRows()
+		if m.bottomTab == bottomTabAliases {
+			if m.aliasDetailOpen() {
+				return m.scrollAliasDetail(sign * detailStep)
+			}
+			return m.moveAliasCursor(sign * step)
+		}
+		if m.bottomTab == bottomTabPayload {
+			if m.payloadDetailOpen() {
+				return m.scrollPayloadDetail(sign * detailStep)
+			}
+			return m.movePayloadCursor(sign * step)
+		}
+		if m.bottomTab == bottomTabBlocks {
+			if m.blockDetailOpen() {
+				return m.scrollBlockDetail(sign * detailStep)
+			}
+			return m.moveBlockCursor(sign * step)
+		}
+		if m.logDetailOpen {
+			return m.scrollLogDetail(sign * detailStep)
+		}
+		return m.moveLogCursor(sign * step)
+	}
+}
+
+func (m *model) detailVisibleRows() int {
+	n := zoomBodyHeight(m.height) - 5
+	if n < 1 {
+		n = 1
+	}
+	return n
 }
 
 func (m *model) scrollTop() bool {
@@ -819,14 +893,53 @@ func (m *model) aliasCursorBottom() bool {
 
 func (m *model) scrollAliasDetail(delta int) bool {
 	if delta > 0 {
-		m.aliasDetailScroll++
+		m.aliasDetailScroll += delta
 		return true
 	}
 	if delta < 0 {
 		if m.aliasDetailScroll <= 0 {
 			return false
 		}
-		m.aliasDetailScroll--
+		m.aliasDetailScroll += delta
+		if m.aliasDetailScroll < 0 {
+			m.aliasDetailScroll = 0
+		}
+		return true
+	}
+	return false
+}
+
+func (m *model) scrollPayloadDetail(delta int) bool {
+	if delta > 0 {
+		m.payloadDetailScroll += delta
+		return true
+	}
+	if delta < 0 {
+		if m.payloadDetailScroll <= 0 {
+			return false
+		}
+		m.payloadDetailScroll += delta
+		if m.payloadDetailScroll < 0 {
+			m.payloadDetailScroll = 0
+		}
+		return true
+	}
+	return false
+}
+
+func (m *model) scrollBlockDetail(delta int) bool {
+	if delta > 0 {
+		m.blockDetailScroll += delta
+		return true
+	}
+	if delta < 0 {
+		if m.blockDetailScroll <= 0 {
+			return false
+		}
+		m.blockDetailScroll += delta
+		if m.blockDetailScroll < 0 {
+			m.blockDetailScroll = 0
+		}
 		return true
 	}
 	return false
@@ -838,6 +951,10 @@ func (m *model) handleAliasKey(msg tea.KeyMsg) bool {
 		return m.moveAliasCursor(1)
 	case "k", "up":
 		return m.moveAliasCursor(-1)
+	case "pgdown", "shift+pgdown":
+		return m.moveAliasCursor(m.bottomVisibleRows())
+	case "pgup", "shift+pgup":
+		return m.moveAliasCursor(-m.bottomVisibleRows())
 	case "g", "home":
 		return m.aliasCursorTop()
 	case "G", "end":
@@ -869,6 +986,10 @@ func (m *model) handleAliasDetailKey(msg tea.KeyMsg) bool {
 			return true
 		}
 		return false
+	case "pgdown", "shift+pgdown":
+		return m.scrollAliasDetail(m.detailVisibleRows())
+	case "pgup", "shift+pgup":
+		return m.scrollAliasDetail(-m.detailVisibleRows())
 	case "g", "home":
 		if m.aliasDetailScroll == 0 {
 			return false
@@ -1022,14 +1143,17 @@ func (m *model) logCursorBottom() bool {
 
 func (m *model) scrollLogDetail(delta int) bool {
 	if delta > 0 {
-		m.logDetailScroll++
+		m.logDetailScroll += delta
 		return true
 	}
 	if delta < 0 {
 		if m.logDetailScroll <= 0 {
 			return false
 		}
-		m.logDetailScroll--
+		m.logDetailScroll += delta
+		if m.logDetailScroll < 0 {
+			m.logDetailScroll = 0
+		}
 		return true
 	}
 	return false
@@ -1041,6 +1165,10 @@ func (m *model) handleLogKey(msg tea.KeyMsg) bool {
 		return m.moveLogCursor(1)
 	case "k", "up":
 		return m.moveLogCursor(-1)
+	case "pgdown", "shift+pgdown":
+		return m.moveLogCursor(m.bottomVisibleRows())
+	case "pgup", "shift+pgup":
+		return m.moveLogCursor(-m.bottomVisibleRows())
 	case "g", "home":
 		return m.logCursorTop()
 	case "G", "end":
@@ -1077,6 +1205,10 @@ func (m *model) handleLogDetailKey(msg tea.KeyMsg) bool {
 			return true
 		}
 		return false
+	case "pgdown", "shift+pgdown":
+		return m.scrollLogDetail(m.detailVisibleRows())
+	case "pgup", "shift+pgup":
+		return m.scrollLogDetail(-m.detailVisibleRows())
 	case "g", "home":
 		if m.logDetailScroll == 0 {
 			return false
@@ -1428,12 +1560,13 @@ func (m *model) renderHelp() string {
 	lines := []string{
 		"aiproxy dashboard — keys",
 		"",
-		"  tab        cycle focus PROVIDERS / USAGE / bottom tabs",
+		"  tab/shift+tab cycle focus PROVIDERS / USAGE / bottom tabs",
 		"  1/2/3/4 or [/] switch bottom tab (Aliases / Logs / Payloads / Blocks)",
 		"  enter      open selected row detail (all bottom tabs)",
 		"  z          zoom focused pane to full screen",
 		"  esc        unzoom / close detail (or quit when not zoomed)",
 		"  j/k dn/up  move selection / scroll   g/G,home/end top/bottom",
+		"  pgup/pgdn  page selection / scroll (bottom panes + detail)",
 		"  +/- J/K    resize bottom pane",
 		"  t          cycle tenant filter    e toggle errors-only",
 		"  s          toggle payload errs filter (payloads tab)",
@@ -1480,7 +1613,7 @@ func renderFooter(m *model) string {
 	if m.zoomed {
 		zoomHint = "[esc] unzoom"
 	}
-	base := fmt.Sprintf("%s focus:%s [tab] pane [1/2/3/4] tabs [j/k] scroll [t]enant [e]rrs [s]tatus [r]efresh [o]rder [u]pstream [l]evel [p]ause %s [?]help [q]uit", state, focusName, zoomHint)
+	base := fmt.Sprintf("%s focus:%s [tab/shift+tab] pane [1/2/3/4] tabs [j/k/pgup/pgdn] scroll [t]enant [e]rrs [s]tatus [r]efresh [o]rder [u]pstream [l]evel [p]ause %s [?]help [q]uit", state, focusName, zoomHint)
 	if len([]rune(base)) > m.width && m.width > 20 {
 		base = truncate(base, m.width)
 	}
