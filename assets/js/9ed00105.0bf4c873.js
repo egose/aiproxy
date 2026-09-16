@@ -1129,7 +1129,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
-        children: "ingress_guardrails {\n  enabled        = true\n  mode           = \"block\"\n  max_text_bytes = 65536\n  max_strings    = 512\n\n  quarantine {\n    enabled           = true\n    max_entries       = 128\n    ttl               = \"15m\"\n    max_snippet_bytes = 512\n  }\n}\n"
+        children: "ingress_guardrails {\n  enabled        = true\n  mode           = \"block\"\n  max_text_bytes = 65536\n  max_strings    = 512\n\n  exceptions_file    = \"/etc/aiproxy/guardrail-exceptions.json\"\n  redact_placeholder = \"REDACTED\"\n\n  quarantine {\n    enabled           = true\n    max_entries       = 128\n    ttl               = \"15m\"\n    max_snippet_bytes = 512\n  }\n}\n"
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Opt-in secret scanning of inbound ", (0,jsx_runtime.jsx)(_components.code, {
@@ -1154,7 +1154,7 @@ function _createMdxContent(props) {
         children: "block_id"
       }), " in the error body. Scanned text is the\nJSON-decoded message content, tool arguments (plus one JSON-decoded level),\ntool results, and responses instructions/input; images, audio, embeddings,\nattachments, encoded blobs, and response/SSE output are out of scope and\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "gitleaks:allow"
-      }), " cannot suppress scans. Bounds default to 65536 text bytes\nand 512 strings (zeros select defaults); over-limit or canceled scans are\nvisible ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " cannot suppress scans. Bounds are 1024..32MiB text bytes\nand 1..16384 strings and default to 65536 text bytes\nand 512 strings (zeros select defaults); over-limit or canceled scans are\nvisible ", (0,jsx_runtime.jsx)(_components.code, {
         children: "incomplete"
       }), " outcomes. While enabled, covered-operation request\nbodies are omitted from payload-log entries. Policy changes apply on ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
@@ -1189,6 +1189,28 @@ function _createMdxContent(props) {
       }), ". Dashboard token\nholders can read live matched secrets while quarantine is on; state is\nprocess-local, lost on restart, and rebuilt empty whenever its config\nchanges on ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
       }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Triage decisions outlive quarantine: open a block and press ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "[a]llow"
+      }), "\n(non-secret), ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "[s]anitize"
+      }), " (replace with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "redact_placeholder"
+      }), " upstream), or\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "[d]eny"
+      }), " (keep blocking). The decision fans out to every matched secret in\nthe block via ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /_internal/dashboard/blocks/<block_id>/decision"
+      }), " and is\nstored by SHA-256 fingerprint in ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "exceptions_file"
+      }), " (default\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "$XDG_CONFIG_HOME/aiproxy/guardrail-exceptions.json"
+      }), ", shown by\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy paths"
+      }), "; fingerprints and actions only, never secret text).\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "redact_placeholder"
+      }), " defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "REDACTED"
+      }), " and is rejected at startup when\nflagged as a secret itself."]
     })]
   });
 }
