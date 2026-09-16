@@ -37,11 +37,13 @@ const (
 )
 
 type IngressGuardrails struct {
-	Enabled      bool
-	Mode         GuardrailMode
-	MaxTextBytes int
-	MaxStrings   int
-	Quarantine   GuardrailQuarantine
+	Enabled           bool
+	Mode              GuardrailMode
+	MaxTextBytes      int
+	MaxStrings        int
+	ExceptionsFile    string
+	RedactPlaceholder string
+	Quarantine        GuardrailQuarantine
 }
 
 type GuardrailQuarantine struct {

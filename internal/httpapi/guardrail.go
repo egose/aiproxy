@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/egose/aiproxy/internal/guardrails"
@@ -202,7 +204,7 @@ func collectStringLeaves(c *guardrailTextCollector, v any) {
 	}
 }
 
-func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *http.Request, op provider.Operation, body []byte, scanner *guardrails.Scanner, publicModel string, logger *slog.Logger) bool {
+func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *http.Request, op provider.Operation, body []byte, scanner *guardrails.Scanner, publicModel string, logger *slog.Logger) (bool, []byte) {
 	policy := scanner.Policy()
 	mode := string(policy.Mode)
 	texts, reason := extractGuardrailTexts(r.Header.Get("Content-Type"), op, body, policy.MaxStrings, policy.MaxTextBytes)
@@ -235,11 +237,31 @@ func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *h
 	}
 	switch res.Outcome {
 	case guardrails.OutcomeClean:
-		return false
+		return false, body
 	case guardrails.OutcomeFlagged, guardrails.OutcomeIncomplete:
-		if policy.Mode == guardrails.ModeAudit {
+		if res.Outcome == guardrails.OutcomeFlagged && len(captured) > 0 {
+			if blocking, redactions := partitionGuardrailFindings(deps.Exceptions, captured); len(blocking) == 0 {
+				out := body
+				extra := []any{}
+				if len(redactions) > 0 {
+					out = rewriteGuardrailBody(body, redactions)
+					extra = append(extra, "redacted", len(redactions))
+				} else {
+					extra = append(extra, "allowed", len(captured))
+				}
+				logger.Info("guardrail scan cleared by exceptions", append(safeAttrs(), extra...)...)
+				return false, out
+			} else if policy.Mode == guardrails.ModeAudit {
+				logger.Info("guardrail scan did not block request", safeAttrs()...)
+				return false, body
+			} else {
+				captured = blocking
+				res.RuleIDs = guardrailRuleIDs(blocking)
+				res.FindingCount = len(blocking)
+			}
+		} else if policy.Mode == guardrails.ModeAudit {
 			logger.Info("guardrail scan did not block request", safeAttrs()...)
-			return false
+			return false, body
 		}
 		if res.Outcome == guardrails.OutcomeFlagged && deps.Quarantine != nil && len(captured) > 0 {
 			if id, err := guardrails.MintBlockID(); err == nil {
@@ -258,8 +280,72 @@ func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *h
 		} else {
 			h.writeRequestError(deps.Metrics, w, r, http.StatusBadRequest, guardrailGapType, guardrailGapMessage)
 		}
-		return true
+		return true, body
 	default:
-		return false
+		return false, body
 	}
+}
+
+func partitionGuardrailFindings(exceptions *guardrails.Exceptions, captured []guardrails.CapturedFinding) ([]guardrails.CapturedFinding, map[string]string) {
+	blocking := make([]guardrails.CapturedFinding, 0, len(captured))
+	redactions := map[string]string{}
+	if exceptions == nil {
+		return append(blocking, captured...), redactions
+	}
+	placeholder := exceptions.Placeholder()
+	if placeholder == "" {
+		placeholder = guardrails.DefaultRedactPlaceholder
+	}
+	for _, f := range captured {
+		sha := f.SecretSHA
+		if sha == "" && f.Secret != "" {
+			sha = guardrails.Fingerprint(f.Secret)
+		}
+		entry, ok := exceptions.Lookup(sha)
+		if !ok || sha == "" {
+			blocking = append(blocking, f)
+			continue
+		}
+		switch entry.Action {
+		case guardrails.ExceptionActionAllow:
+			continue
+		case guardrails.ExceptionActionRedact:
+			if f.Secret != "" && f.Secret != placeholder { // pragma: allowlist secret
+				redactions[f.Secret] = placeholder // pragma: allowlist secret
+			}
+		default:
+			blocking = append(blocking, f)
+		}
+	}
+	return blocking, redactions
+}
+
+func rewriteGuardrailBody(body []byte, redactions map[string]string) []byte {
+	out := body
+	for secret, placeholder := range redactions {
+		if secret == "" {
+			continue
+		}
+		out = bytes.ReplaceAll(out, []byte(secret), []byte(placeholder))
+	}
+	return out
+}
+
+func guardrailRuleIDs(blocking []guardrails.CapturedFinding) []string {
+	seen := make(map[string]struct{}, len(blocking))
+	for _, f := range blocking {
+		if f.RuleID == "" {
+			continue
+		}
+		seen[f.RuleID] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	if len(out) > guardrails.MaxReportedRuleIDs {
+		out = out[:guardrails.MaxReportedRuleIDs]
+	}
+	return out
 }

@@ -56,9 +56,9 @@ func TestNewRejectsInvalidPolicy(t *testing.T) {
 	for _, policy := range []Policy{
 		{Enabled: true, Mode: "watch"},
 		{Enabled: true, Mode: ModeBlock, MaxTextBytes: 1},
-		{Enabled: true, Mode: ModeBlock, MaxTextBytes: 16 << 20},
+		{Enabled: true, Mode: ModeBlock, MaxTextBytes: 64 << 20},
 		{Enabled: true, Mode: ModeBlock, MaxStrings: 0 - 1},
-		{Enabled: true, Mode: ModeBlock, MaxStrings: 8192},
+		{Enabled: true, Mode: ModeBlock, MaxStrings: 32768},
 	} {
 		if _, err := New(policy); err == nil {
 			t.Fatalf("expected error for policy %+v", policy)

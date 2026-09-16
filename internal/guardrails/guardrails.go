@@ -27,9 +27,9 @@ const (
 
 const (
 	MinMaxTextBytes = 1024
-	MaxMaxTextBytes = 8 << 20
+	MaxMaxTextBytes = 32 << 20
 	MinMaxStrings   = 1
-	MaxMaxStrings   = 4096
+	MaxMaxStrings   = 16384
 )
 
 type Policy struct {

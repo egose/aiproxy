@@ -151,6 +151,11 @@ func validateIngressGuardrails(g IngressGuardrails) error {
 	if maxStrings < guardrails.MinMaxStrings || maxStrings > guardrails.MaxMaxStrings {
 		return fmt.Errorf("ingress_guardrails: max_strings must be between %d and %d", guardrails.MinMaxStrings, guardrails.MaxMaxStrings)
 	}
+	if g.RedactPlaceholder != "" {
+		if err := guardrails.ValidatePlaceholder(g.RedactPlaceholder); err != nil {
+			return fmt.Errorf("ingress_guardrails: %w", err)
+		}
+	}
 	return validateGuardrailQuarantine(g.Quarantine)
 }
 

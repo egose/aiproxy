@@ -241,6 +241,16 @@ func (m *model) handlePayloadKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			return false, nil
 		}
 		return m.movePayloadCursor(-1), nil
+	case "pgdown", "shift+pgdown":
+		if m.payloadDetailOpen() {
+			return m.scrollPayloadDetail(m.detailVisibleRows()), nil
+		}
+		return m.movePayloadCursor(m.bottomVisibleRows()), nil
+	case "pgup", "shift+pgup":
+		if m.payloadDetailOpen() {
+			return m.scrollPayloadDetail(-m.detailVisibleRows()), nil
+		}
+		return m.movePayloadCursor(-m.bottomVisibleRows()), nil
 	case "g", "home":
 		if m.payloadDetailOpen() {
 			if m.payloadDetailScroll == 0 {

@@ -191,7 +191,7 @@ func newPathsCommand() *cobra.Command {
 	var cfgPath string
 	cmd := &cobra.Command{
 		Use:   "paths",
-		Short: "Print resolved default config, secrets, and payload log paths",
+		Short: "Print resolved default config, secrets, payload log, and guardrail paths",
 		Run: func(cmd *cobra.Command, args []string) {
 			configDisplay := cfgPath
 			if !configFlagExplicit(cmd) {
@@ -200,12 +200,17 @@ func newPathsCommand() *cobra.Command {
 				}
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "config: %s\nsecrets: %s\n", configDisplay, defaultSecretsPath())
-			if rt, err := loadConfigForCommand(cfgPath, cmd); err == nil && rt.Logging.PayloadLog.Enabled {
-				if rt.Logging.PayloadLog.Dir != "" {
-					fmt.Fprintf(cmd.OutOrStdout(), "payload_log: %s\n", rt.Logging.PayloadLog.Dir)
+			if rt, err := loadConfigForCommand(cfgPath, cmd); err == nil {
+				if rt.Logging.PayloadLog.Enabled {
+					if rt.Logging.PayloadLog.Dir != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "payload_log: %s\n", rt.Logging.PayloadLog.Dir)
+					}
+					if rt.Logging.PayloadLog.Mongo.URI != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "payload_mongo: %s.%s\n", rt.Logging.PayloadLog.Mongo.Database, rt.Logging.PayloadLog.Mongo.Collection)
+					}
 				}
-				if rt.Logging.PayloadLog.Mongo.URI != "" {
-					fmt.Fprintf(cmd.OutOrStdout(), "payload_mongo: %s.%s\n", rt.Logging.PayloadLog.Mongo.Database, rt.Logging.PayloadLog.Mongo.Collection)
+				if rt.IngressGuardrails.Enabled {
+					fmt.Fprintf(cmd.OutOrStdout(), "guardrail_exceptions: %s\n", config.ResolveGuardrailExceptionsPath(rt.IngressGuardrails))
 				}
 			}
 		},

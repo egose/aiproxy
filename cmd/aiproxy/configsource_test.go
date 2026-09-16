@@ -72,6 +72,31 @@ func TestServeDaemonRejectsEnvConfig(t *testing.T) {
 	}
 }
 
+func TestPathsShowsGuardrailExceptions(t *testing.T) {
+	cfg := envSourceTestConfig + `
+ingress_guardrails {
+  enabled = true
+  exceptions_file = "/tmp/guardrail-exceptions-test.json"
+}
+`
+	configPath := filepath.Join(t.TempDir(), "config.hcl")
+	if err := os.WriteFile(configPath, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("AIPROXY_CONFIG", "")
+	cmd := newRootCommand()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"paths", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("paths: %v", err)
+	}
+	if !strings.Contains(buf.String(), "guardrail_exceptions: /tmp/guardrail-exceptions-test.json") {
+		t.Fatalf("paths should show guardrail exceptions file, got: %q", buf.String())
+	}
+}
+
 func TestPathsShowsEnvSource(t *testing.T) {
 	t.Setenv("AIPROXY_CONFIG", envSourceTestConfig)
 	cmd := newRootCommand()

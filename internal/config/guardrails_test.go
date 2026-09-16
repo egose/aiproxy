@@ -166,10 +166,10 @@ func TestLoadIngressGuardrailsRejectsInvalid(t *testing.T) {
   max_text_bytes = 16
 }`,
 		`ingress_guardrails { enabled = true
-  max_text_bytes = 16777216
+  max_text_bytes = 67108864
 }`,
 		`ingress_guardrails { enabled = true
-  max_strings = 8192
+  max_strings = 32768
 }`,
 		`ingress_guardrails { enabled = true
 }

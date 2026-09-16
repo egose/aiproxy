@@ -49,6 +49,7 @@ type Dependencies struct {
 	Version           string
 	Guardrails        *guardrails.Scanner
 	Quarantine        *guardrails.Quarantine
+	Exceptions        *guardrails.Exceptions
 }
 
 const maxRequestBodyBytes int64 = 8 << 20
@@ -345,9 +346,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if deps.Guardrails != nil && guardrailCovered(op) {
-		if h.checkGuardrails(deps, rw, r, op, body, deps.Guardrails, publicModel, logger) {
+		blocked, outBody := h.checkGuardrails(deps, rw, r, op, body, deps.Guardrails, publicModel, logger)
+		if blocked {
 			return
 		}
+		body = outBody
 	}
 
 	if resolved.Kind == modelresolver.KindDirect {
