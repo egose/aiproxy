@@ -53,9 +53,30 @@ type geminiCandidate struct {
 }
 
 type geminiUsageMetadata struct {
-	PromptTokenCount     int `json:"promptTokenCount"`
-	CandidatesTokenCount int `json:"candidatesTokenCount"`
-	TotalTokenCount      int `json:"totalTokenCount"`
+	PromptTokenCount        int `json:"promptTokenCount"`
+	CandidatesTokenCount    int `json:"candidatesTokenCount"`
+	TotalTokenCount         int `json:"totalTokenCount"`
+	CachedContentTokenCount int `json:"cachedContentTokenCount"`
+}
+
+func geminiUsageToInternal(m geminiUsageMetadata) Usage {
+	cached := m.CachedContentTokenCount
+	if cached < 0 {
+		cached = 0
+	}
+	if cached > m.PromptTokenCount {
+		cached = m.PromptTokenCount
+	}
+	total := m.TotalTokenCount
+	if total == 0 {
+		total = m.PromptTokenCount + m.CandidatesTokenCount
+	}
+	return Usage{
+		PromptTokens:     int64(m.PromptTokenCount),
+		CompletionTokens: int64(m.CandidatesTokenCount),
+		TotalTokens:      int64(total),
+		CachedTokens:     int64(cached),
+	}
 }
 
 type geminiEmbedding struct {
@@ -397,6 +418,15 @@ func translateGeminiResponse(body []byte, publicModel string) ([]byte, error) {
 			TotalTokens:      resp.UsageMetadata.TotalTokenCount,
 		},
 	}
+	if out.Usage.TotalTokens == 0 {
+		out.Usage.TotalTokens = out.Usage.PromptTokens + out.Usage.CompletionTokens
+	}
+	if cached := resp.UsageMetadata.CachedContentTokenCount; cached > 0 {
+		if cached > out.Usage.PromptTokens {
+			cached = out.Usage.PromptTokens
+		}
+		out.Usage.PromptTokensDetails = &openAIPromptTokensDetails{CachedTokens: cached}
+	}
 	return json.Marshal(out)
 }
 
@@ -409,7 +439,8 @@ func translateGeminiResponsesResponse(body []byte, publicModel string) ([]byte, 
 	if len(resp.Candidates) > 0 {
 		text = joinGeminiText(resp.Candidates[0].Content.Parts)
 	}
-	usage := reconcileResponsesUsage(resp.UsageMetadata.PromptTokenCount, resp.UsageMetadata.CandidatesTokenCount, resp.UsageMetadata.TotalTokenCount)
+	internal := geminiUsageToInternal(resp.UsageMetadata)
+	usage := reconcileResponsesUsageCached(int(internal.PromptTokens), int(internal.CompletionTokens), int(internal.TotalTokens), int(internal.CachedTokens))
 	return buildResponsesOutput("resp_gemini", publicModel, text, usage)
 }
 
@@ -602,7 +633,7 @@ func processGeminiPayload(w io.Writer, payload, publicModel string, sentRole *bo
 	if err := json.Unmarshal([]byte(payload), &resp); err != nil {
 		return false, false, err
 	}
-	stream.SetUsage(Usage{PromptTokens: int64(resp.UsageMetadata.PromptTokenCount), CompletionTokens: int64(resp.UsageMetadata.CandidatesTokenCount), TotalTokens: int64(resp.UsageMetadata.TotalTokenCount)})
+	stream.SetUsage(geminiUsageToInternal(resp.UsageMetadata))
 	if len(resp.Candidates) == 0 {
 		return false, false, nil
 	}
@@ -671,12 +702,14 @@ func processGeminiResponsesPayload(w io.Writer, payload string, state *responses
 	if err := json.Unmarshal([]byte(payload), &resp); err != nil {
 		return false, err
 	}
+	internal := geminiUsageToInternal(resp.UsageMetadata)
 	state.setUsage(openAIResponsesUsage{
-		InputTokens:  resp.UsageMetadata.PromptTokenCount,
-		OutputTokens: resp.UsageMetadata.CandidatesTokenCount,
-		TotalTokens:  resp.UsageMetadata.TotalTokenCount,
+		InputTokens:  int(internal.PromptTokens),
+		OutputTokens: int(internal.CompletionTokens),
+		TotalTokens:  int(internal.TotalTokens),
+		CachedTokens: int(internal.CachedTokens),
 	})
-	stream.SetUsage(Usage{PromptTokens: int64(resp.UsageMetadata.PromptTokenCount), CompletionTokens: int64(resp.UsageMetadata.CandidatesTokenCount), TotalTokens: int64(resp.UsageMetadata.TotalTokenCount)})
+	stream.SetUsage(internal)
 	if err := writeResponsesCreated(w, state); err != nil {
 		return false, err
 	}

@@ -147,18 +147,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				usage = result.Usage
 			}
 			deps.Accounting.Record(accounting.Event{
-				Timestamp:        time.Now(),
-				Tenant:           principalTenant(principal),
-				Client:           principalName(principal),
-				Model:            accountingModel,
-				Operation:        op.String(),
-				StatusCode:       rw.statusCode,
-				Provider:         accountingProvider,
-				UpstreamModel:    accountingUpstream,
-				PromptTokens:     usage.PromptTokens,
-				CompletionTokens: usage.CompletionTokens,
-				TotalTokens:      usage.TotalTokens,
-				Duration:         time.Since(start),
+				Timestamp:           time.Now(),
+				Tenant:              principalTenant(principal),
+				Client:              principalName(principal),
+				Model:               accountingModel,
+				Operation:           op.String(),
+				StatusCode:          rw.statusCode,
+				Provider:            accountingProvider,
+				UpstreamModel:       accountingUpstream,
+				PromptTokens:        usage.PromptTokens,
+				CompletionTokens:    usage.CompletionTokens,
+				TotalTokens:         usage.TotalTokens,
+				CachedTokens:        usage.CachedTokens,
+				CacheCreationTokens: usage.CacheCreationTokens,
+				CacheReadTokens:     usage.CacheReadTokens,
+				Duration:            time.Since(start),
 			})
 		}
 	}()

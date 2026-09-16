@@ -55,13 +55,16 @@ type Result struct {
 }
 
 type Usage struct {
-	PromptTokens     int64
-	CompletionTokens int64
-	TotalTokens      int64
+	PromptTokens        int64
+	CompletionTokens    int64
+	TotalTokens         int64
+	CachedTokens        int64
+	CacheCreationTokens int64
+	CacheReadTokens     int64
 }
 
 func (u Usage) Has() bool {
-	return u.PromptTokens > 0 || u.CompletionTokens > 0 || u.TotalTokens > 0
+	return u.PromptTokens > 0 || u.CompletionTokens > 0 || u.TotalTokens > 0 || u.CachedTokens > 0
 }
 
 type StreamCompletion struct {
@@ -94,6 +97,15 @@ func (s *StreamCompletion) SetUsage(usage Usage) {
 	}
 	if usage.TotalTokens > 0 {
 		s.outcome.Usage.TotalTokens = usage.TotalTokens
+	}
+	if usage.CachedTokens > 0 {
+		s.outcome.Usage.CachedTokens = usage.CachedTokens
+	}
+	if usage.CacheCreationTokens > 0 {
+		s.outcome.Usage.CacheCreationTokens = usage.CacheCreationTokens
+	}
+	if usage.CacheReadTokens > 0 {
+		s.outcome.Usage.CacheReadTokens = usage.CacheReadTokens
 	}
 	if total := s.outcome.Usage.PromptTokens + s.outcome.Usage.CompletionTokens; total > s.outcome.Usage.TotalTokens {
 		s.outcome.Usage.TotalTokens = total

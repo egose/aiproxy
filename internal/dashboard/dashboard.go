@@ -1617,7 +1617,7 @@ func renderFooter(m *model) string {
 	if len([]rune(base)) > m.width && m.width > 20 {
 		base = truncate(base, m.width)
 	}
-	legend := "ERR% excl 429 · ~=stream/no-tokens · ?=unknown health · HC=healthcheck · n/a=sparse latency"
+	legend := "ERR% excl 429 · ~=stream/no-tokens · ?=unknown health · HC=healthcheck · n/a=sparse latency · TOKENS=in/out (+cached w=write r=read)"
 	if len([]rune(legend)) > m.width && m.width > 20 {
 		legend = truncate(legend, m.width)
 	}
@@ -1870,15 +1870,18 @@ func upstreamAsSummaries(upstream []accounting.UpstreamSummary) []accounting.Sum
 	out := make([]accounting.Summary, 0, len(upstream))
 	for _, u := range upstream {
 		out = append(out, accounting.Summary{
-			Tenant:           u.Tenant,
-			Client:           u.Client,
-			Model:            u.Provider + "/" + u.Model,
-			Operation:        u.Operation,
-			StatusCode:       u.StatusCode,
-			Count:            u.Count,
-			PromptTokens:     u.PromptTokens,
-			CompletionTokens: u.CompletionTokens,
-			TotalTokens:      u.TotalTokens,
+			Tenant:              u.Tenant,
+			Client:              u.Client,
+			Model:               u.Provider + "/" + u.Model,
+			Operation:           u.Operation,
+			StatusCode:          u.StatusCode,
+			Count:               u.Count,
+			PromptTokens:        u.PromptTokens,
+			CompletionTokens:    u.CompletionTokens,
+			TotalTokens:         u.TotalTokens,
+			CachedTokens:        u.CachedTokens,
+			CacheCreationTokens: u.CacheCreationTokens,
+			CacheReadTokens:     u.CacheReadTokens,
 		})
 	}
 	return out
@@ -1907,21 +1910,22 @@ func renderProviders(m *model, width, height int) string {
 	latency, samples := p95WithSamples(snap.Usage.Recent(recentLimit))
 	var names []string
 	var ips []string
-	var reqs, t429s, toks []int64
+	var reqs, t429s []int64
+	var toks []string
 	for _, p := range snap.Providers {
 		ps := byName[p.Name]
 		names = append(names, p.Name)
 		ips = append(ips, m.providerIP(p.BaseURL))
 		reqs = append(reqs, ps.Requests)
 		t429s = append(t429s, ps.Throttled)
-		toks = append(toks, ps.TotalTokens)
+		toks = append(toks, providerTokensText(ps))
 	}
 	for _, p := range snap.DisabledProviders {
 		names = append(names, p.Name)
 		ips = append(ips, m.providerIP(p.BaseURL))
 		reqs = append(reqs, 0)
 		t429s = append(t429s, 0)
-		toks = append(toks, 0)
+		toks = append(toks, providerTokensText(accounting.ProviderSummary{}))
 	}
 	nameW, ipW, reqW, t429W, tokW := providerColWidths(names, ips, reqs, t429s, toks, inner)
 	rows := []string{headerStyle.Render(fitRow(headerCells([]col{{"PROVIDER", nameW}, {"", 1}, {"HC", 2}, {"REQS", reqW}, {"ERR%", 6}, {"429", t429W}, {"P95", 8}, {"TOKENS", tokW}, {"IP", ipW}}), inner))}
@@ -2136,7 +2140,7 @@ func comma(n int64) string {
 	return b.String()
 }
 
-func providerColWidths(names, ips []string, requests, throttled, tokens []int64, inner int) (nameW, ipW, reqW, t429W, tokW int) {
+func providerColWidths(names, ips []string, requests, throttled []int64, tokens []string, inner int) (nameW, ipW, reqW, t429W, tokW int) {
 	nameW, ipW, reqW, t429W, tokW = len("PROVIDER"), len("IP"), len("REQS"), len("429"), len("TOKENS")
 	for _, n := range names {
 		nameW = max(nameW, runeLen(n))
@@ -2151,13 +2155,13 @@ func providerColWidths(names, ips []string, requests, throttled, tokens []int64,
 		t429W = max(t429W, runeLen(comma(r)))
 	}
 	for _, t := range tokens {
-		tokW = max(tokW, runeLen(comma(t)))
+		tokW = max(tokW, runeLen(t))
 	}
 	nameW = min(nameW, 24)
 	ipW = min(ipW, 21)
 	reqW = min(reqW, 10)
 	t429W = min(t429W, 8)
-	tokW = min(tokW, 14)
+	tokW = min(tokW, 20)
 	const fixed = 1 + 2 + 6 + 8
 	const gaps = 8
 	limit := inner - 2
@@ -2196,7 +2200,7 @@ func usageColWidths(summaries []accounting.Summary, inner int) (modelW, opW, cou
 	modelW = min(modelW, 64)
 	opW = min(opW, 20)
 	countW = min(countW, 10)
-	tokW = min(tokW, 14)
+	tokW = min(tokW, 20)
 	const statusW = 6
 	const gaps = 4
 	for modelW+opW+statusW+countW+tokW+gaps > inner && modelW > 10 {
@@ -2215,10 +2219,30 @@ func usageColWidths(summaries []accounting.Summary, inner int) (modelW, opW, cou
 }
 
 func tokensText(s accounting.Summary) string {
-	if s.TotalTokens == 0 {
+	return formatTokenSplit(s.PromptTokens, s.CompletionTokens, s.TotalTokens, s.CachedTokens, s.CacheCreationTokens, s.CacheReadTokens)
+}
+
+func providerTokensText(ps accounting.ProviderSummary) string {
+	return formatTokenSplit(ps.PromptTokens, ps.CompletionTokens, ps.TotalTokens, ps.CachedTokens, ps.CacheCreationTokens, ps.CacheReadTokens)
+}
+
+func formatTokenSplit(prompt, completion, total, cached, cacheWrite, cacheRead int64) string {
+	if prompt == 0 && completion == 0 && total == 0 && cached == 0 {
 		return "~"
 	}
-	return comma(s.TotalTokens)
+	if prompt == 0 && completion == 0 && cached == 0 {
+		return comma(total)
+	}
+	split := comma(prompt) + "/" + comma(completion)
+	if cacheWrite > 0 || cacheRead > 0 {
+		split += " (" + comma(cacheWrite) + "w+" + comma(cacheRead) + "r)"
+	} else if cached > 0 {
+		split += " (" + comma(cached) + "c)"
+	}
+	if total > 0 && total != prompt+completion {
+		return comma(total) + " " + split
+	}
+	return split
 }
 
 func providerRow(name string, known, healthy bool, hcMark string, ps accounting.ProviderSummary, throttled int64, p95 time.Duration, samples int, disabled bool, ip string, nameW, ipW, reqW, t429W, tokW int) string {
@@ -2249,7 +2273,7 @@ func providerRow(name string, known, healthy bool, hcMark string, ps accounting.
 		fmt.Sprintf("%5.1f%%", errPct),
 		fmt.Sprintf("%*s", t429W, comma(throttled)),
 		p95cell,
-		fmt.Sprintf("%*s", tokW, comma(ps.TotalTokens)),
+		fmt.Sprintf("%*s", tokW, truncate(providerTokensText(ps), tokW)),
 		truncate(ip, ipW),
 	}, []int{nameW, 1, 2, reqW, 6, t429W, 8, tokW, ipW})
 }

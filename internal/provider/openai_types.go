@@ -37,9 +37,14 @@ type openAIMessageOut struct {
 }
 
 type openAIUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens        int                        `json:"prompt_tokens"`
+	CompletionTokens    int                        `json:"completion_tokens"`
+	TotalTokens         int                        `json:"total_tokens"`
+	PromptTokensDetails *openAIPromptTokensDetails `json:"prompt_tokens_details,omitempty"`
+}
+
+type openAIPromptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
 }
 
 // openAIResponsesUsage is the endpoint-specific wire usage for the Responses
@@ -50,9 +55,15 @@ type openAIUsage struct {
 // authoritative total when it covers extra categories, otherwise use the
 // input+output sum).
 type openAIResponsesUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens        int                       `json:"input_tokens"`
+	OutputTokens       int                       `json:"output_tokens"`
+	TotalTokens        int                       `json:"total_tokens"`
+	CachedTokens       int                       `json:"-"`
+	InputTokensDetails *openAIInputTokensDetails `json:"input_tokens_details,omitempty"`
+}
+
+type openAIInputTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
 }
 
 type openAIChunk struct {
