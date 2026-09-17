@@ -515,6 +515,48 @@ func TestGuardrailPayloadLogOmitsCoveredBodies(t *testing.T) {
 	}
 }
 
+func TestGuardrailPayloadLogOmitsUpstreamBody(t *testing.T) {
+	key := guardrailTestKey(t)
+	rt := newRT()
+	pl, dir := payloadTestLogger(t, 1<<20)
+	adapter := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       []byte(`{"id":"chatcmpl-stub"}`),
+		UpstreamRequestHeaders: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		UpstreamRequestBody: []byte(`{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"deploy with ` + key + `"}]}`),
+	}}
+	h := NewHandler(Dependencies{
+		Resolver:   modelresolver.New(rt),
+		Adapter:    adapter,
+		Auth:       auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:    rt.Catalog,
+		Metrics:    observability.NewMetrics(),
+		PayloadLog: pl,
+		Guardrails: guardrailTestScanner(t, guardrails.ModeAudit, 0, 0),
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(guardrailChatBody("openai/gpt-4o-mini", "deploy with "+key)))
+	r.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	entries := readPayloadEntries(t, dir)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	if entries[0].UpstreamRequest.Body.AsString() != "" || entries[0].UpstreamRequest.Body.Bytes != 0 {
+		t.Fatalf("upstream body persisted: %+v", entries[0].UpstreamRequest.Body)
+	}
+	raw, _ := json.Marshal(entries[0])
+	if strings.Contains(string(raw), key) {
+		t.Fatalf("payload entry leaks secret text")
+	}
+}
+
 func TestGuardrailPayloadLogDisabledKeepsBodies(t *testing.T) {
 	rt := newRT()
 	pl, dir := payloadTestLogger(t, 1<<20)

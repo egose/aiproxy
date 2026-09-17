@@ -111,6 +111,28 @@ func TestRecordRedactsAndTruncates(t *testing.T) {
 	}
 }
 
+func TestRedactHeadersCoversUpstreamCredentials(t *testing.T) {
+	got := RedactHeaders(http.Header{
+		"Authorization":  []string{"Bearer secret"},
+		"X-Api-Key":      []string{"anthropic-secret"},
+		"X-Goog-Api-Key": []string{"gemini-secret"},
+		"Cookie":         []string{"session=abc"},
+		"User-Agent":     []string{"aiproxy/1.0"},
+		"Content-Type":   []string{"application/json"},
+	})
+	for _, k := range []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Cookie"} {
+		if v := got[k]; len(v) != 1 || v[0] != "[REDACTED]" {
+			t.Fatalf("%s = %v, want redacted", k, v)
+		}
+	}
+	if v := got["User-Agent"]; len(v) != 1 || v[0] != "aiproxy/1.0" {
+		t.Fatalf("User-Agent = %v, want passthrough", v)
+	}
+	if v := got["Content-Type"]; len(v) != 1 || v[0] != "application/json" {
+		t.Fatalf("Content-Type = %v, want passthrough", v)
+	}
+}
+
 func TestEncodeBinaryBody(t *testing.T) {
 	b := EncodeBody([]byte{0xff, 0xfe, 0x00}, 0)
 	if b.Encoding != "base64" || b.AsString() == "" {
