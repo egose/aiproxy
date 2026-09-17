@@ -25,6 +25,7 @@ func TestConfigureProviderCreatesConfigAndSecrets(t *testing.T) {
 		"",
 		"",
 		"",
+		"",
 		secretsPath,
 		"",
 		"sk-test-primary",
@@ -88,6 +89,7 @@ func TestConfigureProviderRejectsInvalidProviderName(t *testing.T) {
 		"",
 		"",
 		"",
+		"",
 		secretsPath,
 		"",
 		"sk-test-primary",
@@ -143,6 +145,7 @@ provider "openai" "primary" {
 		"2",
 		"primary",
 		"Backup provider",
+		"",
 		"",
 		"",
 		"",
@@ -818,6 +821,7 @@ provider "openai" "primary" {
 		"chat_default",
 		"",
 		"1",
+		"n",
 	}, "\n") + "\n"
 
 	_, stderr, err := executeRootCommand(input, "configure", "alias")
@@ -1283,6 +1287,7 @@ func TestConfigureProviderEnvExpressionRejectsMalformedThenAccepts(t *testing.T)
 		"",                      // upstream header timeout
 		"",                      // user agent override
 		"",                      // forward inbound User-Agent
+		"",                      // forward headers
 		"2",                     // credential storage: env_expression
 		`env(FOO)`,              // malformed env expression -> re-prompt
 		`env("OPENAI_API_KEY")`, // valid
