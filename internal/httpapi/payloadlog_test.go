@@ -196,3 +196,83 @@ func TestPayloadLogTruncatesBodies(t *testing.T) {
 		t.Fatalf("bodies should be truncated: %+v / %+v", entries[0].Request.Body, entries[0].Response.Body)
 	}
 }
+
+func TestPayloadLogUpstreamRequest(t *testing.T) {
+	rt := newRT()
+	pl, dir := payloadTestLogger(t, 1<<20)
+	adapter := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       []byte(`{"id":"chatcmpl-stub"}`),
+		UpstreamRequestHeaders: http.Header{
+			"Authorization":  []string{"Bearer provider-secret"},
+			"X-Goog-Api-Key": []string{"gemini-secret"},
+			"User-Agent":     []string{"aiproxy/1.2.3-test"},
+			"Content-Type":   []string{"application/json"},
+		},
+		UpstreamRequestBody: []byte(`{"model":"up-m","messages":[]}`),
+	}}
+	h := NewHandler(Dependencies{
+		Resolver:   modelresolver.New(rt),
+		Adapter:    adapter,
+		Auth:       auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:    rt.Catalog,
+		Metrics:    observability.NewMetrics(),
+		PayloadLog: pl,
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"openai/gpt-4o-mini","messages":[]}`))
+	r.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	entries := readPayloadEntries(t, dir)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	e := entries[0]
+	if !strings.Contains(e.Request.Body.AsString(), "openai/gpt-4o-mini") {
+		t.Fatalf("inbound body should be preserved, got %q", e.Request.Body.AsString())
+	}
+	up := e.UpstreamRequest
+	if !strings.Contains(up.Body.AsString(), `"model":"up-m"`) {
+		t.Fatalf("upstream body should show rewritten model, got %q", up.Body.AsString())
+	}
+	if got := up.Headers["Authorization"]; len(got) != 1 || got[0] != "[REDACTED]" {
+		t.Fatalf("upstream authorization = %v, want redacted", got)
+	}
+	if got := up.Headers["X-Goog-Api-Key"]; len(got) != 1 || got[0] != "[REDACTED]" {
+		t.Fatalf("upstream x-goog-api-key = %v, want redacted", got)
+	}
+	if got := up.Headers["User-Agent"]; len(got) != 1 || got[0] != "aiproxy/1.2.3-test" {
+		t.Fatalf("upstream user-agent = %v", got)
+	}
+}
+
+func TestPayloadLogOmitsUpstreamRequestWithoutSnapshot(t *testing.T) {
+	rt := newRT()
+	pl, dir := payloadTestLogger(t, 1<<20)
+	h := NewHandler(Dependencies{
+		Resolver:   modelresolver.New(rt),
+		Adapter:    &stubAdapter{},
+		Auth:       auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:    rt.Catalog,
+		Metrics:    observability.NewMetrics(),
+		PayloadLog: pl,
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"openai/gpt-4o-mini","messages":[]}`))
+	r.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	entries := readPayloadEntries(t, dir)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	if len(entries[0].UpstreamRequest.Headers) != 0 || entries[0].UpstreamRequest.Body.AsString() != "" {
+		t.Fatalf("upstream_request should be empty without snapshot: %+v", entries[0].UpstreamRequest)
+	}
+}

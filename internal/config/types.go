@@ -15,6 +15,7 @@ type Runtime struct {
 	UpstreamHeaderTimeout time.Duration
 	UserAgent             string
 	ForwardUserAgent      bool
+	ForwardHeaders        []string
 	Catalog               Catalog
 }
 
@@ -204,6 +205,7 @@ type Provider struct {
 	UpstreamHeaderTimeout time.Duration
 	UserAgent             string
 	ForwardUserAgent      bool
+	ForwardHeaders        []string
 	APIKey                string
 	APIKeyRef             *APIKeyRef
 	CopilotCredentialRef  *CopilotCredentialRef

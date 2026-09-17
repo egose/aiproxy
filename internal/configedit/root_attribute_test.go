@@ -319,3 +319,46 @@ func TestWriteProviderFilesRejectsInvalidSourceWithoutPublish(t *testing.T) {
 		t.Fatalf("config was modified on failed publish:\n%s", string(data))
 	}
 }
+
+func TestUpsertTopLevelStringListAttributeRoundTrip(t *testing.T) {
+	source := "listener \"http\" \"public\" { address = \":8080\" }\nauth \"main\" { mode = \"none\" }\n"
+	updated, err := UpsertTopLevelStringListAttribute(source, "forward_headers", []string{"X-Session-Id", "X-Session-Affinity"})
+	if err != nil {
+		t.Fatalf("UpsertTopLevelStringListAttribute(): %v", err)
+	}
+	if !strings.Contains(updated, "forward_headers = [\"X-Session-Id\", \"X-Session-Affinity\"]\n") {
+		t.Fatalf("list attribute not inserted:\n%s", updated)
+	}
+	updated, err = UpsertTopLevelStringListAttribute(updated, "forward_headers", []string{"X-Other"})
+	if err != nil {
+		t.Fatalf("UpsertTopLevelStringListAttribute(): %v", err)
+	}
+	if !strings.Contains(updated, "forward_headers = [\"X-Other\"]\n") {
+		t.Fatalf("list attribute not updated:\n%s", updated)
+	}
+	rt, err := config.Load([]byte(updated), "config.hcl")
+	if err != nil {
+		t.Fatalf("Load(): %v\n%s", err, updated)
+	}
+	if len(rt.ForwardHeaders) != 1 || rt.ForwardHeaders[0] != "X-Other" {
+		t.Fatalf("ForwardHeaders = %v", rt.ForwardHeaders)
+	}
+}
+
+func TestTopLevelStringListAttributeRoundTrip(t *testing.T) {
+	source := "forward_headers = [\"X-Session-Id\", \"X-Session-Affinity\"]\n\nlistener \"http\" \"public\" { address = \":8080\" }\n"
+	got, err := TopLevelStringListAttribute(source, "forward_headers")
+	if err != nil {
+		t.Fatalf("TopLevelStringListAttribute(): %v", err)
+	}
+	if len(got) != 2 || got[0] != "X-Session-Id" || got[1] != "X-Session-Affinity" {
+		t.Fatalf("got %v", got)
+	}
+	got, err = TopLevelStringListAttribute(source, "absent_attr")
+	if err != nil {
+		t.Fatalf("TopLevelStringListAttribute(): %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("absent attribute should read empty, got %v", got)
+	}
+}

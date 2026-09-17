@@ -264,3 +264,102 @@ func TestConfigureUpstreamFailsOnInvalidSourceWithoutPublish(t *testing.T) {
 		t.Fatalf("config modified on failed edit:\n%s", string(data))
 	}
 }
+
+func TestConfigureUpstreamSetsRootForwardHeaders(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := "listener \"http\" \"public\" { address = \":8080\" }\n" +
+		"auth \"main\" { mode = \"none\" }\n" +
+		"provider \"openai\" \"plain\" {\n" +
+		"  api_key = \"sk-test\"\n" +
+		"  model \"gpt-4o-mini\" {}\n" +
+		"}\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+	if _, _, err := executeRootCommand(
+		"",
+		"configure", "upstream",
+		"--config", configPath,
+		"--non-interactive",
+		"--upstream-header-timeout", "30s",
+		"--forward-headers", "X-Session-Id, X-Session-Affinity",
+	); err != nil {
+		t.Fatalf("Execute(): %v", err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	if strings.Count(string(data), "forward_headers = [\"X-Session-Id\", \"X-Session-Affinity\"]") != 1 {
+		t.Fatalf("expected exactly one root forward_headers list:\n%s", string(data))
+	}
+	rt := loadTestConfig(t, configPath)
+	if len(rt.ForwardHeaders) != 2 || rt.ForwardHeaders[0] != "X-Session-Id" || rt.ForwardHeaders[1] != "X-Session-Affinity" {
+		t.Fatalf("root ForwardHeaders = %v", rt.ForwardHeaders)
+	}
+	p, ok := rt.Catalog.Provider("plain")
+	if !ok {
+		t.Fatal("plain provider missing from catalog")
+	}
+	if len(p.ForwardHeaders) != 2 {
+		t.Fatalf("plain should inherit root list, got %v", p.ForwardHeaders)
+	}
+}
+
+func TestConfigureUpstreamClearsRootForwardHeaders(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := "forward_headers = [\"X-Session-Id\"]\n" +
+		"\n" +
+		"listener \"http\" \"public\" { address = \":8080\" }\n" +
+		"auth \"main\" { mode = \"none\" }\n" +
+		"provider \"openai\" \"plain\" {\n" +
+		"  api_key = \"sk-test\"\n" +
+		"  model \"gpt-4o-mini\" {}\n" +
+		"}\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+	if _, _, err := executeRootCommand(
+		"",
+		"configure", "upstream",
+		"--config", configPath,
+		"--non-interactive",
+		"--upstream-header-timeout", "30s",
+		"--forward-headers", "",
+	); err != nil {
+		t.Fatalf("Execute(): %v", err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	if strings.Contains(string(data), "forward_headers") {
+		t.Fatalf("forward_headers should be removed:\n%s", string(data))
+	}
+	rt := loadTestConfig(t, configPath)
+	if len(rt.ForwardHeaders) != 0 {
+		t.Fatalf("root ForwardHeaders = %v, want empty", rt.ForwardHeaders)
+	}
+}
+
+func TestConfigureUpstreamRejectsManagedForwardHeaders(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := "listener \"http\" \"public\" { address = \":8080\" }\nauth \"main\" { mode = \"none\" }\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+	_, _, err := executeRootCommand(
+		"",
+		"configure", "upstream",
+		"--config", configPath,
+		"--non-interactive",
+		"--upstream-header-timeout", "30s",
+		"--forward-headers", "Authorization",
+	)
+	if err == nil {
+		t.Fatal("managed forward_headers entry should fail")
+	}
+}

@@ -259,6 +259,9 @@ func validateProviders(providers []Provider, requireCredential bool) error {
 		if err := validateProviderUserAgent(p); err != nil {
 			return err
 		}
+		if err := ValidateForwardHeaders(p.ForwardHeaders, fmt.Sprintf("provider %q", p.Name)); err != nil {
+			return err
+		}
 		if err := validateProviderHealthcheck(p); err != nil {
 			return err
 		}
@@ -436,6 +439,44 @@ func isValidUserAgent(s string) bool {
 		}
 	}
 	return true
+}
+
+var deniedForwardHeaders = map[string]struct{}{
+	"authorization": {}, "proxy-authorization": {}, "proxy-authenticate": {},
+	"cookie": {}, "set-cookie": {}, "x-api-key": {}, "x-goog-api-key": {},
+	"host": {}, "content-length": {}, "transfer-encoding": {},
+	"connection": {}, "keep-alive": {}, "proxy-connection": {},
+	"te": {}, "trailer": {}, "upgrade": {},
+	"content-type": {}, "accept": {}, "user-agent": {},
+}
+
+func ValidateForwardHeaders(names []string, owner string) error {
+	for _, name := range names {
+		if !isValidHeaderName(name) {
+			return fmt.Errorf("%s: forward_headers entry %q is not a valid header name", owner, name)
+		}
+		if _, denied := deniedForwardHeaders[strings.ToLower(name)]; denied {
+			if strings.EqualFold(name, "user-agent") {
+				return fmt.Errorf("%s: forward_headers entry %q is managed by the proxy, use forward_user_agent instead", owner, name)
+			}
+			return fmt.Errorf("%s: forward_headers entry %q is managed by the proxy and cannot be forwarded", owner, name)
+		}
+	}
+	return nil
+}
+
+func unionForwardHeaders(root, local []string) []string {
+	out := make([]string, 0, len(root)+len(local))
+	seen := make(map[string]struct{}, len(root)+len(local))
+	for _, name := range append(append([]string(nil), root...), local...) {
+		key := strings.ToLower(name)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, name)
+	}
+	return out
 }
 
 func isLoopbackHost(host string) bool {

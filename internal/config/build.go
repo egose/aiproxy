@@ -59,6 +59,10 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		rt.UserAgent = raw.UserAgent
 	}
 	rt.ForwardUserAgent = raw.ForwardUserAgent
+	if err := ValidateForwardHeaders(raw.ForwardHeaders, "root"); err != nil {
+		return nil, err
+	}
+	rt.ForwardHeaders = append([]string(nil), raw.ForwardHeaders...)
 	if len(raw.Dashboard) > 0 {
 		if len(raw.Dashboard) > 1 {
 			return nil, fmt.Errorf("only one dashboard block is supported")
@@ -104,7 +108,7 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		if p.Extends != "" {
 			continue
 		}
-		provider, err := buildProvider(p, rt.UpstreamHeaderTimeout, rt.UserAgent, rt.ForwardUserAgent)
+		provider, err := buildProvider(p, rt.UpstreamHeaderTimeout, rt.UserAgent, rt.ForwardUserAgent, rt.ForwardHeaders)
 		if err != nil {
 			return nil, fmt.Errorf("provider %q: %w", p.Name, err)
 		}
@@ -234,7 +238,7 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 }
 
 func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderSyntax) error {
-	for _, name := range []string{"base_url", "upstream_header_timeout", "user_agent", "forward_user_agent", "enabled"} {
+	for _, name := range []string{"base_url", "upstream_header_timeout", "user_agent", "forward_user_agent", "forward_headers", "enabled"} {
 		if syntax.Attrs[name] {
 			return fmt.Errorf("derived provider cannot declare %s", name)
 		}
@@ -464,7 +468,7 @@ func buildAuth(rawAuths []rawAuth) (Auth, error) {
 	return auth, nil
 }
 
-func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Duration, rootUserAgent string, rootForwardUserAgent bool) (Provider, error) {
+func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Duration, rootUserAgent string, rootForwardUserAgent bool, rootForwardHeaders []string) (Provider, error) {
 	provider := Provider{
 		Type:                  ProviderType(rawProvider.Type),
 		Name:                  rawProvider.Name,
@@ -473,6 +477,7 @@ func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Durat
 		UpstreamHeaderTimeout: rootUpstreamHeaderTimeout,
 		UserAgent:             rootUserAgent,
 		ForwardUserAgent:      rootForwardUserAgent,
+		ForwardHeaders:        unionForwardHeaders(rootForwardHeaders, rawProvider.ForwardHeaders),
 		APIKey:                rawProvider.APIKey,
 		Enabled:               true,
 		ModelByName:           make(map[string]Model),

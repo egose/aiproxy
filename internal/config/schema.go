@@ -4,6 +4,7 @@ type rawFile struct {
 	UpstreamHeaderTimeout string             `hcl:"upstream_header_timeout,optional"`
 	UserAgent             string             `hcl:"user_agent,optional"`
 	ForwardUserAgent      bool               `hcl:"forward_user_agent,optional"`
+	ForwardHeaders        []string           `hcl:"forward_headers,optional"`
 	Listeners             []rawListener      `hcl:"listener,block"`
 	Auth                  []rawAuth          `hcl:"auth,block"`
 	Logging               *rawLogging        `hcl:"logging,block"`
@@ -117,6 +118,7 @@ type rawProvider struct {
 	UpstreamHeaderTimeout string            `hcl:"upstream_header_timeout,optional"`
 	UserAgent             string            `hcl:"user_agent,optional"`
 	ForwardUserAgent      bool              `hcl:"forward_user_agent,optional"`
+	ForwardHeaders        []string          `hcl:"forward_headers,optional"`
 	APIKey                string            `hcl:"api_key,optional"`
 	APIKeyRef             *rawAPIKeyRef     `hcl:"api_key_ref,block"`
 	CredentialRef         *rawCredentialRef `hcl:"credential_ref,block"`

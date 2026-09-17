@@ -24,22 +24,23 @@ type Body struct {
 }
 
 type Entry struct {
-	Timestamp     string    `json:"ts"`
-	RequestID     string    `json:"request_id,omitempty"`
-	Method        string    `json:"method,omitempty"`
-	Path          string    `json:"path,omitempty"`
-	Operation     string    `json:"operation,omitempty"`
-	PublicModel   string    `json:"public_model,omitempty"`
-	Client        string    `json:"client,omitempty"`
-	Tenant        string    `json:"tenant,omitempty"`
-	Provider      string    `json:"provider,omitempty"`
-	UpstreamModel string    `json:"upstream_model,omitempty"`
-	Status        int       `json:"status"`
-	DurationMs    int64     `json:"duration_ms"`
-	Streaming     bool      `json:"streaming,omitempty"`
-	Error         string    `json:"error,omitempty"`
-	Request       EntrySide `json:"request"`
-	Response      EntrySide `json:"response"`
+	Timestamp       string    `json:"ts"`
+	RequestID       string    `json:"request_id,omitempty"`
+	Method          string    `json:"method,omitempty"`
+	Path            string    `json:"path,omitempty"`
+	Operation       string    `json:"operation,omitempty"`
+	PublicModel     string    `json:"public_model,omitempty"`
+	Client          string    `json:"client,omitempty"`
+	Tenant          string    `json:"tenant,omitempty"`
+	Provider        string    `json:"provider,omitempty"`
+	UpstreamModel   string    `json:"upstream_model,omitempty"`
+	Status          int       `json:"status"`
+	DurationMs      int64     `json:"duration_ms"`
+	Streaming       bool      `json:"streaming,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	Request         EntrySide `json:"request"`
+	UpstreamRequest EntrySide `json:"upstream_request,omitempty"`
+	Response        EntrySide `json:"response"`
 }
 
 type EntrySide struct {
@@ -54,6 +55,7 @@ var redactedHeaders = map[string]struct{}{
 	"cookie":              {},
 	"set-cookie":          {},
 	"x-api-key":           {},
+	"x-goog-api-key":      {},
 }
 
 func RedactHeaders(h http.Header) map[string][]string {

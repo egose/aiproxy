@@ -118,6 +118,7 @@ func annotateProviderSyntax(body hcl.Body, raw *rawFile) {
 				{Name: "base_url"},
 				{Name: "upstream_header_timeout"},
 				{Name: "user_agent"},
+				{Name: "forward_headers"},
 				{Name: "api_key"},
 				{Name: "enabled"},
 			},

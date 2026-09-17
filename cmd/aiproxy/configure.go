@@ -79,6 +79,8 @@ type providerOptions struct {
 	UserAgent               string
 	ForwardUserAgent        bool
 	HasForwardUserAgent     bool
+	ForwardHeaders          string
+	HasForwardHeaders       bool
 	APIKey                  string
 	APIKeyEnv               string
 	SecretsPath             string
@@ -152,6 +154,8 @@ type upstreamOptions struct {
 	HasUserAgent          bool
 	ForwardUserAgent      bool
 	HasForwardUserAgent   bool
+	ForwardHeaders        string
+	HasForwardHeaders     bool
 	NonInteractive        bool
 }
 
@@ -215,6 +219,7 @@ func newConfigureUpstreamCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.HasUserAgent = cmd.Flags().Changed("user-agent")
 			options.HasForwardUserAgent = cmd.Flags().Changed("forward-user-agent")
+			options.HasForwardHeaders = cmd.Flags().Changed("forward-headers")
 			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureUpstream(&prompts, inheritedConfigPath(cmd), options)
 		},
@@ -223,6 +228,7 @@ func newConfigureUpstreamCommand() *cobra.Command {
 	cmd.Flags().StringVar(&options.UserAgent, "user-agent", "", "root user_agent default (empty clears it when explicitly passed)")
 	cmd.Flags().BoolVar(&options.ForwardUserAgent, "forward-user-agent", false, "root forward_user_agent default")
 	cmd.Flags().Lookup("forward-user-agent").NoOptDefVal = "true"
+	cmd.Flags().StringVar(&options.ForwardHeaders, "forward-headers", "", "root forward_headers default as comma-separated names (empty clears it when explicitly passed)")
 	cmd.Flags().BoolVar(&options.NonInteractive, "non-interactive", false, "fail instead of prompting for missing values")
 	return cmd
 }
@@ -290,6 +296,7 @@ func newConfigureProviderCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.HasEnabled = cmd.Flags().Changed("enabled")
 			options.HasForwardUserAgent = cmd.Flags().Changed("forward-user-agent")
+			options.HasForwardHeaders = cmd.Flags().Changed("forward-headers")
 			options.HasHealthcheckStatus = cmd.Flags().Changed("healthcheck-expected-status")
 			options.HasHealthcheckFailures = cmd.Flags().Changed("healthcheck-failure-threshold")
 			options.HasHealthcheckSuccesses = cmd.Flags().Changed("healthcheck-success-threshold")
@@ -307,6 +314,7 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().StringVar(&options.UpstreamHeaderTimeout, "upstream-header-timeout", "", "provider upstream_header_timeout")
 	cmd.Flags().StringVar(&options.UserAgent, "user-agent", "", "provider user_agent override")
 	cmd.Flags().BoolVar(&options.ForwardUserAgent, "forward-user-agent", false, "forward the inbound User-Agent header upstream (use --forward-user-agent=false to disable; default preserves existing)")
+	cmd.Flags().StringVar(&options.ForwardHeaders, "forward-headers", "", "provider forward_headers as comma-separated names (empty clears it when explicitly passed)")
 	cmd.Flags().StringVar(&options.APIKey, "api-key", "", "provider API key or secret value")
 	cmd.Flags().StringVar(&options.APIKeyEnv, "api-key-env", "", "provider API key environment variable name")
 	cmd.Flags().StringVar(&options.SecretsPath, "secrets-path", "", "secrets file path for api_key_ref")
@@ -520,6 +528,17 @@ func runConfigureUpstream(prompts *promptSession, configPath string, options ups
 		forwardUserAgent = current == "true"
 	}
 	writeForwardUserAgent := options.HasForwardUserAgent
+	var forwardHeaders []string
+	if options.HasForwardHeaders {
+		forwardHeaders = parseForwardHeadersCSV(options.ForwardHeaders)
+	} else {
+		current, err := configedit.TopLevelStringListAttribute(doc.source, "forward_headers")
+		if err != nil {
+			return err
+		}
+		forwardHeaders = current
+	}
+	writeForwardHeaders := options.HasForwardHeaders
 	if options.NonInteractive {
 		if timeout == "" {
 			return fmt.Errorf("upstream requires --upstream-header-timeout in non-interactive mode")
@@ -529,6 +548,11 @@ func runConfigureUpstream(prompts *promptSession, configPath string, options ups
 		}
 		if options.HasUserAgent && userAgent != "" && validateOptionalUserAgent(userAgent) != nil {
 			return fmt.Errorf("invalid user-agent: must be 1-256 printable ASCII characters without newlines")
+		}
+		if options.HasForwardHeaders {
+			if err := config.ValidateForwardHeaders(forwardHeaders, "forward_headers"); err != nil {
+				return fmt.Errorf("invalid forward-headers: %w", err)
+			}
 		}
 	} else {
 		timeout, err = prompts.askValidated("Root upstream header timeout", timeout, validateOptionalPositiveDuration)
@@ -551,6 +575,14 @@ func runConfigureUpstream(prompts *promptSession, configPath string, options ups
 				return err
 			}
 			writeForwardUserAgent = true
+		}
+		if !options.HasForwardHeaders {
+			forwardHeadersRaw, err := prompts.askValidated("Forward headers by default (comma-separated)", strings.Join(forwardHeaders, ", "), validateForwardHeadersCSV)
+			if err != nil {
+				return err
+			}
+			forwardHeaders = parseForwardHeadersCSV(forwardHeadersRaw)
+			writeForwardHeaders = true
 		}
 	}
 	updated, err := configedit.UpsertTopLevelStringAttribute(doc.source, "upstream_header_timeout", timeout)
@@ -582,6 +614,22 @@ func runConfigureUpstream(prompts *promptSession, configPath string, options ups
 		}
 		preview += "forward_user_agent = " + strconv.FormatBool(forwardUserAgent) + "\n"
 		actions = append(actions, "Action: update root forward_user_agent default (provider overrides preserved)")
+	}
+	if writeForwardHeaders {
+		if len(forwardHeaders) == 0 {
+			updated, err = configedit.RemoveTopLevelAttribute(updated, "forward_headers")
+			if err != nil {
+				return err
+			}
+			actions = append(actions, "Action: remove root forward_headers default")
+		} else {
+			updated, err = configedit.UpsertTopLevelStringListAttribute(updated, "forward_headers", forwardHeaders)
+			if err != nil {
+				return err
+			}
+			preview += "forward_headers = " + configedit.RenderQuotedList(forwardHeaders) + "\n"
+			actions = append(actions, "Action: update root forward_headers default (provider lists merge with root)")
+		}
 	}
 	if err := prompts.confirmWrite("Review upstream changes", buildReviewSummary(actions, preview)); err != nil {
 		return err
@@ -1859,7 +1907,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if options.DisplayName != "" {
 		defaults.DisplayName = options.DisplayName
 	}
-	if defaults.Extends != "" && (options.BaseURL != "" || options.UpstreamHeaderTimeout != "" || options.UserAgent != "" || options.HasForwardUserAgent || options.HasEnabled || hasProviderModelOptions(options) || hasProviderHealthcheckOptions(options)) {
+	if defaults.Extends != "" && (options.BaseURL != "" || options.UpstreamHeaderTimeout != "" || options.UserAgent != "" || options.HasForwardUserAgent || options.HasForwardHeaders || options.HasEnabled || hasProviderModelOptions(options) || hasProviderHealthcheckOptions(options)) {
 		return providerInput{}, secretsUpdate{}, fmt.Errorf("--extends cannot be combined with inherited-field flags")
 	}
 	if options.BaseURL != "" {
@@ -1879,6 +1927,12 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	}
 	if options.HasForwardUserAgent {
 		defaults.ForwardUserAgent = options.ForwardUserAgent
+	}
+	if options.HasForwardHeaders {
+		if err := validateForwardHeadersCSV(options.ForwardHeaders); err != nil {
+			return providerInput{}, secretsUpdate{}, fmt.Errorf("invalid forward-headers: %w", err)
+		}
+		defaults.ForwardHeaders = parseForwardHeadersCSV(options.ForwardHeaders)
 	}
 	if err := applyProviderCredentialOptions(&defaults, options); err != nil {
 		return providerInput{}, secretsUpdate{}, err
@@ -1925,6 +1979,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			defaults.UpstreamHeaderTimeout = ""
 			defaults.UserAgent = ""
 			defaults.ForwardUserAgent = false
+			defaults.ForwardHeaders = nil
 			defaults.Enabled = nil
 			defaults.Models = nil
 			defaults.Healthcheck = nil
@@ -1988,6 +2043,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		extends = extendsFromChoice(extendsChoice)
 		userAgent := defaults.UserAgent
 		forwardUserAgent := defaults.ForwardUserAgent
+		forwardHeaders := strings.Join(defaults.ForwardHeaders, ", ")
 		if strings.TrimSpace(extends) == "" {
 			if err := prompts.runHuhForm(
 				huh.NewGroup(
@@ -2000,6 +2056,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 				huh.NewGroup(
 					huh.NewInput().Title("User agent override").Description(userAgentDescription()).Value(&userAgent).Validate(validateOptionalUserAgent),
 					huh.NewConfirm().Title("Forward inbound User-Agent").Description(forwardUserAgentDescription()).Value(&forwardUserAgent),
+					huh.NewInput().Title("Forward headers").Description(forwardHeadersDescription()).Value(&forwardHeaders).Validate(validateForwardHeadersCSV),
 				).Title("User Agent"),
 			); err != nil {
 				return providerInput{}, secretsUpdate{}, err
@@ -2007,6 +2064,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		} else {
 			userAgent = ""
 			forwardUserAgent = false
+			forwardHeaders = ""
 		}
 		baseURL := defaults.BaseURL
 		if strings.TrimSpace(extends) != "" {
@@ -2062,6 +2120,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 				UpstreamHeaderTimeout: strings.TrimSpace(upstreamHeaderTimeout),
 				UserAgent:             strings.TrimSpace(userAgent),
 				ForwardUserAgent:      forwardUserAgent,
+				ForwardHeaders:        parseForwardHeadersCSV(forwardHeaders),
 				Credential:            credential,
 				Enabled:               defaults.Enabled,
 				Models:                models,
@@ -2155,6 +2214,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			UpstreamHeaderTimeout: strings.TrimSpace(upstreamHeaderTimeout),
 			UserAgent:             strings.TrimSpace(userAgent),
 			ForwardUserAgent:      forwardUserAgent,
+			ForwardHeaders:        parseForwardHeadersCSV(forwardHeaders),
 			Credential:            credential,
 			Enabled:               defaults.Enabled,
 			Healthcheck:           preservedProviderHealthcheck(defaults.Healthcheck, extends, providerType),
@@ -2183,6 +2243,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	upstreamHeaderTimeout := defaults.UpstreamHeaderTimeout
 	userAgent := defaults.UserAgent
 	forwardUserAgent := defaults.ForwardUserAgent
+	forwardHeaders := strings.Join(defaults.ForwardHeaders, ", ")
 	if strings.TrimSpace(extends) == "" {
 		upstreamHeaderTimeout, err = prompts.askValidated("Upstream header timeout", defaults.UpstreamHeaderTimeout, validateOptionalPositiveDuration)
 		if err != nil {
@@ -2196,9 +2257,14 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
+		forwardHeaders, err = prompts.askValidated("Forward headers (comma-separated)", forwardHeaders, validateForwardHeadersCSV)
+		if err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
 	} else {
 		userAgent = ""
 		forwardUserAgent = false
+		forwardHeaders = ""
 	}
 	baseURL := defaults.BaseURL
 	if strings.TrimSpace(extends) != "" {
@@ -2247,6 +2313,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			UpstreamHeaderTimeout: upstreamHeaderTimeout,
 			UserAgent:             userAgent,
 			ForwardUserAgent:      forwardUserAgent,
+			ForwardHeaders:        parseForwardHeadersCSV(forwardHeaders),
 			Credential:            credential,
 			Enabled:               defaults.Enabled,
 			Models:                models,
@@ -2322,6 +2389,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		UpstreamHeaderTimeout: upstreamHeaderTimeout,
 		UserAgent:             userAgent,
 		ForwardUserAgent:      forwardUserAgent,
+		ForwardHeaders:        parseForwardHeadersCSV(forwardHeaders),
 		Credential:            credential,
 		Enabled:               defaults.Enabled,
 		Healthcheck:           preservedProviderHealthcheck(defaults.Healthcheck, extends, providerType),
@@ -3214,6 +3282,25 @@ func forwardUserAgentDescription() string {
 	return "Forward the inbound caller User-Agent upstream instead of aiproxy/<version>. An explicit user_agent override still takes precedence."
 }
 
+func forwardHeadersDescription() string {
+	return "Inbound header names forwarded upstream verbatim. Proxy-managed headers (authorization, cookies, content headers, hop-by-hop) are rejected; headers the adapter already sets keep the adapter value."
+}
+
+func parseForwardHeadersCSV(value string) []string {
+	var out []string
+	for _, part := range strings.Split(value, ",") {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func validateForwardHeadersCSV(value string) error {
+	return config.ValidateForwardHeaders(parseForwardHeadersCSV(value), "forward_headers")
+}
+
 func rateLimitRPMDescription() string {
 	return "Positive integer requests-per-minute limit applied per authenticated client."
 }
@@ -3914,6 +4001,7 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 		boolVal := fwdExpr == "true" || fwdExpr == "1"
 		input.ForwardUserAgent = boolVal
 	}
+	input.ForwardHeaders = parseQuotedListExpr(attributeExpr(src, parsed.Body, "forward_headers"))
 	if enabledExpr := parseLiteralOrExpression(attributeExpr(src, parsed.Body, "enabled")); enabledExpr != "" {
 		boolVal := enabledExpr == "true" || enabledExpr == "1"
 		input.Enabled = &boolVal

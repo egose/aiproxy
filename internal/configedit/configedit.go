@@ -62,6 +62,7 @@ type ProviderInput struct {
 	UpstreamHeaderTimeout string
 	UserAgent             string
 	ForwardUserAgent      bool
+	ForwardHeaders        []string
 	Credential            ProviderCredentialInput
 	Enabled               *bool
 	Healthcheck           *ProviderHealthcheckInput
@@ -316,6 +317,11 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 	}
 	if input.ForwardUserAgent {
 		b.WriteString("  forward_user_agent = true\n")
+	}
+	if len(input.ForwardHeaders) > 0 {
+		b.WriteString("  forward_headers = ")
+		b.WriteString(RenderQuotedList(input.ForwardHeaders))
+		b.WriteString("\n")
 	}
 	if input.IsExplicitlyDisabled() {
 		b.WriteString("  enabled = false\n")
@@ -839,6 +845,66 @@ func UpsertTopLevelBoolAttribute(source, name string, value bool) (string, error
 		return "", fmt.Errorf("parse config: attribute %q has out-of-range expression", name)
 	}
 	return source[:exprRange.Start.Byte] + literal + source[exprRange.End.Byte:], nil
+}
+
+func UpsertTopLevelStringListAttribute(source, name string, values []string) (string, error) {
+	rendered := RenderQuotedList(values)
+	if strings.TrimSpace(source) == "" {
+		return name + " = " + rendered + "\n", nil
+	}
+	file, diags := hclsyntax.ParseConfig([]byte(source), "config.hcl", hcl.Pos{Line: 1, Column: 1})
+	if diags.HasErrors() {
+		return "", fmt.Errorf("parse config: %s", diags.Error())
+	}
+	body, ok := file.Body.(*hclsyntax.Body)
+	if !ok {
+		return "", fmt.Errorf("parse config: unexpected body type")
+	}
+	attr, ok := body.Attributes[name]
+	if !ok {
+		trimmed := strings.TrimLeft(source, "\n")
+		if strings.TrimSpace(trimmed) == "" {
+			return name + " = " + rendered + "\n", nil
+		}
+		return name + " = " + rendered + "\n\n" + trimmed, nil
+	}
+	exprRange := attr.Expr.Range()
+	if exprRange.Start.Byte < 0 || exprRange.End.Byte > len(source) || exprRange.End.Byte < exprRange.Start.Byte {
+		return "", fmt.Errorf("parse config: attribute %q has out-of-range expression", name)
+	}
+	return source[:exprRange.Start.Byte] + rendered + source[exprRange.End.Byte:], nil
+}
+
+var topLevelQuotedStringPattern = regexp.MustCompile(`"(?:\\.|[^"\\]*)*"`)
+
+func TopLevelStringListAttribute(source, name string) ([]string, error) {
+	if strings.TrimSpace(source) == "" {
+		return nil, nil
+	}
+	file, diags := hclsyntax.ParseConfig([]byte(source), "config.hcl", hcl.Pos{Line: 1, Column: 1})
+	if diags.HasErrors() {
+		return nil, fmt.Errorf("parse config: %s", diags.Error())
+	}
+	body, ok := file.Body.(*hclsyntax.Body)
+	if !ok {
+		return nil, fmt.Errorf("parse config: unexpected body type")
+	}
+	attr, ok := body.Attributes[name]
+	if !ok {
+		return nil, nil
+	}
+	exprRange := attr.Expr.Range()
+	if exprRange.Start.Byte < 0 || exprRange.End.Byte > len(source) || exprRange.End.Byte < exprRange.Start.Byte {
+		return nil, fmt.Errorf("parse config: attribute %q has out-of-range expression", name)
+	}
+	var out []string
+	for _, raw := range topLevelQuotedStringPattern.FindAllString(source[exprRange.Start.Byte:exprRange.End.Byte], -1) {
+		value, err := strconv.Unquote(raw)
+		if err == nil {
+			out = append(out, value)
+		}
+	}
+	return out, nil
 }
 
 func RemoveTopLevelAttribute(source, name string) (string, error) {
