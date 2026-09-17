@@ -680,11 +680,9 @@ function _createMdxContent(props) {
         children: "User-Agent: aiproxy/<version>"
       }), " unless the\nprovider declares a ", (0,jsx_runtime.jsx)(_components.code, {
         children: "user_agent"
-      }), " override (supported on ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "opencode-zen"
-      }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
-        children: "opencode-go"
-      }), " only, validated as 1-256 printable ASCII characters); the\ninbound ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " override (any provider type, validated as\n1-256 printable ASCII characters) or sets ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "forward_user_agent = true"
+      }), " to\nforward the inbound caller value on live inference requests; the\ninbound ", (0,jsx_runtime.jsx)(_components.code, {
         children: "User-Agent"
       }), " is never forwarded implicitly, so matching a first-party\nclient fingerprint is always an explicit operator choice. Both\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "opencode-zen"

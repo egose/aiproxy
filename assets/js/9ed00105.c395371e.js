@@ -74,6 +74,10 @@ const toc = [{
   "id": "upstream-header-timeout",
   "level": 2
 }, {
+  "value": "Upstream User-Agent",
+  "id": "upstream-user-agent",
+  "level": 2
+}, {
   "value": "Models",
   "id": "models",
   "level": 2
@@ -195,7 +199,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
-        children: "listener \"http\" \"public\" {\n  address = \":8080\"\n\n  timeouts {\n    read_header = \"10s\"\n    idle        = \"60s\"\n    write       = \"0s\"\n  }\n}\n\nupstream_header_timeout = \"120s\"\n\nauth \"main\" {\n  mode = \"bearer_static\"\n\n  rate_limit {\n    requests_per_minute = 120\n    burst               = 120\n  }\n\n  client \"internal-app\" {\n    token          = env(\"AIPROXY_CLIENT_TOKEN\")\n    tenant         = \"internal\"\n    allowed_models = [\"alias/chat_default\", \"openai/gpt-4.1\"]\n  }\n}\n\nlogging {\n  level      = \"info\"\n  access_log = true\n}\n\nprovider \"openai\" \"openai\" {\n  display_name = \"OpenAI\"\n  api_key      = env(\"OPENAI_API_KEY\")\n\n  model \"gpt-4.1\" {\n    display_name = \"GPT-4.1\"\n    capabilities = [\"chat\", \"responses\"]\n  }\n\n  model \"text-embedding-3-large\" {\n    display_name = \"text-embedding-3-large\"\n    capabilities = [\"embeddings\"]\n  }\n}\n\nprovider \"openai-compatible\" \"localai\" {\n  display_name = \"LocalAI\"\n  base_url     = \"https://llm.internal/v1\"\n  upstream_header_timeout = \"180s\"\n\n  api_key_ref {\n    key = \"localai\"\n  }\n\n  model \"qwen3-32b\" {\n    display_name = \"Qwen 3 32B\"\n  }\n}\n\nalias \"chat_default\" {\n  algorithm = \"round_robin\"\n\n  target {\n    provider = \"openai\"\n    model    = \"gpt-4.1\"\n  }\n\n  target {\n    provider = \"localai\"\n    model    = \"qwen3-32b\"\n  }\n}\n"
+        children: "listener \"http\" \"public\" {\n  address = \":8080\"\n\n  timeouts {\n    read_header = \"10s\"\n    idle        = \"60s\"\n    write       = \"0s\"\n  }\n}\n\nupstream_header_timeout = \"120s\"\n\nuser_agent = \"my-proxy/1.0\"\n\nauth \"main\" {\n  mode = \"bearer_static\"\n\n  rate_limit {\n    requests_per_minute = 120\n    burst               = 120\n  }\n\n  client \"internal-app\" {\n    token          = env(\"AIPROXY_CLIENT_TOKEN\")\n    tenant         = \"internal\"\n    allowed_models = [\"alias/chat_default\", \"openai/gpt-4.1\"]\n  }\n}\n\nlogging {\n  level      = \"info\"\n  access_log = true\n}\n\nprovider \"openai\" \"openai\" {\n  display_name = \"OpenAI\"\n  api_key      = env(\"OPENAI_API_KEY\")\n\n  model \"gpt-4.1\" {\n    display_name = \"GPT-4.1\"\n    capabilities = [\"chat\", \"responses\"]\n  }\n\n  model \"text-embedding-3-large\" {\n    display_name = \"text-embedding-3-large\"\n    capabilities = [\"embeddings\"]\n  }\n}\n\nprovider \"openai-compatible\" \"localai\" {\n  display_name = \"LocalAI\"\n  base_url     = \"https://llm.internal/v1\"\n  upstream_header_timeout = \"180s\"\n\n  api_key_ref {\n    key = \"localai\"\n  }\n\n  model \"qwen3-32b\" {\n    display_name = \"Qwen 3 32B\"\n  }\n}\n\nalias \"chat_default\" {\n  algorithm = \"round_robin\"\n\n  target {\n    provider = \"openai\"\n    model    = \"gpt-4.1\"\n  }\n\n  target {\n    provider = \"localai\"\n    model    = \"qwen3-32b\"\n  }\n}\n"
       })
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "listener",
@@ -451,13 +455,17 @@ function _createMdxContent(props) {
           children: "user_agent"
         }), " as an optional upstream ", (0,jsx_runtime.jsx)(_components.code, {
           children: "User-Agent"
-        }), " override for\n", (0,jsx_runtime.jsx)(_components.code, {
-          children: "opencode-zen"
-        }), " and ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "opencode-go"
-        }), " (defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+        }), " override for any provider\ntype (defaults to ", (0,jsx_runtime.jsx)(_components.code, {
           children: "aiproxy/<version>"
         }), ")"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "forward_user_agent"
+        }), " to forward the inbound caller ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "User-Agent"
+        }), " upstream on\nlive inference requests instead of the default (explicit ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "user_agent"
+        }), " wins)"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "extends"
@@ -716,6 +724,40 @@ function _createMdxContent(props) {
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Precedence is provider value, then root value, then the 90-second default. The timeout applies only until response headers arrive; JSON and streaming response bodies can continue for any duration after headers are received. Root and provider timeout changes apply on a successful ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), " reload."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "upstream-user-agent",
+      children: "Upstream User-Agent"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Every upstream request sends ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "User-Agent: aiproxy/<version>"
+      }), " unless overridden. You can set a default for all providers at the root, override it per provider with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "user_agent"
+      }), ", or forward the inbound caller ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "User-Agent"
+      }), " with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "forward_user_agent"
+      }), ":"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "user_agent = \"my-proxy/1.0\"\n\nprovider \"openai\" \"openai\" {\n  user_agent = \"openai-specific/2.0\"\n}\n\nprovider \"openai\" \"passthrough\" {\n  forward_user_agent = true\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Precedence is provider ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "user_agent"
+      }), ", then root ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "user_agent"
+      }), ", then the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy/<version>"
+      }), " default. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "forward_user_agent"
+      }), " applies when a provider has no explicit ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "user_agent"
+      }), " of its own and is effective when set at either the provider or root level; there is no per-provider opt-out when the root enables it, so set the flag per provider instead in that case. Forwarded values must be non-empty, at most 256 characters, and printable ASCII, otherwise the default is sent. The inbound caller ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "User-Agent"
+      }), " is never forwarded unless forwarding is enabled. Root and provider user-agent changes apply on a successful ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
       }), " reload."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
@@ -1029,12 +1071,6 @@ function _createMdxContent(props) {
         }), ", or declaring a capability the\nprotocol does not serve; ", (0,jsx_runtime.jsx)(_components.code, {
           children: "protocol"
         }), " on any other provider type"]
-      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: [(0,jsx_runtime.jsx)(_components.code, {
-          children: "user_agent"
-        }), " on any non-OpenCode provider type (including ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "github-copilot"
-        }), ")"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["providers with both ", (0,jsx_runtime.jsx)(_components.code, {
           children: "api_key"
