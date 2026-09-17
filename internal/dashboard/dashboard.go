@@ -2976,17 +2976,21 @@ func renderLogs(m *model, width, height int) string {
 	page := entries[start:end]
 	attrsContent := len("ATTRS")
 	msgContent := len("MESSAGE")
-	for _, e := range entries {
-		attrsContent = max(attrsContent, runeLen(orDash(e.Attrs)))
-		msgContent = max(msgContent, runeLen(e.Message))
+	for _, e := range page {
+		attrsContent = max(attrsContent, runeLen(logOneLine(orDash(e.Attrs))))
+		msgContent = max(msgContent, runeLen(logOneLine(e.Message)))
 	}
-	got := flexWidths([]flexCol{
-		{content: 8, min: 8, max: 8},
-		{content: 6, min: 6, max: 6},
-		{content: msgContent, min: 12, max: 160, flex: 2},
-		{content: attrsContent, min: 5, max: 160, flex: 3},
-	}, inner)
-	msgWidth, attrsWidth := got[2], got[3]
+	if len(page) == 0 {
+		for _, e := range entries {
+			attrsContent = max(attrsContent, runeLen(logOneLine(orDash(e.Attrs))))
+			msgContent = max(msgContent, runeLen(logOneLine(e.Message)))
+		}
+	}
+	budget := inner - 2
+	if budget < 40 {
+		budget = 40
+	}
+	msgWidth, attrsWidth := logColWidths(msgContent, attrsContent, budget)
 	levelName := "all"
 	if m.logFilterOn {
 		levelName = ">=" + m.logMinLevel.String()
@@ -2996,7 +3000,7 @@ func renderLogs(m *model, width, height int) string {
 		order = "oldest-first"
 	}
 	title := fmt.Sprintf("LOGS %s (%s) [o]rder", order, levelName)
-	rows := []string{title, headerStyle.Render(fitRow(headerCells([]col{{"AT", 8}, {"LEVEL", 6}, {"MESSAGE", msgWidth}, {"ATTRS", attrsWidth}}), inner))}
+	rows := []string{title, headerStyle.Render(fitRow(headerCells([]col{{"TIME", 8}, {"LEVEL", 6}, {"MESSAGE", msgWidth}, {"ATTRS", attrsWidth}}), inner))}
 	if height <= 3 {
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
@@ -3073,17 +3077,33 @@ func wrapText(s string, width int) []string {
 	return out
 }
 
+func logOneLine(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\t", " ")
+	return s
+}
+
+func logColWidths(msgContent, attrsContent, budget int) (msgW, attrsW int) {
+	got := flexWidths([]flexCol{
+		{content: 8, min: 8, max: 8},
+		{content: 6, min: 6, max: 6},
+		{content: msgContent, min: 8, max: 80, flex: 1},
+		{content: attrsContent, min: 16, max: 0, flex: 3},
+	}, budget)
+	return got[2], got[3]
+}
+
 func renderLogEntry(msgWidth, attrsWidth int, e observability.LogEntry) string {
 	levelStyle := levelStyleFor(e.Level)
-	attrs := e.Attrs
-	if runeLen(attrs) > attrsWidth {
-		attrs = truncate(attrs, attrsWidth)
-	}
+	attrs := logOneLine(orDash(e.Attrs))
+	msg := logOneLine(e.Message)
 	return dataRow([]string{
 		e.Time.Format("15:04:05"),
 		levelStyle.Render(padRight(truncate(e.Level.String(), 6), 6)),
-		truncate(e.Message, msgWidth),
-		truncate(orDash(attrs), attrsWidth),
+		truncate(msg, msgWidth),
+		truncate(attrs, attrsWidth),
 	}, []int{8, 6, msgWidth, attrsWidth})
 }
 

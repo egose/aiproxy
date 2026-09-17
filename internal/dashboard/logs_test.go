@@ -278,6 +278,31 @@ func TestLogOrderToggleKey(t *testing.T) {
 	}
 }
 
+func TestLogEntryRendersSingleRow(t *testing.T) {
+	e := observability.LogEntry{Time: time.Now(), Level: slog.LevelInfo, Message: "line1\nline2\tline3", Attrs: "a=1\nb=2"}
+	row := renderLogEntry(20, 20, e)
+	if strings.Contains(row, "\n") || strings.Contains(row, "\r") || strings.Contains(row, "\t") {
+		t.Fatalf("log row must be a single line, got %q", row)
+	}
+	if !strings.Contains(row, "line1 line2 line3") || !strings.Contains(row, "a=1 b=2") {
+		t.Fatalf("multiline fields should be flattened with spaces, got %q", row)
+	}
+}
+
+func TestLogAttrsTakeMoreWidthThanMessage(t *testing.T) {
+	msgW, attrsW := logColWidths(len("ok"), 100, 200)
+	if attrsW <= msgW {
+		t.Fatalf("attrs width %d should exceed message width %d at wide budget", attrsW, msgW)
+	}
+	msgW, attrsW = logColWidths(500, 100, 76)
+	if total := 8 + 6 + msgW + attrsW + 3 + 2; total > 80 {
+		t.Fatalf("narrow columns overflow: %d > 80 (msg %d attrs %d)", total, msgW, attrsW)
+	}
+	if attrsW < 16 || msgW < 8 {
+		t.Fatalf("columns shrank below floors: msg %d attrs %d", msgW, attrsW)
+	}
+}
+
 func TestZStillZooms(t *testing.T) {
 	snap := newSnapshot()
 	m := &model{snapshot: snap, health: map[string]bool{}, now: time.Now(), dirty: true, focus: focusUsage}
