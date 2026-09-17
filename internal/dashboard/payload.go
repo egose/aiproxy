@@ -328,14 +328,7 @@ func payloadRow(s dashrpc.PayloadSummary, methodW, modelW, pathW int) string {
 }
 
 func renderPayloads(m *model, width, height int) string {
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#334155")).
-		Width(width - 2).
-		Height(height - 2)
-	if m.focus == focusBottom && m.bottomTab == bottomTabPayload {
-		borderStyle = borderStyle.BorderForeground(lipgloss.Color("#38BDF8"))
-	}
+	borderStyle, inner := paneBox(width, height, m.focus == focusBottom && m.bottomTab == bottomTabPayload)
 	filter := "all"
 	if m.payloadErrorsOnly {
 		filter = "errs-only"
@@ -355,7 +348,7 @@ func renderPayloads(m *model, width, height int) string {
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if m.payloadErr != "" {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Render("fetch failed: "+truncate(m.payloadErr, width-4)))
+		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Render("fetch failed: "+truncate(m.payloadErr, inner)))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if !m.payloadKnown {
@@ -366,20 +359,24 @@ func renderPayloads(m *model, width, height int) string {
 		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("no payload entries yet"))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
-	inner := width - 2
-	methodW, modelW, pathW := 6, 24, 24
-	fixed := 8 + 1 + methodW + 1 + 4 + 1 + 8 + 1 + modelW + 1 + pathW
-	if fixed > inner {
-		shrink := fixed - inner
-		for shrink > 0 && pathW > 8 {
-			pathW--
-			shrink--
+	modelContent, pathContent := len("MODEL"), len("PATH")
+	for _, p := range m.payloads {
+		model := p.PublicModel
+		if model == "" {
+			model = p.Provider + "/" + p.UpstreamModel
 		}
-		for shrink > 0 && modelW > 10 {
-			modelW--
-			shrink--
-		}
+		modelContent = max(modelContent, runeLen(model))
+		pathContent = max(pathContent, runeLen(p.Path))
 	}
+	got := flexWidths([]flexCol{
+		{content: 8, min: 8, max: 8},
+		{content: 6, min: 6, max: 6},
+		{content: 4, min: 4, max: 4},
+		{content: 8, min: 8, max: 8},
+		{content: modelContent, min: 10, max: 40, flex: 2},
+		{content: pathContent, min: 8, max: 48, flex: 3},
+	}, inner)
+	methodW, modelW, pathW := got[1], got[4], got[5]
 	rows = append(rows, headerStyle.Render(fitRow(headerCells([]col{{"AT", 8}, {"METHOD", methodW}, {"ST", 4}, {"DUR", 8}, {"MODEL", modelW}, {"PATH", pathW}}), inner)))
 	visible := m.bottomVisibleRows()
 	view := m.orderedPayloads()
@@ -405,15 +402,7 @@ func renderPayloads(m *model, width, height int) string {
 }
 
 func renderPayloadDetail(m *model, width, height int) string {
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#38BDF8")).
-		Width(width - 2).
-		Height(height - 2)
-	inner := width - 4
-	if inner < 10 {
-		inner = 10
-	}
+	borderStyle, inner := paneBox(width, height, true)
 	title := "PAYLOAD " + m.payloadDetailID
 	if m.payloadPendingID != "" {
 		title = "PAYLOAD " + m.payloadPendingID + " (loading…)"

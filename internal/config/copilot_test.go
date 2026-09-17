@@ -200,7 +200,7 @@ provider "openai" "p" {
 	}
 }
 
-func TestLoadGitHubCopilotRejectsProtocolAndUserAgent(t *testing.T) {
+func TestLoadGitHubCopilotRejectsProtocolButAcceptsUserAgent(t *testing.T) {
 	secretsPath := writeCopilotCredential(t, "main", "gho_test-token")
 	cfg := `
 listener "http" "public" { address = ":8080" }
@@ -230,8 +230,16 @@ provider "github-copilot" "copilot" {
   model "m" {}
 }
 `
-	if _, err := Load([]byte(cfg), "test.hcl"); err == nil || !strings.Contains(err.Error(), "user_agent is only supported") {
-		t.Fatalf("expected user_agent error, got %v", err)
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("user_agent should be accepted on github-copilot providers: %v", err)
+	}
+	p, ok := rt.Catalog.Provider("copilot")
+	if !ok {
+		t.Fatal("copilot provider missing from catalog")
+	}
+	if p.UserAgent != "custom/1.0" {
+		t.Fatalf("copilot UserAgent = %q, want custom/1.0", p.UserAgent)
 	}
 }
 

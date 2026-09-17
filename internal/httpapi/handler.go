@@ -147,18 +147,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				usage = result.Usage
 			}
 			deps.Accounting.Record(accounting.Event{
-				Timestamp:        time.Now(),
-				Tenant:           principalTenant(principal),
-				Client:           principalName(principal),
-				Model:            accountingModel,
-				Operation:        op.String(),
-				StatusCode:       rw.statusCode,
-				Provider:         accountingProvider,
-				UpstreamModel:    accountingUpstream,
-				PromptTokens:     usage.PromptTokens,
-				CompletionTokens: usage.CompletionTokens,
-				TotalTokens:      usage.TotalTokens,
-				Duration:         time.Since(start),
+				Timestamp:           time.Now(),
+				Tenant:              principalTenant(principal),
+				Client:              principalName(principal),
+				Model:               accountingModel,
+				Operation:           op.String(),
+				StatusCode:          rw.statusCode,
+				Provider:            accountingProvider,
+				UpstreamModel:       accountingUpstream,
+				PromptTokens:        usage.PromptTokens,
+				CompletionTokens:    usage.CompletionTokens,
+				TotalTokens:         usage.TotalTokens,
+				CachedTokens:        usage.CachedTokens,
+				CacheCreationTokens: usage.CacheCreationTokens,
+				CacheReadTokens:     usage.CacheReadTokens,
+				Duration:            time.Since(start),
 			})
 		}
 	}()
@@ -569,8 +572,24 @@ func (h *Handler) handleBilling(deps Dependencies, w http.ResponseWriter, r *htt
 		return true
 	}
 	summaries := accounting.FilterSummaries(deps.Usage.Summaries(), principalTenant(principal), principalName(principal))
-	h.writeBillingUsage(w, summaries)
+	var upstream []accounting.UpstreamSummary
+	if deps.Usage != nil {
+		upstream = deps.Usage.UpstreamSummaries()
+	}
+	h.writeBillingUsage(w, summaries, billingPrices(deps.Catalog), deps.Catalog.Aliases(), upstream)
 	return true
+}
+
+func billingPrices(catalog config.Catalog) map[string]*config.ModelPricing {
+	out := map[string]*config.ModelPricing{}
+	for _, p := range catalog.Providers() {
+		for _, m := range p.Models {
+			if m.Pricing != nil && m.Pricing.HasRates() {
+				out[p.Name+"/"+m.Name] = m.Pricing
+			}
+		}
+	}
+	return out
 }
 
 func (h *Handler) allowRequest(deps Dependencies, w http.ResponseWriter, r *http.Request, principal *auth.Principal) bool {

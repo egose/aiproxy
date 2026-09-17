@@ -24,19 +24,20 @@ const (
 )
 
 type Request struct {
-	Operation     Operation
-	ProviderType  config.ProviderType
-	PublicModel   string
-	BaseURL       string
-	APIKey        string
-	CopilotToken  string
-	UpstreamModel string
-	ModelProtocol config.ModelProtocol
-	UserAgent     string
-	Version       string
-	Body          []byte
-	Inbound       *http.Request
-	Client        *http.Client
+	Operation        Operation
+	ProviderType     config.ProviderType
+	PublicModel      string
+	BaseURL          string
+	APIKey           string
+	CopilotToken     string
+	UpstreamModel    string
+	ModelProtocol    config.ModelProtocol
+	UserAgent        string
+	ForwardUserAgent bool
+	Version          string
+	Body             []byte
+	Inbound          *http.Request
+	Client           *http.Client
 }
 
 type Result struct {
@@ -55,13 +56,16 @@ type Result struct {
 }
 
 type Usage struct {
-	PromptTokens     int64
-	CompletionTokens int64
-	TotalTokens      int64
+	PromptTokens        int64
+	CompletionTokens    int64
+	TotalTokens         int64
+	CachedTokens        int64
+	CacheCreationTokens int64
+	CacheReadTokens     int64
 }
 
 func (u Usage) Has() bool {
-	return u.PromptTokens > 0 || u.CompletionTokens > 0 || u.TotalTokens > 0
+	return u.PromptTokens > 0 || u.CompletionTokens > 0 || u.TotalTokens > 0 || u.CachedTokens > 0
 }
 
 type StreamCompletion struct {
@@ -94,6 +98,15 @@ func (s *StreamCompletion) SetUsage(usage Usage) {
 	}
 	if usage.TotalTokens > 0 {
 		s.outcome.Usage.TotalTokens = usage.TotalTokens
+	}
+	if usage.CachedTokens > 0 {
+		s.outcome.Usage.CachedTokens = usage.CachedTokens
+	}
+	if usage.CacheCreationTokens > 0 {
+		s.outcome.Usage.CacheCreationTokens = usage.CacheCreationTokens
+	}
+	if usage.CacheReadTokens > 0 {
+		s.outcome.Usage.CacheReadTokens = usage.CacheReadTokens
 	}
 	if total := s.outcome.Usage.PromptTokens + s.outcome.Usage.CompletionTokens; total > s.outcome.Usage.TotalTokens {
 		s.outcome.Usage.TotalTokens = total
@@ -342,7 +355,39 @@ type upstreamResponseHandlers struct {
 	OnSuccess       func(*http.Response, []byte) (*Result, error)
 }
 
+func upstreamUserAgent(r Request) string {
+	if r.UserAgent != "" {
+		return r.UserAgent
+	}
+	if r.ForwardUserAgent && r.Inbound != nil {
+		if ua := r.Inbound.Header.Get("User-Agent"); isForwardableUserAgent(ua) {
+			return ua
+		}
+	}
+	return "aiproxy/" + defaultVersion(r.Version)
+}
+
+func isForwardableUserAgent(s string) bool {
+	if s == "" || len(s) > 256 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+func defaultVersion(version string) string {
+	if version == "" {
+		return "dev"
+	}
+	return version
+}
+
 func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHandlers) (*Result, error) {
+	req.Header.Set("User-Agent", upstreamUserAgent(r))
 	resp, err := clientFor(r).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("upstream call: %w", err)

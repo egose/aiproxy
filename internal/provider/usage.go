@@ -6,34 +6,46 @@ import (
 
 type openAIUsageShape struct {
 	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		TotalTokens         int `json:"total_tokens"`
+		PromptTokensDetails struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 }
 
 type anthropicUsageShape struct {
 	Usage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	} `json:"usage"`
 }
 
 type geminiUsageShape struct {
 	UsageMetadata struct {
-		PromptTokenCount     int `json:"promptTokenCount"`
-		CandidatesTokenCount int `json:"candidatesTokenCount"`
-		TotalTokenCount      int `json:"totalTokenCount"`
+		PromptTokenCount        int `json:"promptTokenCount"`
+		CandidatesTokenCount    int `json:"candidatesTokenCount"`
+		TotalTokenCount         int `json:"totalTokenCount"`
+		CachedContentTokenCount int `json:"cachedContentTokenCount"`
 	} `json:"usageMetadata"`
 }
 
 type openAIResponsesUsageShape struct {
 	Usage struct {
-		InputTokens      int `json:"input_tokens"`
-		OutputTokens     int `json:"output_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
+		InputTokens        int `json:"input_tokens"`
+		OutputTokens       int `json:"output_tokens"`
+		TotalTokens        int `json:"total_tokens"`
+		PromptTokens       int `json:"prompt_tokens"`
+		CompletionTokens   int `json:"completion_tokens"`
+		InputTokensDetails struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"input_tokens_details"`
+		PromptTokensDetails struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 }
 
@@ -116,10 +128,17 @@ func extractOpenAIUsage(body []byte) Usage {
 	prompt := shape.Usage.PromptTokens
 	completion := shape.Usage.CompletionTokens
 	total := shape.Usage.TotalTokens
+	cached := shape.Usage.PromptTokensDetails.CachedTokens
+	if cached < 0 {
+		cached = 0
+	}
+	if cached > prompt {
+		cached = prompt
+	}
 	if total == 0 {
 		total = prompt + completion
 	}
-	return Usage{PromptTokens: int64(prompt), CompletionTokens: int64(completion), TotalTokens: int64(total)}
+	return Usage{PromptTokens: int64(prompt), CompletionTokens: int64(completion), TotalTokens: int64(total), CachedTokens: int64(cached)}
 }
 
 func extractAnthropicUsage(body []byte) Usage {
@@ -127,9 +146,18 @@ func extractAnthropicUsage(body []byte) Usage {
 	if err := json.Unmarshal(body, &shape); err != nil {
 		return Usage{}
 	}
-	prompt := shape.Usage.InputTokens
+	creation := shape.Usage.CacheCreationInputTokens
+	if creation < 0 {
+		creation = 0
+	}
+	read := shape.Usage.CacheReadInputTokens
+	if read < 0 {
+		read = 0
+	}
+	cached := creation + read
+	prompt := shape.Usage.InputTokens + cached
 	completion := shape.Usage.OutputTokens
-	return Usage{PromptTokens: int64(prompt), CompletionTokens: int64(completion), TotalTokens: int64(prompt + completion)}
+	return Usage{PromptTokens: int64(prompt), CompletionTokens: int64(completion), TotalTokens: int64(prompt + completion), CachedTokens: int64(cached), CacheCreationTokens: int64(creation), CacheReadTokens: int64(read)}
 }
 
 func extractGeminiUsage(body []byte) Usage {
@@ -140,10 +168,17 @@ func extractGeminiUsage(body []byte) Usage {
 	prompt := shape.UsageMetadata.PromptTokenCount
 	completion := shape.UsageMetadata.CandidatesTokenCount
 	total := shape.UsageMetadata.TotalTokenCount
+	cached := shape.UsageMetadata.CachedContentTokenCount
+	if cached < 0 {
+		cached = 0
+	}
+	if cached > prompt {
+		cached = prompt
+	}
 	if total == 0 {
 		total = prompt + completion
 	}
-	return Usage{PromptTokens: int64(prompt), CompletionTokens: int64(completion), TotalTokens: int64(total)}
+	return Usage{PromptTokens: int64(prompt), CompletionTokens: int64(completion), TotalTokens: int64(total), CachedTokens: int64(cached)}
 }
 
 func extractOpenAIResponsesUsage(body []byte) Usage {
@@ -159,9 +194,19 @@ func extractOpenAIResponsesUsage(body []byte) Usage {
 	if completion == 0 {
 		completion = shape.Usage.OutputTokens
 	}
+	cached := shape.Usage.InputTokensDetails.CachedTokens
+	if cached == 0 {
+		cached = shape.Usage.PromptTokensDetails.CachedTokens
+	}
+	if cached < 0 {
+		cached = 0
+	}
+	if cached > prompt {
+		cached = prompt
+	}
 	total := shape.Usage.TotalTokens
 	if total == 0 {
 		total = prompt + completion
 	}
-	return Usage{PromptTokens: int64(prompt), CompletionTokens: int64(completion), TotalTokens: int64(total)}
+	return Usage{PromptTokens: int64(prompt), CompletionTokens: int64(completion), TotalTokens: int64(total), CachedTokens: int64(cached)}
 }

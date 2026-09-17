@@ -37,6 +37,8 @@ listener "http" "public" {
 
 upstream_header_timeout = "120s"
 
+user_agent = "my-proxy/1.0"
+
 auth "main" {
   mode = "bearer_static"
 
@@ -215,8 +217,10 @@ Common attributes:
 - `display_name`
 - `base_url` for `openai-compatible` (required), and as an optional transport
   override for `opencode-zen` and `opencode-go`
-- `user_agent` as an optional upstream `User-Agent` override for
-  `opencode-zen` and `opencode-go` (defaults to `aiproxy/<version>`)
+- `user_agent` as an optional upstream `User-Agent` override for any provider
+  type (defaults to `aiproxy/<version>`)
+- `forward_user_agent` to forward the inbound caller `User-Agent` upstream on
+  live inference requests instead of the default (explicit `user_agent` wins)
 - `extends` for restricted provider inheritance
 - `api_key`
 - `api_key_ref`
@@ -373,6 +377,24 @@ provider "openai" "openai" {
 ```
 
 Precedence is provider value, then root value, then the 90-second default. The timeout applies only until response headers arrive; JSON and streaming response bodies can continue for any duration after headers are received. Root and provider timeout changes apply on a successful `SIGHUP` reload.
+
+## Upstream User-Agent
+
+Every upstream request sends `User-Agent: aiproxy/<version>` unless overridden. You can set a default for all providers at the root, override it per provider with `user_agent`, or forward the inbound caller `User-Agent` with `forward_user_agent`:
+
+```hcl
+user_agent = "my-proxy/1.0"
+
+provider "openai" "openai" {
+  user_agent = "openai-specific/2.0"
+}
+
+provider "openai" "passthrough" {
+  forward_user_agent = true
+}
+```
+
+Precedence is provider `user_agent`, then root `user_agent`, then the `aiproxy/<version>` default. `forward_user_agent` applies when a provider has no explicit `user_agent` of its own and is effective when set at either the provider or root level; there is no per-provider opt-out when the root enables it, so set the flag per provider instead in that case. Forwarded values must be non-empty, at most 256 characters, and printable ASCII, otherwise the default is sent. The inbound caller `User-Agent` is never forwarded unless forwarding is enabled. Root and provider user-agent changes apply on a successful `SIGHUP` reload.
 
 ## Models
 
@@ -535,7 +557,6 @@ Startup fails on invalid configuration. Important checks include:
 - `opencode-zen` or `opencode-go` models missing `protocol`, using an unknown
   protocol, using `gemini` on `opencode-go`, or declaring a capability the
   protocol does not serve; `protocol` on any other provider type
-- `user_agent` on any non-OpenCode provider type (including `github-copilot`)
 - providers with both `api_key` and `api_key_ref`
 - `github-copilot` providers with `api_key`/`api_key_ref`, or `credential_ref`
   on any other provider type; enabled Copilot providers without a resolvable

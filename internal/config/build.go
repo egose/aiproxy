@@ -52,6 +52,13 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		}
 		rt.UpstreamHeaderTimeout = d
 	}
+	if raw.UserAgent != "" {
+		if len(raw.UserAgent) > 256 || !isValidUserAgent(raw.UserAgent) {
+			return nil, fmt.Errorf("root user_agent must be 1-256 printable ASCII characters without newlines")
+		}
+		rt.UserAgent = raw.UserAgent
+	}
+	rt.ForwardUserAgent = raw.ForwardUserAgent
 	if len(raw.Dashboard) > 0 {
 		if len(raw.Dashboard) > 1 {
 			return nil, fmt.Errorf("only one dashboard block is supported")
@@ -97,7 +104,7 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		if p.Extends != "" {
 			continue
 		}
-		provider, err := buildProvider(p, rt.UpstreamHeaderTimeout)
+		provider, err := buildProvider(p, rt.UpstreamHeaderTimeout, rt.UserAgent, rt.ForwardUserAgent)
 		if err != nil {
 			return nil, fmt.Errorf("provider %q: %w", p.Name, err)
 		}
@@ -227,7 +234,7 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 }
 
 func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderSyntax) error {
-	for _, name := range []string{"base_url", "upstream_header_timeout", "user_agent", "enabled"} {
+	for _, name := range []string{"base_url", "upstream_header_timeout", "user_agent", "forward_user_agent", "enabled"} {
 		if syntax.Attrs[name] {
 			return fmt.Errorf("derived provider cannot declare %s", name)
 		}
@@ -457,18 +464,23 @@ func buildAuth(rawAuths []rawAuth) (Auth, error) {
 	return auth, nil
 }
 
-func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Duration) (Provider, error) {
+func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Duration, rootUserAgent string, rootForwardUserAgent bool) (Provider, error) {
 	provider := Provider{
 		Type:                  ProviderType(rawProvider.Type),
 		Name:                  rawProvider.Name,
 		DisplayName:           rawProvider.DisplayName,
 		BaseURL:               rawProvider.BaseURL,
 		UpstreamHeaderTimeout: rootUpstreamHeaderTimeout,
-		UserAgent:             rawProvider.UserAgent,
+		UserAgent:             rootUserAgent,
+		ForwardUserAgent:      rootForwardUserAgent,
 		APIKey:                rawProvider.APIKey,
 		Enabled:               true,
 		ModelByName:           make(map[string]Model),
 	}
+	if rawProvider.UserAgent != "" {
+		provider.UserAgent = rawProvider.UserAgent
+	}
+	provider.ForwardUserAgent = rawProvider.ForwardUserAgent || rootForwardUserAgent
 	if rawProvider.Enabled != nil {
 		provider.Enabled = *rawProvider.Enabled
 	}
@@ -523,10 +535,45 @@ func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Durat
 		for _, c := range m.Capabilities {
 			model.Capabilities = append(model.Capabilities, Capability(c))
 		}
+		if m.Pricing != nil {
+			pricing, err := buildModelPricing(rawProvider.Name, m.Name, m.Pricing)
+			if err != nil {
+				return Provider{}, err
+			}
+			model.Pricing = pricing
+		}
 		provider.Models = append(provider.Models, model)
 		provider.ModelByName[m.Name] = model
 	}
 	return provider, nil
+}
+
+func buildModelPricing(providerName, modelName string, raw *rawPricing) (*ModelPricing, error) {
+	out := &ModelPricing{}
+	rates := map[string]*float64{
+		"input_per_million":       raw.InputPerMillion,
+		"output_per_million":      raw.OutputPerMillion,
+		"cached_per_million":      raw.CachedPerMillion,
+		"cache_write_per_million": raw.CacheWritePerMillion,
+	}
+	set := map[string]float64{}
+	for field, ptr := range rates {
+		if ptr == nil {
+			continue
+		}
+		if *ptr < 0 {
+			return nil, fmt.Errorf("provider %q: model %q pricing %q must not be negative", providerName, modelName, field)
+		}
+		set[field] = *ptr
+	}
+	if len(set) == 0 {
+		return nil, fmt.Errorf("provider %q: model %q pricing block must declare at least one rate", providerName, modelName)
+	}
+	out.InputPerMillion = set["input_per_million"]
+	out.OutputPerMillion = set["output_per_million"]
+	out.CachedPerMillion = set["cached_per_million"]
+	out.CacheWritePerMillion = set["cache_write_per_million"]
+	return out, nil
 }
 
 var defaultRetryStatusCodes = []int{500, 502, 503, 504}

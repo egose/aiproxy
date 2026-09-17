@@ -173,13 +173,24 @@ func (s *responsesStreamState) setUsage(usage openAIResponsesUsage) {
 	if usage.TotalTokens > 0 {
 		s.Usage.TotalTokens = usage.TotalTokens
 	}
+	if usage.CachedTokens > 0 {
+		s.Usage.CachedTokens = usage.CachedTokens
+		s.Usage.InputTokensDetails = usage.InputTokensDetails
+	}
 	if total := s.Usage.InputTokens + s.Usage.OutputTokens; total > s.Usage.TotalTokens {
 		s.Usage.TotalTokens = total
 	}
 }
 
 func reconcileResponsesUsage(input, output, total int) openAIResponsesUsage {
-	out := openAIResponsesUsage{InputTokens: input, OutputTokens: output, TotalTokens: total}
+	return reconcileResponsesUsageCached(input, output, total, 0)
+}
+
+func reconcileResponsesUsageCached(input, output, total, cached int) openAIResponsesUsage {
+	out := openAIResponsesUsage{InputTokens: input, OutputTokens: output, TotalTokens: total, CachedTokens: cached}
+	if cached > 0 {
+		out.InputTokensDetails = &openAIInputTokensDetails{CachedTokens: cached}
+	}
 	if out.TotalTokens == 0 || input+output > out.TotalTokens {
 		out.TotalTokens = input + output
 	}

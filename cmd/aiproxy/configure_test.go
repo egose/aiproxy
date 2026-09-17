@@ -23,6 +23,8 @@ func TestConfigureProviderCreatesConfigAndSecrets(t *testing.T) {
 		"",
 		"",
 		"",
+		"",
+		"",
 		secretsPath,
 		"",
 		"sk-test-primary",
@@ -84,6 +86,8 @@ func TestConfigureProviderRejectsInvalidProviderName(t *testing.T) {
 		"",
 		"",
 		"",
+		"",
+		"",
 		secretsPath,
 		"",
 		"sk-test-primary",
@@ -139,6 +143,8 @@ provider "openai" "primary" {
 		"2",
 		"primary",
 		"Backup provider",
+		"",
+		"",
 		"",
 		"",
 		"https://llm.internal/v1",
@@ -353,11 +359,49 @@ func TestConfigureProviderNonInteractiveUserAgent(t *testing.T) {
 		"--type", "openai",
 		"--name", "other",
 		"--api-key", "k",
-		"--user-agent", "opencode/local",
+		"--user-agent", "custom-openai/2.0",
 		"--model", "m",
 	)
-	if err == nil || !strings.Contains(stderr+err.Error(), "--user-agent is only supported") {
-		t.Fatalf("expected user-agent type error, got err=%v stderr=%s", err, stderr)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	configData, err = os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	if !strings.Contains(string(configData), `user_agent = "custom-openai/2.0"`) {
+		t.Fatalf("config output missing openai user_agent:\n%s", string(configData))
+	}
+}
+
+func TestConfigureProviderNonInteractiveForwardUserAgent(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := "listener \"http\" \"public\" { address = \":8080\" }\nauth \"main\" { mode = \"none\" }\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+
+	_, _, err := executeRootCommand(
+		"",
+		"configure", "provider",
+		"--config", configPath,
+		"--non-interactive",
+		"--type", "openai",
+		"--name", "primary",
+		"--api-key", "k",
+		"--forward-user-agent",
+		"--model", "m",
+	)
+	if err != nil {
+		t.Fatalf("Execute(): %v", err)
+	}
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	if !strings.Contains(string(configData), `forward_user_agent = true`) {
+		t.Fatalf("config output missing forward_user_agent:\n%s", string(configData))
 	}
 }
 
@@ -1237,6 +1281,8 @@ func TestConfigureProviderEnvExpressionRejectsMalformedThenAccepts(t *testing.T)
 		"",                      // display name
 		"",                      // extends
 		"",                      // upstream header timeout
+		"",                      // user agent override
+		"",                      // forward inbound User-Agent
 		"2",                     // credential storage: env_expression
 		`env(FOO)`,              // malformed env expression -> re-prompt
 		`env("OPENAI_API_KEY")`, // valid

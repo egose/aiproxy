@@ -41,8 +41,31 @@ type anthropicResponse struct {
 }
 
 type anthropicUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+}
+
+func anthropicUsageToInternal(u anthropicUsage) Usage {
+	creation := u.CacheCreationInputTokens
+	if creation < 0 {
+		creation = 0
+	}
+	read := u.CacheReadInputTokens
+	if read < 0 {
+		read = 0
+	}
+	cached := creation + read
+	prompt := u.InputTokens + cached
+	return Usage{
+		PromptTokens:        int64(prompt),
+		CompletionTokens:    int64(u.OutputTokens),
+		TotalTokens:         int64(prompt + u.OutputTokens),
+		CachedTokens:        int64(cached),
+		CacheCreationTokens: int64(creation),
+		CacheReadTokens:     int64(read),
+	}
 }
 
 func (a *adapter) doAnthropic(ctx context.Context, r Request) (*Result, error) {
@@ -221,10 +244,14 @@ func translateAnthropicResponse(body []byte, publicModel string) ([]byte, Usage,
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, Usage{}, err
 	}
-	usage := Usage{
-		PromptTokens:     int64(resp.Usage.InputTokens),
-		CompletionTokens: int64(resp.Usage.OutputTokens),
-		TotalTokens:      int64(resp.Usage.InputTokens + resp.Usage.OutputTokens),
+	usage := anthropicUsageToInternal(resp.Usage)
+	wire := openAIUsage{
+		PromptTokens:     int(usage.PromptTokens),
+		CompletionTokens: int(usage.CompletionTokens),
+		TotalTokens:      int(usage.TotalTokens),
+	}
+	if usage.CachedTokens > 0 {
+		wire.PromptTokensDetails = &openAIPromptTokensDetails{CachedTokens: int(usage.CachedTokens)}
 	}
 	out := openAIResponse{
 		ID:      resp.ID,
@@ -239,11 +266,7 @@ func translateAnthropicResponse(body []byte, publicModel string) ([]byte, Usage,
 			},
 			FinishReason: mapAnthropicStopReason(resp.StopReason),
 		}},
-		Usage: openAIUsage{
-			PromptTokens:     resp.Usage.InputTokens,
-			CompletionTokens: resp.Usage.OutputTokens,
-			TotalTokens:      resp.Usage.InputTokens + resp.Usage.OutputTokens,
-		},
+		Usage: wire,
 	}
 	encoded, err := json.Marshal(out)
 	if err != nil {
@@ -257,11 +280,7 @@ func usageFromAnthropicBody(body []byte) Usage {
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return Usage{}
 	}
-	return Usage{
-		PromptTokens:     int64(resp.Usage.InputTokens),
-		CompletionTokens: int64(resp.Usage.OutputTokens),
-		TotalTokens:      int64(resp.Usage.InputTokens + resp.Usage.OutputTokens),
-	}
+	return anthropicUsageToInternal(resp.Usage)
 }
 
 func translateAnthropicResponsesResponse(body []byte, publicModel string) ([]byte, error) {
@@ -269,7 +288,8 @@ func translateAnthropicResponsesResponse(body []byte, publicModel string) ([]byt
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, err
 	}
-	usage := reconcileResponsesUsage(resp.Usage.InputTokens, resp.Usage.OutputTokens, 0)
+	internal := anthropicUsageToInternal(resp.Usage)
+	usage := reconcileResponsesUsageCached(int(internal.PromptTokens), int(internal.CompletionTokens), 0, int(internal.CachedTokens))
 	return buildResponsesOutput(resp.ID, publicModel, joinAnthropicText(resp.Content), usage)
 }
 
@@ -433,7 +453,7 @@ func processAnthropicEvent(w io.Writer, eventType, data, publicModel string, str
 		if evt.Message.ID != "" {
 			*streamID = evt.Message.ID
 		}
-		stream.SetUsage(Usage{PromptTokens: int64(evt.Message.Usage.InputTokens), CompletionTokens: int64(evt.Message.Usage.OutputTokens), TotalTokens: int64(evt.Message.Usage.InputTokens + evt.Message.Usage.OutputTokens)})
+		stream.SetUsage(anthropicUsageToInternal(evt.Message.Usage))
 		return false, writeOpenAIChunk(w, openAIChunk{
 			ID:      fallbackStreamID(*streamID),
 			Object:  "chat.completion.chunk",
@@ -480,7 +500,7 @@ func processAnthropicEvent(w io.Writer, eventType, data, publicModel string, str
 		if evt.Delta.StopReason != "" {
 			*finishReason = mapAnthropicStopReason(evt.Delta.StopReason)
 		}
-		stream.SetUsage(Usage{PromptTokens: int64(evt.Usage.InputTokens), CompletionTokens: int64(evt.Usage.OutputTokens), TotalTokens: int64(evt.Usage.InputTokens + evt.Usage.OutputTokens)})
+		stream.SetUsage(anthropicUsageToInternal(evt.Usage))
 		return false, nil
 	case "message_stop":
 		if err := writeOpenAIChunk(w, openAIChunk{
@@ -524,12 +544,14 @@ func processAnthropicResponsesEvent(w io.Writer, eventType, data string, state *
 			state.ResponseID = evt.Message.ID
 			state.ItemID = evt.Message.ID + "_msg"
 		}
+		internal := anthropicUsageToInternal(evt.Message.Usage)
 		state.setUsage(openAIResponsesUsage{
-			InputTokens:  evt.Message.Usage.InputTokens,
-			OutputTokens: evt.Message.Usage.OutputTokens,
-			TotalTokens:  evt.Message.Usage.InputTokens + evt.Message.Usage.OutputTokens,
+			InputTokens:  int(internal.PromptTokens),
+			OutputTokens: int(internal.CompletionTokens),
+			TotalTokens:  int(internal.TotalTokens),
+			CachedTokens: int(internal.CachedTokens),
 		})
-		stream.SetUsage(Usage{PromptTokens: int64(evt.Message.Usage.InputTokens), CompletionTokens: int64(evt.Message.Usage.OutputTokens), TotalTokens: int64(evt.Message.Usage.InputTokens + evt.Message.Usage.OutputTokens)})
+		stream.SetUsage(internal)
 		return false, writeResponsesCreated(w, state)
 	case "content_block_delta":
 		var evt struct {
@@ -552,12 +574,14 @@ func processAnthropicResponsesEvent(w io.Writer, eventType, data string, state *
 		if err := json.Unmarshal([]byte(data), &evt); err != nil {
 			return false, err
 		}
+		internal := anthropicUsageToInternal(evt.Usage)
 		state.setUsage(openAIResponsesUsage{
-			InputTokens:  evt.Usage.InputTokens,
-			OutputTokens: evt.Usage.OutputTokens,
-			TotalTokens:  evt.Usage.InputTokens + evt.Usage.OutputTokens,
+			InputTokens:  int(internal.PromptTokens),
+			OutputTokens: int(internal.CompletionTokens),
+			TotalTokens:  int(internal.TotalTokens),
+			CachedTokens: int(internal.CachedTokens),
 		})
-		stream.SetUsage(Usage{PromptTokens: int64(evt.Usage.InputTokens), CompletionTokens: int64(evt.Usage.OutputTokens), TotalTokens: int64(evt.Usage.InputTokens + evt.Usage.OutputTokens)})
+		stream.SetUsage(internal)
 		return false, nil
 	case "message_stop":
 		return true, writeResponsesCompleted(w, state)

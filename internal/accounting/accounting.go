@@ -23,9 +23,12 @@ type Event struct {
 	Provider      string
 	UpstreamModel string
 
-	PromptTokens     int64
-	CompletionTokens int64
-	TotalTokens      int64
+	PromptTokens        int64
+	CompletionTokens    int64
+	TotalTokens         int64
+	CachedTokens        int64
+	CacheCreationTokens int64
+	CacheReadTokens     int64
 
 	Duration time.Duration
 }
@@ -53,7 +56,7 @@ func isErrorStatus(code int) bool {
 }
 
 func (e Event) HasTokens() bool {
-	return e.PromptTokens > 0 || e.CompletionTokens > 0 || e.TotalTokens > 0
+	return e.PromptTokens > 0 || e.CompletionTokens > 0 || e.TotalTokens > 0 || e.CachedTokens > 0 || e.CacheCreationTokens > 0 || e.CacheReadTokens > 0
 }
 
 type Recorder interface {
@@ -62,6 +65,7 @@ type Recorder interface {
 
 type Reader interface {
 	Summaries() []Summary
+	UpstreamSummaries() []UpstreamSummary
 }
 
 type Snapshotter interface {
@@ -76,19 +80,25 @@ type Summary struct {
 	StatusCode int
 	Count      int64
 
-	PromptTokens     int64
-	CompletionTokens int64
-	TotalTokens      int64
+	PromptTokens        int64
+	CompletionTokens    int64
+	TotalTokens         int64
+	CachedTokens        int64
+	CacheCreationTokens int64
+	CacheReadTokens     int64
 }
 
 type ProviderSummary struct {
-	Provider         string
-	Requests         int64
-	Errors           int64
-	Throttled        int64
-	PromptTokens     int64
-	CompletionTokens int64
-	TotalTokens      int64
+	Provider            string
+	Requests            int64
+	Errors              int64
+	Throttled           int64
+	PromptTokens        int64
+	CompletionTokens    int64
+	TotalTokens         int64
+	CachedTokens        int64
+	CacheCreationTokens int64
+	CacheReadTokens     int64
 }
 
 type UpstreamSummary struct {
@@ -100,9 +110,12 @@ type UpstreamSummary struct {
 	StatusCode int
 	Count      int64
 
-	PromptTokens     int64
-	CompletionTokens int64
-	TotalTokens      int64
+	PromptTokens        int64
+	CompletionTokens    int64
+	TotalTokens         int64
+	CachedTokens        int64
+	CacheCreationTokens int64
+	CacheReadTokens     int64
 }
 
 type RecorderFunc func(Event)
@@ -179,13 +192,48 @@ func (r *MemoryRecorder) Recent(n int) []Event {
 	return out
 }
 
+func (r *MemoryRecorder) Summaries() []Summary {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	byKey := map[summaryKey]*Summary{}
+	var order []summaryKey
+	for _, e := range r.events {
+		key := summaryKey{tenant: e.Tenant, client: e.Client, model: e.Model, operation: e.Operation, statusCode: e.StatusCode}
+		s, ok := byKey[key]
+		if !ok {
+			s = &Summary{Tenant: key.tenant, Client: key.client, Model: key.model, Operation: key.operation, StatusCode: key.statusCode}
+			byKey[key] = s
+			order = append(order, key)
+		}
+		s.Count++
+		s.PromptTokens += e.PromptTokens
+		s.CompletionTokens += e.CompletionTokens
+		s.TotalTokens += e.TotalTokens
+		s.CachedTokens += e.CachedTokens
+		s.CacheCreationTokens += e.CacheCreationTokens
+		s.CacheReadTokens += e.CacheReadTokens
+	}
+	out := make([]Summary, 0, len(order))
+	for _, key := range order {
+		out = append(out, *byKey[key])
+	}
+	return out
+}
+
+func (r *MemoryRecorder) UpstreamSummaries() []UpstreamSummary {
+	return nil
+}
+
 type providerEntry struct {
-	requests         int64
-	errors           int64
-	throttled        int64
-	promptTokens     int64
-	completionTokens int64
-	totalTokens      int64
+	requests            int64
+	errors              int64
+	throttled           int64
+	promptTokens        int64
+	completionTokens    int64
+	totalTokens         int64
+	cachedTokens        int64
+	cacheCreationTokens int64
+	cacheReadTokens     int64
 }
 
 type upstreamKey struct {
@@ -210,10 +258,13 @@ type Aggregator struct {
 }
 
 type aggregateEntry struct {
-	count            int64
-	promptTokens     int64
-	completionTokens int64
-	totalTokens      int64
+	count               int64
+	promptTokens        int64
+	completionTokens    int64
+	totalTokens         int64
+	cachedTokens        int64
+	cacheCreationTokens int64
+	cacheReadTokens     int64
 }
 
 type summaryKey struct {
@@ -263,6 +314,9 @@ func (a *Aggregator) Record(event Event) {
 	entry.promptTokens += event.PromptTokens
 	entry.completionTokens += event.CompletionTokens
 	entry.totalTokens += event.TotalTokens
+	entry.cachedTokens += event.CachedTokens
+	entry.cacheCreationTokens += event.CacheCreationTokens
+	entry.cacheReadTokens += event.CacheReadTokens
 	bucket[key] = entry
 	if a.providers == nil {
 		a.providers = make(map[string]*providerEntry)
@@ -283,6 +337,9 @@ func (a *Aggregator) Record(event Event) {
 	prov.promptTokens += event.PromptTokens
 	prov.completionTokens += event.CompletionTokens
 	prov.totalTokens += event.TotalTokens
+	prov.cachedTokens += event.CachedTokens
+	prov.cacheCreationTokens += event.CacheCreationTokens
+	prov.cacheReadTokens += event.CacheReadTokens
 	if event.Provider != "" && event.UpstreamModel != "" {
 		if a.upstream == nil {
 			a.upstream = make(map[upstreamKey]*providerEntry)
@@ -307,6 +364,9 @@ func (a *Aggregator) Record(event Event) {
 		uent.promptTokens += event.PromptTokens
 		uent.completionTokens += event.CompletionTokens
 		uent.totalTokens += event.TotalTokens
+		uent.cachedTokens += event.CachedTokens
+		uent.cacheCreationTokens += event.CacheCreationTokens
+		uent.cacheReadTokens += event.CacheReadTokens
 	}
 	ringEntry := event
 	if ringEntry.Timestamp.IsZero() {
@@ -328,21 +388,27 @@ func (a *Aggregator) Summaries() []Summary {
 			total.promptTokens += entry.promptTokens
 			total.completionTokens += entry.completionTokens
 			total.totalTokens += entry.totalTokens
+			total.cachedTokens += entry.cachedTokens
+			total.cacheCreationTokens += entry.cacheCreationTokens
+			total.cacheReadTokens += entry.cacheReadTokens
 			counts[key] = total
 		}
 	}
 	out := make([]Summary, 0, len(counts))
 	for key, entry := range counts {
 		out = append(out, Summary{
-			Tenant:           key.tenant,
-			Client:           key.client,
-			Model:            key.model,
-			Operation:        key.operation,
-			StatusCode:       key.statusCode,
-			Count:            entry.count,
-			PromptTokens:     entry.promptTokens,
-			CompletionTokens: entry.completionTokens,
-			TotalTokens:      entry.totalTokens,
+			Tenant:              key.tenant,
+			Client:              key.client,
+			Model:               key.model,
+			Operation:           key.operation,
+			StatusCode:          key.statusCode,
+			Count:               entry.count,
+			PromptTokens:        entry.promptTokens,
+			CompletionTokens:    entry.completionTokens,
+			TotalTokens:         entry.totalTokens,
+			CachedTokens:        entry.cachedTokens,
+			CacheCreationTokens: entry.cacheCreationTokens,
+			CacheReadTokens:     entry.cacheReadTokens,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -448,6 +514,9 @@ func ByProvider(summaries []Summary) []ProviderSummary {
 		entry.PromptTokens += s.PromptTokens
 		entry.CompletionTokens += s.CompletionTokens
 		entry.TotalTokens += s.TotalTokens
+		entry.CachedTokens += s.CachedTokens
+		entry.CacheCreationTokens += s.CacheCreationTokens
+		entry.CacheReadTokens += s.CacheReadTokens
 	}
 	out := make([]ProviderSummary, 0, len(byProvider))
 	for _, entry := range byProvider {
@@ -468,13 +537,16 @@ func (a *Aggregator) ProviderSummaries() []ProviderSummary {
 	out := make([]ProviderSummary, 0, len(a.providers))
 	for name, entry := range a.providers {
 		out = append(out, ProviderSummary{
-			Provider:         name,
-			Requests:         entry.requests,
-			Errors:           entry.errors,
-			Throttled:        entry.throttled,
-			PromptTokens:     entry.promptTokens,
-			CompletionTokens: entry.completionTokens,
-			TotalTokens:      entry.totalTokens,
+			Provider:            name,
+			Requests:            entry.requests,
+			Errors:              entry.errors,
+			Throttled:           entry.throttled,
+			PromptTokens:        entry.promptTokens,
+			CompletionTokens:    entry.completionTokens,
+			TotalTokens:         entry.totalTokens,
+			CachedTokens:        entry.cachedTokens,
+			CacheCreationTokens: entry.cacheCreationTokens,
+			CacheReadTokens:     entry.cacheReadTokens,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -492,16 +564,19 @@ func (a *Aggregator) UpstreamSummaries() []UpstreamSummary {
 	out := make([]UpstreamSummary, 0, len(a.upstream))
 	for key, entry := range a.upstream {
 		out = append(out, UpstreamSummary{
-			Tenant:           key.tenant,
-			Client:           key.client,
-			Provider:         key.provider,
-			Model:            key.model,
-			Operation:        key.operation,
-			StatusCode:       key.statusCode,
-			Count:            entry.requests,
-			PromptTokens:     entry.promptTokens,
-			CompletionTokens: entry.completionTokens,
-			TotalTokens:      entry.totalTokens,
+			Tenant:              key.tenant,
+			Client:              key.client,
+			Provider:            key.provider,
+			Model:               key.model,
+			Operation:           key.operation,
+			StatusCode:          key.statusCode,
+			Count:               entry.requests,
+			PromptTokens:        entry.promptTokens,
+			CompletionTokens:    entry.completionTokens,
+			TotalTokens:         entry.totalTokens,
+			CachedTokens:        entry.cachedTokens,
+			CacheCreationTokens: entry.cacheCreationTokens,
+			CacheReadTokens:     entry.cacheReadTokens,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

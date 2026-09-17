@@ -67,7 +67,8 @@ JSON config form, where `env("VAR")` is written bare as the value. Run
 `set -a; . ./.env; set +a` before invoking the binary locally so env vars resolve.
 
 The server supports `SIGHUP`-triggered live config reload for auth, providers,
-models, aliases, root and provider upstream header timeouts, access-log
+models, aliases, root and provider upstream header timeouts, root and provider
+user-agent settings, access-log
 enablement, payload-log configuration, metrics config, provider-health config, ingress-guardrail policy, and metrics-backed inventory
 state. Listener address, listener timeout, logging level, and enabling the
 dashboard after startup require restart.
@@ -115,6 +116,17 @@ matrices.
   `extends`, optional `display_name`, and at most one local `api_key` or
   `api_key_ref` (exactly one, except `opencode-zen` derivatives which may omit
   it for keyless access); the base must be enabled, concrete, and the same type.
+- Any provider may declare an optional `user_agent` override (1-256 printable
+  ASCII characters, no newlines). It replaces the default `aiproxy/<version>`
+  upstream `User-Agent` on every proxy-initiated request for that provider
+  (inference, upstream model listing, and health probes); the inbound caller's
+  `User-Agent` is never forwarded. A provider may instead set
+  `forward_user_agent = true` to forward the inbound caller `User-Agent`
+  upstream on live inference requests (explicit `user_agent` still wins;
+  missing or invalid inbound values fall back to the default).
+  Both attributes also exist at root scope as defaults for all providers:
+  a provider-level `user_agent` overrides the root value, while
+  `forward_user_agent` is effective when set at either level.
 - Direct (`<provider>/<model>`) requests never fail over to a different
   target and never consult or populate alias cooldown state. Alias requests retry the next target on transport errors, timeouts,
   and configured `retry_status_codes` in the `400`-`599` range. The default list
@@ -183,7 +195,7 @@ matrices.
   subsets. Unsupported operation/protocol combinations are rejected before
   upstream I/O. `base_url` is an optional transport override only. Every
   upstream request sends `User-Agent: aiproxy/<version>` unless the provider
-  declares a `user_agent` override (Zen/Go only); `opencode-zen` and
+  declares a `user_agent` override; `opencode-zen` and
   `opencode-go` additionally send `x-opencode-session` (a caller value is forwarded only
   when valid, falling back to a valid caller `X-Session-Id`, otherwise a fresh per-request ID is generated)
   and forward a caller-supplied `x-opencode-client` under the same validity

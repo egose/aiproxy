@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/egose/aiproxy/internal/accounting"
+	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/provider"
 )
@@ -27,8 +28,100 @@ type modelsResponse struct {
 }
 
 type billingUsageResponse struct {
-	Object string               `json:"object"`
-	Data   []accounting.Summary `json:"data"`
+	Object string              `json:"object"`
+	Data   []billingUsageEntry `json:"data"`
+}
+
+type billingUsageEntry struct {
+	accounting.Summary
+	EstimatedCostUSD *float64 `json:"estimated_cost_usd,omitempty"`
+}
+
+func billingCost(s accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) (float64, bool) {
+	if len(prices) == 0 {
+		return 0, false
+	}
+	if p, ok := prices[s.Model]; ok && p != nil {
+		return p.Cost(s.PromptTokens, s.CompletionTokens, s.CachedTokens, s.CacheCreationTokens, s.CacheReadTokens)
+	}
+	return billingAliasCost(s, prices, aliases, upstream)
+}
+
+func billingAliasCost(s accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) (float64, bool) {
+	aliasName, ok := strings.CutPrefix(s.Model, "alias/")
+	if !ok {
+		return 0, false
+	}
+	var targets []config.AliasTarget
+	for _, a := range aliases {
+		if a.Name == aliasName {
+			targets = a.Targets
+			break
+		}
+	}
+	if len(targets) == 0 {
+		return 0, false
+	}
+	type share struct {
+		price  *config.ModelPricing
+		weight int64
+	}
+	shares := make([]share, 0, len(targets))
+	var totalWeight int64
+	for _, t := range targets {
+		p, ok := prices[t.Provider+"/"+t.Model]
+		if !ok || p == nil {
+			continue
+		}
+		var w int64
+		for _, u := range upstream {
+			if u.Provider != t.Provider || u.Model != t.Model {
+				continue
+			}
+			if u.Operation != s.Operation || u.StatusCode != s.StatusCode {
+				continue
+			}
+			if s.Tenant != "" && u.Tenant != s.Tenant {
+				continue
+			}
+			if s.Client != "" && u.Client != s.Client {
+				continue
+			}
+			w += u.Count
+		}
+		shares = append(shares, share{price: p, weight: w})
+		totalWeight += w
+	}
+	if len(shares) == 0 {
+		return 0, false
+	}
+	var total float64
+	priced := false
+	for _, sh := range shares {
+		frac := 1.0 / float64(len(shares))
+		if totalWeight > 0 {
+			if sh.weight <= 0 {
+				continue
+			}
+			frac = float64(sh.weight) / float64(totalWeight)
+		}
+		cost, ok := sh.price.Cost(
+			int64(float64(s.PromptTokens)*frac),
+			int64(float64(s.CompletionTokens)*frac),
+			int64(float64(s.CachedTokens)*frac),
+			int64(float64(s.CacheCreationTokens)*frac),
+			int64(float64(s.CacheReadTokens)*frac),
+		)
+		if !ok {
+			continue
+		}
+		total += cost
+		priced = true
+	}
+	if !priced {
+		return 0, false
+	}
+	return total, true
 }
 
 func (h *Handler) writeResult(w http.ResponseWriter, req *http.Request, r *provider.Result) provider.StreamOutcome {
@@ -119,8 +212,17 @@ func (h *Handler) writeModels(w http.ResponseWriter, catalog []ModelCard) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func (h *Handler) writeBillingUsage(w http.ResponseWriter, summaries []accounting.Summary) {
-	resp := billingUsageResponse{Object: "list", Data: summaries}
+func (h *Handler) writeBillingUsage(w http.ResponseWriter, summaries []accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) {
+	entries := make([]billingUsageEntry, 0, len(summaries))
+	for _, s := range summaries {
+		entry := billingUsageEntry{Summary: s}
+		if cost, priced := billingCost(s, prices, aliases, upstream); priced {
+			c := cost
+			entry.EstimatedCostUSD = &c
+		}
+		entries = append(entries, entry)
+	}
+	resp := billingUsageResponse{Object: "list", Data: entries}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)

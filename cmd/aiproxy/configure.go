@@ -34,6 +34,7 @@ type topLevelBlock = configedit.TopLevelBlock
 type providerInput = configedit.ProviderInput
 type providerCredentialInput = configedit.ProviderCredentialInput
 type providerModelInput = configedit.ProviderModelInput
+type providerModelPricingInput = configedit.ModelPricingInput
 type providerHealthcheckInput = configedit.ProviderHealthcheckInput
 type listenerInput = configedit.ListenerInput
 type authInput = configedit.AuthInput
@@ -76,6 +77,8 @@ type providerOptions struct {
 	BaseURL                 string
 	UpstreamHeaderTimeout   string
 	UserAgent               string
+	ForwardUserAgent        bool
+	HasForwardUserAgent     bool
 	APIKey                  string
 	APIKeyEnv               string
 	SecretsPath             string
@@ -145,6 +148,10 @@ type loggingOptions struct {
 
 type upstreamOptions struct {
 	UpstreamHeaderTimeout string
+	UserAgent             string
+	HasUserAgent          bool
+	ForwardUserAgent      bool
+	HasForwardUserAgent   bool
 	NonInteractive        bool
 }
 
@@ -203,13 +210,19 @@ func newConfigureUpstreamCommand() *cobra.Command {
 		Use:   "upstream",
 		Short: "Configure top-level upstream settings",
 		Example: "aiproxy configure upstream\n" +
-			"aiproxy configure upstream --config /etc/aiproxy/config.hcl --non-interactive --upstream-header-timeout 120s",
+			"aiproxy configure upstream --config /etc/aiproxy/config.hcl --non-interactive --upstream-header-timeout 120s\n" +
+			"aiproxy configure upstream --config /etc/aiproxy/config.hcl --non-interactive --upstream-header-timeout 120s --user-agent my-proxy/1.0 --forward-user-agent",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			options.HasUserAgent = cmd.Flags().Changed("user-agent")
+			options.HasForwardUserAgent = cmd.Flags().Changed("forward-user-agent")
 			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureUpstream(&prompts, inheritedConfigPath(cmd), options)
 		},
 	}
 	cmd.Flags().StringVar(&options.UpstreamHeaderTimeout, "upstream-header-timeout", "", "root upstream_header_timeout")
+	cmd.Flags().StringVar(&options.UserAgent, "user-agent", "", "root user_agent default (empty clears it when explicitly passed)")
+	cmd.Flags().BoolVar(&options.ForwardUserAgent, "forward-user-agent", false, "root forward_user_agent default")
+	cmd.Flags().Lookup("forward-user-agent").NoOptDefVal = "true"
 	cmd.Flags().BoolVar(&options.NonInteractive, "non-interactive", false, "fail instead of prompting for missing values")
 	return cmd
 }
@@ -276,6 +289,7 @@ func newConfigureProviderCommand() *cobra.Command {
 			"aiproxy configure provider --config /etc/aiproxy/config.hcl --delete --name backup",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.HasEnabled = cmd.Flags().Changed("enabled")
+			options.HasForwardUserAgent = cmd.Flags().Changed("forward-user-agent")
 			options.HasHealthcheckStatus = cmd.Flags().Changed("healthcheck-expected-status")
 			options.HasHealthcheckFailures = cmd.Flags().Changed("healthcheck-failure-threshold")
 			options.HasHealthcheckSuccesses = cmd.Flags().Changed("healthcheck-success-threshold")
@@ -291,7 +305,8 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().StringVar(&options.DisplayName, "display-name", "", "provider display_name")
 	cmd.Flags().StringVar(&options.BaseURL, "base-url", "", "provider base_url")
 	cmd.Flags().StringVar(&options.UpstreamHeaderTimeout, "upstream-header-timeout", "", "provider upstream_header_timeout")
-	cmd.Flags().StringVar(&options.UserAgent, "user-agent", "", "provider user_agent override (opencode-zen and opencode-go only)")
+	cmd.Flags().StringVar(&options.UserAgent, "user-agent", "", "provider user_agent override")
+	cmd.Flags().BoolVar(&options.ForwardUserAgent, "forward-user-agent", false, "forward the inbound User-Agent header upstream (use --forward-user-agent=false to disable; default preserves existing)")
 	cmd.Flags().StringVar(&options.APIKey, "api-key", "", "provider API key or secret value")
 	cmd.Flags().StringVar(&options.APIKeyEnv, "api-key-env", "", "provider API key environment variable name")
 	cmd.Flags().StringVar(&options.SecretsPath, "secrets-path", "", "secrets file path for api_key_ref")
@@ -315,6 +330,7 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&options.NoHealthcheck, "no-healthcheck", false, "remove the healthcheck block from the provider")
 	cmd.Flags().BoolVar(&options.Enabled, "enabled", false, "provider enabled state (use --enabled=false to disable; default preserves existing)")
 	cmd.Flags().Lookup("enabled").NoOptDefVal = "true"
+	cmd.Flags().Lookup("forward-user-agent").NoOptDefVal = "true"
 	cmd.Flags().BoolVar(&options.NonInteractive, "non-interactive", false, "fail instead of prompting for missing values")
 	return cmd
 }
@@ -482,12 +498,37 @@ func runConfigureUpstream(prompts *promptSession, configPath string, options ups
 		}
 		timeout = current
 	}
+	userAgent := ""
+	if options.HasUserAgent {
+		userAgent = options.UserAgent
+	} else {
+		current, err := configedit.TopLevelStringAttribute(doc.source, "user_agent")
+		if err != nil {
+			return err
+		}
+		userAgent = current
+	}
+	writeUserAgent := options.HasUserAgent
+	forwardUserAgent := false
+	if options.HasForwardUserAgent {
+		forwardUserAgent = options.ForwardUserAgent
+	} else {
+		current, err := configedit.TopLevelStringAttribute(doc.source, "forward_user_agent")
+		if err != nil {
+			return err
+		}
+		forwardUserAgent = current == "true"
+	}
+	writeForwardUserAgent := options.HasForwardUserAgent
 	if options.NonInteractive {
 		if timeout == "" {
 			return fmt.Errorf("upstream requires --upstream-header-timeout in non-interactive mode")
 		}
 		if err := validateOptionalPositiveDuration(timeout); err != nil {
 			return fmt.Errorf("invalid upstream-header-timeout: %w", err)
+		}
+		if options.HasUserAgent && userAgent != "" && validateOptionalUserAgent(userAgent) != nil {
+			return fmt.Errorf("invalid user-agent: must be 1-256 printable ASCII characters without newlines")
 		}
 	} else {
 		timeout, err = prompts.askValidated("Root upstream header timeout", timeout, validateOptionalPositiveDuration)
@@ -497,13 +538,52 @@ func runConfigureUpstream(prompts *promptSession, configPath string, options ups
 		if timeout == "" {
 			return fmt.Errorf("root upstream header timeout is required")
 		}
+		if !options.HasUserAgent {
+			userAgent, err = prompts.ask("Root user agent override", userAgent)
+			if err != nil {
+				return err
+			}
+			writeUserAgent = true
+		}
+		if !options.HasForwardUserAgent {
+			forwardUserAgent, err = prompts.askYesNo("Forward inbound User-Agent by default", forwardUserAgent)
+			if err != nil {
+				return err
+			}
+			writeForwardUserAgent = true
+		}
 	}
 	updated, err := configedit.UpsertTopLevelStringAttribute(doc.source, "upstream_header_timeout", timeout)
 	if err != nil {
 		return err
 	}
+	actions := []string{"Config path: " + configPath, "Action: update root upstream_header_timeout (provider overrides preserved)"}
 	preview := "upstream_header_timeout = " + strconv.Quote(timeout) + "\n"
-	if err := prompts.confirmWrite("Review upstream changes", buildReviewSummary([]string{"Config path: " + configPath, "Action: update root upstream_header_timeout (provider overrides preserved)"}, preview)); err != nil {
+	if writeUserAgent {
+		if userAgent == "" {
+			updated, err = configedit.RemoveTopLevelAttribute(updated, "user_agent")
+			if err != nil {
+				return err
+			}
+			actions = append(actions, "Action: remove root user_agent default")
+		} else {
+			updated, err = configedit.UpsertTopLevelStringAttribute(updated, "user_agent", userAgent)
+			if err != nil {
+				return err
+			}
+			preview += "user_agent = " + strconv.Quote(userAgent) + "\n"
+			actions = append(actions, "Action: update root user_agent default (provider overrides preserved)")
+		}
+	}
+	if writeForwardUserAgent {
+		updated, err = configedit.UpsertTopLevelBoolAttribute(updated, "forward_user_agent", forwardUserAgent)
+		if err != nil {
+			return err
+		}
+		preview += "forward_user_agent = " + strconv.FormatBool(forwardUserAgent) + "\n"
+		actions = append(actions, "Action: update root forward_user_agent default (provider overrides preserved)")
+	}
+	if err := prompts.confirmWrite("Review upstream changes", buildReviewSummary(actions, preview)); err != nil {
 		return err
 	}
 	if err := writeConfigFile(configPath, updated); err != nil {
@@ -1779,7 +1859,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if options.DisplayName != "" {
 		defaults.DisplayName = options.DisplayName
 	}
-	if defaults.Extends != "" && (options.BaseURL != "" || options.UpstreamHeaderTimeout != "" || options.UserAgent != "" || options.HasEnabled || hasProviderModelOptions(options) || hasProviderHealthcheckOptions(options)) {
+	if defaults.Extends != "" && (options.BaseURL != "" || options.UpstreamHeaderTimeout != "" || options.UserAgent != "" || options.HasForwardUserAgent || options.HasEnabled || hasProviderModelOptions(options) || hasProviderHealthcheckOptions(options)) {
 		return providerInput{}, secretsUpdate{}, fmt.Errorf("--extends cannot be combined with inherited-field flags")
 	}
 	if options.BaseURL != "" {
@@ -1795,10 +1875,10 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if validateOptionalUserAgent(options.UserAgent) != nil {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("invalid user-agent: must be 1-256 printable ASCII characters without newlines")
 		}
-		if defaults.ProviderType != "opencode-zen" && defaults.ProviderType != "opencode-go" {
-			return providerInput{}, secretsUpdate{}, fmt.Errorf("--user-agent is only supported for opencode-zen and opencode-go providers")
-		}
 		defaults.UserAgent = options.UserAgent
+	}
+	if options.HasForwardUserAgent {
+		defaults.ForwardUserAgent = options.ForwardUserAgent
 	}
 	if err := applyProviderCredentialOptions(&defaults, options); err != nil {
 		return providerInput{}, secretsUpdate{}, err
@@ -1844,6 +1924,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			defaults.BaseURL = ""
 			defaults.UpstreamHeaderTimeout = ""
 			defaults.UserAgent = ""
+			defaults.ForwardUserAgent = false
 			defaults.Enabled = nil
 			defaults.Models = nil
 			defaults.Healthcheck = nil
@@ -1906,6 +1987,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		}
 		extends = extendsFromChoice(extendsChoice)
 		userAgent := defaults.UserAgent
+		forwardUserAgent := defaults.ForwardUserAgent
 		if strings.TrimSpace(extends) == "" {
 			if err := prompts.runHuhForm(
 				huh.NewGroup(
@@ -1914,19 +1996,17 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			); err != nil {
 				return providerInput{}, secretsUpdate{}, err
 			}
-			if isOpenCodeProviderType(providerType) {
-				if err := prompts.runHuhForm(
-					huh.NewGroup(
-						huh.NewInput().Title("User agent override").Description(userAgentDescription()).Value(&userAgent).Validate(validateOptionalUserAgent),
-					).Title("User Agent"),
-				); err != nil {
-					return providerInput{}, secretsUpdate{}, err
-				}
-			} else {
-				userAgent = ""
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewInput().Title("User agent override").Description(userAgentDescription()).Value(&userAgent).Validate(validateOptionalUserAgent),
+					huh.NewConfirm().Title("Forward inbound User-Agent").Description(forwardUserAgentDescription()).Value(&forwardUserAgent),
+				).Title("User Agent"),
+			); err != nil {
+				return providerInput{}, secretsUpdate{}, err
 			}
 		} else {
 			userAgent = ""
+			forwardUserAgent = false
 		}
 		baseURL := defaults.BaseURL
 		if strings.TrimSpace(extends) != "" {
@@ -1980,7 +2060,8 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 				DisplayName:           strings.TrimSpace(displayName),
 				BaseURL:               strings.TrimSpace(baseURL),
 				UpstreamHeaderTimeout: strings.TrimSpace(upstreamHeaderTimeout),
-				UserAgent:             "",
+				UserAgent:             strings.TrimSpace(userAgent),
+				ForwardUserAgent:      forwardUserAgent,
 				Credential:            credential,
 				Enabled:               defaults.Enabled,
 				Models:                models,
@@ -2073,6 +2154,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			BaseURL:               strings.TrimSpace(baseURL),
 			UpstreamHeaderTimeout: strings.TrimSpace(upstreamHeaderTimeout),
 			UserAgent:             strings.TrimSpace(userAgent),
+			ForwardUserAgent:      forwardUserAgent,
 			Credential:            credential,
 			Enabled:               defaults.Enabled,
 			Healthcheck:           preservedProviderHealthcheck(defaults.Healthcheck, extends, providerType),
@@ -2100,21 +2182,23 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	extends = extendsFromChoice(extendsChoice)
 	upstreamHeaderTimeout := defaults.UpstreamHeaderTimeout
 	userAgent := defaults.UserAgent
+	forwardUserAgent := defaults.ForwardUserAgent
 	if strings.TrimSpace(extends) == "" {
 		upstreamHeaderTimeout, err = prompts.askValidated("Upstream header timeout", defaults.UpstreamHeaderTimeout, validateOptionalPositiveDuration)
 		if err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
-		if isOpenCodeProviderType(providerType) {
-			userAgent, err = prompts.askValidated("User agent override", defaults.UserAgent, validateOptionalUserAgent)
-			if err != nil {
-				return providerInput{}, secretsUpdate{}, err
-			}
-		} else {
-			userAgent = ""
+		userAgent, err = prompts.askValidated("User agent override", defaults.UserAgent, validateOptionalUserAgent)
+		if err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
+		forwardUserAgent, err = prompts.askYesNo("Forward inbound User-Agent", defaults.ForwardUserAgent)
+		if err != nil {
+			return providerInput{}, secretsUpdate{}, err
 		}
 	} else {
 		userAgent = ""
+		forwardUserAgent = false
 	}
 	baseURL := defaults.BaseURL
 	if strings.TrimSpace(extends) != "" {
@@ -2161,7 +2245,8 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			DisplayName:           displayName,
 			BaseURL:               baseURL,
 			UpstreamHeaderTimeout: upstreamHeaderTimeout,
-			UserAgent:             "",
+			UserAgent:             userAgent,
+			ForwardUserAgent:      forwardUserAgent,
 			Credential:            credential,
 			Enabled:               defaults.Enabled,
 			Models:                models,
@@ -2236,6 +2321,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		BaseURL:               baseURL,
 		UpstreamHeaderTimeout: upstreamHeaderTimeout,
 		UserAgent:             userAgent,
+		ForwardUserAgent:      forwardUserAgent,
 		Credential:            credential,
 		Enabled:               defaults.Enabled,
 		Healthcheck:           preservedProviderHealthcheck(defaults.Healthcheck, extends, providerType),
@@ -3121,7 +3207,11 @@ func validateOptionalUserAgent(value string) error {
 }
 
 func userAgentDescription() string {
-	return "Optional upstream User-Agent override for opencode-zen and opencode-go providers. Leave blank to send aiproxy/<version>."
+	return "Optional upstream User-Agent override. Leave blank to send aiproxy/<version>."
+}
+
+func forwardUserAgentDescription() string {
+	return "Forward the inbound caller User-Agent upstream instead of aiproxy/<version>. An explicit user_agent override still takes precedence."
 }
 
 func rateLimitRPMDescription() string {
@@ -3820,6 +3910,10 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 	input.BaseURL = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "base_url"))
 	input.UpstreamHeaderTimeout = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "upstream_header_timeout"))
 	input.UserAgent = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "user_agent"))
+	if fwdExpr := parseLiteralOrExpression(attributeExpr(src, parsed.Body, "forward_user_agent")); fwdExpr != "" {
+		boolVal := fwdExpr == "true" || fwdExpr == "1"
+		input.ForwardUserAgent = boolVal
+	}
 	if enabledExpr := parseLiteralOrExpression(attributeExpr(src, parsed.Body, "enabled")); enabledExpr != "" {
 		boolVal := enabledExpr == "true" || enabledExpr == "1"
 		input.Enabled = &boolVal
@@ -3856,10 +3950,27 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 		model.UpstreamName = parseLiteralOrExpression(attributeExpr(src, modelBlock.Body, "upstream_name"))
 		model.Protocol = parseLiteralOrExpression(attributeExpr(src, modelBlock.Body, "protocol"))
 		model.Capabilities = parseQuotedListExpr(attributeExpr(src, modelBlock.Body, "capabilities"))
+		model.Pricing = parseModelPricingInput(src, modelBlock)
 		input.Models = append(input.Models, model)
 	}
 	if hcBlock := findNestedBlock(parsed.Body, "healthcheck"); hcBlock != nil {
 		input.Healthcheck = parseProviderHealthcheckInput(src, hcBlock)
+	}
+	return input
+}
+
+func parseModelPricingInput(src []byte, modelBlock *hclsyntax.Block) *providerModelPricingInput {
+	pricingBlock := findNestedBlock(modelBlock.Body, "pricing")
+	if pricingBlock == nil {
+		return nil
+	}
+	input := &providerModelPricingInput{}
+	input.InputPerMillion = parseLiteralOrExpression(attributeExpr(src, pricingBlock.Body, "input_per_million"))
+	input.OutputPerMillion = parseLiteralOrExpression(attributeExpr(src, pricingBlock.Body, "output_per_million"))
+	input.CachedPerMillion = parseLiteralOrExpression(attributeExpr(src, pricingBlock.Body, "cached_per_million"))
+	input.CacheWritePerMillion = parseLiteralOrExpression(attributeExpr(src, pricingBlock.Body, "cache_write_per_million"))
+	if input.InputPerMillion == "" && input.OutputPerMillion == "" && input.CachedPerMillion == "" && input.CacheWritePerMillion == "" {
+		return nil
 	}
 	return input
 }

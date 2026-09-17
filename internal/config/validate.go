@@ -349,9 +349,6 @@ func validateProviderUserAgent(p Provider) error {
 	if p.UserAgent == "" {
 		return nil
 	}
-	if !IsOpenCodeProviderType(p.Type) {
-		return fmt.Errorf("provider %q: user_agent is only supported by opencode-zen and opencode-go", p.Name)
-	}
 	if len(p.UserAgent) > 256 || !isValidUserAgent(p.UserAgent) {
 		return fmt.Errorf("provider %q: user_agent must be 1-256 printable ASCII characters without newlines", p.Name)
 	}

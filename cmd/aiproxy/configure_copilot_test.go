@@ -21,6 +21,8 @@ func TestConfigureProviderLineOrientedCreatesCopilot(t *testing.T) {
 		"",
 		"",
 		"",
+		"",
+		"",
 		"main",
 		secretsPath,
 		"gpt-4o-mini",
@@ -123,6 +125,8 @@ func TestConfigureProviderNonInteractiveCopilotEquivalentRef(t *testing.T) {
 	lineInput := strings.Join([]string{
 		"github-copilot",
 		"copilot",
+		"",
+		"",
 		"",
 		"",
 		"",

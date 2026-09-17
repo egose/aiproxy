@@ -19,7 +19,7 @@ func TestSnapshotFromTransportRoundTripsCoreFields(t *testing.T) {
 		AuthMode:  "bearer_static",
 		StartTime: start,
 		Providers: []dashrpc.Provider{
-			{Type: "openai", Name: "openai", DisplayName: "OpenAI", BaseURL: "https://api.openai.com", Models: []string{"gpt-4o-mini"}},
+			{Type: "openai", Name: "openai", DisplayName: "OpenAI", BaseURL: "https://api.openai.com", Models: []dashrpc.ModelPrice{{Name: "gpt-4o-mini"}}},
 		},
 		DisabledProviders: []dashrpc.Provider{
 			{Type: "openai-compatible", Name: "localai", BaseURL: "http://127.0.0.1:8080"},

@@ -209,8 +209,9 @@ from the model name. There is no generic `opencode` type.
 ### Session And Client Requirements
 
 Every upstream request sends `User-Agent: aiproxy/<version>` unless the
-provider declares a `user_agent` override (supported on `opencode-zen` and
-`opencode-go` only, validated as 1-256 printable ASCII characters); the
+provider declares a `user_agent` override (any provider type, validated as
+1-256 printable ASCII characters) or sets `forward_user_agent = true` to
+forward the inbound caller value on live inference requests; the
 inbound `User-Agent` is never forwarded implicitly, so matching a first-party
 client fingerprint is always an explicit operator choice. Both
 `opencode-zen` and `opencode-go` additionally send `x-opencode-session` for

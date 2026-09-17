@@ -248,6 +248,48 @@ func TestUpsertRootInsertPreservesProviderOverrides(t *testing.T) {
 	}
 }
 
+func TestUpsertTopLevelBoolAttributeRoundTrip(t *testing.T) {
+	source := "listener \"http\" \"public\" { address = \":8080\" }\nauth \"main\" { mode = \"none\" }\n"
+	updated, err := UpsertTopLevelBoolAttribute(source, "forward_user_agent", true)
+	if err != nil {
+		t.Fatalf("UpsertTopLevelBoolAttribute(): %v", err)
+	}
+	if !strings.Contains(updated, "forward_user_agent = true\n") {
+		t.Fatalf("bool attribute not inserted:\n%s", updated)
+	}
+	updated, err = UpsertTopLevelBoolAttribute(updated, "forward_user_agent", false)
+	if err != nil {
+		t.Fatalf("UpsertTopLevelBoolAttribute(): %v", err)
+	}
+	if !strings.Contains(updated, "forward_user_agent = false\n") {
+		t.Fatalf("bool attribute not updated:\n%s", updated)
+	}
+	if _, err := config.Load([]byte(updated), "config.hcl"); err != nil {
+		t.Fatalf("Load(): %v\n%s", err, updated)
+	}
+}
+
+func TestRemoveTopLevelAttributeRoundTrip(t *testing.T) {
+	source := "user_agent = \"root-agent/1.0\"\n\nlistener \"http\" \"public\" { address = \":8080\" }\nauth \"main\" { mode = \"none\" }\n"
+	updated, err := RemoveTopLevelAttribute(source, "user_agent")
+	if err != nil {
+		t.Fatalf("RemoveTopLevelAttribute(): %v", err)
+	}
+	if strings.Contains(updated, "user_agent") {
+		t.Fatalf("attribute not removed:\n%s", updated)
+	}
+	if _, err := config.Load([]byte(updated), "config.hcl"); err != nil {
+		t.Fatalf("Load(): %v\n%s", err, updated)
+	}
+	unchanged, err := RemoveTopLevelAttribute(updated, "user_agent")
+	if err != nil {
+		t.Fatalf("RemoveTopLevelAttribute(): %v", err)
+	}
+	if unchanged != updated {
+		t.Fatalf("removing absent attribute should be a no-op:\n%s", unchanged)
+	}
+}
+
 func TestUpsertInvalidSourceFails(t *testing.T) {
 	bad := "provider \"openai\" \"primary\" {\n  api_key = \"k\"\n"
 	if _, err := UpsertTopLevelStringAttribute(bad, "upstream_header_timeout", "30s"); err == nil {

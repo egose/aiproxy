@@ -61,6 +61,7 @@ type ProviderInput struct {
 	BaseURL               string
 	UpstreamHeaderTimeout string
 	UserAgent             string
+	ForwardUserAgent      bool
 	Credential            ProviderCredentialInput
 	Enabled               *bool
 	Healthcheck           *ProviderHealthcheckInput
@@ -86,6 +87,14 @@ type ProviderModelInput struct {
 	UpstreamName string
 	Protocol     string
 	Capabilities []string
+	Pricing      *ModelPricingInput
+}
+
+type ModelPricingInput struct {
+	InputPerMillion      string
+	OutputPerMillion     string
+	CachedPerMillion     string
+	CacheWritePerMillion string
 }
 
 type ProviderHealthcheckInput struct {
@@ -305,6 +314,9 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 		b.WriteString(strconv.Quote(input.UserAgent))
 		b.WriteString("\n")
 	}
+	if input.ForwardUserAgent {
+		b.WriteString("  forward_user_agent = true\n")
+	}
 	if input.IsExplicitlyDisabled() {
 		b.WriteString("  enabled = false\n")
 	} else {
@@ -338,9 +350,39 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 			b.WriteString(RenderQuotedList(model.Capabilities))
 			b.WriteString("\n")
 		}
+		if model.Pricing != nil {
+			b.WriteString(renderModelPricingBlock(model.Pricing))
+		}
 		b.WriteString("  }\n")
 	}
 	b.WriteString("}\n")
+	return b.String()
+}
+
+func renderModelPricingBlock(pricing *ModelPricingInput) string {
+	var b strings.Builder
+	b.WriteString("    pricing {\n")
+	if pricing.InputPerMillion != "" {
+		b.WriteString("      input_per_million = ")
+		b.WriteString(pricing.InputPerMillion)
+		b.WriteString("\n")
+	}
+	if pricing.OutputPerMillion != "" {
+		b.WriteString("      output_per_million = ")
+		b.WriteString(pricing.OutputPerMillion)
+		b.WriteString("\n")
+	}
+	if pricing.CachedPerMillion != "" {
+		b.WriteString("      cached_per_million = ")
+		b.WriteString(pricing.CachedPerMillion)
+		b.WriteString("\n")
+	}
+	if pricing.CacheWritePerMillion != "" {
+		b.WriteString("      cache_write_per_million = ")
+		b.WriteString(pricing.CacheWritePerMillion)
+		b.WriteString("\n")
+	}
+	b.WriteString("    }\n")
 	return b.String()
 }
 
@@ -766,6 +808,64 @@ func UpsertTopLevelStringAttribute(source, name, value string) (string, error) {
 		return "", fmt.Errorf("parse config: attribute %q has out-of-range expression", name)
 	}
 	return source[:exprRange.Start.Byte] + quoted + source[exprRange.End.Byte:], nil
+}
+
+func UpsertTopLevelBoolAttribute(source, name string, value bool) (string, error) {
+	literal := "false"
+	if value {
+		literal = "true"
+	}
+	if strings.TrimSpace(source) == "" {
+		return name + " = " + literal + "\n", nil
+	}
+	file, diags := hclsyntax.ParseConfig([]byte(source), "config.hcl", hcl.Pos{Line: 1, Column: 1})
+	if diags.HasErrors() {
+		return "", fmt.Errorf("parse config: %s", diags.Error())
+	}
+	body, ok := file.Body.(*hclsyntax.Body)
+	if !ok {
+		return "", fmt.Errorf("parse config: unexpected body type")
+	}
+	attr, ok := body.Attributes[name]
+	if !ok {
+		trimmed := strings.TrimLeft(source, "\n")
+		if strings.TrimSpace(trimmed) == "" {
+			return name + " = " + literal + "\n", nil
+		}
+		return name + " = " + literal + "\n\n" + trimmed, nil
+	}
+	exprRange := attr.Expr.Range()
+	if exprRange.Start.Byte < 0 || exprRange.End.Byte > len(source) || exprRange.End.Byte < exprRange.Start.Byte {
+		return "", fmt.Errorf("parse config: attribute %q has out-of-range expression", name)
+	}
+	return source[:exprRange.Start.Byte] + literal + source[exprRange.End.Byte:], nil
+}
+
+func RemoveTopLevelAttribute(source, name string) (string, error) {
+	if strings.TrimSpace(source) == "" {
+		return source, nil
+	}
+	file, diags := hclsyntax.ParseConfig([]byte(source), "config.hcl", hcl.Pos{Line: 1, Column: 1})
+	if diags.HasErrors() {
+		return "", fmt.Errorf("parse config: %s", diags.Error())
+	}
+	body, ok := file.Body.(*hclsyntax.Body)
+	if !ok {
+		return "", fmt.Errorf("parse config: unexpected body type")
+	}
+	attr, ok := body.Attributes[name]
+	if !ok {
+		return source, nil
+	}
+	attrRange := attr.Range()
+	if attrRange.Start.Byte < 0 || attrRange.End.Byte > len(source) || attrRange.End.Byte < attrRange.Start.Byte {
+		return "", fmt.Errorf("parse config: attribute %q has out-of-range expression", name)
+	}
+	end := attrRange.End.Byte
+	if end < len(source) && source[end] == '\n' {
+		end++
+	}
+	return source[:attrRange.Start.Byte] + source[end:], nil
 }
 
 func TopLevelStringAttribute(source, name string) (string, error) {

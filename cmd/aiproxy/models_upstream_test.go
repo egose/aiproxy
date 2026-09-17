@@ -173,3 +173,54 @@ provider "openai" "openai" {
 		t.Fatalf("stderr should mention 401, got: %s", stderr.String())
 	}
 }
+
+func TestListUpstreamModelsUserAgentOverride(t *testing.T) {
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	provider := config.Provider{
+		Type:      config.ProviderTypeOpenAICompatible,
+		Name:      "local",
+		BaseURL:   srv.URL,
+		APIKey:    "sk-test",
+		UserAgent: "custom/1.0",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := listUpstreamModels(ctx, provider); err != nil {
+		t.Fatalf("listUpstreamModels: %v", err)
+	}
+	if gotUA != "custom/1.0" {
+		t.Fatalf("User-Agent = %q, want custom/1.0", gotUA)
+	}
+}
+
+func TestListUpstreamModelsDefaultUserAgent(t *testing.T) {
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	provider := config.Provider{
+		Type:    config.ProviderTypeOpenAICompatible,
+		Name:    "local",
+		BaseURL: srv.URL,
+		APIKey:  "sk-test",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := listUpstreamModels(ctx, provider); err != nil {
+		t.Fatalf("listUpstreamModels: %v", err)
+	}
+	if !strings.HasPrefix(gotUA, "aiproxy/") {
+		t.Fatalf("User-Agent = %q, want aiproxy/ prefix", gotUA)
+	}
+}

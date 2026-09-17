@@ -13,6 +13,8 @@ type Runtime struct {
 	Dashboard             Dashboard
 	IngressGuardrails     IngressGuardrails
 	UpstreamHeaderTimeout time.Duration
+	UserAgent             string
+	ForwardUserAgent      bool
 	Catalog               Catalog
 }
 
@@ -201,6 +203,7 @@ type Provider struct {
 	BaseURL               string
 	UpstreamHeaderTimeout time.Duration
 	UserAgent             string
+	ForwardUserAgent      bool
 	APIKey                string
 	APIKeyRef             *APIKeyRef
 	CopilotCredentialRef  *CopilotCredentialRef
@@ -242,6 +245,71 @@ type Model struct {
 	UpstreamName string
 	Protocol     ModelProtocol
 	Capabilities []Capability
+	Pricing      *ModelPricing
+}
+
+type ModelPricing struct {
+	InputPerMillion      float64
+	OutputPerMillion     float64
+	CachedPerMillion     float64
+	CacheWritePerMillion float64
+}
+
+func (p *ModelPricing) HasRates() bool {
+	return p != nil && (p.InputPerMillion > 0 || p.OutputPerMillion > 0 || p.CachedPerMillion > 0 || p.CacheWritePerMillion > 0)
+}
+
+func (p *ModelPricing) Cost(promptTokens, completionTokens, cachedTokens, cacheWriteTokens, cacheReadTokens int64) (float64, bool) {
+	if !p.HasRates() {
+		return 0, false
+	}
+	cached := cachedTokens
+	if cached < 0 {
+		cached = 0
+	}
+	if cached > promptTokens {
+		cached = promptTokens
+	}
+	regular := promptTokens - cached
+	if regular < 0 {
+		regular = 0
+	}
+	writeShare := cacheWriteTokens
+	if writeShare < 0 {
+		writeShare = 0
+	}
+	if writeShare > cached {
+		writeShare = cached
+	}
+	readShare := cacheReadTokens
+	if readShare < 0 {
+		readShare = 0
+	}
+	if writeShare+readShare > cached {
+		if writeShare >= cached {
+			writeShare, readShare = cached, 0
+		} else {
+			readShare = cached - writeShare
+		}
+	}
+	genericCached := cached - writeShare - readShare
+	if genericCached < 0 {
+		genericCached = 0
+	}
+	cachedReadRate := p.CachedPerMillion
+	if cachedReadRate == 0 {
+		cachedReadRate = p.InputPerMillion
+	}
+	cacheWriteRate := p.CacheWritePerMillion
+	if cacheWriteRate == 0 {
+		cacheWriteRate = p.InputPerMillion
+	}
+	cost := float64(regular)/1e6*p.InputPerMillion +
+		float64(completionTokens)/1e6*p.OutputPerMillion +
+		float64(genericCached)/1e6*p.CachedPerMillion +
+		float64(writeShare)/1e6*cacheWriteRate +
+		float64(readShare)/1e6*cachedReadRate
+	return cost, true
 }
 
 type Alias struct {
