@@ -535,7 +535,19 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["The optional nested ", (0,jsx_runtime.jsx)(_components.code, {
         children: "payload_log"
-      }), " block records full request/response headers\nand bodies as JSONL (one JSON object per line per inference request). It is\ndisabled by default."]
+      }), " block records request/response headers\nand bodies as JSONL (one JSON object per line per inference request). It is\ndisabled by default. Each entry carries three sides: ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "request"
+      }), " (inbound\nheaders and body as received), ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "upstream_request"
+      }), " (headers and body actually\nsent upstream, after model rewrites and provider translation; present only\nwhen an upstream call was made, so alias retries log the final attempt), and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "response"
+      }), " (the upstream reply, or the proxy's own error on early rejections).\nCredential headers (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Authorization"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "x-api-key"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "x-goog-api-key"
+      }), ", cookies)\nare redacted on every side, and bodies covered by an ingress-guardrail policy\nare omitted from both request sides."]
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
