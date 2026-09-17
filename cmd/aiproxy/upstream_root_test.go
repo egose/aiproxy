@@ -131,6 +131,114 @@ func TestConfigureUpstreamInsertsRootWhenOnlyProviderOverrideExists(t *testing.T
 	}
 }
 
+func TestConfigureUpstreamSetsRootUserAgentDefaults(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := "listener \"http\" \"public\" { address = \":8080\" }\n" +
+		"auth \"main\" { mode = \"none\" }\n" +
+		"provider \"openai\" \"plain\" {\n" +
+		"  api_key = \"sk-test\"\n" +
+		"  model \"gpt-4o-mini\" {}\n" +
+		"}\n" +
+		"provider \"openai\" \"custom\" {\n" +
+		"  api_key = \"sk-test\"\n" +
+		"  user_agent = \"provider-agent/2.0\"\n" +
+		"  model \"gpt-4o-mini\" {}\n" +
+		"}\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+	if _, _, err := executeRootCommand(
+		"",
+		"configure", "upstream",
+		"--config", configPath,
+		"--non-interactive",
+		"--upstream-header-timeout", "30s",
+		"--user-agent", "root-agent/1.0",
+		"--forward-user-agent",
+	); err != nil {
+		t.Fatalf("Execute(): %v", err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "user_agent = \"root-agent/1.0\"") {
+		t.Fatalf("root user_agent missing:\n%s", text)
+	}
+	if !strings.Contains(text, "forward_user_agent = true") {
+		t.Fatalf("root forward_user_agent missing:\n%s", text)
+	}
+	if strings.Count(text, "user_agent = \"provider-agent/2.0\"") != 1 {
+		t.Fatalf("provider override not preserved exactly once:\n%s", text)
+	}
+	rt := loadTestConfig(t, configPath)
+	if rt.UserAgent != "root-agent/1.0" {
+		t.Fatalf("root UserAgent = %q, want root-agent/1.0", rt.UserAgent)
+	}
+	plain, ok := rt.Catalog.Provider("plain")
+	if !ok {
+		t.Fatal("plain provider missing from catalog")
+	}
+	if plain.UserAgent != "root-agent/1.0" {
+		t.Fatalf("plain UserAgent = %q, want inherited root-agent/1.0", plain.UserAgent)
+	}
+	if !plain.ForwardUserAgent {
+		t.Fatal("plain ForwardUserAgent = false, want inherited true")
+	}
+	custom, ok := rt.Catalog.Provider("custom")
+	if !ok {
+		t.Fatal("custom provider missing from catalog")
+	}
+	if custom.UserAgent != "provider-agent/2.0" {
+		t.Fatalf("custom UserAgent = %q, want provider override", custom.UserAgent)
+	}
+}
+
+func TestConfigureUpstreamClearsRootUserAgentOnEmptyFlag(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := "user_agent = \"root-agent/1.0\"\n" +
+		"listener \"http\" \"public\" { address = \":8080\" }\n" +
+		"auth \"main\" { mode = \"none\" }\n" +
+		"provider \"openai\" \"plain\" {\n" +
+		"  api_key = \"sk-test\"\n" +
+		"  model \"gpt-4o-mini\" {}\n" +
+		"}\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+	if _, _, err := executeRootCommand(
+		"",
+		"configure", "upstream",
+		"--config", configPath,
+		"--non-interactive",
+		"--upstream-header-timeout", "30s",
+		"--user-agent", "",
+	); err != nil {
+		t.Fatalf("Execute(): %v", err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	if strings.Contains(string(data), "user_agent") {
+		t.Fatalf("root user_agent not cleared:\n%s", string(data))
+	}
+	rt := loadTestConfig(t, configPath)
+	if rt.UserAgent != "" {
+		t.Fatalf("root UserAgent = %q, want empty", rt.UserAgent)
+	}
+	plain, ok := rt.Catalog.Provider("plain")
+	if !ok {
+		t.Fatal("plain provider missing from catalog")
+	}
+	if plain.UserAgent != "" {
+		t.Fatalf("plain UserAgent = %q, want empty default", plain.UserAgent)
+	}
+}
+
 func TestConfigureUpstreamFailsOnInvalidSourceWithoutPublish(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.hcl")

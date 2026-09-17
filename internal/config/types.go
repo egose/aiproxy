@@ -13,6 +13,8 @@ type Runtime struct {
 	Dashboard             Dashboard
 	IngressGuardrails     IngressGuardrails
 	UpstreamHeaderTimeout time.Duration
+	UserAgent             string
+	ForwardUserAgent      bool
 	Catalog               Catalog
 }
 
@@ -201,6 +203,7 @@ type Provider struct {
 	BaseURL               string
 	UpstreamHeaderTimeout time.Duration
 	UserAgent             string
+	ForwardUserAgent      bool
 	APIKey                string
 	APIKeyRef             *APIKeyRef
 	CopilotCredentialRef  *CopilotCredentialRef

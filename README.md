@@ -92,7 +92,8 @@ existing conservative translation subsets. A public operation the model's
 protocol does not serve is rejected before any upstream I/O. `base_url` is an
 optional transport override only and never reclassifies the service. Every
 upstream request sends `User-Agent: aiproxy/<version>` unless the provider
-declares a `user_agent` override; `opencode-zen` and
+declares a `user_agent` override (or `forward_user_agent = true` to forward
+the inbound caller `User-Agent` on live inference requests); `opencode-zen` and
 `opencode-go` additionally send `x-opencode-session` (a caller-supplied value is forwarded
 only when it is 1-128 `[A-Za-z0-9_-]` characters, falling back to a valid
 caller `X-Session-Id`, otherwise a fresh per-request
@@ -420,6 +421,8 @@ aiproxy configure alias \
 ```
 
 Use `upstream_header_timeout` to control how long the proxy waits for upstream response headers. Provider values override the root value; otherwise the default is 90 seconds. This timeout does not cap response bodies or SSE streams after headers arrive.
+
+Use root `user_agent` and `forward_user_agent` attributes as defaults for all providers. A provider-level `user_agent` overrides the root value, while `forward_user_agent` is effective when set at either level (there is no per-provider opt-out when the root enables it; set the flag per provider instead).
 
 Use `extends` when several credentials share one provider type, endpoint, timeout, and model inventory. A derived provider keeps the two-label provider form and may declare only `extends`, optional `display_name`, and exactly one local credential (`api_key` or `api_key_ref`):
 
@@ -769,7 +772,9 @@ provider "openai" "backup" {
   `[A-Za-z0-9_-]`), falling back to a valid caller `X-Session-Id`; missing or invalid values get a fresh per-request ID, never
   a shared global session. A caller-supplied `x-opencode-client` is forwarded
   under the same validity rule. Any provider type may declare `user_agent` to
-  override the default `aiproxy/<version>` upstream `User-Agent`.
+  override the default `aiproxy/<version>` upstream `User-Agent`, or set
+  `forward_user_agent = true` to forward the inbound caller `User-Agent`
+  instead (explicit `user_agent` takes precedence).
 - Direct `<provider>/<model>` requests never cross OpenCode services. Upstream
   Go quota/limit errors are returned to the client like any other upstream
   error; only explicitly configured aliases retry another target, and the proxy

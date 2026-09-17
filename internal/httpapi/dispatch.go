@@ -34,19 +34,20 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 	}
 	start := time.Now()
 	result, err := deps.Adapter.Do(ctx, provider.Request{
-		Operation:     op,
-		ProviderType:  r.Provider.Type,
-		PublicModel:   r.Provider.Name + "/" + r.Model.Name,
-		BaseURL:       r.Provider.BaseURL,
-		APIKey:        r.Provider.APIKey,
-		CopilotToken:  r.Provider.CopilotToken,
-		UpstreamModel: r.Model.UpstreamName,
-		ModelProtocol: r.Model.Protocol,
-		UserAgent:     r.Provider.UserAgent,
-		Version:       deps.Version,
-		Body:          body,
-		Inbound:       inbound,
-		Client:        clientForProvider(deps, r.Provider),
+		Operation:        op,
+		ProviderType:     r.Provider.Type,
+		PublicModel:      r.Provider.Name + "/" + r.Model.Name,
+		BaseURL:          r.Provider.BaseURL,
+		APIKey:           r.Provider.APIKey,
+		CopilotToken:     r.Provider.CopilotToken,
+		UpstreamModel:    r.Model.UpstreamName,
+		ModelProtocol:    r.Model.Protocol,
+		UserAgent:        r.Provider.UserAgent,
+		ForwardUserAgent: r.Provider.ForwardUserAgent,
+		Version:          deps.Version,
+		Body:             body,
+		Inbound:          inbound,
+		Client:           clientForProvider(deps, r.Provider),
 	})
 	if result != nil {
 		result.Provider = r.Provider.Name
@@ -326,19 +327,20 @@ targetLoop:
 			req := cloneRequestWithBody(ctx, inbound, currentBody)
 			start := time.Now()
 			result, err := deps.Adapter.Do(ctx, provider.Request{
-				Operation:     op,
-				ProviderType:  prov.Type,
-				PublicModel:   "alias/" + r.Alias.Name,
-				BaseURL:       prov.BaseURL,
-				APIKey:        prov.APIKey,
-				CopilotToken:  prov.CopilotToken,
-				UpstreamModel: model.UpstreamName,
-				ModelProtocol: model.Protocol,
-				UserAgent:     prov.UserAgent,
-				Version:       deps.Version,
-				Body:          currentBody,
-				Inbound:       req,
-				Client:        clientForProvider(deps, prov),
+				Operation:        op,
+				ProviderType:     prov.Type,
+				PublicModel:      "alias/" + r.Alias.Name,
+				BaseURL:          prov.BaseURL,
+				APIKey:           prov.APIKey,
+				CopilotToken:     prov.CopilotToken,
+				UpstreamModel:    model.UpstreamName,
+				ModelProtocol:    model.Protocol,
+				UserAgent:        prov.UserAgent,
+				ForwardUserAgent: prov.ForwardUserAgent,
+				Version:          deps.Version,
+				Body:             currentBody,
+				Inbound:          req,
+				Client:           clientForProvider(deps, prov),
 			})
 			if result != nil {
 				result.Provider = t.Provider

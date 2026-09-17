@@ -24,19 +24,20 @@ const (
 )
 
 type Request struct {
-	Operation     Operation
-	ProviderType  config.ProviderType
-	PublicModel   string
-	BaseURL       string
-	APIKey        string
-	CopilotToken  string
-	UpstreamModel string
-	ModelProtocol config.ModelProtocol
-	UserAgent     string
-	Version       string
-	Body          []byte
-	Inbound       *http.Request
-	Client        *http.Client
+	Operation        Operation
+	ProviderType     config.ProviderType
+	PublicModel      string
+	BaseURL          string
+	APIKey           string
+	CopilotToken     string
+	UpstreamModel    string
+	ModelProtocol    config.ModelProtocol
+	UserAgent        string
+	ForwardUserAgent bool
+	Version          string
+	Body             []byte
+	Inbound          *http.Request
+	Client           *http.Client
 }
 
 type Result struct {
@@ -358,7 +359,24 @@ func upstreamUserAgent(r Request) string {
 	if r.UserAgent != "" {
 		return r.UserAgent
 	}
+	if r.ForwardUserAgent && r.Inbound != nil {
+		if ua := r.Inbound.Header.Get("User-Agent"); isForwardableUserAgent(ua) {
+			return ua
+		}
+	}
 	return "aiproxy/" + defaultVersion(r.Version)
+}
+
+func isForwardableUserAgent(s string) bool {
+	if s == "" || len(s) > 256 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func defaultVersion(version string) string {

@@ -67,7 +67,8 @@ JSON config form, where `env("VAR")` is written bare as the value. Run
 `set -a; . ./.env; set +a` before invoking the binary locally so env vars resolve.
 
 The server supports `SIGHUP`-triggered live config reload for auth, providers,
-models, aliases, root and provider upstream header timeouts, access-log
+models, aliases, root and provider upstream header timeouts, root and provider
+user-agent settings, access-log
 enablement, payload-log configuration, metrics config, provider-health config, ingress-guardrail policy, and metrics-backed inventory
 state. Listener address, listener timeout, logging level, and enabling the
 dashboard after startup require restart.
@@ -119,7 +120,13 @@ matrices.
   ASCII characters, no newlines). It replaces the default `aiproxy/<version>`
   upstream `User-Agent` on every proxy-initiated request for that provider
   (inference, upstream model listing, and health probes); the inbound caller's
-  `User-Agent` is never forwarded.
+  `User-Agent` is never forwarded. A provider may instead set
+  `forward_user_agent = true` to forward the inbound caller `User-Agent`
+  upstream on live inference requests (explicit `user_agent` still wins;
+  missing or invalid inbound values fall back to the default).
+  Both attributes also exist at root scope as defaults for all providers:
+  a provider-level `user_agent` overrides the root value, while
+  `forward_user_agent` is effective when set at either level.
 - Direct (`<provider>/<model>`) requests never fail over to a different
   target and never consult or populate alias cooldown state. Alias requests retry the next target on transport errors, timeouts,
   and configured `retry_status_codes` in the `400`-`599` range. The default list

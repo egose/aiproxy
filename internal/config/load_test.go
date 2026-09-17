@@ -908,6 +908,108 @@ provider "openai" "openai" {
 	}
 }
 
+func TestLoadForwardUserAgent(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "k"
+  forward_user_agent = true
+  model "m" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("forward_user_agent should load: %v", err)
+	}
+	p, ok := rt.Catalog.Provider("openai")
+	if !ok {
+		t.Fatal("openai provider missing from catalog")
+	}
+	if !p.ForwardUserAgent {
+		t.Fatal("openai ForwardUserAgent = false, want true")
+	}
+}
+
+func TestLoadRootUserAgentInheritedWhenProviderUnset(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+user_agent = "root-agent/1.0"
+forward_user_agent = true
+provider "openai" "plain" {
+  api_key = "k"
+  model "m" {}
+}
+provider "openai" "custom" {
+  api_key = "k"
+  user_agent = "provider-agent/2.0"
+  model "m" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("root user_agent should load: %v", err)
+	}
+	if rt.UserAgent != "root-agent/1.0" {
+		t.Fatalf("root UserAgent = %q, want root-agent/1.0", rt.UserAgent)
+	}
+	if !rt.ForwardUserAgent {
+		t.Fatal("root ForwardUserAgent = false, want true")
+	}
+	plain, ok := rt.Catalog.Provider("plain")
+	if !ok {
+		t.Fatal("plain provider missing from catalog")
+	}
+	if plain.UserAgent != "root-agent/1.0" {
+		t.Fatalf("plain UserAgent = %q, want inherited root-agent/1.0", plain.UserAgent)
+	}
+	if !plain.ForwardUserAgent {
+		t.Fatal("plain ForwardUserAgent = false, want inherited true")
+	}
+	custom, ok := rt.Catalog.Provider("custom")
+	if !ok {
+		t.Fatal("custom provider missing from catalog")
+	}
+	if custom.UserAgent != "provider-agent/2.0" {
+		t.Fatalf("custom UserAgent = %q, want provider override", custom.UserAgent)
+	}
+}
+
+func TestLoadRootUserAgentRejectsInvalidValue(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+user_agent = "bad\nagent"
+provider "openai" "plain" {
+  api_key = "k"
+  model "m" {}
+}
+`
+	if _, err := Load([]byte(cfg), "test.hcl"); err == nil {
+		t.Fatal("invalid root user_agent should fail validation")
+	}
+}
+
+func TestLoadDerivedProviderRejectsForwardUserAgent(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "base" {
+  api_key = "k"
+  model "m" {}
+}
+provider "openai" "derived" {
+  extends = "base"
+  api_key = "k2"
+  forward_user_agent = true
+}
+`
+	if _, err := Load([]byte(cfg), "test.hcl"); err == nil {
+		t.Fatal("derived provider declaring forward_user_agent should fail validation")
+	}
+}
+
 func TestLoadRejectsUserAgentWithNewline(t *testing.T) {
 	cfg := `
 listener "http" "public" { address = ":8080" }

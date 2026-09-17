@@ -333,7 +333,9 @@ performed. The same model name may use different protocols on each service
 never from the model name.
 
 Every upstream request sends `User-Agent: aiproxy/<version>` unless the
-provider declares a `user_agent` override, and
+provider declares a `user_agent` override (or `forward_user_agent = true`,
+which forwards the inbound caller `User-Agent` on live inference requests),
+and
 `Authorization: Bearer <key>` (omitted for keyless Zen providers). Both services additionally send
 `x-opencode-session` for prompt caching: a caller-supplied inbound value is
 forwarded as-is when it is 1-128 characters of `[A-Za-z0-9_-]`; otherwise a
@@ -856,6 +858,8 @@ alias "chat_fallback" {
   allowed only for loopback hosts such as `localhost`, `127.0.0.1`, or `::1`
 - `api_key_ref.path` is optional because it has a secure default
 - `upstream_header_timeout` accepts a positive duration at root or provider scope; provider values override root values, and the default is 90 seconds
+- `user_agent` accepts a 1-256 printable ASCII override at root or provider scope; provider values override the root value, and the default is `aiproxy/<version>`
+- `forward_user_agent` enables inbound `User-Agent` forwarding at root or provider scope; it is effective when set at either level, with no per-provider opt-out when the root enables it
 - the upstream header timeout limits only the wait for response headers, not JSON or streaming response bodies after headers arrive
 - aliases reference provider and model names without extra ref prefixes
 

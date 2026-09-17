@@ -2,6 +2,8 @@ package config
 
 type rawFile struct {
 	UpstreamHeaderTimeout string             `hcl:"upstream_header_timeout,optional"`
+	UserAgent             string             `hcl:"user_agent,optional"`
+	ForwardUserAgent      bool               `hcl:"forward_user_agent,optional"`
 	Listeners             []rawListener      `hcl:"listener,block"`
 	Auth                  []rawAuth          `hcl:"auth,block"`
 	Logging               *rawLogging        `hcl:"logging,block"`
@@ -114,6 +116,7 @@ type rawProvider struct {
 	BaseURL               string            `hcl:"base_url,optional"`
 	UpstreamHeaderTimeout string            `hcl:"upstream_header_timeout,optional"`
 	UserAgent             string            `hcl:"user_agent,optional"`
+	ForwardUserAgent      bool              `hcl:"forward_user_agent,optional"`
 	APIKey                string            `hcl:"api_key,optional"`
 	APIKeyRef             *rawAPIKeyRef     `hcl:"api_key_ref,block"`
 	CredentialRef         *rawCredentialRef `hcl:"credential_ref,block"`
