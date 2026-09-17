@@ -1,10 +1,12 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"net/textproto"
 	"sync"
 	"time"
 
@@ -34,6 +36,7 @@ type Request struct {
 	ModelProtocol    config.ModelProtocol
 	UserAgent        string
 	ForwardUserAgent bool
+	ForwardHeaders   []string
 	Version          string
 	Body             []byte
 	Inbound          *http.Request
@@ -41,18 +44,20 @@ type Request struct {
 }
 
 type Result struct {
-	StatusCode    int
-	Header        http.Header
-	Body          []byte
-	StreamBody    io.ReadCloser
-	Streaming     bool
-	OnClose       func()
-	Usage         Usage
-	Stream        *StreamCompletion
-	RetryDelay    time.Duration
-	HasRetryDelay bool
-	Provider      string
-	UpstreamModel string
+	StatusCode             int
+	Header                 http.Header
+	Body                   []byte
+	StreamBody             io.ReadCloser
+	Streaming              bool
+	OnClose                func()
+	Usage                  Usage
+	Stream                 *StreamCompletion
+	RetryDelay             time.Duration
+	HasRetryDelay          bool
+	Provider               string
+	UpstreamModel          string
+	UpstreamRequestHeaders http.Header
+	UpstreamRequestBody    []byte
 }
 
 type Usage struct {
@@ -388,6 +393,19 @@ func defaultVersion(version string) string {
 
 func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHandlers) (*Result, error) {
 	req.Header.Set("User-Agent", upstreamUserAgent(r))
+	applyForwardedHeaders(r, req)
+	sentHeaders := req.Header.Clone()
+	sentBody, err := readUpstreamRequestBody(req)
+	if err != nil {
+		return nil, fmt.Errorf("read upstream request body: %w", err)
+	}
+	attachSent := func(res *Result) *Result {
+		if res != nil {
+			res.UpstreamRequestHeaders = sentHeaders
+			res.UpstreamRequestBody = sentBody
+		}
+		return res
+	}
 	resp, err := clientFor(r).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("upstream call: %w", err)
@@ -400,22 +418,22 @@ func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHand
 			return nil, withCooldownError(fmt.Errorf("read error body: %w", err), delay, hasDelay)
 		}
 		if handlers.OnError == nil {
-			return attachCooldownDelay(&Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, delay, hasDelay), nil
+			return attachCooldownDelay(attachSent(&Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}), delay, hasDelay), nil
 		}
 		res, handlerErr := handlers.OnError(resp, body)
-		return attachCooldownDelay(res, delay, hasDelay), withCooldownError(handlerErr, delay, hasDelay)
+		return attachCooldownDelay(attachSent(res), delay, hasDelay), withCooldownError(handlerErr, delay, hasDelay)
 	}
 	isStreaming := handlers.IsStreaming != nil && handlers.IsStreaming(resp)
 	if handlers.PreferStreaming && isStreaming {
 		res, streamErr := handlers.OnStream(resp)
-		return attachCooldownDelay(res, delay, hasDelay), withCooldownError(streamErr, delay, hasDelay)
+		return attachCooldownDelay(attachSent(res), delay, hasDelay), withCooldownError(streamErr, delay, hasDelay)
 	}
 	if isStreaming {
 		res, streamErr := handlers.OnStream(resp)
-		return attachCooldownDelay(res, delay, hasDelay), withCooldownError(streamErr, delay, hasDelay)
+		return attachCooldownDelay(attachSent(res), delay, hasDelay), withCooldownError(streamErr, delay, hasDelay)
 	}
 	if handlers.StreamSuccess {
-		return attachCooldownDelay(&Result{StatusCode: resp.StatusCode, Header: resp.Header, StreamBody: resp.Body, Streaming: true}, delay, hasDelay), nil
+		return attachCooldownDelay(attachSent(&Result{StatusCode: resp.StatusCode, Header: resp.Header, StreamBody: resp.Body, Streaming: true}), delay, hasDelay), nil
 	}
 	defer resp.Body.Close()
 	body, err := readUpstreamBody(resp.Body)
@@ -423,8 +441,71 @@ func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHand
 		return nil, withCooldownError(fmt.Errorf("read upstream body: %w", err), delay, hasDelay)
 	}
 	if handlers.OnSuccess == nil {
-		return attachCooldownDelay(&Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, delay, hasDelay), nil
+		return attachCooldownDelay(attachSent(&Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}), delay, hasDelay), nil
 	}
 	res, handlerErr := handlers.OnSuccess(resp, body)
-	return attachCooldownDelay(res, delay, hasDelay), withCooldownError(handlerErr, delay, hasDelay)
+	return attachCooldownDelay(attachSent(res), delay, hasDelay), withCooldownError(handlerErr, delay, hasDelay)
+}
+
+const (
+	maxForwardedHeaderValueBytes = 4096
+	maxForwardedHeaderValues     = 32
+)
+
+func applyForwardedHeaders(r Request, req *http.Request) {
+	if r.Inbound == nil || len(r.ForwardHeaders) == 0 {
+		return
+	}
+	for _, name := range r.ForwardHeaders {
+		if req.Header.Get(name) != "" {
+			continue
+		}
+		var kept []string
+		for _, v := range r.Inbound.Header.Values(name) {
+			if !isForwardableHeaderValue(v) {
+				continue
+			}
+			kept = append(kept, v)
+			if len(kept) >= maxForwardedHeaderValues {
+				break
+			}
+		}
+		if len(kept) == 0 {
+			continue
+		}
+		cp := make([]string, len(kept))
+		copy(cp, kept)
+		req.Header[textproto.CanonicalMIMEHeaderKey(name)] = cp
+	}
+}
+
+func isForwardableHeaderValue(v string) bool {
+	if v == "" || len(v) > maxForwardedHeaderValueBytes {
+		return false
+	}
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		if c == 0x09 || c >= 0x20 && c <= 0x7e || c >= 0x80 {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func readUpstreamRequestBody(req *http.Request) ([]byte, error) {
+	if req.Body == nil {
+		return nil, nil
+	}
+	body, err := io.ReadAll(req.Body)
+	_ = req.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(body)), nil
+	}
+	req.ContentLength = int64(len(body))
+	return body, nil
 }

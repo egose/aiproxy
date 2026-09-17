@@ -113,6 +113,20 @@ func (h *Handler) current() Dependencies {
 	return deps
 }
 
+func payloadUpstreamRequest(result *provider.Result, maxBody int, omitBody bool) (payloadlog.EntrySide, bool) {
+	if result == nil || result.UpstreamRequestHeaders == nil {
+		return payloadlog.EntrySide{}, false
+	}
+	body := result.UpstreamRequestBody
+	if omitBody {
+		body = nil
+	}
+	return payloadlog.EntrySide{
+		Headers: payloadlog.RedactHeaders(result.UpstreamRequestHeaders),
+		Body:    payloadlog.EncodeBodyWithContentType(body, maxBody, result.UpstreamRequestHeaders.Get("Content-Type")),
+	}, true
+}
+
 func dashboardAuthLimiterFor(h *Handler) *dashboardAuthLimiter {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -297,12 +311,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case result != nil && result.Streaming && payloadCapture != nil:
 				entry.UpstreamModel = accountingUpstream
+				if side, ok := payloadUpstreamRequest(result, deps.PayloadLog.MaxBodyBytes(), omitRequestBody); ok {
+					entry.UpstreamRequest = side
+				}
 				entry.Response = payloadlog.EntrySide{
 					Headers: payloadlog.RedactHeaders(result.Header),
 					Body:    payloadCapture.BodyWithContentType(result.Header.Get("Content-Type")),
 				}
 			case result != nil && !result.Streaming:
 				entry.UpstreamModel = accountingUpstream
+				if side, ok := payloadUpstreamRequest(result, deps.PayloadLog.MaxBodyBytes(), omitRequestBody); ok {
+					entry.UpstreamRequest = side
+				}
 				entry.Response = payloadlog.EntrySide{
 					Headers: payloadlog.RedactHeaders(result.Header),
 					Body:    payloadlog.EncodeBodyWithContentType(result.Body, deps.PayloadLog.MaxBodyBytes(), result.Header.Get("Content-Type")),

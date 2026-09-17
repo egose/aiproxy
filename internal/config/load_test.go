@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1690,5 +1691,144 @@ provider "openai" "openai" {
 	_, err := Load([]byte(cfg), "test.hcl")
 	if err == nil || !strings.Contains(err.Error(), "allow_insecure_remote is unsupported") {
 		t.Fatalf("expected unsupported allow_insecure_remote error, got %v", err)
+	}
+}
+
+func TestLoadForwardHeaders(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "k"
+  forward_headers = ["X-Session-Id", "X-Session-Affinity"]
+  model "m" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("forward_headers should load: %v", err)
+	}
+	p, ok := rt.Catalog.Provider("openai")
+	if !ok {
+		t.Fatal("openai provider missing from catalog")
+	}
+	if len(p.ForwardHeaders) != 2 || p.ForwardHeaders[0] != "X-Session-Id" || p.ForwardHeaders[1] != "X-Session-Affinity" {
+		t.Fatalf("ForwardHeaders = %v", p.ForwardHeaders)
+	}
+}
+
+func TestLoadForwardHeadersRejectsManaged(t *testing.T) {
+	for _, name := range []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Cookie", "Content-Type", "Accept", "User-Agent", "Content-Length", "Connection", "Transfer-Encoding", "Host", "Upgrade", "not a header", ""} {
+		t.Run(name, func(t *testing.T) {
+			cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "k"
+  forward_headers = [` + strconv.Quote(name) + `]
+  model "m" {}
+}
+`
+			if _, err := Load([]byte(cfg), "test.hcl"); err == nil {
+				t.Fatalf("forward_headers entry %q should fail validation", name)
+			}
+		})
+	}
+}
+
+func TestLoadRootForwardHeadersUnion(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+forward_headers = ["X-Session-Id", "X-Root-Only"]
+provider "openai" "plain" {
+  api_key = "k"
+  model "m" {}
+}
+provider "openai" "custom" {
+  api_key = "k"
+  forward_headers = ["x-session-id", "X-Provider-Only"]
+  model "m" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("root forward_headers should load: %v", err)
+	}
+	plain, ok := rt.Catalog.Provider("plain")
+	if !ok {
+		t.Fatal("plain provider missing from catalog")
+	}
+	if len(plain.ForwardHeaders) != 2 || plain.ForwardHeaders[0] != "X-Session-Id" || plain.ForwardHeaders[1] != "X-Root-Only" {
+		t.Fatalf("plain ForwardHeaders = %v", plain.ForwardHeaders)
+	}
+	custom, ok := rt.Catalog.Provider("custom")
+	if !ok {
+		t.Fatal("custom provider missing from catalog")
+	}
+	if len(custom.ForwardHeaders) != 3 || custom.ForwardHeaders[0] != "X-Session-Id" || custom.ForwardHeaders[1] != "X-Root-Only" || custom.ForwardHeaders[2] != "X-Provider-Only" {
+		t.Fatalf("custom ForwardHeaders = %v, want root-first deduped union", custom.ForwardHeaders)
+	}
+}
+
+func TestLoadRootForwardHeadersRejectsInvalid(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+forward_headers = ["Authorization"]
+provider "openai" "plain" {
+  api_key = "k"
+  model "m" {}
+}
+`
+	if _, err := Load([]byte(cfg), "test.hcl"); err == nil {
+		t.Fatal("invalid root forward_headers should fail validation")
+	}
+}
+
+func TestLoadDerivedProviderRejectsForwardHeaders(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "base" {
+  api_key = "k"
+  forward_headers = ["X-Session-Id"]
+  model "m" {}
+}
+provider "openai" "derived" {
+  extends = "base"
+  api_key = "k2"
+  forward_headers = ["X-Other"]
+}
+`
+	if _, err := Load([]byte(cfg), "test.hcl"); err == nil {
+		t.Fatal("derived provider declaring forward_headers should fail validation")
+	}
+}
+
+func TestLoadDerivedProviderInheritsForwardHeaders(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "base" {
+  api_key = "k"
+  forward_headers = ["X-Session-Id"]
+  model "m" {}
+}
+provider "openai" "derived" {
+  extends = "base"
+  api_key = "k2"
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("derived forward_headers inheritance should load: %v", err)
+	}
+	derived, ok := rt.Catalog.Provider("derived")
+	if !ok {
+		t.Fatal("derived provider missing from catalog")
+	}
+	if len(derived.ForwardHeaders) != 1 || derived.ForwardHeaders[0] != "X-Session-Id" {
+		t.Fatalf("derived ForwardHeaders = %v", derived.ForwardHeaders)
 	}
 }
