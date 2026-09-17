@@ -223,6 +223,7 @@ func TestConfigureProviderInteractiveCreatesOpenCodeZen(t *testing.T) {
 		"",
 		"",
 		"",
+		"",
 		"2",
 		"",
 		"glm-5.3",

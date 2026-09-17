@@ -3390,7 +3390,13 @@ func (p *promptSession) ask(label, def string) (string, error) {
 	}
 	_, _ = fmt.Fprintf(p.out, "%s: ", prompt)
 	line, err := p.in.ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			if trimmed := strings.TrimSpace(line); trimmed != "" {
+				return trimmed, nil
+			}
+			return "", fmt.Errorf("%s: unexpected end of input", label)
+		}
 		return "", err
 	}
 	line = strings.TrimSpace(line)
