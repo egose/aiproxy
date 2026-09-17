@@ -198,8 +198,8 @@ func InitialModel(s *RuntimeSnapshot) tea.Model {
 		now:          time.Now(),
 		dirty:        true,
 		focus:        focusUsage,
-		statsHeight:  12,
-		bottomHeight: 14,
+		statsHeight:  16,
+		bottomHeight: 10,
 		logMinLevel:  slog.LevelDebug,
 		logFollow:    true,
 	}
@@ -1257,18 +1257,6 @@ func (m *model) providerDataRows() int {
 	return len(m.snapshot.Providers) + len(m.snapshot.DisabledProviders)
 }
 
-func (m *model) providerVisibleRows() int {
-	notes := 0
-	if m.snapshot != nil {
-		notes = providerNoteCount(m.snapshot.Usage.Summaries())
-	}
-	n := m.effStatsHeight() - 4 - notes
-	if n < 1 {
-		n = 1
-	}
-	return n
-}
-
 func (m *model) maxProviderScroll() int {
 	if m.snapshot == nil {
 		return 0
@@ -1313,7 +1301,8 @@ func (m *model) effBottomHeight() int {
 }
 
 func (m *model) usageVisibleRows() int {
-	n := m.effStatsHeight() - 5
+	_, usageH := m.splitStatsHeight(m.effStatsHeight())
+	n := usageH - 5
 	if n < 1 {
 		n = 1
 	}
@@ -1459,13 +1448,51 @@ func (m *model) render() string {
 	if statsHeight < 4 {
 		statsHeight = 4
 	}
-	sideWidth := m.sideWidth()
-	usageWidth := m.width - sideWidth
-	side := renderProviders(m, sideWidth, statsHeight)
-	usage := renderUsage(m, usageWidth, statsHeight)
-	mid := lipgloss.JoinHorizontal(lipgloss.Top, side, usage)
+	top := m.renderTopStacked(m.width, statsHeight)
 	bottom := renderBottom(m, m.width, m.effBottomHeight())
-	return fitView(lipgloss.JoinVertical(lipgloss.Left, header, rate, mid, bottom, renderFooter(m)), m.width)
+	return fitView(lipgloss.JoinVertical(lipgloss.Left, header, rate, top, bottom, renderFooter(m)), m.width)
+}
+
+func (m *model) renderTopStacked(width, statsHeight int) string {
+	provH, usageH := m.splitStatsHeight(statsHeight)
+	providers := renderProviders(m, width, provH)
+	usage := renderUsage(m, width, usageH)
+	return lipgloss.JoinVertical(lipgloss.Left, providers, usage)
+}
+
+func (m *model) splitStatsHeight(statsHeight int) (provH, usageH int) {
+	const minUsage = 6
+	if statsHeight < 4+minUsage {
+		statsHeight = 4 + minUsage
+	}
+	rows := 0
+	if m.snapshot != nil {
+		rows = len(m.snapshot.Providers) + len(m.snapshot.DisabledProviders)
+	}
+	need := rows + 4
+	if noteRows := providerNoteCount(m.snapshotUsageSummaries()); noteRows > 0 {
+		need += noteRows
+	}
+	if need > statsHeight-minUsage {
+		need = statsHeight - minUsage
+	}
+	if need < 4 {
+		need = 4
+	}
+	provH = need
+	usageH = statsHeight - provH
+	if usageH < minUsage {
+		usageH = minUsage
+		provH = statsHeight - usageH
+	}
+	return provH, usageH
+}
+
+func (m *model) snapshotUsageSummaries() []accounting.Summary {
+	if m == nil || m.snapshot == nil || m.snapshot.Usage == nil {
+		return nil
+	}
+	return m.snapshot.Usage.Summaries()
 }
 
 var ansiSeq = regexp.MustCompile("\x1b\\[[0-9;:?]*[ -/]*[@-~]|\x1b\\][^\x07]*(?:\x07|\x1b\\\\)|\x1b[()][0-9A-Za-z]")
@@ -1489,11 +1516,17 @@ func fitView(out string, width int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *model) sideWidth() int {
-	if m.width <= 0 {
-		return 0
+func (m *model) providerVisibleRows() int {
+	notes := 0
+	if m.snapshot != nil {
+		notes = providerNoteCount(m.snapshot.Usage.Summaries())
 	}
-	return m.width / 2
+	provH, _ := m.splitStatsHeight(m.effStatsHeight())
+	n := provH - 4 - notes
+	if n < 1 {
+		n = 1
+	}
+	return n
 }
 
 func renderBottom(m *model, width, height int) string {
@@ -1889,15 +1922,7 @@ func upstreamAsSummaries(upstream []accounting.UpstreamSummary) []accounting.Sum
 
 func renderProviders(m *model, width, height int) string {
 	snap := m.snapshot
-	border := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#334155")).
-		Width(width - 2).
-		Height(height - 2)
-	if m.focus == focusProviders {
-		border = border.BorderForeground(lipgloss.Color("#38BDF8"))
-	}
-	inner := width - 2
+	border, inner := paneBox(width, height, m.focus == focusProviders)
 	summaries := snap.Usage.Summaries()
 	stats := snap.Usage.ProviderSummaries()
 	if len(stats) == 0 && len(summaries) > 0 {
@@ -1908,10 +1933,12 @@ func renderProviders(m *model, width, height int) string {
 		byName[ps.Provider] = ps
 	}
 	latency, samples := p95WithSamples(snap.Usage.Recent(recentLimit))
+	prices := pricingIndex(snap.Providers)
+	upstream := snap.Usage.UpstreamSummaries()
 	var names []string
 	var ips []string
 	var reqs, t429s []int64
-	var toks []string
+	var toks, costs []string
 	for _, p := range snap.Providers {
 		ps := byName[p.Name]
 		names = append(names, p.Name)
@@ -1919,6 +1946,7 @@ func renderProviders(m *model, width, height int) string {
 		reqs = append(reqs, ps.Requests)
 		t429s = append(t429s, ps.Throttled)
 		toks = append(toks, providerTokensText(ps))
+		costs = append(costs, providerCostTextWithAliases(p.Name, summaries, prices, snap.Aliases, upstream))
 	}
 	for _, p := range snap.DisabledProviders {
 		names = append(names, p.Name)
@@ -1926,9 +1954,10 @@ func renderProviders(m *model, width, height int) string {
 		reqs = append(reqs, 0)
 		t429s = append(t429s, 0)
 		toks = append(toks, providerTokensText(accounting.ProviderSummary{}))
+		costs = append(costs, "-")
 	}
-	nameW, ipW, reqW, t429W, tokW := providerColWidths(names, ips, reqs, t429s, toks, inner)
-	rows := []string{headerStyle.Render(fitRow(headerCells([]col{{"PROVIDER", nameW}, {"", 1}, {"HC", 2}, {"REQS", reqW}, {"ERR%", 6}, {"429", t429W}, {"P95", 8}, {"TOKENS", tokW}, {"IP", ipW}}), inner))}
+	nameW, ipW, reqW, t429W, tokW, costW := providerColWidths(names, ips, reqs, t429s, toks, costs, inner)
+	rows := []string{headerStyle.Render(fitRow(headerCells([]col{{"PROVIDER", nameW}, {"", 1}, {"HC", 2}, {"REQS", reqW}, {"ERR%", 6}, {"429", t429W}, {"P95", 8}, {"TOKENS", tokW}, {"COST", costW}, {"IP", ipW}}), inner))}
 	unresolved := int64(0)
 	for _, s := range summaries {
 		if strings.HasPrefix(s.Model, "_") {
@@ -1944,12 +1973,12 @@ func renderProviders(m *model, width, height int) string {
 	for _, p := range snap.Providers {
 		known, healthy := healthKnown(m.health, p.Name)
 		ps := byName[p.Name]
-		data = append(data, providerLine{text: providerRow(p.Name, known, healthy, hcByName[p.Name], ps, ps.Throttled, latency[p.Name], samples[p.Name], false, m.providerIP(p.BaseURL), nameW, ipW, reqW, t429W, tokW)})
+		data = append(data, providerLine{text: providerRow(p.Name, known, healthy, hcByName[p.Name], ps, ps.Throttled, latency[p.Name], samples[p.Name], false, m.providerIP(p.BaseURL), providerCostTextWithAliases(p.Name, summaries, prices, snap.Aliases, upstream), nameW, ipW, reqW, t429W, tokW, costW)})
 	}
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B"))
 	for _, p := range snap.DisabledProviders {
 		data = append(data, providerLine{
-			text: providerRow(p.Name, true, false, "-", accounting.ProviderSummary{}, 0, 0, 0, true, m.providerIP(p.BaseURL), nameW, ipW, reqW, t429W, tokW),
+			text: providerRow(p.Name, true, false, "-", accounting.ProviderSummary{}, 0, 0, 0, true, m.providerIP(p.BaseURL), "-", nameW, ipW, reqW, t429W, tokW, costW),
 			dim:  true,
 		})
 	}
@@ -2140,8 +2169,8 @@ func comma(n int64) string {
 	return b.String()
 }
 
-func providerColWidths(names, ips []string, requests, throttled []int64, tokens []string, inner int) (nameW, ipW, reqW, t429W, tokW int) {
-	nameW, ipW, reqW, t429W, tokW = len("PROVIDER"), len("IP"), len("REQS"), len("429"), len("TOKENS")
+func providerColWidths(names, ips []string, requests, throttled []int64, tokens, costs []string, inner int) (nameW, ipW, reqW, t429W, tokW, costW int) {
+	nameW, ipW, reqW, t429W, tokW, costW = len("PROVIDER"), len("IP"), len("REQS"), len("429"), len("TOKENS"), len("COST")
 	for _, n := range names {
 		nameW = max(nameW, runeLen(n))
 	}
@@ -2157,65 +2186,285 @@ func providerColWidths(names, ips []string, requests, throttled []int64, tokens 
 	for _, t := range tokens {
 		tokW = max(tokW, runeLen(t))
 	}
-	nameW = min(nameW, 24)
-	ipW = min(ipW, 21)
-	reqW = min(reqW, 10)
-	t429W = min(t429W, 8)
-	tokW = min(tokW, 20)
-	const fixed = 1 + 2 + 6 + 8
-	const gaps = 8
-	limit := inner - 2
-	if limit < 20 {
-		limit = 20
+	for _, c := range costs {
+		costW = max(costW, runeLen(c))
 	}
-	for nameW+ipW+reqW+t429W+tokW+fixed+gaps > limit && nameW > 8 {
-		nameW--
-	}
-	for nameW+ipW+reqW+t429W+tokW+fixed+gaps > limit && ipW > 7 {
-		ipW--
-	}
-	for nameW+ipW+reqW+t429W+tokW+fixed+gaps > limit && tokW > 6 {
-		tokW--
-	}
-	for nameW+ipW+reqW+t429W+tokW+fixed+gaps > limit && reqW > 4 {
-		reqW--
-	}
-	for nameW+ipW+reqW+t429W+tokW+fixed+gaps > limit && t429W > 3 {
-		t429W--
-	}
-	for nameW+ipW+reqW+t429W+tokW+fixed+gaps > limit && ipW > 2 {
-		ipW--
-	}
-	return nameW, ipW, reqW, t429W, tokW
+	got := flexWidths([]flexCol{
+		{content: nameW, min: 8, max: 32, flex: 2},
+		{content: 1, min: 1, max: 1},
+		{content: 2, min: 2, max: 2},
+		{content: reqW, min: 4, max: 10},
+		{content: 6, min: 6, max: 6},
+		{content: t429W, min: 3, max: 8},
+		{content: 8, min: 8, max: 8},
+		{content: tokW, min: 6, max: 0, flex: 3},
+		{content: costW, min: 4, max: 12, flex: 1},
+		{content: ipW, min: 2, max: 32, flex: 1},
+	}, inner)
+	return got[0], got[9], got[3], got[5], got[7], got[8]
 }
 
-func usageColWidths(summaries []accounting.Summary, inner int) (modelW, opW, countW, tokW int) {
-	modelW, opW, countW, tokW = len("MODEL"), len("OP"), len("COUNT"), len("TOKENS")
+func costTexts(summaries []accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) map[accounting.Summary]string {
+	out := make(map[accounting.Summary]string, len(summaries))
+	for _, s := range summaries {
+		out[s] = summaryCostTextWithAliases(s, prices, aliases, upstream)
+	}
+	return out
+}
+
+func usageColWidths(summaries []accounting.Summary, costs map[accounting.Summary]string, inner int) (modelW, opW, countW, tokW, costW int) {
+	modelW, opW, countW, tokW, costW = len("MODEL"), len("OP"), len("COUNT"), len("TOKENS"), len("COST")
 	for _, s := range summaries {
 		modelW = max(modelW, runeLen(s.Model))
 		opW = max(opW, runeLen(s.Operation))
 		countW = max(countW, runeLen(comma(s.Count)))
 		tokW = max(tokW, runeLen(tokensText(s)))
+		if c, ok := costs[s]; ok {
+			costW = max(costW, runeLen(c))
+		}
 	}
-	modelW = min(modelW, 64)
-	opW = min(opW, 20)
-	countW = min(countW, 10)
-	tokW = min(tokW, 20)
-	const statusW = 6
-	const gaps = 4
-	for modelW+opW+statusW+countW+tokW+gaps > inner && modelW > 10 {
-		modelW--
+	got := flexWidths([]flexCol{
+		{content: modelW, min: 10, max: 48, flex: 2},
+		{content: opW, min: 8, max: 24, flex: 1},
+		{content: 6, min: 6, max: 6},
+		{content: countW, min: 4, max: 10},
+		{content: tokW, min: 6, max: 0, flex: 3},
+		{content: costW, min: 4, max: 12, flex: 1},
+	}, inner)
+	return got[0], got[1], got[3], got[4], got[5]
+}
+
+func pricingIndex(providers []config.Provider) map[string]*config.ModelPricing {
+	out := map[string]*config.ModelPricing{}
+	for _, p := range providers {
+		for _, m := range p.Models {
+			if m.Pricing != nil && m.Pricing.HasRates() {
+				out[p.Name+"/"+m.Name] = m.Pricing
+			}
+		}
 	}
-	for modelW+opW+statusW+countW+tokW+gaps > inner && tokW > 6 {
-		tokW--
+	return out
+}
+
+func summaryCostText(s accounting.Summary, prices map[string]*config.ModelPricing) string {
+	cost, ok := summaryCost(s, prices)
+	if !ok {
+		return "-"
 	}
-	for modelW+opW+statusW+countW+tokW+gaps > inner && opW > 8 {
-		opW--
+	return formatCost(cost)
+}
+
+func summaryCostTextWithAliases(s accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) string {
+	cost, ok := summaryCostWithAliases(s, prices, aliases, upstream)
+	if !ok {
+		return "-"
 	}
-	for modelW+opW+statusW+countW+tokW+gaps > inner && countW > 4 {
-		countW--
+	return formatCost(cost)
+}
+
+func summaryCost(s accounting.Summary, prices map[string]*config.ModelPricing) (float64, bool) {
+	return summaryCostWithAliases(s, prices, nil, nil)
+}
+
+func summaryCostWithAliases(s accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) (float64, bool) {
+	if len(prices) == 0 {
+		return 0, false
 	}
-	return modelW, opW, countW, tokW
+	if p, ok := prices[s.Model]; ok {
+		return p.Cost(s.PromptTokens, s.CompletionTokens, s.CachedTokens, s.CacheCreationTokens, s.CacheReadTokens)
+	}
+	return aliasCost(s, prices, aliases, upstream)
+}
+
+func aliasTargets(aliases []config.Alias, name string) []config.AliasTarget {
+	for _, a := range aliases {
+		if a.Name == name {
+			return a.Targets
+		}
+	}
+	return nil
+}
+
+func aliasCost(s accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) (float64, bool) {
+	aliasName, ok := strings.CutPrefix(s.Model, "alias/")
+	if !ok {
+		return 0, false
+	}
+	targets := aliasTargets(aliases, aliasName)
+	if len(targets) == 0 {
+		return 0, false
+	}
+	type share struct {
+		key    string
+		weight int64
+	}
+	shares := make([]share, 0, len(targets))
+	var totalWeight int64
+	for _, t := range targets {
+		key := t.Provider + "/" + t.Model
+		if _, ok := prices[key]; !ok {
+			continue
+		}
+		w := upstreamWeight(upstream, s, t.Provider, t.Model)
+		shares = append(shares, share{key: key, weight: w})
+		totalWeight += w
+	}
+	if len(shares) == 0 {
+		return 0, false
+	}
+	var total float64
+	priced := false
+	for _, sh := range shares {
+		frac := 1.0 / float64(len(shares))
+		if totalWeight > 0 {
+			if sh.weight <= 0 {
+				continue
+			}
+			frac = float64(sh.weight) / float64(totalWeight)
+		}
+		prompt := int64(float64(s.PromptTokens) * frac)
+		completion := int64(float64(s.CompletionTokens) * frac)
+		cached := int64(float64(s.CachedTokens) * frac)
+		write := int64(float64(s.CacheCreationTokens) * frac)
+		read := int64(float64(s.CacheReadTokens) * frac)
+		cost, ok := prices[sh.key].Cost(prompt, completion, cached, write, read)
+		if !ok {
+			continue
+		}
+		total += cost
+		priced = true
+	}
+	if !priced {
+		return 0, false
+	}
+	return total, true
+}
+
+func upstreamWeight(upstream []accounting.UpstreamSummary, s accounting.Summary, provider, model string) int64 {
+	var weight int64
+	for _, u := range upstream {
+		if u.Provider != provider || u.Model != model {
+			continue
+		}
+		if u.Operation != s.Operation || u.StatusCode != s.StatusCode {
+			continue
+		}
+		if s.Tenant != "" && u.Tenant != s.Tenant {
+			continue
+		}
+		if s.Client != "" && u.Client != s.Client {
+			continue
+		}
+		weight += u.Count
+	}
+	return weight
+}
+
+func providerCostText(provider string, summaries []accounting.Summary, prices map[string]*config.ModelPricing) string {
+	return providerCostTextWithAliases(provider, summaries, prices, nil, nil)
+}
+
+func providerRowCost(provider string, s accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) (float64, bool) {
+	if prov := accounting.EventProvider(accounting.Event{Model: s.Model}); prov == provider {
+		return summaryCostWithAliases(s, prices, aliases, upstream)
+	}
+	if _, ok := strings.CutPrefix(s.Model, "alias/"); !ok {
+		return 0, false
+	}
+	full, ok := summaryCostWithAliases(s, prices, aliases, upstream)
+	if !ok {
+		return 0, false
+	}
+	share, ok := aliasProviderShare(s, provider, prices, aliases, upstream)
+	if !ok {
+		return 0, false
+	}
+	return full * share, true
+}
+
+func aliasProviderShare(s accounting.Summary, provider string, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) (float64, bool) {
+	aliasName, ok := strings.CutPrefix(s.Model, "alias/")
+	if !ok {
+		return 0, false
+	}
+	targets := aliasTargets(aliases, aliasName)
+	if len(targets) == 0 {
+		return 0, false
+	}
+	var mine, total, priced int64
+	for _, t := range targets {
+		if _, ok := prices[t.Provider+"/"+t.Model]; !ok {
+			continue
+		}
+		priced++
+		w := upstreamWeight(upstream, s, t.Provider, t.Model)
+		total += w
+		if t.Provider == provider {
+			mine += w
+		}
+	}
+	if priced == 0 {
+		return 0, false
+	}
+	if total > 0 {
+		if mine <= 0 {
+			return 0, false
+		}
+		return float64(mine) / float64(total), true
+	}
+	var mineTargets, pricedTargets int64
+	for _, t := range targets {
+		if _, ok := prices[t.Provider+"/"+t.Model]; !ok {
+			continue
+		}
+		pricedTargets++
+		if t.Provider == provider {
+			mineTargets++
+		}
+	}
+	if mineTargets == 0 || pricedTargets == 0 {
+		return 0, false
+	}
+	return float64(mineTargets) / float64(pricedTargets), true
+}
+
+func providerCostTextWithAliases(provider string, summaries []accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) string {
+	if len(prices) == 0 {
+		return "-"
+	}
+	var total float64
+	priced := false
+	for _, s := range summaries {
+		if strings.HasPrefix(s.Model, "_") {
+			continue
+		}
+		cost, ok := providerRowCost(provider, s, prices, aliases, upstream)
+		if !ok {
+			continue
+		}
+		total += cost
+		priced = true
+	}
+	if !priced {
+		return "-"
+	}
+	return formatCost(total)
+}
+
+func formatCost(dollars float64) string {
+	if dollars < 0 {
+		dollars = 0
+	}
+	if dollars == 0 {
+		return "$0.00"
+	}
+	if dollars < 0.01 {
+		return fmt.Sprintf("$%.4f", dollars)
+	}
+	if dollars < 1000 {
+		return fmt.Sprintf("$%.2f", dollars)
+	}
+	return "$" + comma(int64(dollars+0.5))
 }
 
 func tokensText(s accounting.Summary) string {
@@ -2245,7 +2494,7 @@ func formatTokenSplit(prompt, completion, total, cached, cacheWrite, cacheRead i
 	return split
 }
 
-func providerRow(name string, known, healthy bool, hcMark string, ps accounting.ProviderSummary, throttled int64, p95 time.Duration, samples int, disabled bool, ip string, nameW, ipW, reqW, t429W, tokW int) string {
+func providerRow(name string, known, healthy bool, hcMark string, ps accounting.ProviderSummary, throttled int64, p95 time.Duration, samples int, disabled bool, ip, cost string, nameW, ipW, reqW, t429W, tokW, costW int) string {
 	status := "✓"
 	if disabled {
 		status = "✗"
@@ -2274,8 +2523,9 @@ func providerRow(name string, known, healthy bool, hcMark string, ps accounting.
 		fmt.Sprintf("%*s", t429W, comma(throttled)),
 		p95cell,
 		fmt.Sprintf("%*s", tokW, truncate(providerTokensText(ps), tokW)),
+		fmt.Sprintf("%*s", costW, truncate(cost, costW)),
 		truncate(ip, ipW),
-	}, []int{nameW, 1, 2, reqW, 6, t429W, 8, tokW, ipW})
+	}, []int{nameW, 1, 2, reqW, 6, t429W, 8, tokW, costW, ipW})
 }
 
 func p95LatencyByProvider(recent []accounting.Event) map[string]time.Duration {
@@ -2317,14 +2567,7 @@ func percentile(durs []time.Duration, p float64) time.Duration {
 }
 
 func renderUsage(m *model, width, height int) string {
-	border := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#334155")).
-		Width(width - 2).
-		Height(height - 2)
-	if m.focus == focusUsage {
-		border = border.BorderForeground(lipgloss.Color("#38BDF8"))
-	}
+	border, inner := paneBox(width, height, m.focus == focusUsage)
 	tenant := m.activeTenant()
 	title := "USAGE"
 	if m.usageUpstream {
@@ -2336,10 +2579,12 @@ func renderUsage(m *model, width, height int) string {
 	if m.errorsOnly {
 		title += " errs-only"
 	}
-	inner := width - 2
 	summaries := m.filteredSummaries()
-	modelW, opW, countW, tokW := usageColWidths(summaries, inner)
-	header := headerStyle.Render(fitRow(headerCells([]col{{"MODEL", modelW}, {"OP", opW}, {"STATUS", 6}, {"COUNT", countW}, {"TOKENS", tokW}}), inner))
+	prices := pricingIndex(m.snapshot.Providers)
+	aliases := m.snapshot.Aliases
+	upstream := m.snapshot.Usage.UpstreamSummaries()
+	modelW, opW, countW, tokW, costW := usageColWidths(summaries, costTexts(summaries, prices, aliases, upstream), inner)
+	header := headerStyle.Render(fitRow(headerCells([]col{{"MODEL", modelW}, {"OP", opW}, {"STATUS", 6}, {"COUNT", countW}, {"TOKENS", tokW}, {"COST", costW}}), inner))
 	rows := []string{title, header}
 	visible := m.usageVisibleRows()
 	total := len(summaries)
@@ -2358,7 +2603,8 @@ func renderUsage(m *model, width, height int) string {
 			fmt.Sprintf("%d", s.StatusCode),
 			fmt.Sprintf("%*s", countW, comma(s.Count)),
 			tokensCell(s, tokW),
-		}, []int{modelW, opW, 6, countW, tokW}), inner))
+			fmt.Sprintf("%*s", costW, truncate(summaryCostTextWithAliases(s, prices, aliases, upstream), costW)),
+		}, []int{modelW, opW, 6, countW, tokW, costW}), inner))
 	}
 	if total == 0 {
 		rows = append(rows, "no usage recorded yet")
@@ -2416,14 +2662,7 @@ func (m *model) aliasRows() []string {
 }
 
 func renderAliases(m *model, width, height int) string {
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#334155")).
-		Width(width - 2).
-		Height(height - 2)
-	if m.focus == focusBottom && m.bottomTab == bottomTabAliases {
-		borderStyle = borderStyle.BorderForeground(lipgloss.Color("#38BDF8"))
-	}
+	borderStyle, inner := paneBox(width, height, m.focus == focusBottom && m.bottomTab == bottomTabAliases)
 	m.clampAliasCursor()
 	aliases := m.aliasList()
 	rows := []string{fmt.Sprintf("ALIASES (%d) cool:%d", len(aliases), len(m.snapshot.Cooldowns))}
@@ -2506,7 +2745,7 @@ func renderAliases(m *model, width, height int) string {
 		} else {
 			line = "  " + line
 		}
-		rows = append(rows, truncate(line, width-2))
+		rows = append(rows, truncate(line, inner))
 	}
 	if end < len(aliases) {
 		rows = append(rows, fmt.Sprintf("… %d more (j/k move)", len(aliases)-end))
@@ -2517,15 +2756,7 @@ func renderAliases(m *model, width, height int) string {
 }
 
 func renderAliasDetail(m *model, width, height int) string {
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#38BDF8")).
-		Width(width - 2).
-		Height(height - 2)
-	inner := width - 4
-	if inner < 10 {
-		inner = 10
-	}
+	borderStyle, inner := paneBox(width, height, true)
 	var a *config.Alias
 	for i := range m.snapshot.Aliases {
 		if m.snapshot.Aliases[i].Name == m.aliasDetailName {
@@ -2704,14 +2935,7 @@ func (m *model) filteredLogs(limit int) []observability.LogEntry {
 }
 
 func renderLogs(m *model, width, height int) string {
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#334155")).
-		Width(width - 2).
-		Height(height - 2)
-	if m.focus == focusBottom && m.bottomTab == bottomTabLogs {
-		borderStyle = borderStyle.BorderForeground(lipgloss.Color("#38BDF8"))
-	}
+	borderStyle, inner := paneBox(width, height, m.focus == focusBottom && m.bottomTab == bottomTabLogs)
 	entries := m.filteredLogs(1 << 30)
 	visible := m.logVisibleRows()
 	if visible < 1 {
@@ -2750,18 +2974,19 @@ func renderLogs(m *model, width, height int) string {
 		end = len(entries)
 	}
 	page := entries[start:end]
-	attrsWidth := len("ATTRS")
+	attrsContent := len("ATTRS")
+	msgContent := len("MESSAGE")
 	for _, e := range entries {
-		attrsWidth = max(attrsWidth, runeLen(orDash(e.Attrs)))
+		attrsContent = max(attrsContent, runeLen(orDash(e.Attrs)))
+		msgContent = max(msgContent, runeLen(e.Message))
 	}
-	msgWidth := width - 8 - 6 - 4 - attrsWidth - 8
-	for msgWidth < 12 && attrsWidth > 12 {
-		attrsWidth--
-		msgWidth = width - 8 - 6 - 4 - attrsWidth - 8
-	}
-	if msgWidth < 12 {
-		msgWidth = 12
-	}
+	got := flexWidths([]flexCol{
+		{content: 8, min: 8, max: 8},
+		{content: 6, min: 6, max: 6},
+		{content: msgContent, min: 12, max: 160, flex: 2},
+		{content: attrsContent, min: 5, max: 160, flex: 3},
+	}, inner)
+	msgWidth, attrsWidth := got[2], got[3]
 	levelName := "all"
 	if m.logFilterOn {
 		levelName = ">=" + m.logMinLevel.String()
@@ -2771,7 +2996,6 @@ func renderLogs(m *model, width, height int) string {
 		order = "oldest-first"
 	}
 	title := fmt.Sprintf("LOGS %s (%s) [o]rder", order, levelName)
-	inner := width - 2
 	rows := []string{title, headerStyle.Render(fitRow(headerCells([]col{{"AT", 8}, {"LEVEL", 6}, {"MESSAGE", msgWidth}, {"ATTRS", attrsWidth}}), inner))}
 	if height <= 3 {
 		return borderStyle.Render(strings.Join(rows, "\n"))
@@ -2800,15 +3024,7 @@ func renderLogs(m *model, width, height int) string {
 }
 
 func renderLogDetail(m *model, width, height int) string {
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#38BDF8")).
-		Width(width - 2).
-		Height(height - 2)
-	inner := width - 4
-	if inner < 10 {
-		inner = 10
-	}
+	borderStyle, inner := paneBox(width, height, true)
 	e := m.logDetailEntry
 	title := "LOG " + e.Time.Format(time.RFC3339) + " " + e.Level.String()
 	lines := []string{title}
@@ -2969,6 +3185,170 @@ func clampInt(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+func paneBox(width, height int, focused bool) (lipgloss.Style, int) {
+	inner := width - 2
+	if inner < 10 {
+		inner = 10
+	}
+	border := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#334155")).
+		Width(width).
+		Height(height - 2)
+	if focused {
+		border = border.BorderForeground(lipgloss.Color("#38BDF8"))
+	}
+	return border, inner
+}
+
+type flexCol struct {
+	content int
+	min     int
+	max     int
+	flex    int
+}
+
+func flexWidths(cols []flexCol, inner int) []int {
+	out := make([]int, len(cols))
+	if len(cols) == 0 {
+		return out
+	}
+	total := 0
+	for i, c := range cols {
+		w := c.content
+		if w < c.min {
+			w = c.min
+		}
+		if c.max > 0 && w > c.max {
+			w = c.max
+		}
+		out[i] = w
+		total += w
+	}
+	gaps := len(cols) - 1
+	if gaps < 0 {
+		gaps = 0
+	}
+	total += gaps
+	if total <= inner {
+		return distributeFlexGrow(out, cols, inner-gaps)
+	}
+	return shrinkFlex(out, cols, inner-gaps)
+}
+
+func distributeFlexGrow(out []int, cols []flexCol, budget int) []int {
+	used := 0
+	for _, w := range out {
+		used += w
+	}
+	slack := budget - used
+	if slack <= 0 {
+		return out
+	}
+	for slack > 0 {
+		totalFlex := 0
+		for i, c := range cols {
+			if c.flex <= 0 {
+				continue
+			}
+			if c.max > 0 && out[i] >= c.max {
+				continue
+			}
+			totalFlex += c.flex
+		}
+		if totalFlex <= 0 {
+			break
+		}
+		progress := false
+		base := slack
+		for i, c := range cols {
+			if base <= 0 {
+				break
+			}
+			if c.flex <= 0 {
+				continue
+			}
+			if c.max > 0 && out[i] >= c.max {
+				continue
+			}
+			share := base * c.flex / totalFlex
+			if share < 1 {
+				share = 1
+			}
+			if c.max > 0 && out[i]+share > c.max {
+				share = c.max - out[i]
+			}
+			if share > slack {
+				share = slack
+			}
+			if share <= 0 {
+				continue
+			}
+			out[i] += share
+			slack -= share
+			progress = true
+			if slack <= 0 {
+				break
+			}
+		}
+		if !progress {
+			break
+		}
+	}
+	return out
+}
+
+func shrinkFlex(out []int, cols []flexCol, budget int) []int {
+	used := 0
+	for _, w := range out {
+		used += w
+	}
+	over := used - budget
+	if over <= 0 {
+		return out
+	}
+	shrinkable := func(i int) int {
+		if out[i] > cols[i].min {
+			return out[i] - cols[i].min
+		}
+		return 0
+	}
+	for over > 0 {
+		totalFlex := 0
+		for i := range cols {
+			if shrinkable(i) > 0 && cols[i].flex > 0 {
+				totalFlex += cols[i].flex
+			}
+		}
+		if totalFlex <= 0 {
+			break
+		}
+		progress := false
+		for i, c := range cols {
+			if over <= 0 {
+				break
+			}
+			if c.flex <= 0 || shrinkable(i) <= 0 {
+				continue
+			}
+			share := over * c.flex / totalFlex
+			if share < 1 {
+				share = 1
+			}
+			if share > shrinkable(i) {
+				share = shrinkable(i)
+			}
+			out[i] -= share
+			over -= share
+			progress = true
+		}
+		if !progress {
+			break
+		}
+	}
+	return out
 }
 
 type Program struct {

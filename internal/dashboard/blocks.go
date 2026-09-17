@@ -349,7 +349,7 @@ func (m *model) applyBlockDecision(msg blockDecisionMsg) {
 	m.dirty = true
 }
 
-func blockRow(s dashrpc.BlockSummary, idW, modelW int) string {
+func blockRow(s dashrpc.BlockSummary, idW, rulesW, modelW int) string {
 	ts := s.Timestamp
 	if len(ts) > 19 {
 		if idx := strings.Index(ts, "T"); idx >= 0 && idx+9 <= len(ts) {
@@ -361,21 +361,14 @@ func blockRow(s dashrpc.BlockSummary, idW, modelW int) string {
 	return dataRow([]string{
 		truncate(ts, 8),
 		truncate(s.BlockID, idW),
-		truncate(strings.Join(s.RuleIDs, ","), modelW),
+		truncate(strings.Join(s.RuleIDs, ","), rulesW),
 		fmt.Sprintf("%4d", s.FindingCount),
 		truncate(s.PublicModel, modelW),
-	}, []int{8, idW, modelW, 4, modelW})
+	}, []int{8, idW, rulesW, 4, modelW})
 }
 
 func renderBlocks(m *model, width, height int) string {
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#334155")).
-		Width(width - 2).
-		Height(height - 2)
-	if m.focus == focusBottom && m.bottomTab == bottomTabBlocks {
-		borderStyle = borderStyle.BorderForeground(lipgloss.Color("#38BDF8"))
-	}
+	borderStyle, inner := paneBox(width, height, m.focus == focusBottom && m.bottomTab == bottomTabBlocks)
 	title := "BLOCKS newest-first (take-once detail) [r]efresh"
 	rows := []string{title}
 	if m.blockFetcher == nil {
@@ -383,7 +376,7 @@ func renderBlocks(m *model, width, height int) string {
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if m.blockErr != "" {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Render("fetch failed: "+truncate(m.blockErr, width-4)))
+		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Render("fetch failed: "+truncate(m.blockErr, inner)))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if !m.blockKnown && !m.blockEnabled && len(m.blocks) == 0 {
@@ -398,9 +391,21 @@ func renderBlocks(m *model, width, height int) string {
 		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("no quarantined blocks"))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
-	inner := width - 2
-	idW, modelW := 36, 24
-	rows = append(rows, headerStyle.Render(fitRow(headerCells([]col{{"AT", 8}, {"BLOCK_ID", idW}, {"RULES", modelW}, {"N", 4}, {"MODEL", modelW}}), inner)))
+	idContent, rulesContent, modelContent := len("BLOCK_ID"), len("RULES"), len("MODEL")
+	for _, b := range m.blocks {
+		idContent = max(idContent, runeLen(b.BlockID))
+		rulesContent = max(rulesContent, runeLen(strings.Join(b.RuleIDs, ",")))
+		modelContent = max(modelContent, runeLen(b.PublicModel))
+	}
+	got := flexWidths([]flexCol{
+		{content: 8, min: 8, max: 8},
+		{content: idContent, min: 8, max: 40, flex: 3},
+		{content: rulesContent, min: 5, max: 32, flex: 2},
+		{content: 4, min: 4, max: 4},
+		{content: modelContent, min: 5, max: 40, flex: 2},
+	}, inner)
+	idW, rulesW, modelW := got[1], got[2], got[4]
+	rows = append(rows, headerStyle.Render(fitRow(headerCells([]col{{"AT", 8}, {"BLOCK_ID", idW}, {"RULES", rulesW}, {"N", 4}, {"MODEL", modelW}}), inner)))
 	visible := m.bottomVisibleRows()
 	start := m.blockOffset
 	end := start + visible
@@ -409,7 +414,7 @@ func renderBlocks(m *model, width, height int) string {
 	}
 	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
 	for i := start; i < end; i++ {
-		line := fitRow(blockRow(m.blocks[i], idW, modelW), inner-2)
+		line := fitRow(blockRow(m.blocks[i], idW, rulesW, modelW), inner-2)
 		if i == m.blockCursor {
 			line = cursorStyle.Render("▸ " + line)
 		} else {
@@ -424,15 +429,7 @@ func renderBlocks(m *model, width, height int) string {
 }
 
 func renderBlockDetail(m *model, width, height int) string {
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#38BDF8")).
-		Width(width - 2).
-		Height(height - 2)
-	inner := width - 4
-	if inner < 10 {
-		inner = 10
-	}
+	borderStyle, inner := paneBox(width, height, true)
 	title := "BLOCK " + m.blockDetailID
 	if m.blockPendingID != "" {
 		title = "BLOCK " + m.blockPendingID + " (loading…)"

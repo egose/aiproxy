@@ -1976,6 +1976,40 @@ func TestHandlerAccountingRecordsAliasServingTarget(t *testing.T) {
 	}
 }
 
+// Upstream accounting identity must be the catalog-local model name, not the
+// transport upstream_name: alias target refs, pricing keys, and cost
+// attribution all resolve through provider/local-model.
+func TestHandlerAccountingUpstreamUsesLocalModelName(t *testing.T) {
+	rt := &config.Runtime{Catalog: config.NewCatalog([]config.Provider{
+		{Type: config.ProviderTypeOpenAICompatible, Name: "dxc", APIKey: "key", BaseURL: "https://x",
+			Models: []config.Model{{Name: "muse-spark", UpstreamName: "zen/muse-spark"}}},
+	}, nil, []config.Alias{{
+		Name:      "a",
+		Algorithm: config.AlgorithmRoundRobin,
+		Targets:   []config.AliasTarget{{Provider: "dxc", Model: "muse-spark"}},
+	}})}
+	usage := accounting.NewAggregator()
+	h := NewHandler(Dependencies{
+		Resolver:   modelresolver.New(rt),
+		Adapter:    &stubAdapter{},
+		Auth:       auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:    rt.Catalog,
+		Metrics:    observability.NewMetrics(),
+		Accounting: usage,
+		Usage:      usage,
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"alias/a","messages":[]}`)))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	upstream := usage.UpstreamSummaries()
+	if len(upstream) != 1 || upstream[0].Provider != "dxc" || upstream[0].Model != "muse-spark" {
+		t.Fatalf("upstream = %+v, want dxc/muse-spark local identity", upstream)
+	}
+}
+
 func TestHandlerAccountingRecordsUsageTokens(t *testing.T) {
 	rt := newRT()
 	recorder := &accounting.MemoryRecorder{}
@@ -2145,6 +2179,65 @@ func TestHandlerBillingUsageFiltersToTenant(t *testing.T) {
 	}
 	if resp.Data[0].Tenant != "team-a" || resp.Data[0].Client != "ci" {
 		t.Fatalf("filtered summary = %+v", resp.Data[0])
+	}
+}
+
+func TestHandlerBillingUsagePricesAliasRows(t *testing.T) {
+	rt := &config.Runtime{
+		Catalog: config.NewCatalog([]config.Provider{
+			{
+				Type:   config.ProviderTypeOpenAICompatible,
+				Name:   "dxc",
+				APIKey: "sk",
+				Models: []config.Model{{Name: "m", UpstreamName: "m",
+					Pricing: &config.ModelPricing{InputPerMillion: 0.1, OutputPerMillion: 0.2, CachedPerMillion: 0.002}}},
+			},
+		}, nil, []config.Alias{
+			{
+				Name:      "x",
+				Algorithm: config.AlgorithmRoundRobin,
+				Targets:   []config.AliasTarget{{Provider: "dxc", Model: "m"}},
+			},
+		}),
+	}
+	usage := accounting.NewAggregator()
+	usage.Record(accounting.Event{Model: "alias/x", Operation: "responses", StatusCode: 200,
+		Provider: "dxc", UpstreamModel: "m",
+		PromptTokens: 1000000, CompletionTokens: 1000000, TotalTokens: 2000000, CachedTokens: 500000})
+	h := NewHandler(Dependencies{
+		Resolver:   modelresolver.New(rt),
+		Adapter:    &stubAdapter{},
+		Auth:       auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:    rt.Catalog,
+		Metrics:    observability.NewMetrics(),
+		Accounting: usage,
+		Usage:      usage,
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/v1/billing/usage", nil)
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Object string `json:"object"`
+		Data   []struct {
+			Model            string   `json:"Model"`
+			EstimatedCostUSD *float64 `json:"estimated_cost_usd"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal billing usage: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].Model != "alias/x" {
+		t.Fatalf("response = %+v", resp)
+	}
+	if resp.Data[0].EstimatedCostUSD == nil {
+		t.Fatalf("alias row missing estimated_cost_usd: %+v", resp.Data[0])
+	}
+	want := 0.5*0.1 + 1.0*0.2 + 0.5*0.002
+	if got := *resp.Data[0].EstimatedCostUSD; got < want-1e-9 || got > want+1e-9 {
+		t.Fatalf("cost = %v, want %v", got, want)
 	}
 }
 

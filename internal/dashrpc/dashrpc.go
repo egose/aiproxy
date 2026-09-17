@@ -81,11 +81,19 @@ type HealthcheckStatus struct {
 }
 
 type Provider struct {
-	Type        string   `json:"type"`
-	Name        string   `json:"name"`
-	DisplayName string   `json:"display_name,omitempty"`
-	BaseURL     string   `json:"base_url,omitempty"`
-	Models      []string `json:"models"`
+	Type        string       `json:"type"`
+	Name        string       `json:"name"`
+	DisplayName string       `json:"display_name,omitempty"`
+	BaseURL     string       `json:"base_url,omitempty"`
+	Models      []ModelPrice `json:"models"`
+}
+
+type ModelPrice struct {
+	Name                 string   `json:"name"`
+	InputPerMillion      *float64 `json:"input_per_million,omitempty"`
+	OutputPerMillion     *float64 `json:"output_per_million,omitempty"`
+	CachedPerMillion     *float64 `json:"cached_per_million,omitempty"`
+	CacheWritePerMillion *float64 `json:"cache_write_per_million,omitempty"`
 }
 
 type Alias struct {
@@ -352,9 +360,20 @@ func toProviders(in []config.Provider) []Provider {
 	}
 	out := make([]Provider, len(in))
 	for i, p := range in {
-		models := make([]string, 0, len(p.Models))
+		models := make([]ModelPrice, 0, len(p.Models))
 		for _, m := range p.Models {
-			models = append(models, m.Name)
+			mp := ModelPrice{Name: m.Name}
+			if m.Pricing != nil && m.Pricing.HasRates() {
+				inRate := m.Pricing.InputPerMillion
+				outRate := m.Pricing.OutputPerMillion
+				cachedRate := m.Pricing.CachedPerMillion
+				writeRate := m.Pricing.CacheWritePerMillion
+				mp.InputPerMillion = &inRate
+				mp.OutputPerMillion = &outRate
+				mp.CachedPerMillion = &cachedRate
+				mp.CacheWritePerMillion = &writeRate
+			}
+			models = append(models, mp)
 		}
 		out[i] = Provider{
 			Type:        string(p.Type),

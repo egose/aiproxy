@@ -50,7 +50,7 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 	})
 	if result != nil {
 		result.Provider = r.Provider.Name
-		result.UpstreamModel = upstreamDisplayName(r.Model)
+		result.UpstreamModel = r.Model.Name
 	}
 	if deps.Metrics != nil && (result == nil || !result.Streaming) {
 		status := 0
@@ -94,13 +94,6 @@ type aliasPoolTarget struct {
 	model       config.Model
 	fingerprint modelresolver.CooldownFingerprint
 	ok          bool
-}
-
-func upstreamDisplayName(model config.Model) string {
-	if model.UpstreamName != "" {
-		return model.UpstreamName
-	}
-	return model.Name
 }
 
 func resolveAliasPool(deps Dependencies, aliasName string, targets []config.AliasTarget) []aliasPoolTarget {
@@ -349,7 +342,7 @@ targetLoop:
 			})
 			if result != nil {
 				result.Provider = t.Provider
-				result.UpstreamModel = upstreamDisplayName(model)
+				result.UpstreamModel = model.Name
 			}
 			if deps.Metrics != nil && (result == nil || !result.Streaming) {
 				status := 0

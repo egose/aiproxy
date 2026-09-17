@@ -280,7 +280,11 @@ func (m *Manager) probeURL(ctx context.Context, p config.Provider, target string
 	if err != nil {
 		return 0, "", err
 	}
-	req.Header.Set("User-Agent", "aiproxy/"+m.version)
+	if p.UserAgent != "" {
+		req.Header.Set("User-Agent", p.UserAgent)
+	} else {
+		req.Header.Set("User-Agent", "aiproxy/"+m.version)
+	}
 	req.Header.Set("Accept", "*/*")
 	if hc.SendAuthorization && p.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+p.APIKey)

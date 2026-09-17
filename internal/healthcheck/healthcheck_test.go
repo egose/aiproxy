@@ -247,6 +247,28 @@ func TestManagerUserAgent(t *testing.T) {
 	}
 }
 
+func TestManagerUserAgentOverride(t *testing.T) {
+	var gotUA atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA.Store(r.Header.Get("User-Agent"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tracker := providerhealth.New(nil, config.ProviderHealth{})
+	provider := testProvider("local", srv.URL, fastCheck("/health"))
+	provider.UserAgent = "custom/1.0"
+	tracker.SetProviders(config.NewCatalog([]config.Provider{provider}, nil, nil))
+	m := New(tracker, nil, "9.9.9")
+	defer m.Close()
+	m.SetProviders(config.NewCatalog([]config.Provider{provider}, nil, nil))
+
+	waitForStatus(t, m, "local")
+	if ua, _ := gotUA.Load().(string); ua != "custom/1.0" {
+		t.Fatalf("user agent = %q, want custom/1.0", ua)
+	}
+}
+
 func TestManagerRemoveProviderStopsProbing(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

@@ -65,6 +65,7 @@ type Recorder interface {
 
 type Reader interface {
 	Summaries() []Summary
+	UpstreamSummaries() []UpstreamSummary
 }
 
 type Snapshotter interface {
@@ -189,6 +190,38 @@ func (r *MemoryRecorder) Recent(n int) []Event {
 	out := make([]Event, n)
 	copy(out, r.events[len(r.events)-n:])
 	return out
+}
+
+func (r *MemoryRecorder) Summaries() []Summary {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	byKey := map[summaryKey]*Summary{}
+	var order []summaryKey
+	for _, e := range r.events {
+		key := summaryKey{tenant: e.Tenant, client: e.Client, model: e.Model, operation: e.Operation, statusCode: e.StatusCode}
+		s, ok := byKey[key]
+		if !ok {
+			s = &Summary{Tenant: key.tenant, Client: key.client, Model: key.model, Operation: key.operation, StatusCode: key.statusCode}
+			byKey[key] = s
+			order = append(order, key)
+		}
+		s.Count++
+		s.PromptTokens += e.PromptTokens
+		s.CompletionTokens += e.CompletionTokens
+		s.TotalTokens += e.TotalTokens
+		s.CachedTokens += e.CachedTokens
+		s.CacheCreationTokens += e.CacheCreationTokens
+		s.CacheReadTokens += e.CacheReadTokens
+	}
+	out := make([]Summary, 0, len(order))
+	for _, key := range order {
+		out = append(out, *byKey[key])
+	}
+	return out
+}
+
+func (r *MemoryRecorder) UpstreamSummaries() []UpstreamSummary {
+	return nil
 }
 
 type providerEntry struct {

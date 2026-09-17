@@ -179,7 +179,7 @@ func TestByProviderInSnapshot(t *testing.T) {
 
 func TestProviderRowFormatsErrorAndP95(t *testing.T) {
 	ps := accounting.ProviderSummary{Provider: "openai", Requests: 4, Errors: 1, TotalTokens: 25}
-	row := providerRow("openai", true, true, "-", ps, 2, 1_200*time.Millisecond, 5, false, "1.2.3.4", 18, 9, 5, 4, 10)
+	row := providerRow("openai", true, true, "-", ps, 2, 1_200*time.Millisecond, 5, false, "1.2.3.4", "-", 18, 9, 5, 4, 10, 4)
 	if !strings.Contains(row, "4") || !strings.Contains(row, "25.0%") || !strings.Contains(row, "1.2s") {
 		t.Errorf("provider row missing err/p95: %q", row)
 	}
@@ -227,7 +227,7 @@ func TestProviderPaneAttributesAliasTraffic(t *testing.T) {
 
 func TestProviderRowUnknownHealthAndSparseLatency(t *testing.T) {
 	ps := accounting.ProviderSummary{Provider: "openai", Requests: 1}
-	row := providerRow("openai", false, false, "-", ps, 0, 0, 0, false, "-", 18, 9, 5, 4, 10)
+	row := providerRow("openai", false, false, "-", ps, 0, 0, 0, false, "-", "-", 18, 9, 5, 4, 10, 4)
 	if !strings.Contains(row, "?") {
 		t.Errorf("expected unknown health mark: %q", row)
 	}
@@ -459,31 +459,72 @@ func TestUsageColumnsShrinkOnNarrowTerminal(t *testing.T) {
 	summaries := []accounting.Summary{
 		{Model: "alias/muse-spark-1.3-contributor-free", Operation: "responses", StatusCode: 200, Count: 1615, TotalTokens: 1191785},
 	}
-	modelW, opW, countW, tokW := usageColWidths(summaries, 58)
-	if total := modelW + opW + 6 + countW + tokW + 4; total > 58 {
+	modelW, opW, countW, tokW, costW := usageColWidths(summaries, costTexts(summaries, nil, nil, nil), 58)
+	if total := modelW + opW + 6 + countW + tokW + costW + 5; total > 58 {
 		t.Fatalf("columns overflow narrow pane: %d > 58", total)
 	}
-	if modelW < 10 || opW < 8 || countW < 4 || tokW < 6 {
-		t.Fatalf("columns shrank below floors: %d %d %d %d", modelW, opW, countW, tokW)
+	if modelW < 10 || opW < 8 || countW < 4 || tokW < 6 || costW < 4 {
+		t.Fatalf("columns shrank below floors: %d %d %d %d %d", modelW, opW, countW, tokW, costW)
 	}
 }
 
 func TestProviderColumnsSizeToContent(t *testing.T) {
-	nameW, ipW, reqW, t429W, tokW := providerColWidths([]string{"zen", "render-coreanesque"}, []string{"-", "1.2.3.4"}, []int64{0, 1615}, []int64{0, 280}, []string{"~", "1,234,567"}, 125)
-	if nameW != len("render-coreanesque") {
-		t.Fatalf("nameW = %d, want %d", nameW, len("render-coreanesque"))
+	nameW, ipW, reqW, t429W, tokW, _ := providerColWidths([]string{"zen", "render-coreanesque"}, []string{"-", "1.2.3.4"}, []int64{0, 1615}, []int64{0, 280}, []string{"~", "1,234,567"}, []string{"-", "$1.23"}, 125)
+	if nameW < len("render-coreanesque") {
+		t.Fatalf("nameW = %d, want >= %d (content width plus slack distribution)", nameW, len("render-coreanesque"))
 	}
-	if ipW != len("1.2.3.4") {
-		t.Fatalf("ipW = %d, want %d", ipW, len("1.2.3.4"))
+	if ipW < len("1.2.3.4") {
+		t.Fatalf("ipW = %d, want >= %d", ipW, len("1.2.3.4"))
 	}
-	if reqW != len("1,615") {
-		t.Fatalf("reqW = %d, want %d", reqW, len("1,615"))
+	if reqW < len("1,615") {
+		t.Fatalf("reqW = %d, want >= %d", reqW, len("1,615"))
 	}
-	if t429W != len("280") {
-		t.Fatalf("t429W = %d, want %d", t429W, len("280"))
+	if t429W < len("280") {
+		t.Fatalf("t429W = %d, want >= %d", t429W, len("280"))
 	}
-	if tokW != len("1,234,567") {
-		t.Fatalf("tokW = %d, want %d", tokW, len("1,234,567"))
+	if tokW < len("1,234,567") {
+		t.Fatalf("tokW = %d, want >= %d", tokW, len("1,234,567"))
+	}
+}
+
+func TestFlexWidthsGrowAndShrink(t *testing.T) {
+	got := flexWidths([]flexCol{{content: 5, min: 3, max: 10, flex: 1}, {content: 4, min: 4, max: 4}}, 12)
+	if got[0]+got[1]+1 != 12 {
+		t.Fatalf("flex grow must fill inner width, got %v", got)
+	}
+	if got[0] <= 5 {
+		t.Fatalf("flex column should absorb slack, got %v", got)
+	}
+	got = flexWidths([]flexCol{{content: 30, min: 10, max: 64, flex: 3}, {content: 4, min: 4, max: 4}}, 20)
+	if got[0]+got[1]+1 != 20 {
+		t.Fatalf("flex shrink must fit inner width, got %v", got)
+	}
+}
+
+func TestFlexGrowSharesSlackByWeight(t *testing.T) {
+	got := flexWidths([]flexCol{
+		{content: 10, min: 10, max: 48, flex: 2},
+		{content: 46, min: 6, max: 0, flex: 3},
+	}, 120)
+	if got[0]+got[1]+1 != 120 {
+		t.Fatalf("flex grow must fill inner width, got %v", got)
+	}
+	if got[1] < 46 {
+		t.Fatalf("wide content column must not shrink on grow, got %v", got)
+	}
+	if got[1]-46 < got[0]-10 {
+		t.Fatalf("higher flex column should take more slack, got %v", got)
+	}
+}
+
+func TestUsageTokensColumnFitsLongSplit(t *testing.T) {
+	summaries := []accounting.Summary{
+		{Model: "a", Operation: "chat", StatusCode: 200, Count: 1, PromptTokens: 290296, CompletionTokens: 179, TotalTokens: 290475, CachedTokens: 2289},
+	}
+	_, _, _, tokW, _ := usageColWidths(summaries, costTexts(summaries, nil, nil, nil), 200)
+	want := len("290,296/179 (2,289c)")
+	if tokW < want {
+		t.Fatalf("tokW = %d, want >= %d for %q", tokW, want, "290,296/179 (2,289c)")
 	}
 }
 
@@ -538,9 +579,12 @@ func TestProviderPaneScrollsManyProviders(t *testing.T) {
 		t.Fatalf("last provider visible without scrolling:\n%s", first)
 	}
 	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+	if mod := mm.(*model); mod.focus != focusBottom {
+		t.Fatalf("focus = %v, want bottom after tab from usage", mod.focus)
+	}
 	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
 	if mod := mm.(*model); mod.focus != focusProviders {
-		t.Fatalf("focus = %v, want providers", mod.focus)
+		t.Fatalf("focus = %v, want providers after second tab", mod.focus)
 	}
 	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "G"}))
 	if got := mm.View().Content; !strings.Contains(got, "prov-"+strings.Repeat("x", 19)) {
@@ -557,9 +601,26 @@ func TestTabCyclesThreeFocusAreas(t *testing.T) {
 		t.Fatalf("focus = %v, want usage", mod.focus)
 	}
 	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+	if mod := mm.(*model); mod.focus != focusBottom {
+		t.Fatalf("focus after tab = %v, want bottom", mod.focus)
+	}
 	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
 	if mod := mm.(*model); mod.focus != focusProviders {
 		t.Fatalf("focus after 2 tabs = %v, want providers", mod.focus)
+	}
+	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+	if mod := mm.(*model); mod.focus != focusUsage {
+		t.Fatalf("focus after 3 tabs = %v, want usage", mod.focus)
+	}
+}
+
+func TestShiftTabCyclesBackward(t *testing.T) {
+	snap := newSnapshot()
+	m := &model{snapshot: snap, health: map[string]bool{}, now: time.Now(), dirty: true, focus: focusUsage}
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift}))
+	if mod := mm.(*model); mod.focus != focusProviders {
+		t.Fatalf("focus after shift+tab = %v, want providers", mod.focus)
 	}
 }
 
@@ -601,22 +662,59 @@ func TestZoomedBottomKeepsTabs(t *testing.T) {
 	}
 }
 
-func TestSideWidthSplitsEvenly(t *testing.T) {
-	narrow := &model{snapshot: &RuntimeSnapshot{Providers: []config.Provider{{Name: "a"}, {Name: "b"}}}, width: 120}
-	if got := narrow.sideWidth(); got != 60 {
-		t.Fatalf("sideWidth = %d, want 60 for width 120", got)
+func TestSplitStatsHeightFitsProviderRows(t *testing.T) {
+	snap := &RuntimeSnapshot{Providers: []config.Provider{{Name: "a"}, {Name: "b"}}}
+	m := &model{snapshot: snap, statsHeight: 20}
+	provH, usageH := m.splitStatsHeight(20)
+	if provH+usageH != 20 {
+		t.Fatalf("split = %d+%d, want total 20", provH, usageH)
 	}
+	if provH < 2+4 {
+		t.Fatalf("providers height = %d, want room for 2 rows", provH)
+	}
+	if usageH < 6 {
+		t.Fatalf("usage height = %d, want >= 6", usageH)
+	}
+}
+
+func TestSplitStatsHeightCapsTallProviderList(t *testing.T) {
 	var many []config.Provider
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 30; i++ {
 		many = append(many, config.Provider{Name: "very-long-provider-name-" + strings.Repeat("z", 10)})
 	}
-	wide := &model{snapshot: &RuntimeSnapshot{Providers: many}, width: 120}
-	if got := wide.sideWidth(); got != 60 {
-		t.Fatalf("sideWidth = %d, want 60 regardless of provider name length", got)
+	m := &model{snapshot: &RuntimeSnapshot{Providers: many}, statsHeight: 20}
+	provH, usageH := m.splitStatsHeight(20)
+	if usageH < 6 {
+		t.Fatalf("usage height = %d, want >= 6 when providers overflow", usageH)
 	}
-	odd := &model{width: 121}
-	if got, want := odd.sideWidth(), 60; got != want {
-		t.Fatalf("sideWidth = %d, want %d for odd width 121", got, want)
+	if provH+usageH != 20 {
+		t.Fatalf("split = %d+%d, want total 20", provH, usageH)
+	}
+}
+
+func TestTopStackRendersBothPanesFullWidth(t *testing.T) {
+	snap := newSnapshot()
+	m := &model{snapshot: snap, health: map[string]bool{}, now: time.Now(), dirty: true, focus: focusUsage, statsHeight: 20, width: 120}
+	got := m.renderTopStacked(120, 20)
+	if !strings.Contains(got, "PROVIDER") {
+		t.Errorf("stacked top missing providers pane:\n%s", got)
+	}
+	if !strings.Contains(got, "USAGE") {
+		t.Errorf("stacked top missing usage pane:\n%s", got)
+	}
+}
+
+func TestEnterZoomsProvidersPane(t *testing.T) {
+	snap := newSnapshot()
+	m := &model{snapshot: snap, health: map[string]bool{}, now: time.Now(), dirty: true, focus: focusProviders}
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "z"}))
+	got := mm.View().Content
+	if !strings.Contains(got, "PROVIDER") {
+		t.Fatalf("zoomed providers pane missing:\n%s", got)
+	}
+	if strings.Contains(got, "USAGE") {
+		t.Errorf("zoomed providers should hide usage pane:\n%s", got)
 	}
 }
 

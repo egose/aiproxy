@@ -572,8 +572,24 @@ func (h *Handler) handleBilling(deps Dependencies, w http.ResponseWriter, r *htt
 		return true
 	}
 	summaries := accounting.FilterSummaries(deps.Usage.Summaries(), principalTenant(principal), principalName(principal))
-	h.writeBillingUsage(w, summaries)
+	var upstream []accounting.UpstreamSummary
+	if deps.Usage != nil {
+		upstream = deps.Usage.UpstreamSummaries()
+	}
+	h.writeBillingUsage(w, summaries, billingPrices(deps.Catalog), deps.Catalog.Aliases(), upstream)
 	return true
+}
+
+func billingPrices(catalog config.Catalog) map[string]*config.ModelPricing {
+	out := map[string]*config.ModelPricing{}
+	for _, p := range catalog.Providers() {
+		for _, m := range p.Models {
+			if m.Pricing != nil && m.Pricing.HasRates() {
+				out[p.Name+"/"+m.Name] = m.Pricing
+			}
+		}
+	}
+	return out
 }
 
 func (h *Handler) allowRequest(deps Dependencies, w http.ResponseWriter, r *http.Request, principal *auth.Principal) bool {

@@ -140,13 +140,36 @@ func healthchecksFromTransport(in []dashrpc.HealthcheckStatus) []HealthcheckEntr
 
 // configModels converts a list of model names into the minimal config.Model
 // shape the dashboard renderer reads (it only inspects m.Name).
-func configModels(names []string) []config.Model {
+func configModels(names []dashrpc.ModelPrice) []config.Model {
 	if len(names) == 0 {
 		return nil
 	}
 	out := make([]config.Model, len(names))
 	for i, n := range names {
-		out[i] = config.Model{Name: n}
+		out[i] = config.Model{Name: n.Name, Pricing: modelPricing(n)}
+	}
+	return out
+}
+
+func modelPricing(mp dashrpc.ModelPrice) *config.ModelPricing {
+	if mp.InputPerMillion == nil && mp.OutputPerMillion == nil && mp.CachedPerMillion == nil && mp.CacheWritePerMillion == nil {
+		return nil
+	}
+	out := &config.ModelPricing{}
+	if mp.InputPerMillion != nil {
+		out.InputPerMillion = *mp.InputPerMillion
+	}
+	if mp.OutputPerMillion != nil {
+		out.OutputPerMillion = *mp.OutputPerMillion
+	}
+	if mp.CachedPerMillion != nil {
+		out.CachedPerMillion = *mp.CachedPerMillion
+	}
+	if mp.CacheWritePerMillion != nil {
+		out.CacheWritePerMillion = *mp.CacheWritePerMillion
+	}
+	if !out.HasRates() {
+		return nil
 	}
 	return out
 }

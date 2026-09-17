@@ -40,7 +40,7 @@ func TestBuildSerializesAllLiveState(t *testing.T) {
 	if snap.StartTime != start {
 		t.Fatalf("StartTime = %v, want %v", snap.StartTime, start)
 	}
-	if len(snap.Providers) != 1 || snap.Providers[0].Name != "openai" || snap.Providers[0].Models[0] != "gpt-4o-mini" {
+	if len(snap.Providers) != 1 || snap.Providers[0].Name != "openai" || snap.Providers[0].Models[0].Name != "gpt-4o-mini" {
 		t.Fatalf("Providers mis-serialized: %+v", snap.Providers)
 	}
 	if len(snap.DisabledProviders) != 1 || snap.DisabledProviders[0].Name != "localai" {
