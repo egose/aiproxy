@@ -356,9 +356,16 @@ When `access_log = true`, request logs include events for request receipt, upstr
 
 ### Payload logging
 
-The optional nested `payload_log` block records full request/response headers
+The optional nested `payload_log` block records request/response headers
 and bodies as JSONL (one JSON object per line per inference request). It is
-disabled by default.
+disabled by default. Each entry carries three sides: `request` (inbound
+headers and body as received), `upstream_request` (headers and body actually
+sent upstream, after model rewrites and provider translation; present only
+when an upstream call was made, so alias retries log the final attempt), and
+`response` (the upstream reply, or the proxy's own error on early rejections).
+Credential headers (`Authorization`, `x-api-key`, `x-goog-api-key`, cookies)
+are redacted on every side, and bodies covered by an ingress-guardrail policy
+are omitted from both request sides.
 
 ```hcl
 logging {
