@@ -164,8 +164,8 @@ provider "github-copilot" "copilot" {
 `credential_ref.path` defaults to the shared secrets path so the sidecar is
 found next to `keys.json`; set it explicitly only for a custom location.
 Derived `github-copilot` providers require their own local `credential_ref`
-and stay compact (no `base_url`/models). `api_key`/`api_key_ref`,
-`protocol`, and `user_agent` are rejected on Copilot blocks, and
+and stay compact (no `base_url`/models). `api_key`/`api_key_ref` and
+`protocol` are rejected on Copilot blocks, and
 `credential_ref` is rejected on all other types.
 
 Activate with restart or `SIGHUP`; key-file-only changes never affect a
@@ -768,7 +768,7 @@ provider "openai" "backup" {
   caching. Callers may supply their own session value (1-128 characters of
   `[A-Za-z0-9_-]`), falling back to a valid caller `X-Session-Id`; missing or invalid values get a fresh per-request ID, never
   a shared global session. A caller-supplied `x-opencode-client` is forwarded
-  under the same validity rule. Either type may declare `user_agent` to
+  under the same validity rule. Any provider type may declare `user_agent` to
   override the default `aiproxy/<version>` upstream `User-Agent`.
 - Direct `<provider>/<model>` requests never cross OpenCode services. Upstream
   Go quota/limit errors are returned to the client like any other upstream
@@ -785,7 +785,7 @@ provider "openai" "backup" {
   Upstream `401`/`403` is returned verbatim with a re-login hint: re-run
   `aiproxy login github-copilot` with the same client ID/credential name, then
   restart or `SIGHUP`. Upstream inference sends only an allowlist
-  (`Authorization` from the stored login, proxy `User-Agent: aiproxy/<version>`,
+  (`Authorization` from the stored login, proxy `User-Agent`,
   `X-GitHub-Api-Version`, `Openai-Intent`, derived `x-initiator: user`, and
   `Copilot-Vision-Request` only when the body contains image parts); inbound
   authorization, cookies, `x-api-key`, and caller-supplied Copilot metadata are

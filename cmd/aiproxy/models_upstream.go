@@ -84,8 +84,8 @@ func listOpenAIStyleModels(ctx context.Context, provider config.Provider, openco
 	if provider.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 	}
+	req.Header.Set("User-Agent", providerCLIUserAgent(provider))
 	if opencodeHeaders {
-		req.Header.Set("User-Agent", opencodeCLIUserAgent(provider))
 		if session, err := newCLIopencodeSession(); err == nil {
 			req.Header.Set("x-opencode-session", session)
 		}
@@ -134,6 +134,7 @@ func listAnthropicModels(ctx context.Context, provider config.Provider) ([]upstr
 		}
 		req.Header.Set("x-api-key", provider.APIKey)
 		req.Header.Set("anthropic-version", "2023-06-01")
+		req.Header.Set("User-Agent", providerCLIUserAgent(provider))
 		resp, err := upstreamHTTPClient(provider).Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("upstream call: %w", err)
@@ -183,6 +184,7 @@ func listGeminiModels(ctx context.Context, provider config.Provider) ([]upstream
 			return nil, err
 		}
 		req.Header.Set("x-goog-api-key", provider.APIKey)
+		req.Header.Set("User-Agent", providerCLIUserAgent(provider))
 		resp, err := upstreamHTTPClient(provider).Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("upstream call: %w", err)
@@ -233,6 +235,9 @@ func listGitHubCopilotModels(ctx context.Context, provider config.Provider) ([]u
 		return nil, err
 	}
 	copilotlogin.ApplyModelsHeaders(req, provider.CopilotToken, version)
+	if provider.UserAgent != "" {
+		req.Header.Set("User-Agent", provider.UserAgent)
+	}
 	resp, err := upstreamHTTPClient(provider).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("upstream call: %w", err)
@@ -284,7 +289,7 @@ func listGitHubCopilotModels(ctx context.Context, provider config.Provider) ([]u
 	return out, nil
 }
 
-func opencodeCLIUserAgent(provider config.Provider) string {
+func providerCLIUserAgent(provider config.Provider) string {
 	if provider.UserAgent != "" {
 		return provider.UserAgent
 	}

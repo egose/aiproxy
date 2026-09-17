@@ -333,7 +333,7 @@ performed. The same model name may use different protocols on each service
 never from the model name.
 
 Every upstream request sends `User-Agent: aiproxy/<version>` unless the
-provider declares a `user_agent` override (OpenCode types only), and
+provider declares a `user_agent` override, and
 `Authorization: Bearer <key>` (omitted for keyless Zen providers). Both services additionally send
 `x-opencode-session` for prompt caching: a caller-supplied inbound value is
 forwarded as-is when it is 1-128 characters of `[A-Za-z0-9_-]`; otherwise a
@@ -356,8 +356,8 @@ configuration; the proxy performs no runtime catalog sync.
 Chat-only device-flow provider (GitHub.com release scope). Defaults to
 `https://api.githubcopilot.com`; `base_url` is an optional transport override
 only (same absolute-URL and loopback rules as other providers) that never
-changes auth or header behavior. Models declare no `protocol` (rejected, as is
-`user_agent`); default and supported capabilities are `chat` only.
+changes auth or header behavior. Models declare no `protocol` (rejected);
+default and supported capabilities are `chat` only.
 
 Provisioning is explicit and headless-friendly:
 `aiproxy login github-copilot --client-id <id> --credential <name>` uses the
@@ -379,7 +379,7 @@ the same client ID/name, then reload.
 
 Inference is `POST {base}/chat/completions` with model rewrite and shared
 JSON/SSE pass-through handling. Upstream headers are an allowlist only:
-`Authorization` from the stored login, proxy `User-Agent: aiproxy/<version>`,
+`Authorization` from the stored login, proxy `User-Agent`,
 `X-GitHub-Api-Version`, `Openai-Intent`, derived `x-initiator: user`, and
 `Copilot-Vision-Request` only when the request body structurally contains
 image parts. Inbound authorization, cookies, `x-api-key`, and caller-supplied
@@ -881,8 +881,7 @@ The config loader should validate:
 - providers with both `api_key` and `api_key_ref`
 - `github-copilot` providers with `api_key`/`api_key_ref`, missing
   `credential_ref.name`, or `credential_ref` on any other provider type
-- `protocol` on any non-OpenCode provider type, or `user_agent` on any
-  non-OpenCode provider type (including `github-copilot`)
+- `protocol` on any non-OpenCode provider type
 - malformed, zero, or negative `upstream_header_timeout` values
 - active providers with no resolved credential, including an empty
   `api_key = env("...")`; missing or empty credentials fail validation unless

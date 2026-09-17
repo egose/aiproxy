@@ -354,7 +354,22 @@ type upstreamResponseHandlers struct {
 	OnSuccess       func(*http.Response, []byte) (*Result, error)
 }
 
+func upstreamUserAgent(r Request) string {
+	if r.UserAgent != "" {
+		return r.UserAgent
+	}
+	return "aiproxy/" + defaultVersion(r.Version)
+}
+
+func defaultVersion(version string) string {
+	if version == "" {
+		return "dev"
+	}
+	return version
+}
+
 func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHandlers) (*Result, error) {
+	req.Header.Set("User-Agent", upstreamUserAgent(r))
 	resp, err := clientFor(r).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("upstream call: %w", err)

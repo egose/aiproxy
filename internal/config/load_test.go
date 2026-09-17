@@ -885,7 +885,7 @@ provider "opencode-zen" "zen" {
 	}
 }
 
-func TestLoadRejectsUserAgentOnNonOpenCodeProvider(t *testing.T) {
+func TestLoadUserAgentOverrideOnNonOpenCodeProvider(t *testing.T) {
 	cfg := `
 listener "http" "public" { address = ":8080" }
 auth "main" { mode = "none" }
@@ -895,9 +895,16 @@ provider "openai" "openai" {
   model "m" {}
 }
 `
-	_, err := Load([]byte(cfg), "test.hcl")
-	if err == nil || !strings.Contains(err.Error(), "user_agent is only supported") {
-		t.Fatalf("expected user_agent type error, got %v", err)
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("user_agent override should load on non-OpenCode providers: %v", err)
+	}
+	p, ok := rt.Catalog.Provider("openai")
+	if !ok {
+		t.Fatal("openai provider missing from catalog")
+	}
+	if p.UserAgent != "opencode/local" {
+		t.Fatalf("openai UserAgent = %q, want override", p.UserAgent)
 	}
 }
 

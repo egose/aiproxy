@@ -263,7 +263,6 @@ func applyOpenCodeHeaders(req *http.Request, r Request) error {
 		req.Header.Set("Authorization", "Bearer "+r.APIKey)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", openCodeUserAgent(r))
 	if v := openCodeForwardedHeader(r, openCodeClientHeader); v != "" {
 		req.Header.Set(openCodeClientHeader, v)
 	}
@@ -273,20 +272,6 @@ func applyOpenCodeHeaders(req *http.Request, r Request) error {
 	}
 	req.Header.Set(openCodeSessionHeader, session)
 	return nil
-}
-
-func openCodeUserAgent(r Request) string {
-	if r.UserAgent != "" {
-		return r.UserAgent
-	}
-	return "aiproxy/" + openCodeDefaultVersion(r.Version)
-}
-
-func openCodeDefaultVersion(version string) string {
-	if version == "" {
-		return "dev"
-	}
-	return version
 }
 
 func openCodeForwardedHeader(r Request, name string) string {

@@ -34,6 +34,7 @@ type topLevelBlock = configedit.TopLevelBlock
 type providerInput = configedit.ProviderInput
 type providerCredentialInput = configedit.ProviderCredentialInput
 type providerModelInput = configedit.ProviderModelInput
+type providerModelPricingInput = configedit.ModelPricingInput
 type providerHealthcheckInput = configedit.ProviderHealthcheckInput
 type listenerInput = configedit.ListenerInput
 type authInput = configedit.AuthInput
@@ -291,7 +292,7 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().StringVar(&options.DisplayName, "display-name", "", "provider display_name")
 	cmd.Flags().StringVar(&options.BaseURL, "base-url", "", "provider base_url")
 	cmd.Flags().StringVar(&options.UpstreamHeaderTimeout, "upstream-header-timeout", "", "provider upstream_header_timeout")
-	cmd.Flags().StringVar(&options.UserAgent, "user-agent", "", "provider user_agent override (opencode-zen and opencode-go only)")
+	cmd.Flags().StringVar(&options.UserAgent, "user-agent", "", "provider user_agent override")
 	cmd.Flags().StringVar(&options.APIKey, "api-key", "", "provider API key or secret value")
 	cmd.Flags().StringVar(&options.APIKeyEnv, "api-key-env", "", "provider API key environment variable name")
 	cmd.Flags().StringVar(&options.SecretsPath, "secrets-path", "", "secrets file path for api_key_ref")
@@ -1795,9 +1796,6 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if validateOptionalUserAgent(options.UserAgent) != nil {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("invalid user-agent: must be 1-256 printable ASCII characters without newlines")
 		}
-		if defaults.ProviderType != "opencode-zen" && defaults.ProviderType != "opencode-go" {
-			return providerInput{}, secretsUpdate{}, fmt.Errorf("--user-agent is only supported for opencode-zen and opencode-go providers")
-		}
 		defaults.UserAgent = options.UserAgent
 	}
 	if err := applyProviderCredentialOptions(&defaults, options); err != nil {
@@ -1914,16 +1912,12 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			); err != nil {
 				return providerInput{}, secretsUpdate{}, err
 			}
-			if isOpenCodeProviderType(providerType) {
-				if err := prompts.runHuhForm(
-					huh.NewGroup(
-						huh.NewInput().Title("User agent override").Description(userAgentDescription()).Value(&userAgent).Validate(validateOptionalUserAgent),
-					).Title("User Agent"),
-				); err != nil {
-					return providerInput{}, secretsUpdate{}, err
-				}
-			} else {
-				userAgent = ""
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewInput().Title("User agent override").Description(userAgentDescription()).Value(&userAgent).Validate(validateOptionalUserAgent),
+				).Title("User Agent"),
+			); err != nil {
+				return providerInput{}, secretsUpdate{}, err
 			}
 		} else {
 			userAgent = ""
@@ -2105,13 +2099,9 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
-		if isOpenCodeProviderType(providerType) {
-			userAgent, err = prompts.askValidated("User agent override", defaults.UserAgent, validateOptionalUserAgent)
-			if err != nil {
-				return providerInput{}, secretsUpdate{}, err
-			}
-		} else {
-			userAgent = ""
+		userAgent, err = prompts.askValidated("User agent override", defaults.UserAgent, validateOptionalUserAgent)
+		if err != nil {
+			return providerInput{}, secretsUpdate{}, err
 		}
 	} else {
 		userAgent = ""
@@ -3121,7 +3111,7 @@ func validateOptionalUserAgent(value string) error {
 }
 
 func userAgentDescription() string {
-	return "Optional upstream User-Agent override for opencode-zen and opencode-go providers. Leave blank to send aiproxy/<version>."
+	return "Optional upstream User-Agent override. Leave blank to send aiproxy/<version>."
 }
 
 func rateLimitRPMDescription() string {
@@ -3856,10 +3846,27 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 		model.UpstreamName = parseLiteralOrExpression(attributeExpr(src, modelBlock.Body, "upstream_name"))
 		model.Protocol = parseLiteralOrExpression(attributeExpr(src, modelBlock.Body, "protocol"))
 		model.Capabilities = parseQuotedListExpr(attributeExpr(src, modelBlock.Body, "capabilities"))
+		model.Pricing = parseModelPricingInput(src, modelBlock)
 		input.Models = append(input.Models, model)
 	}
 	if hcBlock := findNestedBlock(parsed.Body, "healthcheck"); hcBlock != nil {
 		input.Healthcheck = parseProviderHealthcheckInput(src, hcBlock)
+	}
+	return input
+}
+
+func parseModelPricingInput(src []byte, modelBlock *hclsyntax.Block) *providerModelPricingInput {
+	pricingBlock := findNestedBlock(modelBlock.Body, "pricing")
+	if pricingBlock == nil {
+		return nil
+	}
+	input := &providerModelPricingInput{}
+	input.InputPerMillion = parseLiteralOrExpression(attributeExpr(src, pricingBlock.Body, "input_per_million"))
+	input.OutputPerMillion = parseLiteralOrExpression(attributeExpr(src, pricingBlock.Body, "output_per_million"))
+	input.CachedPerMillion = parseLiteralOrExpression(attributeExpr(src, pricingBlock.Body, "cached_per_million"))
+	input.CacheWritePerMillion = parseLiteralOrExpression(attributeExpr(src, pricingBlock.Body, "cache_write_per_million"))
+	if input.InputPerMillion == "" && input.OutputPerMillion == "" && input.CachedPerMillion == "" && input.CacheWritePerMillion == "" {
+		return nil
 	}
 	return input
 }
