@@ -38,6 +38,7 @@ var jsonBlockLabels = map[string]int{
 	"credential_ref":     0,
 	"healthcheck":        0,
 	"model":              1,
+	"pricing":            0,
 	"payload_log":        0,
 	"mongodb":            0,
 }

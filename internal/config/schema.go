@@ -145,11 +145,19 @@ type rawCredentialRef struct {
 }
 
 type rawModel struct {
-	Name         string   `hcl:"name,label"`
-	DisplayName  string   `hcl:"display_name,optional"`
-	UpstreamName string   `hcl:"upstream_name,optional"`
-	Protocol     string   `hcl:"protocol,optional"`
-	Capabilities []string `hcl:"capabilities,optional"`
+	Name         string      `hcl:"name,label"`
+	DisplayName  string      `hcl:"display_name,optional"`
+	UpstreamName string      `hcl:"upstream_name,optional"`
+	Protocol     string      `hcl:"protocol,optional"`
+	Capabilities []string    `hcl:"capabilities,optional"`
+	Pricing      *rawPricing `hcl:"pricing,block"`
+}
+
+type rawPricing struct {
+	InputPerMillion      *float64 `hcl:"input_per_million,optional"`
+	OutputPerMillion     *float64 `hcl:"output_per_million,optional"`
+	CachedPerMillion     *float64 `hcl:"cached_per_million,optional"`
+	CacheWritePerMillion *float64 `hcl:"cache_write_per_million,optional"`
 }
 
 type rawAlias struct {

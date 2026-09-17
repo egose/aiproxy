@@ -86,6 +86,14 @@ type ProviderModelInput struct {
 	UpstreamName string
 	Protocol     string
 	Capabilities []string
+	Pricing      *ModelPricingInput
+}
+
+type ModelPricingInput struct {
+	InputPerMillion      string
+	OutputPerMillion     string
+	CachedPerMillion     string
+	CacheWritePerMillion string
 }
 
 type ProviderHealthcheckInput struct {
@@ -338,9 +346,39 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 			b.WriteString(RenderQuotedList(model.Capabilities))
 			b.WriteString("\n")
 		}
+		if model.Pricing != nil {
+			b.WriteString(renderModelPricingBlock(model.Pricing))
+		}
 		b.WriteString("  }\n")
 	}
 	b.WriteString("}\n")
+	return b.String()
+}
+
+func renderModelPricingBlock(pricing *ModelPricingInput) string {
+	var b strings.Builder
+	b.WriteString("    pricing {\n")
+	if pricing.InputPerMillion != "" {
+		b.WriteString("      input_per_million = ")
+		b.WriteString(pricing.InputPerMillion)
+		b.WriteString("\n")
+	}
+	if pricing.OutputPerMillion != "" {
+		b.WriteString("      output_per_million = ")
+		b.WriteString(pricing.OutputPerMillion)
+		b.WriteString("\n")
+	}
+	if pricing.CachedPerMillion != "" {
+		b.WriteString("      cached_per_million = ")
+		b.WriteString(pricing.CachedPerMillion)
+		b.WriteString("\n")
+	}
+	if pricing.CacheWritePerMillion != "" {
+		b.WriteString("      cache_write_per_million = ")
+		b.WriteString(pricing.CacheWritePerMillion)
+		b.WriteString("\n")
+	}
+	b.WriteString("    }\n")
 	return b.String()
 }
 

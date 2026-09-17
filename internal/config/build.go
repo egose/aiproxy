@@ -523,10 +523,45 @@ func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Durat
 		for _, c := range m.Capabilities {
 			model.Capabilities = append(model.Capabilities, Capability(c))
 		}
+		if m.Pricing != nil {
+			pricing, err := buildModelPricing(rawProvider.Name, m.Name, m.Pricing)
+			if err != nil {
+				return Provider{}, err
+			}
+			model.Pricing = pricing
+		}
 		provider.Models = append(provider.Models, model)
 		provider.ModelByName[m.Name] = model
 	}
 	return provider, nil
+}
+
+func buildModelPricing(providerName, modelName string, raw *rawPricing) (*ModelPricing, error) {
+	out := &ModelPricing{}
+	rates := map[string]*float64{
+		"input_per_million":       raw.InputPerMillion,
+		"output_per_million":      raw.OutputPerMillion,
+		"cached_per_million":      raw.CachedPerMillion,
+		"cache_write_per_million": raw.CacheWritePerMillion,
+	}
+	set := map[string]float64{}
+	for field, ptr := range rates {
+		if ptr == nil {
+			continue
+		}
+		if *ptr < 0 {
+			return nil, fmt.Errorf("provider %q: model %q pricing %q must not be negative", providerName, modelName, field)
+		}
+		set[field] = *ptr
+	}
+	if len(set) == 0 {
+		return nil, fmt.Errorf("provider %q: model %q pricing block must declare at least one rate", providerName, modelName)
+	}
+	out.InputPerMillion = set["input_per_million"]
+	out.OutputPerMillion = set["output_per_million"]
+	out.CachedPerMillion = set["cached_per_million"]
+	out.CacheWritePerMillion = set["cache_write_per_million"]
+	return out, nil
 }
 
 var defaultRetryStatusCodes = []int{500, 502, 503, 504}
