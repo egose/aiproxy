@@ -169,6 +169,8 @@ type rawAlias struct {
 	Name               string                 `hcl:"name,label"`
 	Algorithm          string                 `hcl:"algorithm"`
 	RetryStatusCodes   []string               `hcl:"retry_status_codes,optional"`
+	Providers          []string               `hcl:"providers,optional"`
+	Model              string                 `hcl:"model,optional"`
 	SessionAffinity    *rawSessionAffinity    `hcl:"session_affinity,block"`
 	EncryptedReasoning *rawEncryptedReasoning `hcl:"encrypted_reasoning,block"`
 	Targets            []rawTarget            `hcl:"target,block"`
