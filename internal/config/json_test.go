@@ -104,6 +104,18 @@ func TestLoadJSONEnvExpansion(t *testing.T) {
 	}
 }
 
+func TestLoadJSONAliasShorthand(t *testing.T) {
+	cfg := `{"listener":{"http":{"public":{"address":":8080"}}},"auth":{"main":{"mode":"none"}},"provider":{"openai":{"p1":{"api_key":"k1","model":{"m":{}}},"p2":{"api_key":"k2","model":{"m":{}}}}},"alias":{"chat":{"algorithm":"round_robin","providers":["p1","p2"],"model":"m"}}}`
+	rt, err := Load([]byte(cfg), "test.json")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	a := testAlias(t, rt, "chat")
+	if len(a.Targets) != 2 || a.Targets[0].Provider != "p1" || a.Targets[1].Provider != "p2" || a.Targets[0].Model != "m" {
+		t.Fatalf("targets = %+v", a.Targets)
+	}
+}
+
 func TestLoadInvalidKeepsNativeError(t *testing.T) {
 	_, err := Load([]byte(`invalid hcl >>>`), "test.hcl")
 	if err == nil || !strings.Contains(err.Error(), "Invalid block definition") {

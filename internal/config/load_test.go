@@ -1832,3 +1832,116 @@ provider "openai" "derived" {
 		t.Fatalf("derived ForwardHeaders = %v", derived.ForwardHeaders)
 	}
 }
+
+func TestLoadAliasShorthandExpands(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "primary" {
+  api_key = "k1"
+  model "gpt-4o-mini" {}
+}
+provider "openai" "backup" {
+  api_key = "k2"
+  model "gpt-4o-mini" {}
+}
+alias "chat" {
+  algorithm = "round_robin"
+  providers = ["primary", "backup"]
+  model     = "gpt-4o-mini"
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	a := testAlias(t, rt, "chat")
+	want := []AliasTarget{{Provider: "primary", Model: "gpt-4o-mini"}, {Provider: "backup", Model: "gpt-4o-mini"}}
+	if len(a.Targets) != len(want) {
+		t.Fatalf("targets = %+v, want %+v", a.Targets, want)
+	}
+	for i := range want {
+		if a.Targets[i] != want[i] {
+			t.Fatalf("targets = %+v, want %+v", a.Targets, want)
+		}
+	}
+}
+
+func TestLoadAliasShorthandRejectsMixing(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "primary" {
+  api_key = "k1"
+  model "gpt-4o-mini" {}
+}
+alias "chat" {
+  algorithm = "round_robin"
+  providers = ["primary"]
+  model     = "gpt-4o-mini"
+  target {
+    provider = "primary"
+    model    = "gpt-4o-mini"
+  }
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined with target blocks") {
+		t.Fatalf("error = %v, want shorthand/target mixing error", err)
+	}
+}
+
+func TestLoadAliasShorthandRequiresBoth(t *testing.T) {
+	base := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "primary" {
+  api_key = "k1"
+  model "gpt-4o-mini" {}
+}
+`
+	for _, tc := range []struct {
+		name  string
+		alias string
+		want  string
+	}{
+		{name: "missing model", alias: "alias \"chat\" {\n  algorithm = \"round_robin\"\n  providers = [\"primary\"]\n}", want: "model is required when providers is set"},
+		{name: "missing providers", alias: "alias \"chat\" {\n  algorithm = \"round_robin\"\n  model = \"gpt-4o-mini\"\n}", want: "providers is required when model is set"},
+		{name: "duplicate providers", alias: "alias \"chat\" {\n  algorithm = \"round_robin\"\n  providers = [\"primary\", \"primary\"]\n  model = \"gpt-4o-mini\"\n}", want: "duplicate provider"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load([]byte(base+tc.alias+"\n"), "test.hcl")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadAliasShorthandPrunesDisabled(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "primary" {
+  api_key = "k1"
+  model "gpt-4o-mini" {}
+}
+provider "openai" "disabled-a" {
+  enabled = false
+  model "gpt-4o-mini" {}
+}
+alias "chat" {
+  algorithm = "round_robin"
+  providers = ["disabled-a", "primary"]
+  model     = "gpt-4o-mini"
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	a := testAlias(t, rt, "chat")
+	if len(a.Targets) != 1 || a.Targets[0].Provider != "primary" {
+		t.Fatalf("targets = %+v, want only primary", a.Targets)
+	}
+}
