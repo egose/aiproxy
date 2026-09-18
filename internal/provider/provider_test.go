@@ -2,6 +2,8 @@ package provider
 
 import (
 	"bytes"
+	"compress/flate"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,7 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andybalholm/brotli"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/klauspost/compress/zstd"
 )
 
 func TestProviderDescriptorsCoverConfiguredProviderTypes(t *testing.T) {
@@ -1838,5 +1842,86 @@ func TestGeminiAdapterEmbeddingsBatch(t *testing.T) {
 	}
 	if len(out.Data) != 2 || out.Data[1].Index != 1 {
 		t.Fatalf("data = %+v", out.Data)
+	}
+}
+
+func encodeForInspectionTest(t *testing.T, encoding string, plain []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	switch encoding {
+	case "gzip":
+		w := gzip.NewWriter(&buf)
+		if _, err := w.Write(plain); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+	case "deflate":
+		w, err := flate.NewWriter(&buf, flate.DefaultCompression)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(plain); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+	case "br":
+		w := brotli.NewWriter(&buf)
+		if _, err := w.Write(plain); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+	case "zstd":
+		w, err := zstd.NewWriter(&buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(plain); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+	default:
+		t.Fatalf("unknown encoding %q", encoding)
+	}
+	return buf.Bytes()
+}
+
+func TestDecodeBodyForInspection(t *testing.T) {
+	plain := []byte(`{"error":{"type":"invalid_request_error","message":"reasoning encrypted_content was not issued to this caller"}}`)
+	for _, encoding := range []string{"gzip", "x-gzip", "deflate", "br", "zstd"} {
+		enc := encoding
+		if enc == "x-gzip" {
+			enc = "gzip"
+		}
+		raw := encodeForInspectionTest(t, enc, plain)
+		header := http.Header{"Content-Encoding": []string{encoding}}
+		if got := DecodeBodyForInspection(header, raw); !bytes.Equal(got, plain) {
+			t.Fatalf("%s: got %q, want %q", encoding, got, plain)
+		}
+	}
+	header := http.Header{"Content-Encoding": []string{"br, gzip"}}
+	gzipped := encodeForInspectionTest(t, "gzip", encodeForInspectionTest(t, "br", plain))
+	if got := DecodeBodyForInspection(header, gzipped); !bytes.Equal(got, plain) {
+		t.Fatalf("chained br,gzip: got %q, want %q", got, plain)
+	}
+	if got := DecodeBodyForInspection(nil, plain); !bytes.Equal(got, plain) {
+		t.Fatalf("no header: got %q, want passthrough", got)
+	}
+	if got := DecodeBodyForInspection(http.Header{"Content-Encoding": []string{"identity"}}, plain); !bytes.Equal(got, plain) {
+		t.Fatalf("identity: got %q, want passthrough", got)
+	}
+	corrupt := []byte{0x1f, 0x8b, 0x00, 0x01}
+	if got := DecodeBodyForInspection(http.Header{"Content-Encoding": []string{"gzip"}}, corrupt); !bytes.Equal(got, corrupt) {
+		t.Fatalf("corrupt gzip: got %q, want original", got)
+	}
+	if got := DecodeBodyForInspection(http.Header{"Content-Encoding": []string{"compress"}}, plain); !bytes.Equal(got, plain) {
+		t.Fatalf("unknown encoding: got %q, want original", got)
 	}
 }

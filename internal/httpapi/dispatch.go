@@ -401,7 +401,7 @@ targetLoop:
 			}
 			observeCooldownResult(cooldowns, ctx, fp, result)
 			if err == nil && !strippedAttempted && conditionalRetry && result != nil && !result.Streaming &&
-				isCallerMismatch(result.StatusCode, result.Body, er.MatchMessages) && requestHadOpaqueBlocks(currentBody) {
+				isCallerMismatch(result.StatusCode, provider.DecodeBodyForInspection(result.Header, result.Body), er.MatchMessages) && requestHadOpaqueBlocks(currentBody) {
 				if stripped, ok := stripOpaqueBlocks(op, currentBody); ok {
 					closeResult(result)
 					strippedAttempted = true
