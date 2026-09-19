@@ -1097,8 +1097,26 @@ function _createMdxContent(props) {
         })]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "providers without any models"
-      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
-        children: "aliases without any targets"
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["aliases without any targets (either ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "target"
+        }), " blocks or the ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "providers"
+        }), "/", (0,jsx_runtime.jsx)(_components.code, {
+          children: "model"
+        }), " shorthand)"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["aliases combining ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "target"
+        }), " blocks with the ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "providers"
+        }), "/", (0,jsx_runtime.jsx)(_components.code, {
+          children: "model"
+        }), " shorthand, or shorthand with only one of ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "providers"
+        }), "/", (0,jsx_runtime.jsx)(_components.code, {
+          children: "model"
+        }), " set"]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "alias targets that reference unknown providers or models"
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {

@@ -177,6 +177,27 @@ function _createMdxContent(props) {
         className: "language-hcl",
         children: "alias \"chat_default\" {\n  algorithm = \"round_robin\"\n\n  target {\n    provider = \"openai\"\n    model    = \"gpt-4o-mini\"\n  }\n\n  target {\n    provider = \"anthropic\"\n    model    = \"claude-sonnet\"\n  }\n}\n"
       })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["When every provider exposes the same model name, the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "providers"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), " shorthand expands to one target per provider:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "alias \"chat_default\" {\n  algorithm = \"round_robin\"\n  providers = [\"primary\", \"backup\"]\n  model     = \"gpt-4o-mini\"\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The shorthand cannot be combined with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "target"
+      }), " blocks and supports the full alias feature set (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "retry_status_codes"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "session_affinity"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "encrypted_reasoning"
+      }), ")."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Aliases are useful when you want:"
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
