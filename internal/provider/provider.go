@@ -2,16 +2,21 @@ package provider
 
 import (
 	"bytes"
+	"compress/flate"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"net/textproto"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/andybalholm/brotli"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/copilotlogin"
+	"github.com/klauspost/compress/zstd"
 )
 
 type Operation int
@@ -334,6 +339,84 @@ func readUpstreamBody(r io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("upstream response body exceeds %d bytes", maxUpstreamBodyBytes)
 	}
 	return body, nil
+}
+
+const inspectDecodeMaxBytes = 1 << 20
+
+func DecodeBodyForInspection(header http.Header, body []byte) []byte {
+	if len(body) == 0 || len(header.Get("Content-Encoding")) == 0 {
+		return body
+	}
+	encodings := parseContentEncodings(header.Get("Content-Encoding"))
+	if len(encodings) == 0 {
+		return body
+	}
+	decoded := body
+	for i := len(encodings) - 1; i >= 0; i-- {
+		next, ok := decodeContentEncoding(encodings[i], decoded)
+		if !ok {
+			return body
+		}
+		decoded = next
+	}
+	return decoded
+}
+
+func parseContentEncodings(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		token := strings.ToLower(strings.TrimSpace(p))
+		if token == "" || token == "identity" {
+			continue
+		}
+		out = append(out, token)
+	}
+	return out
+}
+
+func decodeContentEncoding(encoding string, body []byte) ([]byte, bool) {
+	var reader io.Reader
+	switch encoding {
+	case "gzip", "x-gzip":
+		r, err := gzip.NewReader(bytes.NewReader(body))
+		if err != nil {
+			return nil, false
+		}
+		defer r.Close()
+		reader = r
+	case "deflate":
+		r := flate.NewReader(bytes.NewReader(body))
+		defer r.Close()
+		reader = r
+	case "br":
+		reader = brotli.NewReader(bytes.NewReader(body))
+	case "zstd":
+		r, err := zstd.NewReader(nil)
+		if err != nil {
+			return nil, false
+		}
+		defer r.Close()
+		decoded, err := r.DecodeAll(body, nil)
+		if err != nil {
+			return nil, false
+		}
+		return capInspectDecoded(decoded), true
+	default:
+		return nil, false
+	}
+	decoded, err := io.ReadAll(io.LimitReader(reader, inspectDecodeMaxBytes))
+	if err != nil {
+		return nil, false
+	}
+	return decoded, true
+}
+
+func capInspectDecoded(decoded []byte) []byte {
+	if len(decoded) > inspectDecodeMaxBytes {
+		return decoded[:inspectDecodeMaxBytes]
+	}
+	return decoded
 }
 
 func requestBody(r Request) ([]byte, error) {

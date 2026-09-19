@@ -171,6 +171,50 @@ func TestConvertRoundTrip(t *testing.T) {
 	}
 }
 
+func TestConvertAliasShorthandRoundTrip(t *testing.T) {
+	hclCfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "p1" {
+  api_key = "k1"
+  model "m" {}
+}
+provider "openai" "p2" {
+  api_key = "k2"
+  model "m" {}
+}
+alias "chat" {
+  algorithm = "round_robin"
+  providers = ["p1", "p2"]
+  model     = "m"
+}
+`
+	jsonOut, _, _, err := Convert([]byte(hclCfg), "test.hcl", false)
+	if err != nil {
+		t.Fatalf("to JSON: %v", err)
+	}
+	rt, err := Load(jsonOut, "test.json")
+	if err != nil {
+		t.Fatalf("load JSON: %v\n%s", err, jsonOut)
+	}
+	a, ok := rt.Catalog.Alias("chat")
+	if !ok || len(a.Targets) != 2 {
+		t.Fatalf("alias = %+v", rt.Catalog.Aliases())
+	}
+	hclOut, _, _, err := Convert(jsonOut, "test.json", false)
+	if err != nil {
+		t.Fatalf("to HCL: %v", err)
+	}
+	rt2, err := Load(hclOut, "test.hcl")
+	if err != nil {
+		t.Fatalf("load round-tripped: %v\n%s", err, hclOut)
+	}
+	a2, ok := rt2.Catalog.Alias("chat")
+	if !ok || len(a2.Targets) != 2 || a2.Targets[0] != a.Targets[0] || a2.Targets[1] != a.Targets[1] {
+		t.Fatalf("round-trip targets = %+v, want %+v", a2.Targets, a.Targets)
+	}
+}
+
 func TestConvertJSONSingleTargetObject(t *testing.T) {
 	jsonCfg := `{"listener":{"http":{"public":{"address":":8080"}}},"auth":{"main":{"mode":"none"}},"provider":{"openai":{"openai":{"api_key":"k","model":{"m":{}}}}},"alias":{"a":{"algorithm":"round_robin","target":{"provider":"openai","model":"m"}}}}`
 	out, _, _, err := Convert([]byte(jsonCfg), "test.json", false)

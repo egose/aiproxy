@@ -114,6 +114,8 @@ type AliasInput struct {
 	Name               string
 	Algorithm          string
 	RetryStatusCodes   []string
+	Providers          []string
+	Model              string
 	SessionAffinity    *AliasSessionAffinityInput
 	EncryptedReasoning *AliasEncryptedReasoningInput
 	Targets            []AliasTargetInput
@@ -526,15 +528,24 @@ func RenderAliasBlock(input AliasInput) string {
 		}
 		b.WriteString("  }\n")
 	}
-	for _, target := range input.Targets {
-		b.WriteString("\n  target {\n")
-		b.WriteString("    provider = ")
-		b.WriteString(strconv.Quote(target.Provider))
+	if len(input.Providers) > 0 || input.Model != "" {
+		b.WriteString("  providers = ")
+		b.WriteString(RenderQuotedList(input.Providers))
 		b.WriteString("\n")
-		b.WriteString("    model    = ")
-		b.WriteString(strconv.Quote(target.Model))
+		b.WriteString("  model     = ")
+		b.WriteString(strconv.Quote(input.Model))
 		b.WriteString("\n")
-		b.WriteString("  }\n")
+	} else {
+		for _, target := range input.Targets {
+			b.WriteString("\n  target {\n")
+			b.WriteString("    provider = ")
+			b.WriteString(strconv.Quote(target.Provider))
+			b.WriteString("\n")
+			b.WriteString("    model    = ")
+			b.WriteString(strconv.Quote(target.Model))
+			b.WriteString("\n")
+			b.WriteString("  }\n")
+		}
 	}
 	b.WriteString("}\n")
 	return b.String()

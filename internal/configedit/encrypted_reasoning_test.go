@@ -23,6 +23,23 @@ func TestRenderAliasBlockEncryptedReasoning(t *testing.T) {
 	}
 }
 
+func TestRenderAliasBlockShorthand(t *testing.T) {
+	out := RenderAliasBlock(AliasInput{
+		Name:      "chat",
+		Algorithm: "round_robin",
+		Providers: []string{"p1", "p2"},
+		Model:     "m",
+	})
+	for _, want := range []string{`providers = ["p1", "p2"]`, `model     = "m"`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered block missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "target {") {
+		t.Fatalf("shorthand render must not contain target blocks:\n%s", out)
+	}
+}
+
 func TestRenderAliasBlockWithoutEncryptedReasoningOmitsBlock(t *testing.T) {
 	out := RenderAliasBlock(AliasInput{
 		Name:      "a",

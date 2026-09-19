@@ -168,11 +168,37 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 			}
 			alias.EncryptedReasoning = er
 		}
-		for _, t := range al.Targets {
-			if disabledProviderNames[t.Provider] {
-				continue
+		hasTargets := len(al.Targets) > 0
+		hasProviders := len(al.Providers) > 0
+		hasModel := al.Model != ""
+		if hasTargets && (hasProviders || hasModel) {
+			return nil, fmt.Errorf("alias %q: providers/model shorthand cannot be combined with target blocks", al.Name)
+		}
+		if hasProviders || hasModel {
+			if !hasProviders {
+				return nil, fmt.Errorf("alias %q: providers is required when model is set", al.Name)
 			}
-			alias.Targets = append(alias.Targets, AliasTarget{Provider: t.Provider, Model: t.Model})
+			if !hasModel {
+				return nil, fmt.Errorf("alias %q: model is required when providers is set", al.Name)
+			}
+			seenProviders := make(map[string]bool, len(al.Providers))
+			for _, provider := range al.Providers {
+				if seenProviders[provider] {
+					return nil, fmt.Errorf("alias %q: duplicate provider %q in providers", al.Name, provider)
+				}
+				seenProviders[provider] = true
+				if disabledProviderNames[provider] {
+					continue
+				}
+				alias.Targets = append(alias.Targets, AliasTarget{Provider: provider, Model: al.Model})
+			}
+		} else {
+			for _, t := range al.Targets {
+				if disabledProviderNames[t.Provider] {
+					continue
+				}
+				alias.Targets = append(alias.Targets, AliasTarget{Provider: t.Provider, Model: t.Model})
+			}
 		}
 		aliases = append(aliases, alias)
 	}

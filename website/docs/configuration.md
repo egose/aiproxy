@@ -566,7 +566,8 @@ Startup fails on invalid configuration. Important checks include:
   `enabled = false` is declared explicitly or the provider type is
   `opencode-zen`
 - providers without any models
-- aliases without any targets
+- aliases without any targets (either `target` blocks or the `providers`/`model` shorthand)
+- aliases combining `target` blocks with the `providers`/`model` shorthand, or shorthand with only one of `providers`/`model` set
 - alias targets that reference unknown providers or models
 - a `metrics` block with an empty or missing token
 - listener addresses that are URLs instead of TCP `host:port` bind addresses

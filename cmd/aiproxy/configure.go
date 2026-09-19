@@ -121,6 +121,8 @@ type aliasOptions struct {
 	Name                             string
 	Algorithm                        string
 	Targets                          []string
+	Providers                        []string
+	Model                            string
 	AffinityHeaders                  []string
 	HasAffinityHeaders               bool
 	NoSessionAffinity                bool
@@ -351,6 +353,7 @@ func newConfigureAliasCommand() *cobra.Command {
 		Short: "Interactively create or update an alias block",
 		Example: "aiproxy configure alias\n" +
 			"aiproxy configure alias --config /etc/aiproxy/config.hcl --non-interactive --name chat_default --algorithm round_robin --target primary/gpt-4o-mini --target backup/qwen3-32b\n" +
+			"aiproxy configure alias --config /etc/aiproxy/config.hcl --non-interactive --name chat_default --algorithm round_robin --providers primary,backup --model gpt-4o-mini\n" +
 			"aiproxy configure alias --config /etc/aiproxy/config.hcl --delete --name chat_default",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.HasAffinityHeaders = cmd.Flags().Changed("affinity-header")
@@ -364,6 +367,8 @@ func newConfigureAliasCommand() *cobra.Command {
 	cmd.Flags().StringVar(&options.Name, "name", "", "alias name")
 	cmd.Flags().StringVar(&options.Algorithm, "algorithm", "", "alias routing algorithm")
 	cmd.Flags().StringArrayVar(&options.Targets, "target", nil, "alias target spec: provider/model")
+	cmd.Flags().StringSliceVar(&options.Providers, "providers", nil, "alias shorthand providers (comma-separated or repeatable; requires --model)")
+	cmd.Flags().StringVar(&options.Model, "model", "", "alias shorthand model name (requires --providers)")
 	cmd.Flags().StringArrayVar(&options.AffinityHeaders, "affinity-header", nil, "session affinity header (repeatable; defaults cover opencode, Claude Code, and Codex session headers)")
 	cmd.Flags().BoolVar(&options.NoSessionAffinity, "no-session-affinity", false, "disable session affinity for the alias")
 	cmd.Flags().BoolVar(&options.EncryptedReasoningPassthrough, "encrypted-reasoning-passthrough", true, "forward caller-bound encrypted reasoning blocks in alias requests")
@@ -2668,6 +2673,19 @@ func promptAuthClientInteractive(prompts *promptSession, availableModels []strin
 	return authClientInput{Name: strings.TrimSpace(name), Token: strings.TrimSpace(token), Tenant: strings.TrimSpace(tenant), AllowedModels: allowedModels}, nil
 }
 
+func normalizeAliasProviders(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		for _, part := range strings.Split(v, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				out = append(out, part)
+			}
+		}
+	}
+	return out
+}
+
 func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *aliasInput, options aliasOptions) (aliasInput, error) {
 	defaults := aliasInput{Name: "", Algorithm: "round_robin"}
 	if existing != nil {
@@ -2679,15 +2697,38 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 	if options.Algorithm != "" {
 		defaults.Algorithm = options.Algorithm
 	}
-	if len(options.Targets) > 0 {
+	hasOptTargets := len(options.Targets) > 0
+	hasOptShorthand := len(options.Providers) > 0 || options.Model != ""
+	if hasOptTargets && hasOptShorthand {
+		return aliasInput{}, fmt.Errorf("alias --target cannot be combined with --providers/--model")
+	}
+	if hasOptShorthand {
+		if len(options.Providers) > 0 {
+			defaults.Providers = normalizeAliasProviders(options.Providers)
+		}
+		if options.Model != "" {
+			defaults.Model = strings.TrimSpace(options.Model)
+		}
+		defaults.Targets = nil
+	} else if hasOptTargets {
 		targets, err := buildAliasTargetsFromOptions(options.Targets)
 		if err != nil {
 			return aliasInput{}, err
 		}
 		defaults.Targets = targets
+		defaults.Providers = nil
+		defaults.Model = ""
 	}
+	useShorthand := len(defaults.Providers) > 0 || defaults.Model != ""
 	if options.NonInteractive {
-		if defaults.Name == "" || defaults.Algorithm == "" || len(defaults.Targets) == 0 {
+		if defaults.Name == "" || defaults.Algorithm == "" {
+			return aliasInput{}, fmt.Errorf("alias requires name, algorithm, and at least one target in non-interactive mode")
+		}
+		if useShorthand {
+			if len(defaults.Providers) == 0 || defaults.Model == "" {
+				return aliasInput{}, fmt.Errorf("alias shorthand requires --providers and --model in non-interactive mode")
+			}
+		} else if len(defaults.Targets) == 0 {
 			return aliasInput{}, fmt.Errorf("alias requires name, algorithm, and at least one target in non-interactive mode")
 		}
 		affinity, err := promptAliasSessionAffinity(prompts, defaults.SessionAffinity, options)
@@ -2719,7 +2760,20 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 		); err != nil {
 			return aliasInput{}, err
 		}
-		input := aliasInput{Name: strings.TrimSpace(name), Algorithm: algorithm}
+		input := aliasInput{Name: strings.TrimSpace(name), Algorithm: algorithm, RetryStatusCodes: defaults.RetryStatusCodes}
+		if useShorthand {
+			model, err := prompts.askRequired("Alias model", defaults.Model)
+			if err != nil {
+				return aliasInput{}, err
+			}
+			providers, err := promptAliasShorthandProviders(prompts, providerBlockNames(blocks), defaults.Providers)
+			if err != nil {
+				return aliasInput{}, err
+			}
+			input.Model = strings.TrimSpace(model)
+			input.Providers = providers
+			return finishAliasInput(prompts, input, defaults, options)
+		}
 		if len(available) > 0 {
 			targets, err := prompts.askAliasTargets("Alias targets", available, defaults.Targets)
 			if err != nil {
@@ -2766,7 +2820,20 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 	if err != nil {
 		return aliasInput{}, err
 	}
-	input := aliasInput{Name: name, Algorithm: algorithm}
+	input := aliasInput{Name: name, Algorithm: algorithm, RetryStatusCodes: defaults.RetryStatusCodes}
+	if useShorthand {
+		model, err := prompts.askRequired("Alias model", defaults.Model)
+		if err != nil {
+			return aliasInput{}, err
+		}
+		providers, err := promptAliasShorthandProviders(prompts, providerBlockNames(blocks), defaults.Providers)
+		if err != nil {
+			return aliasInput{}, err
+		}
+		input.Model = strings.TrimSpace(model)
+		input.Providers = providers
+		return finishAliasInput(prompts, input, defaults, options)
+	}
 	if len(available) > 0 {
 		targets, err := prompts.askAliasTargets("Alias targets", available, defaults.Targets)
 		if err != nil {
@@ -2804,6 +2871,36 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 		}
 	}
 	return finishAliasInput(prompts, input, defaults, options)
+}
+
+func promptAliasShorthandProviders(prompts *promptSession, providerNames, def []string) ([]string, error) {
+	if len(providerNames) > 0 {
+		selected, err := prompts.askMultiChoiceWithDescription("Alias providers", "One target per provider using the shared model name", providerNames, def)
+		if err != nil {
+			return nil, err
+		}
+		if len(selected) == 0 {
+			return nil, fmt.Errorf("select at least one provider")
+		}
+		return selected, nil
+	}
+	if len(def) > 0 {
+		keep, err := prompts.askYesNo("Keep existing providers", true)
+		if err != nil {
+			return nil, err
+		}
+		if keep {
+			return append([]string(nil), def...), nil
+		}
+	}
+	providers, err := prompts.askCSV("Alias providers (comma-separated)", strings.Join(def, ","))
+	if err != nil {
+		return nil, err
+	}
+	if len(providers) == 0 {
+		return nil, fmt.Errorf("alias shorthand requires at least one provider")
+	}
+	return providers, nil
 }
 
 func finishAliasInput(prompts *promptSession, input aliasInput, defaults aliasInput, options aliasOptions) (aliasInput, error) {
@@ -4184,6 +4281,8 @@ func existingAliasInput(blocks []topLevelBlock, name string) *aliasInput {
 	}
 	input.Algorithm = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "algorithm"))
 	input.RetryStatusCodes = parseQuotedListExpr(attributeExpr(src, parsed.Body, "retry_status_codes"))
+	input.Providers = parseQuotedListExpr(attributeExpr(src, parsed.Body, "providers"))
+	input.Model = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "model"))
 	if affinityBlock := findNestedBlock(parsed.Body, "session_affinity"); affinityBlock != nil {
 		input.SessionAffinity = &aliasSessionAffinityInput{
 			Headers: normalizeAffinityHeaders(parseQuotedListExpr(attributeExpr(src, affinityBlock.Body, "headers"))),

@@ -50,6 +50,18 @@ alias "chat_default" {
 }
 ```
 
+When every provider exposes the same model name, the `providers`/`model` shorthand expands to one target per provider:
+
+```hcl
+alias "chat_default" {
+  algorithm = "round_robin"
+  providers = ["primary", "backup"]
+  model     = "gpt-4o-mini"
+}
+```
+
+The shorthand cannot be combined with `target` blocks and supports the full alias feature set (`retry_status_codes`, `session_affinity`, `encrypted_reasoning`).
+
 Aliases are useful when you want:
 
 - simple failover

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/andybalholm/brotli"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/modelresolver"
@@ -235,5 +237,34 @@ func TestDirectRequestNeverStripped(t *testing.T) {
 	}
 	if !strings.Contains(string(bodies[0]), "secret") {
 		t.Fatalf("direct request must stay verbatim: %s", bodies[0])
+	}
+}
+
+func TestAliasStripAndRetryOnEncodedCallerMismatch(t *testing.T) {
+	plain := []byte(`{"error":{"type":"invalid_request_error","message":"reasoning encrypted_content was not issued to this caller"}}`)
+	var buf bytes.Buffer
+	w := brotli.NewWriter(&buf)
+	if _, err := w.Write(plain); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	mismatch := &provider.Result{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}, "Content-Encoding": []string{"br"}}, Body: buf.Bytes()}
+	adapter := &reasoningStubAdapter{results: []*provider.Result{mismatch, {StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: []byte(`{"id":"ok"}`)}}}
+	h := reasoningTestHandler(t, reasoningTestRT(&config.EncryptedReasoning{Passthrough: true, OnCallerMismatch: config.EncryptedReasoningStripAndRetry}), adapter)
+	reqBody := `{"model":"alias/a","messages":[{"role":"assistant","content":[{"type":"reasoning","encrypted_content":"blob"},{"type":"text","text":"hi"}]}]}`
+	rw := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	h.ServeHTTP(rw, r)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s, want stripped retry success", rw.Code, rw.Body.String())
+	}
+	bodies, _ := adapter.recorded()
+	if len(bodies) != 2 {
+		t.Fatalf("upstream calls = %d, want 2", len(bodies))
+	}
+	if strings.Contains(string(bodies[1]), "blob") {
+		t.Fatalf("retry must be stripped: %s", bodies[1])
 	}
 }

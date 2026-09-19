@@ -890,6 +890,59 @@ provider "openai" "primary" {
 	}
 }
 
+func TestConfigureAliasShorthandNonInteractiveFlags(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := strings.TrimSpace(`listener "http" "public" {
+  address = ":8080"
+}
+
+auth "main" {
+  mode = "none"
+}
+
+provider "openai" "primary" {
+  api_key = "sk-test"
+
+  model "gpt-4o-mini" {}
+}
+
+provider "openai" "backup" {
+  api_key = "sk-test"
+
+  model "gpt-4o-mini" {}
+}`) + "\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+
+	_, stderr, err := executeRootCommand(
+		"",
+		"configure", "alias",
+		"--config", configPath,
+		"--non-interactive",
+		"--name", "chat_default",
+		"--algorithm", "round_robin",
+		"--providers", "primary,backup",
+		"--model", "gpt-4o-mini",
+	)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstderr:\n%s", err, stderr)
+	}
+
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	if !strings.Contains(configText, `providers = ["primary", "backup"]`) || !strings.Contains(configText, `model     = "gpt-4o-mini"`) {
+		t.Fatalf("alias shorthand missing expected content:\n%s", configText)
+	}
+	if strings.Contains(configText, "target {") {
+		t.Fatalf("shorthand alias must not contain target blocks:\n%s", configText)
+	}
+}
+
 func TestConfigureAliasSessionAffinityFlags(t *testing.T) {
 	seed := func() string {
 		dir := t.TempDir()
