@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>aiproxy dashboard</title>
+    <meta
+      name="description"
+      content="aiproxy local dashboard: providers, aliases, usage, payloads and guardrail blocks."
+    />
+    <style>
+      #boot {
+        display: grid;
+        min-height: 100vh;
+        place-items: center;
+        background: #09090b;
+        color: #e4e4e7;
+        font-family: system-ui, sans-serif;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"><div id="boot">Loading aiproxy dashboard…</div></div>
+    <noscript>
+      <div
+        style="
+          display: grid;
+          min-height: 100vh;
+          place-items: center;
+          background: #09090b;
+          color: #e4e4e7;
+          font-family: system-ui, sans-serif;
+        "
+      >
+        The aiproxy dashboard requires JavaScript.
+      </div>
+    </noscript>
+    <script>
+      setTimeout(function () {
+        var root = document.getElementById('root');
+        if (root && !root.querySelector('[data-booted]')) {
+          root.innerHTML =
+            '<div style="display:grid;min-height:100vh;place-items:center;background:#09090b;color:#e4e4e7;font-family:system-ui,sans-serif;font-size:14px;padding:24px;text-align:center">' +
+            'Dashboard UI failed to start. Hard-refresh (Ctrl+Shift+R) to drop a stale cached page, ' +
+            'then check the browser console for the failing request.</div>';
+        }
+      }, 8000);
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

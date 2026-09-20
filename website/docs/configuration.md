@@ -216,7 +216,8 @@ Common attributes:
 
 - `display_name`
 - `base_url` for `openai-compatible` (required), and as an optional transport
-  override for `opencode-zen` and `opencode-go`
+  override for `opencode-zen`, `opencode-go`, `github-copilot`, and `zenmux`
+  (defaults to `https://zenmux.ai/api/v1`)
 - `user_agent` as an optional upstream `User-Agent` override for any provider
   type (defaults to `aiproxy/<version>`)
 - `forward_user_agent` to forward the inbound caller `User-Agent` upstream on
@@ -273,7 +274,8 @@ Plain `http` is accepted only for loopback development endpoints such as
 `base_url` only as a transport override for tests and custom gateways. An
 override never changes service selection, auth, or header behavior.
 `github-copilot` defaults to `https://api.githubcopilot.com` with the same
-transport-override-only `base_url` rule.
+transport-override-only `base_url` rule. `zenmux` defaults to
+`https://zenmux.ai/api/v1` with the same transport-override-only rule.
 
 Provider names are part of the public model string, so keep them stable and machine-friendly.
 
@@ -605,6 +607,23 @@ failure rejects the reload and keeps the old runtime unchanged. The dashboard co
 connects over loopback plain HTTP and refuses concrete non-loopback listener
 hosts. HTTPS and remote dashboard URLs are not supported by the current
 configuration model.
+
+### `web_ui`
+
+```hcl
+web_ui {
+  enabled = true
+}
+```
+
+Serves the embedded React dashboard at `GET /dashboard/` (with client-side
+routes such as `/dashboard/providers` and hashed assets under
+`/dashboard/assets/`). The block is optional and a bare `web_ui {}` enables
+it; `enabled = false` keeps the UI closed. This gate is independent of the
+`dashboard` block above: the static UI loads without it, but the live
+snapshot/logs/payloads/blocks views still call the bearer-gated
+`/_internal/dashboard/*` APIs, so paste the dashboard token on the UI's Token
+page. Toggling `web_ui` applies on `SIGHUP` without restart.
 
 ### `ingress_guardrails`
 

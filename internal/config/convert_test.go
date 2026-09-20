@@ -266,3 +266,45 @@ func TestConvertJSONUnknownBlockErrors(t *testing.T) {
 		t.Fatal("expected error for unknown block")
 	}
 }
+
+func TestConvertWebUIRoundTrip(t *testing.T) {
+	hclCfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+web_ui {
+  enabled = true
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	jsonOut, _, _, err := Convert([]byte(hclCfg), "test.hcl", false)
+	if err != nil {
+		t.Fatalf("to JSON: %v", err)
+	}
+	rt, err := Load(jsonOut, "test.json")
+	if err != nil {
+		t.Fatalf("load converted JSON: %v\n%s", err, jsonOut)
+	}
+	if !rt.WebUI.Enabled {
+		t.Fatalf("WebUI.Enabled = false after HCL->JSON, want true")
+	}
+	hclOut, from, to, err := Convert(jsonOut, "test.json", false)
+	if err != nil {
+		t.Fatalf("to HCL: %v\n%s", err, jsonOut)
+	}
+	if from != FormatJSON || to != FormatHCL {
+		t.Fatalf("from/to = %q/%q", from, to)
+	}
+	if !strings.Contains(string(hclOut), "web_ui") {
+		t.Fatalf("hcl output missing web_ui block:\n%s", hclOut)
+	}
+	got, err := Load(hclOut, "test.hcl")
+	if err != nil {
+		t.Fatalf("load round-tripped: %v\n%s", err, hclOut)
+	}
+	if !got.WebUI.Enabled {
+		t.Fatalf("WebUI.Enabled = false after round trip, want true")
+	}
+}

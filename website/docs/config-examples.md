@@ -228,6 +228,30 @@ Use this when:
 - operators can run an explicit headless-friendly login per credential name
 - all other operations must stay rejected rather than translated
 
+## ZenMux Gateway
+
+This setup exposes ZenMux models through OpenAI pass-through. `base_url` is
+omitted so the type uses its `https://zenmux.ai/api/v1` default.
+
+```hcl
+provider "zenmux" "zenmux" {
+  api_key = env("ZENMUX_API_KEY")
+
+  model "qwen3-max" {
+    upstream_name = "qwen/qwen3-max"
+  }
+}
+```
+
+Public model names look like `zenmux/qwen3-max`. Chat, responses,
+embeddings, images, and audio are served; inventory and usage stay
+proxy-owned. The complete validated version lives in `examples/zenmux.hcl`.
+
+Use this when:
+
+- you serve ZenMux models through the proxy with static, reviewable routing
+- you want OpenAI pass-through without per-model protocols
+
 ## Multi-Provider Chat Pool With Tenant-Aware Auth
 
 This example mixes translated and pass-through providers and adds tenant metadata plus a local rate limit.

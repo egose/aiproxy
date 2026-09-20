@@ -2241,6 +2241,34 @@ func TestHandlerBillingUsagePricesAliasRows(t *testing.T) {
 	}
 }
 
+func TestBillingAliasCostUsesUpstreamTokens(t *testing.T) {
+	prices := map[string]*config.ModelPricing{
+		"dxc/m":  {InputPerMillion: 0.1, OutputPerMillion: 0.2, CachedPerMillion: 0.002},
+		"gold/m": {InputPerMillion: 0.1, OutputPerMillion: 0.2, CachedPerMillion: 0.002},
+	}
+	aliases := []config.Alias{{Name: "x", Targets: []config.AliasTarget{
+		{Provider: "dxc", Model: "m"},
+		{Provider: "gold", Model: "m"},
+	}}}
+	upstream := []accounting.UpstreamSummary{
+		{Provider: "dxc", Model: "m", Operation: "responses", StatusCode: 200, Count: 9,
+			PromptTokens: 90000, CompletionTokens: 900, TotalTokens: 90900, CachedTokens: 10000},
+		{Provider: "gold", Model: "m", Operation: "responses", StatusCode: 200, Count: 3,
+			PromptTokens: 3000000, CompletionTokens: 300, TotalTokens: 3000300, CachedTokens: 2900000},
+	}
+	s := accounting.Summary{Model: "alias/x", Operation: "responses", StatusCode: 200, Count: 12,
+		PromptTokens: 3090000, CompletionTokens: 1200, TotalTokens: 3091200, CachedTokens: 2910000}
+	dxcWant, _ := prices["dxc/m"].Cost(90000, 900, 10000, 0, 0)
+	goldWant, _ := prices["gold/m"].Cost(3000000, 300, 2900000, 0, 0)
+	got, ok := billingAliasCost(s, prices, aliases, upstream)
+	if !ok {
+		t.Fatal("alias row must be priced from upstream tokens")
+	}
+	if got < dxcWant+goldWant-1e-9 || got > dxcWant+goldWant+1e-9 {
+		t.Fatalf("cost = %v, want upstream-token sum %v", got, dxcWant+goldWant)
+	}
+}
+
 func TestHandlerRateLimitRejectsWithRetryAfter(t *testing.T) {
 	rt := newRT()
 	h := NewHandler(Dependencies{

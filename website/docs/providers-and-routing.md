@@ -177,8 +177,9 @@ Alias targets additionally honor upstream retry advice as a cross-request cooldo
 | `opencode-zen`      | Native or translated, per protocol | Requires per-model `protocol`; Zen service              |
 | `opencode-go`       | Native or translated, per protocol | Requires per-model `protocol`; Go service               |
 | `github-copilot`    | Pass-through chat-only adapter     | Device-flow login; `credential_ref`; chat JSON/SSE only |
+| `zenmux`            | Pass-through OpenAI adapter        | Defaults to `https://zenmux.ai/api/v1`                  |
 
-For `openai` and `openai-compatible`, the proxy stays close to pass-through behavior. For translated providers, the proxy maps between the public OpenAI-style contract and the provider-native request and response shape.
+For `openai`, `openai-compatible`, and `zenmux`, the proxy stays close to pass-through behavior. For translated providers, the proxy maps between the public OpenAI-style contract and the provider-native request and response shape.
 
 Pass-through providers preserve request JSON values and unknown extension fields, rewriting only the top-level `model` value before forwarding. Malformed JSON, non-object JSON bodies, and duplicate top-level `model` keys are rejected.
 
@@ -291,6 +292,14 @@ metadata are stripped. `GET {base}/models` listing shares the same auth
 without changing the static proxy inventory. See `examples/github-copilot.hcl`
 for a complete config.
 
+## ZenMux
+
+`zenmux` is an OpenAI pass-through gateway defaulting to
+`https://zenmux.ai/api/v1`. `base_url` is an optional transport override only.
+It serves chat, responses, embeddings, images, and audio with the same
+model-rewrite and `Authorization: Bearer` behavior as `openai`. See
+`examples/zenmux.hcl` for a complete config.
+
 ## Model Capabilities
 
 Capabilities describe which proxy operations a model may serve.
@@ -317,6 +326,7 @@ If `capabilities` is omitted, the proxy derives defaults from the provider type 
 | `opencode-zen`      | `chat`, `responses`, or both (by protocol) | None                                             |
 | `opencode-go`       | `chat`, `responses`, or both (by protocol) | None                                             |
 | `github-copilot`    | `chat`                                     | None                                             |
+| `zenmux`            | `chat`, `responses`, `embeddings`          | `images`, `audio_transcriptions`, `audio_speech` |
 
 <!-- docs-contract:capability-matrix:end -->
 

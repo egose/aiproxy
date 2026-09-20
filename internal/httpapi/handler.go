@@ -25,6 +25,7 @@ import (
 	"github.com/egose/aiproxy/internal/provider"
 	"github.com/egose/aiproxy/internal/providerhealth"
 	"github.com/egose/aiproxy/internal/ratelimit"
+	"github.com/egose/aiproxy/internal/webui"
 )
 
 type Dependencies struct {
@@ -46,6 +47,7 @@ type Dependencies struct {
 	PayloadLog        payloadlog.Recorder
 	Logger            *slog.Logger
 	Dashboard         dashrpc.Source
+	WebUI             config.WebUI
 	Version           string
 	Guardrails        *guardrails.Scanner
 	Quarantine        *guardrails.Quarantine
@@ -201,7 +203,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			logPath := r.URL.Path
-			isDashboard := strings.HasPrefix(logPath, "/_internal/dashboard/")
+			isDashboard := strings.HasPrefix(logPath, "/_internal/dashboard/") || webui.Matches(logPath)
 			if responseStreaming {
 				if streamOutcome.Err != nil {
 					logAttrs = append(logAttrs, "error", streamOutcome.Err)
@@ -239,6 +241,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.handleDashboard(deps, rw, r) {
+		return
+	}
+	if h.handleWebUI(deps, rw, r) {
 		return
 	}
 	if h.handleModels(deps, rw, r, logger) {
@@ -458,6 +463,9 @@ func metricsPathLabel(r *http.Request) string {
 	}
 	if strings.HasPrefix(r.URL.Path, "/_internal/dashboard") {
 		return metricsDashboardUnknownPath
+	}
+	if webui.Matches(r.URL.Path) {
+		return webui.RoutePrefix
 	}
 	if _, ok := operationFromRequest(r); ok {
 		return r.URL.Path

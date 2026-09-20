@@ -13,6 +13,7 @@ import (
 
 	"github.com/egose/aiproxy/internal/dashrpc"
 	"github.com/egose/aiproxy/internal/payloadlog"
+	"github.com/egose/aiproxy/internal/webui"
 )
 
 const dashboardRecentN = 200
@@ -165,6 +166,17 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 		return true
 	}
 	return false
+}
+
+func (h *Handler) handleWebUI(deps Dependencies, w http.ResponseWriter, r *http.Request) bool {
+	if !webui.Matches(r.URL.Path) {
+		return false
+	}
+	if !deps.WebUI.Enabled {
+		return false
+	}
+	webui.Handler().ServeHTTP(w, r)
+	return true
 }
 
 func (h *Handler) respondDashboardAuthFailure(w http.ResponseWriter, r *http.Request) {

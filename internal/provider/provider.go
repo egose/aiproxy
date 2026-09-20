@@ -200,6 +200,11 @@ var providerDescriptors = map[config.ProviderType]providerDescriptor{
 		defaultBaseURL: copilotlogin.DefaultBaseURL,
 		do:             (*adapter).doGitHubCopilot,
 	},
+	config.ProviderTypeZenMux: {
+		providerType:   config.ProviderTypeZenMux,
+		defaultBaseURL: defaultZenMuxBaseURL,
+		do:             (*adapter).doOpenAI,
+	},
 }
 
 type ErrUnsupportedOperation struct {
@@ -237,6 +242,7 @@ const (
 	defaultGeminiBaseURL      = "https://generativelanguage.googleapis.com"
 	defaultOpenCodeZenBaseURL = "https://opencode.ai/zen/v1"
 	defaultOpenCodeGoBaseURL  = "https://opencode.ai/zen/go/v1"
+	defaultZenMuxBaseURL      = "https://zenmux.ai/api/v1"
 	anthropicVersion          = "2023-06-01"
 	defaultMaxTokens          = 1024
 	maxUpstreamBodyBytes      = 32 << 20

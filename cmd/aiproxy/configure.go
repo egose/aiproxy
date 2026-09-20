@@ -2028,6 +2028,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 					huh.NewOption("OpenCode Zen", "opencode-zen"),
 					huh.NewOption("OpenCode Go", "opencode-go"),
 					huh.NewOption("GitHub Copilot", "github-copilot"),
+					huh.NewOption("ZenMux", "zenmux"),
 				).Value(&providerType),
 				huh.NewInput().Title("Provider name").Description(providerNameDescription()).Value(&providerName).Validate(validateProviderName),
 				huh.NewInput().Title("Display name").Description(providerDisplayNameDescription()).Value(&displayName),
@@ -2089,6 +2090,14 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			if err := prompts.runHuhForm(
 				huh.NewGroup(
 					huh.NewInput().Title("Base URL override").Description(openCodeBaseURLDescription(providerType)).Value(&baseURL),
+				).Title("Endpoint"),
+			); err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
+		} else if providerType == "zenmux" {
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewInput().Title("Base URL override").Description(zenMuxBaseURLDescription()).Value(&baseURL),
 				).Title("Endpoint"),
 			); err != nil {
 				return providerInput{}, secretsUpdate{}, err
@@ -2226,7 +2235,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			Models:                models,
 		}, update, nil
 	}
-	providerType, err := prompts.askChoiceWithDescription("Provider type", providerTypeDescription(), []string{"openai", "openai-compatible", "anthropic", "gemini", "opencode-zen", "opencode-go", "github-copilot"}, defaults.ProviderType)
+	providerType, err := prompts.askChoiceWithDescription("Provider type", providerTypeDescription(), []string{"openai", "openai-compatible", "anthropic", "gemini", "opencode-zen", "opencode-go", "github-copilot", "zenmux"}, defaults.ProviderType)
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
@@ -2284,6 +2293,12 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		}
 	} else if isOpenCodeProviderType(providerType) {
 		_, _ = fmt.Fprintln(prompts.out, openCodeBaseURLDescription(providerType))
+		baseURL, err = prompts.ask("Base URL override", baseURL)
+		if err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
+	} else if providerType == "zenmux" {
+		_, _ = fmt.Fprintln(prompts.out, zenMuxBaseURLDescription())
 		baseURL, err = prompts.ask("Base URL override", baseURL)
 		if err != nil {
 			return providerInput{}, secretsUpdate{}, err
@@ -3230,7 +3245,7 @@ func listenerTimeoutsDescription() string {
 }
 
 func providerTypeDescription() string {
-	return "Choose the upstream adapter type. 'openai-compatible' is for OpenAI-style APIs hosted elsewhere. 'opencode-zen' and 'opencode-go' target the OpenCode Zen and Go services with per-model protocol selection. 'github-copilot' references a saved device-flow login and serves chat only."
+	return "Choose the upstream adapter type. 'openai-compatible' is for OpenAI-style APIs hosted elsewhere. 'zenmux' targets ZenMux (defaults to https://zenmux.ai/api/v1). 'opencode-zen' and 'opencode-go' target the OpenCode Zen and Go services with per-model protocol selection. 'github-copilot' references a saved device-flow login and serves chat only."
 }
 
 func modelProtocolDescription(providerType string) string {
@@ -3249,6 +3264,10 @@ func openCodeBaseURLDescription(providerType string) string {
 		serviceURL = "https://opencode.ai/zen/v1"
 	}
 	return "Optional transport override only; the default is " + serviceURL + ". An override never changes service selection, auth, or header behavior. Leave blank to use the default."
+}
+
+func zenMuxBaseURLDescription() string {
+	return "Optional transport override only; the default is https://zenmux.ai/api/v1. Leave blank to use the default."
 }
 
 func credentialStorageDescription() string {
@@ -3752,6 +3771,8 @@ func defaultProviderEnvExpression(providerType string) string {
 		return `env("OPENCODE_ZEN_API_KEY")`
 	case "opencode-go":
 		return `env("OPENCODE_GO_API_KEY")`
+	case "zenmux":
+		return `env("ZENMUX_API_KEY")`
 	default:
 		return `env("OPENAI_API_KEY")`
 	}
@@ -3778,7 +3799,7 @@ func defaultCapabilities(providerType string) []string {
 
 func supportedCapabilities(providerType string) []string {
 	switch providerType {
-	case "openai", "openai-compatible":
+	case "openai", "openai-compatible", "zenmux":
 		return []string{"chat", "responses", "embeddings", "images", "audio_transcriptions", "audio_speech"}
 	case "anthropic":
 		return []string{"chat", "responses"}

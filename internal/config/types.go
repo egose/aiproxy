@@ -11,6 +11,7 @@ type Runtime struct {
 	ProviderHealth        ProviderHealth
 	Metrics               Metrics
 	Dashboard             Dashboard
+	WebUI                 WebUI
 	IngressGuardrails     IngressGuardrails
 	UpstreamHeaderTimeout time.Duration
 	UserAgent             string
@@ -30,6 +31,10 @@ type Dashboard struct {
 	ExplicitAllowInsecure bool
 	TokenFromConfig       bool
 	Enabled               bool
+}
+
+type WebUI struct {
+	Enabled bool
 }
 
 type GuardrailMode string
@@ -168,6 +173,7 @@ const (
 	ProviderTypeOpenCodeZen      ProviderType = "opencode-zen"
 	ProviderTypeOpenCodeGo       ProviderType = "opencode-go"
 	ProviderTypeGitHubCopilot    ProviderType = "github-copilot"
+	ProviderTypeZenMux           ProviderType = "zenmux"
 )
 
 type ModelProtocol string

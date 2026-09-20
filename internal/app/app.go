@@ -411,6 +411,7 @@ func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, log
 		PayloadLog:        payloadRecorder,
 		Logger:            logger,
 		Dashboard:         dashboard,
+		WebUI:             rt.WebUI,
 		Version:           version,
 		Guardrails:        scanner,
 		Quarantine:        quarantine,

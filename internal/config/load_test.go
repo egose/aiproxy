@@ -1945,3 +1945,81 @@ alias "chat" {
 		t.Fatalf("targets = %+v, want only primary", a.Targets)
 	}
 }
+
+func TestLoadWebUIBlockEnablesByDefault(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+web_ui {
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !rt.WebUI.Enabled {
+		t.Fatalf("WebUI.Enabled = false, want true")
+	}
+}
+
+func TestLoadWebUICanBeDisabled(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+web_ui {
+  enabled = false
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if rt.WebUI.Enabled {
+		t.Fatalf("WebUI.Enabled = true, want false")
+	}
+}
+
+func TestLoadRejectsMultipleWebUIBlocks(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+web_ui {
+}
+web_ui {
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	_, err := Load([]byte(cfg), "test.hcl")
+	if err == nil || !strings.Contains(err.Error(), "only one web_ui block is supported") {
+		t.Fatalf("expected single web_ui block error, got %v", err)
+	}
+}
+
+func TestLoadWebUIAbsentByDefault(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if rt.WebUI.Enabled {
+		t.Fatalf("WebUI.Enabled = true, want false without web_ui block")
+	}
+}
