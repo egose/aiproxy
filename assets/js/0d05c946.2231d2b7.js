@@ -54,6 +54,10 @@ const toc = [{
   "id": "github-copilot-chat",
   "level": 2
 }, {
+  "value": "ZenMux Gateway",
+  "id": "zenmux-gateway",
+  "level": 2
+}, {
   "value": "Multi-Provider Chat Pool With Tenant-Aware Auth",
   "id": "multi-provider-chat-pool-with-tenant-aware-auth",
   "level": 2
@@ -231,6 +235,34 @@ function _createMdxContent(props) {
         children: "operators can run an explicit headless-friendly login per credential name"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "all other operations must stay rejected rather than translated"
+      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "zenmux-gateway",
+      children: "ZenMux Gateway"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["This setup exposes ZenMux models through OpenAI pass-through. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " is\nomitted so the type uses its ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https://zenmux.ai/api/v1"
+      }), " default."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "provider \"zenmux\" \"zenmux\" {\n  api_key = env(\"ZENMUX_API_KEY\")\n\n  model \"qwen3-max\" {\n    upstream_name = \"qwen/qwen3-max\"\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Public model names look like ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "zenmux/qwen3-max"
+      }), ". Chat, responses,\nembeddings, images, and audio are served; inventory and usage stay\nproxy-owned. The complete validated version lives in ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "examples/zenmux.hcl"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Use this when:"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "you serve ZenMux models through the proxy with static, reviewable routing"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "you want OpenAI pass-through without per-model protocols"
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "multi-provider-chat-pool-with-tenant-aware-auth",

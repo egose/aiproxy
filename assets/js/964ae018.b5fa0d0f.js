@@ -134,6 +134,10 @@ function _createMdxContent(props) {
             children: (0,jsx_runtime.jsx)(_components.code, {
               children: "github-copilot"
             })
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "zenmux"
+            })
           })]
         })
       }), (0,jsx_runtime.jsxs)(_components.tbody, {
@@ -142,6 +146,8 @@ function _createMdxContent(props) {
             children: (0,jsx_runtime.jsx)(_components.code, {
               children: "GET /v1/models"
             })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Proxy-owned"
           }), (0,jsx_runtime.jsx)(_components.td, {
@@ -176,12 +182,16 @@ function _createMdxContent(props) {
             children: "Proxy-owned local usage accounting"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Proxy-owned local usage accounting"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned local usage accounting"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
             children: (0,jsx_runtime.jsx)(_components.code, {
               children: "GET /metrics"
             })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Proxy-owned Prometheus metrics"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Proxy-owned Prometheus metrics"
           }), (0,jsx_runtime.jsx)(_components.td, {
@@ -216,6 +226,8 @@ function _createMdxContent(props) {
             children: "JSON and SSE native or translated subset"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "JSON and SSE"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "JSON and SSE"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -236,6 +248,8 @@ function _createMdxContent(props) {
             children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "No"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Yes"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -256,6 +270,8 @@ function _createMdxContent(props) {
             children: "JSON and SSE native or translated subset"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "No"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "JSON and SSE"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -276,6 +292,8 @@ function _createMdxContent(props) {
             children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "No"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Yes"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -296,6 +314,8 @@ function _createMdxContent(props) {
             children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "No"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Yes"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -316,6 +336,8 @@ function _createMdxContent(props) {
             children: "No"
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "No"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Yes"
           })]
         })]
       })]
@@ -447,6 +469,28 @@ function _createMdxContent(props) {
             })
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "None"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "zenmux"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "embeddings"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "images"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_transcriptions"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_speech"
+            })]
           })]
         })]
       })]
@@ -592,9 +636,15 @@ function _createMdxContent(props) {
       children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "openai"
-        }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
           children: "openai-compatible"
-        }), " are close to pass-through adapters"]
+        }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "zenmux"
+        }), " are close to pass-through adapters (", (0,jsx_runtime.jsx)(_components.code, {
+          children: "zenmux"
+        }), " defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "https://zenmux.ai/api/v1"
+        }), ")"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "anthropic"

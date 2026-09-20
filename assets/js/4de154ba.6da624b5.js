@@ -502,6 +502,20 @@ function _createMdxContent(props) {
           children: "Retry-After"
         }), " header."]
       }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The embedded web dashboard is served at ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/dashboard/"
+      }), " when a ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "web_ui"
+      }), " block\nis present. Use ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy webui"
+      }), " to print that URL after probing that a\nrunning server answers with the UI (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--open"
+      }), " also launches the default\nbrowser). The UI's live views authenticate against the same\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "dashboard"
+      }), "-gated ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/_internal/dashboard/*"
+      }), " APIs with the dashboard token."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "security-defaults",
       children: "Security Defaults"

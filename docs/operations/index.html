@@ -6,7 +6,7 @@
 <title data-rh="true">Operations | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/operations/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Operations | aiproxy"><meta data-rh="true" name="description" content="This page covers the commands and operational behavior that matter most for local development and production deployment."><meta data-rh="true" property="og:description" content="This page covers the commands and operational behavior that matter most for local development and production deployment."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/operations/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/operations/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/operations/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Operations","item":"https://aiproxy.pages.dev/docs/operations"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
 <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.0700b446.css">
-<script src="/assets/js/runtime~main.855dac99.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.b446a0c2.js" defer="defer"></script>
 <script src="/assets/js/main.8b8c49ad.js" defer="defer"></script>
 </head>
 <body>
@@ -154,6 +154,11 @@ model. Remote dashboard access requires a future explicit transport design.</li>
 <li class="">Repeated invalid dashboard tokens are rate limited with <code>429</code> and a
 <code>Retry-After</code> header.</li>
 </ul>
+<p>The embedded web dashboard is served at <code>/dashboard/</code> when a <code>web_ui</code> block
+is present. Use <code>aiproxy webui</code> to print that URL after probing that a
+running server answers with the UI (<code>--open</code> also launches the default
+browser). The UI&#x27;s live views authenticate against the same
+<code>dashboard</code>-gated <code>/_internal/dashboard/*</code> APIs with the dashboard token.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="security-defaults">Security Defaults<a href="#security-defaults" class="hash-link" aria-label="Direct link to Security Defaults" title="Direct link to Security Defaults" translate="no">​</a></h2>
 <ul>
 <li class="">API keys and client bearer tokens are never logged</li>

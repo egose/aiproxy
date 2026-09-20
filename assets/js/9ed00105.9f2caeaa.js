@@ -114,6 +114,10 @@ const toc = [{
   "id": "dashboard",
   "level": 3
 }, {
+  "value": "<code>web_ui</code>",
+  "id": "web_ui",
+  "level": 3
+}, {
   "value": "<code>ingress_guardrails</code>",
   "id": "ingress_guardrails",
   "level": 3
@@ -447,9 +451,15 @@ function _createMdxContent(props) {
           children: "openai-compatible"
         }), " (required), and as an optional transport\noverride for ", (0,jsx_runtime.jsx)(_components.code, {
           children: "opencode-zen"
-        }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
           children: "opencode-go"
-        })]
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "github-copilot"
+        }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "zenmux"
+        }), "\n(defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "https://zenmux.ai/api/v1"
+        }), ")"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "user_agent"
@@ -584,7 +594,11 @@ function _createMdxContent(props) {
         children: "https://api.githubcopilot.com"
       }), " with the same\ntransport-override-only ", (0,jsx_runtime.jsx)(_components.code, {
         children: "base_url"
-      }), " rule."]
+      }), " rule. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "zenmux"
+      }), " defaults to\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https://zenmux.ai/api/v1"
+      }), " with the same transport-override-only rule."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Provider names are part of the public model string, so keep them stable and machine-friendly."
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
@@ -1175,6 +1189,36 @@ function _createMdxContent(props) {
       }), "; the ", (0,jsx_runtime.jsx)(_components.code, {
         children: "dashboard"
       }), "\ncommand reads that file to authenticate. If a reload drops a previously\ndeclared token, the carried-over secret is published to the file before the\nnew runtime activates, so tokenless discovery keeps working; a persistence\nfailure rejects the reload and keeps the old runtime unchanged. The dashboard command is local-only: it\nconnects over loopback plain HTTP and refuses concrete non-loopback listener\nhosts. HTTPS and remote dashboard URLs are not supported by the current\nconfiguration model."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "web_ui",
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        children: "web_ui"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "web_ui {\n  enabled = true\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Serves the embedded React dashboard at ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "GET /dashboard/"
+      }), " (with client-side\nroutes such as ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/dashboard/providers"
+      }), " and hashed assets under\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/dashboard/assets/"
+      }), "). The block is optional and a bare ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "web_ui {}"
+      }), " enables\nit; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "enabled = false"
+      }), " keeps the UI closed. This gate is independent of the\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "dashboard"
+      }), " block above: the static UI loads without it, but the live\nsnapshot/logs/payloads/blocks views still call the bearer-gated\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/_internal/dashboard/*"
+      }), " APIs, so paste the dashboard token on the UI's Token\npage. Toggling ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "web_ui"
+      }), " applies on ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), " without restart."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "ingress_guardrails",
       children: (0,jsx_runtime.jsx)(_components.code, {

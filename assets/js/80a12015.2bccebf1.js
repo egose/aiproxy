@@ -86,6 +86,10 @@ const toc = [{
   "id": "github-copilot",
   "level": 2
 }, {
+  "value": "ZenMux",
+  "id": "zenmux",
+  "level": 2
+}, {
   "value": "Model Capabilities",
   "id": "model-capabilities",
   "level": 2
@@ -502,13 +506,27 @@ function _createMdxContent(props) {
               children: "credential_ref"
             }), "; chat JSON/SSE only"]
           })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "zenmux"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Pass-through OpenAI adapter"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "https://zenmux.ai/api/v1"
+            })]
+          })]
         })]
       })]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["For ", (0,jsx_runtime.jsx)(_components.code, {
         children: "openai"
-      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "openai-compatible"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "zenmux"
       }), ", the proxy stays close to pass-through behavior. For translated providers, the proxy maps between the public OpenAI-style contract and the provider-native request and response shape."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Pass-through providers preserve request JSON values and unknown extension fields, rewriting only the top-level ", (0,jsx_runtime.jsx)(_components.code, {
@@ -805,6 +823,23 @@ function _createMdxContent(props) {
         children: "examples/github-copilot.hcl"
       }), "\nfor a complete config."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "zenmux",
+      children: "ZenMux"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "zenmux"
+      }), " is an OpenAI pass-through gateway defaulting to\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https://zenmux.ai/api/v1"
+      }), ". ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " is an optional transport override only.\nIt serves chat, responses, embeddings, images, and audio with the same\nmodel-rewrite and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Authorization: Bearer"
+      }), " behavior as ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "openai"
+      }), ". See\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "examples/zenmux.hcl"
+      }), " for a complete config."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "model-capabilities",
       children: "Model Capabilities"
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
@@ -966,6 +1001,28 @@ function _createMdxContent(props) {
             })
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "None"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "zenmux"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "embeddings"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "images"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_transcriptions"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_speech"
+            })]
           })]
         })]
       })]
