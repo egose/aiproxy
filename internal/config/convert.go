@@ -25,6 +25,7 @@ var jsonBlockLabels = map[string]int{
 	"provider_health":    0,
 	"metrics":            0,
 	"dashboard":          0,
+	"web_ui":             0,
 	"ingress_guardrails": 0,
 	"quarantine":         0,
 	"provider":           2,

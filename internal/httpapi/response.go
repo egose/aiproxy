@@ -48,9 +48,42 @@ func billingCost(s accounting.Summary, prices map[string]*config.ModelPricing, a
 }
 
 func billingAliasCost(s accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) (float64, bool) {
-	aliasName, ok := strings.CutPrefix(s.Model, "alias/")
+	entries, ok := aliasCostEntries(s, prices, aliases, upstream)
 	if !ok {
 		return 0, false
+	}
+	if upstreamTokenTotal(entries) > 0 {
+		var total float64
+		priced := false
+		for _, e := range entries {
+			if !e.matched {
+				continue
+			}
+			cost, ok := e.price.Cost(e.prompt, e.completion, e.cached, e.write, e.read)
+			if !ok {
+				continue
+			}
+			total += cost
+			priced = true
+		}
+		if !priced {
+			return 0, false
+		}
+		return total, true
+	}
+	return splitAliasCost(s, entries)
+}
+
+type aliasCostEntry struct {
+	price                                          *config.ModelPricing
+	prompt, completion, cached, write, read, count int64
+	matched                                        bool
+}
+
+func aliasCostEntries(s accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) ([]aliasCostEntry, bool) {
+	aliasName, ok := strings.CutPrefix(s.Model, "alias/")
+	if !ok {
+		return nil, false
 	}
 	var targets []config.AliasTarget
 	for _, a := range aliases {
@@ -60,20 +93,15 @@ func billingAliasCost(s accounting.Summary, prices map[string]*config.ModelPrici
 		}
 	}
 	if len(targets) == 0 {
-		return 0, false
+		return nil, false
 	}
-	type share struct {
-		price  *config.ModelPricing
-		weight int64
-	}
-	shares := make([]share, 0, len(targets))
-	var totalWeight int64
+	entries := make([]aliasCostEntry, 0, len(targets))
 	for _, t := range targets {
 		p, ok := prices[t.Provider+"/"+t.Model]
 		if !ok || p == nil {
 			continue
 		}
-		var w int64
+		e := aliasCostEntry{price: p}
 		for _, u := range upstream {
 			if u.Provider != t.Provider || u.Model != t.Model {
 				continue
@@ -87,25 +115,49 @@ func billingAliasCost(s accounting.Summary, prices map[string]*config.ModelPrici
 			if s.Client != "" && u.Client != s.Client {
 				continue
 			}
-			w += u.Count
+			e.prompt += u.PromptTokens
+			e.completion += u.CompletionTokens
+			e.cached += u.CachedTokens
+			e.write += u.CacheCreationTokens
+			e.read += u.CacheReadTokens
+			e.count += u.Count
+			e.matched = true
 		}
-		shares = append(shares, share{price: p, weight: w})
-		totalWeight += w
+		entries = append(entries, e)
 	}
-	if len(shares) == 0 {
-		return 0, false
+	if len(entries) == 0 {
+		return nil, false
+	}
+	return entries, true
+}
+
+func upstreamTokenTotal(entries []aliasCostEntry) int64 {
+	var total int64
+	for _, e := range entries {
+		if !e.matched {
+			continue
+		}
+		total += e.prompt + e.completion + e.cached + e.write + e.read
+	}
+	return total
+}
+
+func splitAliasCost(s accounting.Summary, entries []aliasCostEntry) (float64, bool) {
+	var totalWeight int64
+	for _, e := range entries {
+		totalWeight += e.count
 	}
 	var total float64
 	priced := false
-	for _, sh := range shares {
-		frac := 1.0 / float64(len(shares))
+	for _, e := range entries {
+		frac := 1.0 / float64(len(entries))
 		if totalWeight > 0 {
-			if sh.weight <= 0 {
+			if e.count <= 0 {
 				continue
 			}
-			frac = float64(sh.weight) / float64(totalWeight)
+			frac = float64(e.count) / float64(totalWeight)
 		}
-		cost, ok := sh.price.Cost(
+		cost, ok := e.price.Cost(
 			int64(float64(s.PromptTokens)*frac),
 			int64(float64(s.CompletionTokens)*frac),
 			int64(float64(s.CachedTokens)*frac),

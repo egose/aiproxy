@@ -45,6 +45,11 @@ func TestProviderTypePoliciesCoverCapabilityMatrix(t *testing.T) {
 			defaultCapabilities:   []Capability{CapabilityChat},
 			supportedCapabilities: []Capability{CapabilityChat},
 		},
+		{
+			providerType:          ProviderTypeZenMux,
+			defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings},
+			supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings, CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech},
+		},
 	}
 
 	if got := ProviderTypes(); len(got) != len(tests) {

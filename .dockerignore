@@ -5,3 +5,9 @@
 !cmd/**
 !internal/
 !internal/**
+!package.json
+!pnpm-workspace.yaml
+!pnpm-lock.yaml
+!web/
+!web/**
+!website/package.json

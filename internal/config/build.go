@@ -80,6 +80,15 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		}
 		rt.Metrics = Metrics{Token: raw.Metrics[0].Token, Enabled: true}
 	}
+	if len(raw.WebUI) > 0 {
+		if len(raw.WebUI) > 1 {
+			return nil, fmt.Errorf("only one web_ui block is supported")
+		}
+		rt.WebUI = WebUI{Enabled: true}
+		if raw.WebUI[0].Enabled != nil {
+			rt.WebUI.Enabled = *raw.WebUI[0].Enabled
+		}
+	}
 	if len(raw.IngressGuardrails) > 0 {
 		if len(raw.IngressGuardrails) > 1 {
 			return nil, fmt.Errorf("only one ingress_guardrails block is supported")

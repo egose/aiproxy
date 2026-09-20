@@ -335,6 +335,12 @@ share the proxy listener.
 - Repeated invalid dashboard tokens are rate limited with `429` and a
   `Retry-After` header.
 
+The embedded web dashboard is served at `/dashboard/` when a `web_ui` block
+is present. Use `aiproxy webui` to print that URL after probing that a
+running server answers with the UI (`--open` also launches the default
+browser). The UI's live views authenticate against the same
+`dashboard`-gated `/_internal/dashboard/*` APIs with the dashboard token.
+
 ## Security Defaults
 
 - API keys and client bearer tokens are never logged

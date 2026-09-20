@@ -101,6 +101,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newExamplesCommand())
 	rootCmd.AddCommand(newVersionCommand())
 	rootCmd.AddCommand(newDashboardCommand())
+	rootCmd.AddCommand(newWebUICommand())
 	rootCmd.AddCommand(newStopCommand())
 	rootCmd.AddCommand(newStatusCommand())
 	rootCmd.AddCommand(newRestartCommand())
@@ -312,6 +313,8 @@ aiproxy stop      # Linux only
 aiproxy status    # Linux only
 aiproxy restart   # Linux only
 aiproxy dashboard --config /etc/aiproxy/config.hcl
+aiproxy webui --config /etc/aiproxy/config.hcl
+aiproxy webui --open --config /etc/aiproxy/config.hcl
 aiproxy validate
 aiproxy validate --config /etc/aiproxy/config.hcl
 aiproxy convert ./config.json --config /etc/aiproxy/config.hcl

@@ -22,7 +22,7 @@ type upstreamModel struct {
 
 func listUpstreamModels(ctx context.Context, provider config.Provider) ([]upstreamModel, error) {
 	switch provider.Type {
-	case config.ProviderTypeOpenAI, config.ProviderTypeOpenAICompatible:
+	case config.ProviderTypeOpenAI, config.ProviderTypeOpenAICompatible, config.ProviderTypeZenMux:
 		return listOpenAIStyleModels(ctx, provider, false)
 	case config.ProviderTypeOpenCodeZen, config.ProviderTypeOpenCodeGo:
 		return listOpenAIStyleModels(ctx, provider, true)
@@ -52,6 +52,8 @@ func upstreamBaseURL(provider config.Provider) string {
 	switch provider.Type {
 	case config.ProviderTypeOpenAI, config.ProviderTypeOpenAICompatible:
 		return "https://api.openai.com"
+	case config.ProviderTypeZenMux:
+		return "https://zenmux.ai/api/v1"
 	case config.ProviderTypeAnthropic:
 		return "https://api.anthropic.com"
 	case config.ProviderTypeGemini:

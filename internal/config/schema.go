@@ -11,6 +11,7 @@ type rawFile struct {
 	ProviderHealth        *rawProviderHealth `hcl:"provider_health,block"`
 	Metrics               []*rawMetrics      `hcl:"metrics,block"`
 	Dashboard             []*rawDashboard    `hcl:"dashboard,block"`
+	WebUI                 []*rawWebUI        `hcl:"web_ui,block"`
 	IngressGuardrails     []*rawGuardrails   `hcl:"ingress_guardrails,block"`
 	Providers             []rawProvider      `hcl:"provider,block"`
 	Aliases               []rawAlias         `hcl:"alias,block"`
@@ -29,6 +30,10 @@ type rawMetrics struct {
 type rawDashboard struct {
 	Token               string `hcl:"token,optional"`
 	AllowInsecureRemote *bool  `hcl:"allow_insecure_remote,optional"`
+}
+
+type rawWebUI struct {
+	Enabled *bool `hcl:"enabled,optional"`
 }
 
 type rawGuardrails struct {

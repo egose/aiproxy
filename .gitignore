@@ -11,6 +11,8 @@
 *~
 
 node_modules
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep
 /.docusaurus/
 /build/
 /website/.docusaurus/

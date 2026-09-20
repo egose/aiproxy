@@ -75,6 +75,7 @@ var providerTypeOrder = []ProviderType{
 	ProviderTypeOpenCodeZen,
 	ProviderTypeOpenCodeGo,
 	ProviderTypeGitHubCopilot,
+	ProviderTypeZenMux,
 }
 
 var providerTypePolicies = map[ProviderType]providerTypePolicy{
@@ -106,6 +107,10 @@ var providerTypePolicies = map[ProviderType]providerTypePolicy{
 	ProviderTypeGitHubCopilot: {
 		defaultCapabilities:   []Capability{CapabilityChat},
 		supportedCapabilities: []Capability{CapabilityChat},
+	},
+	ProviderTypeZenMux: {
+		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings},
+		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings, CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech},
 	},
 }
 

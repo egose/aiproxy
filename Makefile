@@ -1,6 +1,6 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
-.PHONY: help build check-toolchain shell-test lint-shell lint-workflows docs-contract format fmt vet test test-race integration cover clean docker-build \
+.PHONY: help build web-build check-toolchain shell-test lint-shell lint-workflows docs-contract format fmt vet test test-race integration cover clean docker-build \
         docker-run run validate
 
 # --- Project --------------------------------------------------------------
@@ -22,7 +22,13 @@ help: ## Show this help
 
 # --- Local Go build -------------------------------------------------------
 
-build: ## Build the aiproxy binary into dist/
+web-build: ## Build the dashboard web UI into internal/webui/dist
+ifndef WEB_SKIP
+	@pnpm --filter @aiproxy/web-ui build
+	@touch internal/webui/dist/.gitkeep
+endif
+
+build: web-build ## Build the aiproxy binary into dist/ (WEB_SKIP=1 skips the web UI)
 	@mkdir -p $(DIST_DIR)
 	CGO_ENABLED=0 $(BUILD_GO) build $(GO_BUILD_FLAGS) -ldflags "$(LD_FLAGS)" -o $(DIST_DIR)/$(BINARY) $(MAIN_PKG)
 	@echo "built $(DIST_DIR)/$(BINARY) (version $(VERSION))"
