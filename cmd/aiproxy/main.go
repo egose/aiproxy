@@ -8,9 +8,12 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/egose/aiproxy/internal/app"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/dbmerge"
+	"github.com/egose/aiproxy/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -105,6 +108,8 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newStopCommand())
 	rootCmd.AddCommand(newStatusCommand())
 	rootCmd.AddCommand(newRestartCommand())
+	rootCmd.AddCommand(newMigrateCommand())
+	rootCmd.AddCommand(newAdminCommand())
 	return rootCmd
 }
 
@@ -129,19 +134,53 @@ func newServeCommand() *cobra.Command {
 
 func newValidateCommand() *cobra.Command {
 	var cfgPath string
+	var checkDB bool
 	cmd := &cobra.Command{
 		Use:   "validate",
 		Short: "Validate the config file without running the server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if _, err := loadConfigForCommand(cfgPath, cmd); err != nil {
+			rt, err := loadConfigForCommand(cfgPath, cmd)
+			if err != nil {
 				return err
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), "config is valid")
-			return nil
+			if !checkDB {
+				return nil
+			}
+			return checkDatabaseCatalog(cmd, rt)
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", defaultConfigPath(), "path to config file (overrides $AIPROXY_CONFIG)")
+	cmd.Flags().BoolVar(&checkDB, "check-db", false, "also validate the database-backed providers, aliases and keys")
 	return cmd
+}
+
+func checkDatabaseCatalog(cmd *cobra.Command, rt *config.Runtime) error {
+	if rt == nil || !rt.MultiTenancy.Enabled {
+		fmt.Fprintln(cmd.OutOrStdout(), "database catalog: skipped (multi_tenancy disabled)")
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
+	defer cancel()
+	st, err := store.Open(ctx, rt.Database.URL)
+	if err != nil {
+		return fmt.Errorf("database catalog: %w", err)
+	}
+	defer st.Close()
+	status, err := st.Status(ctx)
+	if err != nil {
+		return fmt.Errorf("database catalog: %w", err)
+	}
+	if len(status.Pending) > 0 {
+		return fmt.Errorf("database catalog: %d pending migrations (run aiproxy migrate up)", len(status.Pending))
+	}
+	merged, err := dbmerge.MergeCatalog(ctx, st, rt.Catalog)
+	if err != nil {
+		return fmt.Errorf("database catalog: %w", err)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "database catalog: valid (%d providers, %d aliases, %d keys)\n",
+		len(merged.Providers), len(merged.Aliases), len(merged.Keys))
+	return nil
 }
 
 func defaultConfigPath() string {

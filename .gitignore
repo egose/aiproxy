@@ -11,6 +11,8 @@
 *~
 
 node_modules
+sandbox/keycloak-provision/node_modules
+sandbox/keycloak-provision/build
 /internal/webui/dist/*
 !/internal/webui/dist/.gitkeep
 /.docusaurus/

@@ -1,11 +1,11 @@
-import { useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { HookFormSelect } from '@egose/shadcn-theme/components/form/hook-select';
 import { Alert, AlertDescription } from '@egose/shadcn-theme/components/ui/alert';
 import { Button } from '@egose/shadcn-theme/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@egose/shadcn-theme/components/ui/card';
-import { Label } from '@egose/shadcn-theme/components/ui/label';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useForm } from 'react-hook-form';
+import { useState } from 'react';
+import { FormProvider, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useBlock, useBlocks } from '../hooks';
 import { decideBlock, errorMessage, type BlockDecisionAction } from '../services/dashboard';
@@ -56,7 +56,8 @@ export function BlocksPage() {
           {(list.data?.blocks ?? []).map((b) => (
             <Button
               key={b.block_id}
-              variant={selected === b.block_id ? 'primary' : 'outline'}
+              variant={selected === b.block_id ? 'primary' : undefined}
+              appearance={selected === b.block_id ? undefined : 'outline'}
               className="justify-start font-mono"
               onClick={() => {
                 setSelected(b.block_id);
@@ -77,17 +78,22 @@ export function BlocksPage() {
           {detail.data && (
             <>
               <div className="font-mono text-xs">{JSON.stringify(detail.data, null, 2).slice(0, 4000)}</div>
-              <form className="grid gap-2" onSubmit={form.handleSubmit((values) => decision.mutate(values.action))}>
-                <Label htmlFor="action">Action</Label>
-                <select id="action" className="rounded border p-2" {...form.register('action')}>
-                  <option value="allow">allow</option>
-                  <option value="redact">redact</option>
-                  <option value="deny">deny</option>
-                </select>
-                <Button variant="primary" type="submit" disabled={decision.isPending}>
-                  {decision.isPending ? 'Recording...' : 'Record decision'}
-                </Button>
-              </form>
+              <FormProvider {...form}>
+                <form className="grid gap-2" onSubmit={form.handleSubmit((values) => decision.mutate(values.action))}>
+                  <HookFormSelect<DecisionForm>
+                    name="action"
+                    label="Action"
+                    data={[
+                      { label: 'allow', value: 'allow' },
+                      { label: 'redact', value: 'redact' },
+                      { label: 'deny', value: 'deny' },
+                    ]}
+                  />
+                  <Button variant="primary" type="submit" disabled={decision.isPending}>
+                    {decision.isPending ? 'Recording...' : 'Record decision'}
+                  </Button>
+                </form>
+              </FormProvider>
             </>
           )}
           {result && (

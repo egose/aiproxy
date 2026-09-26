@@ -32,7 +32,8 @@ export function PayloadsPage() {
           {(list.data?.payloads ?? []).map((p) => (
             <Button
               key={p.request_id}
-              variant={selected === p.request_id ? 'primary' : 'outline'}
+              variant={selected === p.request_id ? 'primary' : undefined}
+              appearance={selected === p.request_id ? undefined : 'outline'}
               className="justify-start font-mono"
               onClick={() => setSelected(p.request_id)}
             >
@@ -47,11 +48,11 @@ export function PayloadsPage() {
         </CardHeader>
         <CardContent className="grid gap-2 pt-0 text-sm">
           {!selected && <span>Select a payload to inspect.</span>}
-          {detail.data && (
+          {detail.data ? (
             <pre className="overflow-auto rounded bg-black/40 p-3 font-mono text-xs">
               {JSON.stringify(detail.data, null, 2)}
             </pre>
-          )}
+          ) : null}
         </CardContent>
       </Card>
     </div>

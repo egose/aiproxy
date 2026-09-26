@@ -616,14 +616,20 @@ web_ui {
 }
 ```
 
-Serves the embedded React dashboard at `GET /dashboard/` (with client-side
-routes such as `/dashboard/providers` and hashed assets under
-`/dashboard/assets/`). The block is optional and a bare `web_ui {}` enables
-it; `enabled = false` keeps the UI closed. This gate is independent of the
+Serves the embedded React dashboard at `GET /` (with client-side
+routes such as `/providers` and hashed assets under
+`/assets/`). The block is optional and a bare `web_ui {}` enables
+it; `enabled = false` keeps the UI closed. The UI never claims API
+surfaces (`/v1/*`, `/healthz`, `/readyz`, `/metrics`, `/_internal/*`)
+or the reserved `/dashboard` path, and extensionless client-side routes
+fall back to the app shell only for browser (`text/html`) navigations,
+so API clients keep receiving JSON 404s. This gate is independent of the
 `dashboard` block above: the static UI loads without it, but the live
 snapshot/logs/payloads/blocks views still call the bearer-gated
-`/_internal/dashboard/*` APIs, so paste the dashboard token on the UI's Token
-page. Toggling `web_ui` applies on `SIGHUP` without restart.
+`/_internal/dashboard/*` APIs. When `multi_tenancy` is disabled, paste the
+dashboard token on the UI's Token page; when it is enabled, signing in with
+user credentials is enough and no dashboard token is required. Toggling
+`web_ui` applies on `SIGHUP` without restart.
 
 ### `ingress_guardrails`
 

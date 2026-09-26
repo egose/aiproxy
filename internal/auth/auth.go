@@ -6,11 +6,28 @@ import (
 	"strings"
 
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/store"
+	"github.com/google/uuid"
 )
 
 type Principal struct {
-	Name   string
-	Tenant string
+	Name        string
+	Tenant      string
+	KeyID       uuid.UUID
+	OrgID       uuid.UUID
+	OwnerUserID uuid.UUID
+	OwnerTeamID uuid.UUID
+}
+
+type DynamicClient struct {
+	TokenHash     string
+	Name          string
+	Tenant        string
+	AllowedModels []string
+	KeyID         uuid.UUID
+	OrgID         uuid.UUID
+	OwnerUserID   uuid.UUID
+	OwnerTeamID   uuid.UUID
 }
 
 type Authenticator interface {
@@ -33,31 +50,68 @@ func NewAuthenticator(cfg config.Auth) Authenticator {
 	if cfg.Mode == config.AuthModeNone {
 		return nopAuthenticator{}
 	}
+	return &staticAuthenticator{tokens: staticTokens(cfg), hashed: nil}
+}
+
+func NewAuthenticatorWithClients(cfg config.Auth, dyn []DynamicClient) Authenticator {
+	if cfg.Mode == config.AuthModeNone {
+		return nopAuthenticator{}
+	}
+	hashed := make(map[string]Principal, len(dyn))
+	for _, d := range dyn {
+		if d.TokenHash == "" {
+			continue
+		}
+		hashed[d.TokenHash] = Principal{Name: d.Name, Tenant: d.Tenant, KeyID: d.KeyID, OrgID: d.OrgID, OwnerUserID: d.OwnerUserID, OwnerTeamID: d.OwnerTeamID}
+	}
+	return &staticAuthenticator{tokens: staticTokens(cfg), hashed: hashed}
+}
+
+func staticTokens(cfg config.Auth) map[string]Principal {
 	tokens := make(map[string]Principal, len(cfg.Clients))
 	for name, c := range cfg.Clients {
 		tokens[c.Token] = Principal{Name: name, Tenant: c.Tenant}
 	}
-	return &staticAuthenticator{tokens: tokens}
+	return tokens
 }
 
 func NewAuthorizer(cfg config.Auth) Authorizer {
 	if cfg.Mode == config.AuthModeNone {
 		return AuthorizerFunc(func(*Principal, string) bool { return true })
 	}
-	allowed := make(map[string]map[string]struct{}, len(cfg.Clients))
-	clients := make(map[string]struct{}, len(cfg.Clients))
-	for name, c := range cfg.Clients {
-		clients[name] = struct{}{}
-		if len(c.AllowedModels) == 0 {
-			continue
-		}
-		models := make(map[string]struct{}, len(c.AllowedModels))
-		for _, model := range c.AllowedModels {
-			models[model] = struct{}{}
-		}
-		allowed[name] = models
-	}
+	clients, allowed := clientAllowLists(cfg, nil)
 	return &staticAuthorizer{clients: clients, allowed: allowed}
+}
+
+func NewAuthorizerWithClients(cfg config.Auth, dyn []DynamicClient) Authorizer {
+	if cfg.Mode == config.AuthModeNone {
+		return AuthorizerFunc(func(*Principal, string) bool { return true })
+	}
+	clients, allowed := clientAllowLists(cfg, dyn)
+	return &staticAuthorizer{clients: clients, allowed: allowed}
+}
+
+func clientAllowLists(cfg config.Auth, dyn []DynamicClient) (map[string]struct{}, map[string]map[string]struct{}) {
+	allowed := make(map[string]map[string]struct{}, len(cfg.Clients)+len(dyn))
+	clients := make(map[string]struct{}, len(cfg.Clients)+len(dyn))
+	add := func(name string, models []string) {
+		clients[name] = struct{}{}
+		if len(models) == 0 {
+			return
+		}
+		set := make(map[string]struct{}, len(models))
+		for _, model := range models {
+			set[model] = struct{}{}
+		}
+		allowed[name] = set
+	}
+	for name, c := range cfg.Clients {
+		add(name, c.AllowedModels)
+	}
+	for _, d := range dyn {
+		add(d.Name, d.AllowedModels)
+	}
+	return clients, allowed
 }
 
 func (nopAuthenticator) Authenticate(r *http.Request) (*Principal, error) {
@@ -66,6 +120,7 @@ func (nopAuthenticator) Authenticate(r *http.Request) (*Principal, error) {
 
 type staticAuthenticator struct {
 	tokens map[string]Principal
+	hashed map[string]Principal
 }
 
 type staticAuthorizer struct {
@@ -90,6 +145,12 @@ func (s *staticAuthenticator) Authenticate(r *http.Request) (*Principal, error) 
 	if ok {
 		matched := principal
 		return &matched, nil
+	}
+	if len(s.hashed) > 0 {
+		if principal, ok := s.hashed[store.TokenHash(token)]; ok {
+			matched := principal
+			return &matched, nil
+		}
 	}
 	return nil, ErrInvalidToken
 }

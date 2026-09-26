@@ -25,6 +25,7 @@ import (
 	"github.com/egose/aiproxy/internal/provider"
 	"github.com/egose/aiproxy/internal/providerhealth"
 	"github.com/egose/aiproxy/internal/ratelimit"
+	"github.com/egose/aiproxy/internal/store"
 	"github.com/egose/aiproxy/internal/webui"
 )
 
@@ -40,6 +41,7 @@ type Dependencies struct {
 	MetricsToken      string
 	Health            *providerhealth.Tracker
 	RateLimiter       ratelimit.Limiter
+	Quota             *QuotaTracker
 	Accounting        accounting.Recorder
 	Usage             accounting.Reader
 	AccessLog         bool
@@ -48,6 +50,10 @@ type Dependencies struct {
 	Logger            *slog.Logger
 	Dashboard         dashrpc.Source
 	WebUI             config.WebUI
+	MultiTenancy      config.MultiTenancy
+	AdminStore        *store.Store
+	AdminAuthConfig   config.Auth
+	RequestReload     func() error
 	Version           string
 	Guardrails        *guardrails.Scanner
 	Quarantine        *guardrails.Quarantine
@@ -87,6 +93,9 @@ func normalizeDependencies(deps Dependencies) Dependencies {
 	}
 	if deps.RateLimiter == nil {
 		deps.RateLimiter = ratelimit.New(config.Auth{})
+	}
+	if deps.Quota == nil {
+		deps.Quota = NewQuotaTracker(deps.AdminStore)
 	}
 	if deps.Accounting == nil {
 		if deps.Metrics != nil {
@@ -179,6 +188,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				CacheReadTokens:     usage.CacheReadTokens,
 				Duration:            time.Since(start),
 			})
+			if rw.statusCode >= 200 && rw.statusCode < 300 {
+				h.recordQuotaUsage(deps, principal, accountingModel, accountingUpstream, accountingProvider, usage)
+			}
 		}
 	}()
 	defer func() {
@@ -203,7 +215,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			logPath := r.URL.Path
-			isDashboard := strings.HasPrefix(logPath, "/_internal/dashboard/") || webui.Matches(logPath)
+			isDashboard := strings.HasPrefix(logPath, "/_internal/dashboard/") || logPath == "/" ||
+				strings.HasPrefix(logPath, "/assets/") || (webui.Matches(logPath) && webui.WantsHTML(r))
 			if responseStreaming {
 				if streamOutcome.Err != nil {
 					logAttrs = append(logAttrs, "error", streamOutcome.Err)
@@ -241,6 +254,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.handleDashboard(deps, rw, r) {
+		return
+	}
+	if h.handleAdmin(deps, rw, r) {
 		return
 	}
 	if h.handleWebUI(deps, rw, r) {
@@ -368,6 +384,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	accountingModel = publicModel
+	if !h.allowQuota(deps, rw, r, principal, publicModel) {
+		return
+	}
 	if err := ensureOperationSupported(op, resolved, deps.Catalog); err != nil {
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadRequest, "unsupported_operation", err.Error())
 		return
@@ -464,8 +483,14 @@ func metricsPathLabel(r *http.Request) string {
 	if strings.HasPrefix(r.URL.Path, "/_internal/dashboard") {
 		return metricsDashboardUnknownPath
 	}
-	if webui.Matches(r.URL.Path) {
-		return webui.RoutePrefix
+	if strings.HasPrefix(r.URL.Path, "/_internal/admin") {
+		return "/_internal/admin"
+	}
+	if r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/assets/") {
+		return "/"
+	}
+	if webui.Matches(r.URL.Path) && webui.WantsHTML(r) {
+		return "/"
 	}
 	if _, ok := operationFromRequest(r); ok {
 		return r.URL.Path

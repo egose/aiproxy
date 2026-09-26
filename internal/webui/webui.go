@@ -14,10 +14,35 @@ import (
 //go:embed all:dist
 var embeddedDist embed.FS
 
-const RoutePrefix = "/dashboard"
+var reservedPaths = []string{"/v1", "/healthz", "/readyz", "/metrics", "/_internal", "/dashboard"}
+
+func reserved(path string) bool {
+	for _, r := range reservedPaths {
+		if path == r || strings.HasPrefix(path, r+"/") {
+			return true
+		}
+	}
+	return false
+}
 
 func Matches(path string) bool {
-	return path == RoutePrefix || strings.HasPrefix(path, RoutePrefix+"/")
+	if path == "/" {
+		return true
+	}
+	if reserved(path) {
+		return false
+	}
+	return true
+}
+
+func WantsHTML(r *http.Request) bool {
+	for _, part := range strings.Split(r.Header.Get("Accept"), ",") {
+		media := strings.ToLower(strings.TrimSpace(strings.SplitN(part, ";", 2)[0]))
+		if media == "text/html" || media == "application/xhtml+xml" {
+			return true
+		}
+	}
+	return false
 }
 
 func distSub() fs.FS {
@@ -59,38 +84,65 @@ func Handler() http.Handler {
 	return fileHandler(distSub())
 }
 
+func TryServe(w http.ResponseWriter, r *http.Request) bool {
+	if dir := Dir(); dir != "" {
+		return serveDir(w, r, dir)
+	}
+	if !Built() {
+		return false
+	}
+	return serveFSContent(w, r, distSub())
+}
+
 func DirHandler(root string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !allowMethod(w, r) {
-			return
-		}
-		upath := strings.TrimPrefix(r.URL.Path, RoutePrefix)
-		if upath == "" {
-			http.Redirect(w, r, RoutePrefix+"/", http.StatusFound)
-			return
-		}
-		name := resolveDiskName(http.Dir(root), strings.TrimPrefix(upath, "/"))
-		if name == "" {
+		if !serveDir(w, r, root) {
 			http.NotFound(w, r)
-			return
 		}
-		setCacheHeaders(w, name)
-		http.ServeFile(w, r, string(http.Dir(root))+string(os.PathSeparator)+filepathFromSlash(name))
 	})
+}
+
+func serveDir(w http.ResponseWriter, r *http.Request, root string) bool {
+	if !allowMethod(w, r) {
+		return true
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/")
+	resolved := resolveDiskName(http.Dir(root), name)
+	if resolved == "" {
+		if path.Ext(name) == "" && name != "" && WantsHTML(r) {
+			resolved = "index.html"
+		} else {
+			return false
+		}
+	}
+	setCacheHeaders(w, resolved)
+	http.ServeFile(w, r, root+string(os.PathSeparator)+filepathFromSlash(resolved))
+	return true
 }
 
 func fileHandler(content fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !allowMethod(w, r) {
-			return
+		if !serveFSContent(w, r, content) {
+			http.NotFound(w, r)
 		}
-		upath := strings.TrimPrefix(r.URL.Path, RoutePrefix)
-		if upath == "" {
-			http.Redirect(w, r, RoutePrefix+"/", http.StatusFound)
-			return
-		}
-		serveFS(w, r, content, strings.TrimPrefix(upath, "/"))
 	})
+}
+
+func serveFSContent(w http.ResponseWriter, r *http.Request, content fs.FS) bool {
+	if !allowMethod(w, r) {
+		return true
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/")
+	resolved, found := resolveFSName(content, name)
+	if !found {
+		if name != "" && path.Ext(name) == "" && WantsHTML(r) {
+			resolved, found = "index.html", true
+		} else {
+			return false
+		}
+	}
+	serveFS(w, r, content, resolved)
+	return true
 }
 
 func allowMethod(w http.ResponseWriter, r *http.Request) bool {
@@ -141,10 +193,7 @@ func resolveFSName(content fs.FS, name string) (string, bool) {
 	if isFile(content, cleaned) {
 		return cleaned, true
 	}
-	if path.Ext(cleaned) != "" {
-		return "", false
-	}
-	return "index.html", true
+	return "", false
 }
 
 func isFile(content fs.FS, name string) bool {
@@ -168,18 +217,12 @@ func resolveDiskName(root http.FileSystem, name string) string {
 	cleaned = strings.TrimPrefix(cleaned, "/")
 	f, err := root.Open("/" + cleaned)
 	if err != nil {
-		if path.Ext(cleaned) != "" {
-			return ""
-		}
-		return "index.html"
+		return ""
 	}
 	defer f.Close()
 	stat, err := f.Stat()
 	if err != nil || stat.IsDir() {
-		if path.Ext(cleaned) != "" {
-			return ""
-		}
-		return "index.html"
+		return ""
 	}
 	return cleaned
 }

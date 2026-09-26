@@ -18,6 +18,7 @@ import (
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/dashrpc"
+	"github.com/egose/aiproxy/internal/dbmerge"
 	"github.com/egose/aiproxy/internal/guardrails"
 	"github.com/egose/aiproxy/internal/healthcheck"
 	"github.com/egose/aiproxy/internal/httpapi"
@@ -28,6 +29,7 @@ import (
 	"github.com/egose/aiproxy/internal/provider"
 	"github.com/egose/aiproxy/internal/providerhealth"
 	"github.com/egose/aiproxy/internal/ratelimit"
+	"github.com/egose/aiproxy/internal/store"
 )
 
 const (
@@ -58,6 +60,7 @@ type App struct {
 	health                *providerhealth.Tracker
 	healthchecks          *healthcheck.Manager
 	rateLimiter           ratelimit.Limiter
+	quotaTracker          *httpapi.QuotaTracker
 	usage                 *accounting.Aggregator
 	logs                  *observability.LogBuffer
 	payloadLog            *payloadlog.Logger
@@ -66,6 +69,7 @@ type App struct {
 	guardrails            *guardrails.Scanner
 	quarantine            *guardrails.Quarantine
 	exceptions            *guardrails.Exceptions
+	adminStore            *store.Store
 	buildOpt              BuildOptions
 	startTime             time.Time
 	dashboardTokenMinted  bool
@@ -78,6 +82,20 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	rt, err := loadRuntime(opts)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
+	}
+	adminStore, err := openAdminStore(ctx, rt)
+	if err != nil {
+		return nil, err
+	}
+	var dynKeys []auth.DynamicClient
+	if adminStore != nil {
+		merged, err := dbmerge.MergeCatalog(ctx, adminStore, rt.Catalog)
+		if err != nil {
+			_ = adminStore.Close()
+			return nil, fmt.Errorf("database catalog: %w", err)
+		}
+		rt.Catalog = config.NewCatalog(merged.Providers, merged.DisabledProviders, merged.Aliases)
+		dynKeys = merged.Keys
 	}
 	dashboardTokenMinted, _, err := ensureDashboardToken(rt, config.Dashboard{}, false)
 	if err != nil {
@@ -127,13 +145,17 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 
 	startTime := time.Now()
 	resolver := modelresolver.New(rt)
-	handler := httpapi.NewHandler(buildDependencies(rt, resolver, logger, adapter, metrics, health, healthchecks, rateLimiter, usage, httpClients, logs, startTime, opts.Version, payloadRecorder, payloadDirOf(payloadLog), scanner, quarantine, exceptions))
+	deps := buildDependencies(rt, resolver, logger, adapter, metrics, health, healthchecks, rateLimiter, usage, httpClients, logs, startTime, opts.Version, payloadRecorder, payloadDirOf(payloadLog), scanner, quarantine, exceptions, adminStore, dynKeys)
+	app := &App{Config: rt, metrics: metrics, logger: logger, adapter: adapter, resolver: resolver, clients: httpClients, health: health, healthchecks: healthchecks, rateLimiter: rateLimiter, quotaTracker: httpapi.NewQuotaTracker(adminStore), usage: usage, logs: logs, payloadLog: payloadLog, payloadMongo: payloadMongo, payloadRecorder: payloadRecorder, guardrails: scanner, quarantine: quarantine, exceptions: exceptions, adminStore: adminStore, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}
+	deps.Quota = app.quotaTracker
+	deps.RequestReload = app.Reload
+	app.handler = httpapi.NewHandler(deps)
 	server := &http.Server{
-		Handler: handler,
+		Handler: app.handler,
 	}
 	applyServerConfig(server, rt.Listener)
-
-	return &App{Config: rt, Server: server, handler: handler, metrics: metrics, logger: logger, adapter: adapter, resolver: resolver, clients: httpClients, health: health, healthchecks: healthchecks, rateLimiter: rateLimiter, usage: usage, logs: logs, payloadLog: payloadLog, payloadMongo: payloadMongo, payloadRecorder: payloadRecorder, guardrails: scanner, quarantine: quarantine, exceptions: exceptions, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}, nil
+	app.Server = server
+	return app, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -246,6 +268,15 @@ func (a *App) Reload() error {
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
+	var dynKeys []auth.DynamicClient
+	if a.adminStore != nil {
+		merged, err := dbmerge.MergeCatalog(context.Background(), a.adminStore, rt.Catalog)
+		if err != nil {
+			return fmt.Errorf("database catalog: %w", err)
+		}
+		rt.Catalog = config.NewCatalog(merged.Providers, merged.DisabledProviders, merged.Aliases)
+		dynKeys = merged.Keys
+	}
 
 	a.mu.RLock()
 	current := a.Config
@@ -259,6 +290,12 @@ func (a *App) Reload() error {
 	}
 	if current != nil && rt.Dashboard.Enabled && !current.Dashboard.Enabled {
 		return fmt.Errorf("enabling dashboard requires restart")
+	}
+	if current != nil && rt.MultiTenancy.Enabled != current.MultiTenancy.Enabled {
+		return fmt.Errorf("toggling multi_tenancy requires restart")
+	}
+	if current != nil && rt.MultiTenancy.Enabled && rt.Database.URL != current.Database.URL {
+		return fmt.Errorf("changing database url requires restart")
 	}
 	var currentDashboard config.Dashboard
 	if current != nil {
@@ -300,7 +337,10 @@ func (a *App) Reload() error {
 	}
 	a.metrics.SetBuildInfo(a.buildOpt.Version)
 	a.metrics.RecordConfig(rt)
-	a.handler.UpdateDependencies(buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadRecorder, payloadDirOf(nextPayloadLog), nextGuardrails, nextQuarantine, nextExceptions))
+	deps := buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadRecorder, payloadDirOf(nextPayloadLog), nextGuardrails, nextQuarantine, nextExceptions, a.adminStore, dynKeys)
+	deps.Quota = a.quotaTracker
+	deps.RequestReload = a.Reload
+	a.handler.UpdateDependencies(deps)
 	oldHealth := a.health
 	oldPayloadLog := a.payloadLog
 	oldPayloadMongo := a.payloadMongo
@@ -342,6 +382,7 @@ func (a *App) Close() error {
 		healthchecks := a.healthchecks
 		payloadLog := a.payloadLog
 		payloadMongo := a.payloadMongo
+		adminStore := a.adminStore
 		a.mu.RUnlock()
 		if healthchecks != nil {
 			healthchecks.Close()
@@ -362,6 +403,11 @@ func (a *App) Close() error {
 				a.closeErr = err
 			}
 		}
+		if adminStore != nil {
+			if err := adminStore.Close(); err != nil && a.closeErr == nil {
+				a.closeErr = err
+			}
+		}
 	})
 	return a.closeErr
 }
@@ -379,7 +425,7 @@ func (a *App) persistDashboardTokenIfNeeded() error {
 	return nil
 }
 
-func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, healthchecks *healthcheck.Manager, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string, payloadRecorder payloadlog.Recorder, payloadDir string, scanner *guardrails.Scanner, quarantine *guardrails.Quarantine, exceptions *guardrails.Exceptions) httpapi.Dependencies {
+func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, healthchecks *healthcheck.Manager, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string, payloadRecorder payloadlog.Recorder, payloadDir string, scanner *guardrails.Scanner, quarantine *guardrails.Quarantine, exceptions *guardrails.Exceptions, adminStore *store.Store, dynKeys []auth.DynamicClient) httpapi.Dependencies {
 	if resolver == nil {
 		resolver = modelresolver.New(rt)
 	}
@@ -395,8 +441,8 @@ func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, log
 	return httpapi.Dependencies{
 		Resolver:          resolver,
 		Adapter:           adapter,
-		Auth:              auth.NewAuthenticator(rt.Auth),
-		Authorizer:        auth.NewAuthorizer(rt.Auth),
+		Auth:              auth.NewAuthenticatorWithClients(rt.Auth, dynKeys),
+		Authorizer:        auth.NewAuthorizerWithClients(rt.Auth, dynKeys),
 		Client:            clients.Client(config.DefaultUpstreamHeaderTimeout),
 		ClientForProvider: clients.ClientForProvider,
 		Catalog:           rt.Catalog,
@@ -412,6 +458,9 @@ func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, log
 		Logger:            logger,
 		Dashboard:         dashboard,
 		WebUI:             rt.WebUI,
+		MultiTenancy:      rt.MultiTenancy,
+		AdminStore:        adminStore,
+		AdminAuthConfig:   rt.Auth,
 		Version:           version,
 		Guardrails:        scanner,
 		Quarantine:        quarantine,
@@ -585,6 +634,34 @@ func loadRuntime(opts BuildOptions) (*config.Runtime, error) {
 type upstreamClientPool struct {
 	mu      sync.Mutex
 	clients map[time.Duration]*http.Client
+}
+
+func openAdminStore(ctx context.Context, rt *config.Runtime) (*store.Store, error) {
+	if rt == nil || !rt.RequiresDB() {
+		return nil, nil
+	}
+	st, err := store.Open(ctx, rt.Database.URL)
+	if err != nil {
+		return nil, fmt.Errorf("database: %w", err)
+	}
+	status, err := st.Status(ctx)
+	if err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("database: %w", err)
+	}
+	if len(status.Pending) > 0 {
+		_ = st.Close()
+		return nil, fmt.Errorf("database: %d pending migrations (run aiproxy migrate up)", len(status.Pending))
+	}
+	if _, err := store.EnsureAdmin(ctx, st); err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("database seed admin: %w", err)
+	}
+	if err := st.EnsureSystemOrg(ctx); err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("database seed system org: %w", err)
+	}
+	return st, nil
 }
 
 func newUpstreamClientPool() *upstreamClientPool {

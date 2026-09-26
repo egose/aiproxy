@@ -27,10 +27,16 @@ func newWebUIDeps(enabled bool) Dependencies {
 	return deps
 }
 
+func htmlUIRequest(method, target string) *http.Request {
+	req := httptest.NewRequest(method, target, nil)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	return req
+}
+
 func TestWebUIRequiresWebUIEnabled(t *testing.T) {
 	h := NewHandler(newWebUIDeps(false))
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/dashboard/", nil))
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 when web_ui disabled", w.Code)
 	}
@@ -55,7 +61,7 @@ func TestWebUIIndependentOfDashboardBlock(t *testing.T) {
 
 	h := NewHandler(deps)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/dashboard/", nil))
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 with web_ui enabled and dashboard disabled", w.Code)
 	}
@@ -70,7 +76,7 @@ func TestWebUIServesFromDevDir(t *testing.T) {
 
 	h := NewHandler(newWebUIDeps(true))
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/dashboard/", nil))
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -88,7 +94,7 @@ func TestWebUISPAFallbackFromDevDir(t *testing.T) {
 
 	h := NewHandler(newWebUIDeps(true))
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/dashboard/providers", nil))
+	h.ServeHTTP(w, htmlUIRequest(http.MethodGet, "/providers"))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -97,11 +103,26 @@ func TestWebUISPAFallbackFromDevDir(t *testing.T) {
 	}
 }
 
+func TestWebUINoFallbackForAPIClients(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("<html>dev-ui</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AIPROXY_WEBUI_DIR", root)
+
+	h := NewHandler(newWebUIDeps(true))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/providers", nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want API 404 for non-HTML client", w.Code)
+	}
+}
+
 func TestWebUIDevDirWithoutIndexIsNotFound(t *testing.T) {
 	t.Setenv("AIPROXY_WEBUI_DIR", t.TempDir())
 	h := NewHandler(newWebUIDeps(true))
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/dashboard/", nil))
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 for empty web dir", w.Code)
 	}
@@ -119,5 +140,52 @@ func TestWebUIDoesNotShadowAPI(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/_internal/dashboard/snapshot", nil))
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 from dashboard API, not web UI", w.Code)
+	}
+}
+
+func TestWebUIDoesNotShadowModelsAPI(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("<html>dev-ui</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AIPROXY_WEBUI_DIR", root)
+
+	h := NewHandler(newWebUIDeps(true))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, htmlUIRequest(http.MethodGet, "/v1/models"))
+	if w.Code == http.StatusOK && w.Body.String() == "<html>dev-ui</html>" {
+		t.Fatalf("web UI must not serve SPA fallback for /v1/models")
+	}
+}
+
+func TestWebUIDashboardPathIsFree(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("<html>dev-ui</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AIPROXY_WEBUI_DIR", root)
+
+	h := NewHandler(newWebUIDeps(true))
+	for _, target := range []string{"/dashboard", "/dashboard/", "/dashboard/providers"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, htmlUIRequest(http.MethodGet, target))
+		if w.Code == http.StatusOK && w.Body.String() == "<html>dev-ui</html>" {
+			t.Fatalf("GET %s served web UI, want the dashboard path left free", target)
+		}
+	}
+}
+
+func TestWebUIPostFallsThroughToAPI(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("<html>dev-ui</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AIPROXY_WEBUI_DIR", root)
+
+	h := NewHandler(newWebUIDeps(true))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/", nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want API 404 for POST /", w.Code)
 	}
 }

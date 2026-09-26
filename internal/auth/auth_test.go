@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/store"
 )
 
 func TestNoneAuthenticator(t *testing.T) {
@@ -95,5 +96,46 @@ func TestBearerStaticAuthorizerRejectsUnknownPrincipal(t *testing.T) {
 	}})
 	if a.Allow(&Principal{Name: "unknown"}, "openai/gpt-4o-mini") {
 		t.Fatal("expected unknown principal to be denied")
+	}
+}
+
+func TestDynamicClientsAuthenticateByHash(t *testing.T) {
+	cfg := config.Auth{
+		Mode: config.AuthModeBearerStatic,
+		Clients: map[string]config.Client{
+			"ci": {Name: "ci", Token: "tok"},
+		},
+	}
+	raw := "dynamic-secret-token"
+	dyn := []DynamicClient{{TokenHash: store.TokenHash(raw), Name: "db-key", Tenant: "team-b", AllowedModels: []string{"openai/gpt-4o-mini"}}}
+	a := NewAuthenticatorWithClients(cfg, dyn)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Authorization", "Bearer "+raw)
+	p, err := a.Authenticate(r)
+	if err != nil {
+		t.Fatalf("auth: %v", err)
+	}
+	if p.Name != "db-key" || p.Tenant != "team-b" {
+		t.Errorf("principal = %+v", p)
+	}
+	r2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r2.Header.Set("Authorization", "Bearer tok")
+	if _, err := a.Authenticate(r2); err != nil {
+		t.Errorf("static token stopped working: %v", err)
+	}
+	r3 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r3.Header.Set("Authorization", "Bearer nope")
+	if _, err := a.Authenticate(r3); err == nil {
+		t.Errorf("bad token accepted")
+	}
+	z := NewAuthorizerWithClients(cfg, dyn)
+	if !z.Allow(&Principal{Name: "db-key"}, "openai/gpt-4o-mini") {
+		t.Errorf("allowed model rejected")
+	}
+	if z.Allow(&Principal{Name: "db-key"}, "other/model") {
+		t.Errorf("unlisted model allowed")
+	}
+	if !z.Allow(&Principal{Name: "ci"}, "anything/at-all") {
+		t.Errorf("unrestricted static client rejected")
 	}
 }

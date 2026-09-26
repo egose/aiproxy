@@ -1,5 +1,7 @@
 import { ZodError } from 'zod';
 
+import { adminStore } from '../store';
+import { adminClient } from './admin';
 import { dashboardClient } from './client';
 import {
   blockCaptureSchema,
@@ -23,36 +25,43 @@ export interface SnapshotEnvelope {
   [key: string]: unknown;
 }
 
+// When signed in (multi-tenancy), the server accepts the admin JWT on the
+// dashboard APIs, so no dashboard token is needed. Otherwise fall back to
+// the dashboard bearer token.
+function dataClient() {
+  return adminStore.accessToken ? adminClient : dashboardClient;
+}
+
 export async function fetchSnapshot(): Promise<Snapshot> {
-  const res = await dashboardClient.get<unknown>(snapshotPath);
+  const res = await dataClient().get<unknown>(snapshotPath);
   const envelope = res.data as SnapshotEnvelope;
   return snapshotSchema.parse({ ...envelope, last_seq: envelope.last_seq ?? 0 });
 }
 
 export async function fetchPayloads(limit = 100, errorsOnly = false): Promise<PayloadList> {
-  const res = await dashboardClient.get<unknown>(payloadsPath, { params: { limit, errors_only: errorsOnly } });
+  const res = await dataClient().get<unknown>(payloadsPath, { params: { limit, errors_only: errorsOnly } });
   return payloadListSchema.parse(res.data);
 }
 
 export async function fetchPayload(requestId: string): Promise<unknown> {
-  const res = await dashboardClient.get<unknown>(`${payloadsPath}/${requestId}`);
+  const res = await dataClient().get<unknown>(`${payloadsPath}/${requestId}`);
   return res.data;
 }
 
 export async function fetchBlocks(): Promise<BlockList> {
-  const res = await dashboardClient.get<unknown>(blocksPath);
+  const res = await dataClient().get<unknown>(blocksPath);
   return blockListSchema.parse(res.data);
 }
 
 export async function fetchBlock(blockId: string): Promise<BlockCapture> {
-  const res = await dashboardClient.get<unknown>(`${blocksPath}/${blockId}`);
+  const res = await dataClient().get<unknown>(`${blocksPath}/${blockId}`);
   return blockCaptureSchema.parse(res.data);
 }
 
 export type BlockDecisionAction = 'allow' | 'redact' | 'deny';
 
 export async function decideBlock(blockId: string, action: BlockDecisionAction, findingShas: string[]) {
-  const res = await dashboardClient.post(`${blocksPath}/${blockId}/decision`, {
+  const res = await dataClient().post(`${blocksPath}/${blockId}/decision`, {
     action,
     finding_shas: findingShas,
   });
