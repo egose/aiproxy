@@ -64,7 +64,7 @@ provider "openai" "openai" {
 
 func TestRunWebUIPointsAtServerDashboard(t *testing.T) {
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/dashboard/" {
+		if r.URL.Path != "/" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -87,7 +87,7 @@ provider "openai" "openai" {
 	if err := runWebUI(context.Background(), cfg, true, false, &stdout, &stderr); err != nil {
 		t.Fatalf("runWebUI: %v (stderr=%s)", err, stderr.String())
 	}
-	want := "http://" + stubAddr + "/dashboard/"
+	want := "http://" + stubAddr + "/"
 	if strings.TrimSpace(stdout.String()) != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}

@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>aiproxy dashboard</title>
+    <title>aiproxy</title>
     <meta
       name="description"
-      content="aiproxy local dashboard: providers, aliases, usage, payloads and guardrail blocks."
+      content="aiproxy: providers, aliases, usage, payloads, guardrail blocks, and multi-tenancy administration."
     />
     <style>
       #boot {
@@ -22,7 +22,7 @@
     </style>
   </head>
   <body>
-    <div id="root"><div id="boot">Loading aiproxy dashboard…</div></div>
+    <div id="root"><div id="boot">Loading aiproxy…</div></div>
     <noscript>
       <div
         style="
@@ -34,7 +34,7 @@
           font-family: system-ui, sans-serif;
         "
       >
-        The aiproxy dashboard requires JavaScript.
+        The aiproxy web UI requires JavaScript.
       </div>
     </noscript>
     <script>
@@ -43,7 +43,7 @@
         if (root && !root.querySelector('[data-booted]')) {
           root.innerHTML =
             '<div style="display:grid;min-height:100vh;place-items:center;background:#09090b;color:#e4e4e7;font-family:system-ui,sans-serif;font-size:14px;padding:24px;text-align:center">' +
-            'Dashboard UI failed to start. Hard-refresh (Ctrl+Shift+R) to drop a stale cached page, ' +
+            'aiproxy UI failed to start. Hard-refresh (Ctrl+Shift+R) to drop a stale cached page, ' +
             'then check the browser console for the failing request.</div>';
         }
       }, 8000);

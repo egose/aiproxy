@@ -1,49 +1,70 @@
 import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@egose/shadcn-theme/components/ui/card';
 import { Input } from '@egose/shadcn-theme/components/ui/input';
-import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getSortedRowModel,
-  useReactTable,
-  type SortingState,
-} from '@tanstack/react-table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@egose/shadcn-theme/components/ui/table';
 import { useSnapshot } from '../hooks';
 import type { Recent } from '../types';
 
-const columnHelper = createColumnHelper<Recent>();
+type RequestSortKey = 'Model' | 'Operation' | 'StatusCode' | 'Provider' | 'TotalTokens' | 'Client';
+type RequestSort = { key: RequestSortKey; desc: boolean };
+
+const requestHeaders: Array<{ key: RequestSortKey; label: string }> = [
+  { key: 'Model', label: 'Model' },
+  { key: 'Operation', label: 'Op' },
+  { key: 'StatusCode', label: 'Status' },
+  { key: 'Provider', label: 'Provider' },
+  { key: 'TotalTokens', label: 'Tokens' },
+  { key: 'Client', label: 'Client' },
+];
+
+function cellValue(row: Recent, key: RequestSortKey): string {
+  switch (key) {
+    case 'Model':
+      return row.Model ?? '';
+    case 'Operation':
+      return row.Operation ?? '';
+    case 'StatusCode':
+      return String(row.StatusCode ?? '');
+    case 'Provider':
+      return row.Provider ?? '';
+    case 'TotalTokens':
+      return String(row.TotalTokens ?? '');
+    case 'Client':
+      return row.Client ?? '';
+  }
+}
 
 export function RequestsPage() {
   const snapshot = useSnapshot();
-  const [sorting, setSorting] = useState<SortingState>([{ id: 'Model', desc: false }]);
+  const [sorting, setSorting] = useState<RequestSort>({ key: 'Model', desc: false });
   const [filter, setFilter] = useState('');
 
-  const columns = useMemo(
-    () => [
-      columnHelper.accessor('Model', { header: 'Model' }),
-      columnHelper.accessor('Operation', { header: 'Op' }),
-      columnHelper.accessor('StatusCode', { header: 'Status' }),
-      columnHelper.accessor('Provider', { header: 'Provider' }),
-      columnHelper.accessor('TotalTokens', { header: 'Tokens' }),
-      columnHelper.accessor('Client', { header: 'Client' }),
-    ],
-    [],
-  );
+  const rows = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const all = snapshot.data?.recent ?? [];
+    const filtered =
+      q === '' ? all : all.filter((r) => requestHeaders.some((h) => cellValue(r, h.key).toLowerCase().includes(q)));
+    const dir = sorting.desc ? -1 : 1;
+    return [...filtered].sort((a, b) => {
+      const va = cellValue(a, sorting.key);
+      const vb = cellValue(b, sorting.key);
+      const na = Number(va);
+      const nb = Number(vb);
+      if (sorting.key === 'StatusCode' || sorting.key === 'TotalTokens') {
+        return ((Number.isFinite(na) ? na : 0) - (Number.isFinite(nb) ? nb : 0)) * dir;
+      }
+      if (va < vb) return -dir;
+      if (va > vb) return dir;
+      return 0;
+    });
+  }, [snapshot.data, filter, sorting]);
 
-  const rows = useMemo(() => snapshot.data?.recent ?? [], [snapshot.data]);
-
-  const table = useReactTable({
-    data: rows,
-    columns,
-    state: { sorting, globalFilter: filter },
-    onSortingChange: setSorting,
-    onGlobalFilterChange: setFilter,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-  });
+  const toggleSort = (key: RequestSortKey) => {
+    setSorting((prev) => {
+      if (prev.key !== key) return { key, desc: false };
+      return { key, desc: !prev.desc };
+    });
+  };
 
   return (
     <div className="grid w-full gap-6 p-6">
@@ -54,34 +75,29 @@ export function RequestsPage() {
         <CardContent className="grid gap-4 pt-0">
           <Input placeholder="Filter requests..." value={filter} onChange={(e) => setFilter(e.target.value)} />
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                {table.getHeaderGroups().map((group) => (
-                  <tr key={group.id}>
-                    {group.headers.map((header) => (
-                      <th
-                        key={header.id}
-                        className="cursor-pointer px-2 py-1 text-left font-medium"
-                        onClick={header.column.getToggleSortingHandler()}
-                      >
-                        {flexRender(header.column.columnDef.header, header.getContext())}
-                      </th>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {requestHeaders.map((h) => (
+                    <TableHead key={h.key} className="cursor-pointer" onClick={() => toggleSort(h.key)}>
+                      {h.label}
+                      {sorting.key === h.key ? (sorting.desc ? ' ▼' : ' ▲') : ''}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((r, i) => (
+                  <TableRow key={`${r.Model}-${r.Client}-${i}`}>
+                    {requestHeaders.map((h) => (
+                      <TableCell key={h.key} className="font-mono">
+                        {cellValue(r, h.key)}
+                      </TableCell>
                     ))}
-                  </tr>
+                  </TableRow>
                 ))}
-              </thead>
-              <tbody>
-                {table.getRowModel().rows.map((row) => (
-                  <tr key={row.id} className="border-t">
-                    {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="px-2 py-1 font-mono">
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </CardContent>
       </Card>

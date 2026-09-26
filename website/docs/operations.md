@@ -249,6 +249,17 @@ Alias cooldown deadlines survive reload only for fingerprint-unchanged targets
 (resolved `base_url`, credential, upstream model, protocol); removed or changed
 targets are dropped, and failed reloads leave state untouched.
 
+When multi-tenancy is enabled, database-backed providers, aliases, and
+inbound keys merge into the serving catalog on the same reload path (and
+automatically after admin API mutations). An invalid row — for example a
+provider whose encrypted credential no longer decrypts under the current
+encryption key, or an alias pointing at a removed target — fails the reload
+with the old runtime intact, and blocks server startup the same way an
+invalid config file does. Use `aiproxy validate --check-db` to identify the
+offending row without running the server, then fix it (rotate the credential,
+retarget or disable the entry) or delete it via the admin UI/CLI; the next
+mutation or `SIGHUP` picks the catalog back up.
+
 These changes still require a restart:
 
 - listener address changes
@@ -335,7 +346,7 @@ share the proxy listener.
 - Repeated invalid dashboard tokens are rate limited with `429` and a
   `Retry-After` header.
 
-The embedded web dashboard is served at `/dashboard/` when a `web_ui` block
+The embedded web dashboard is served at `/` when a `web_ui` block
 is present. Use `aiproxy webui` to print that URL after probing that a
 running server answers with the UI (`--open` also launches the default
 browser). The UI's live views authenticate against the same

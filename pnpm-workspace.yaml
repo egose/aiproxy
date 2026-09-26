@@ -3,3 +3,5 @@ packages:
 - web-ui
 allowBuilds:
   core-js: false
+minimumReleaseAgeExclude:
+- '@egose/shadcn-theme@0.1.15'

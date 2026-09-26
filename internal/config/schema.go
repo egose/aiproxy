@@ -12,6 +12,8 @@ type rawFile struct {
 	Metrics               []*rawMetrics      `hcl:"metrics,block"`
 	Dashboard             []*rawDashboard    `hcl:"dashboard,block"`
 	WebUI                 []*rawWebUI        `hcl:"web_ui,block"`
+	Database              []*rawDatabase     `hcl:"database,block"`
+	MultiTenancy          []*rawMultiTenancy `hcl:"multi_tenancy,block"`
 	IngressGuardrails     []*rawGuardrails   `hcl:"ingress_guardrails,block"`
 	Providers             []rawProvider      `hcl:"provider,block"`
 	Aliases               []rawAlias         `hcl:"alias,block"`
@@ -34,6 +36,15 @@ type rawDashboard struct {
 
 type rawWebUI struct {
 	Enabled *bool `hcl:"enabled,optional"`
+}
+
+type rawDatabase struct {
+	URL string `hcl:"url,optional"`
+}
+
+type rawMultiTenancy struct {
+	Enabled                 *bool `hcl:"enabled,optional"`
+	AllowPublicRegistration *bool `hcl:"allow_public_registration,optional"`
 }
 
 type rawGuardrails struct {

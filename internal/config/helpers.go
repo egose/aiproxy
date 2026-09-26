@@ -68,6 +68,10 @@ func validateProviderCredentialStructure(p *Provider) error {
 // resolveProviderCredential materializes the effective API key for an enabled
 // provider. Structural checks must already have passed via
 // validateProviderCredentialStructure.
+func ResolveProviderCredential(p *Provider) error {
+	return resolveProviderCredential(p)
+}
+
 func resolveProviderCredential(p *Provider) error {
 	if p.APIKeyRef == nil { // pragma: allowlist secret
 		return nil
@@ -93,6 +97,10 @@ func resolveProviderCredential(p *Provider) error {
 // resolveCopilotCredential materializes the effective OAuth token for an
 // enabled github-copilot provider from its sidecar credential file. The
 // token is stored on the dedicated CopilotToken field, never on APIKey.
+func ResolveCopilotCredential(p *Provider) error {
+	return resolveCopilotCredential(p)
+}
+
 func resolveCopilotCredential(p *Provider) error {
 	if p.CopilotCredentialRef == nil {
 		return nil

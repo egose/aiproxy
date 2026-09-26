@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { DialogManagerProvider } from '@egose/shadcn-theme/components/widgets/dialog-manager';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
 
@@ -11,9 +12,11 @@ function renderApp(path = '/') {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[path]}>
-        <App />
-      </MemoryRouter>
+      <DialogManagerProvider>
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+        </MemoryRouter>
+      </DialogManagerProvider>
     </QueryClientProvider>,
   );
 }

@@ -1,42 +1,37 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { HookFormTextInput } from '@egose/shadcn-theme/components/form/hook-text-input';
 import { Alert, AlertDescription } from '@egose/shadcn-theme/components/ui/alert';
 import { Button } from '@egose/shadcn-theme/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@egose/shadcn-theme/components/ui/card';
-import { Input } from '@egose/shadcn-theme/components/ui/input';
-import { Label } from '@egose/shadcn-theme/components/ui/label';
-import { useForm } from 'react-hook-form';
+import { useMutation } from '@tanstack/react-query';
+import { FormProvider, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 import { useSnapshot } from 'valtio';
 import { dashboardStore, setDashboardToken } from '../store';
 import { tokenFormSchema, type TokenForm } from '../types';
 import { errorMessage, fetchSnapshot } from '../services/dashboard';
-import { useState } from 'react';
 
 export function TokenPage() {
   const navigate = useNavigate();
   const current = useSnapshot(dashboardStore).token;
-  const [checking, setChecking] = useState(false);
-  const [checkError, setCheckError] = useState<string | null>(null);
   const form = useForm<TokenForm>({
     resolver: zodResolver(tokenFormSchema),
     defaultValues: { token: current },
   });
 
-  const onSubmit = async (values: TokenForm) => {
-    setChecking(true);
-    setCheckError(null);
-    const previous = dashboardStore.token;
-    setDashboardToken(values.token.trim());
-    try {
-      await fetchSnapshot();
-      navigate('/', { replace: true });
-    } catch (err) {
-      setDashboardToken(previous);
-      setCheckError(errorMessage(err));
-    } finally {
-      setChecking(false);
-    }
-  };
+  const connectMutation = useMutation({
+    mutationFn: async (values: TokenForm) => {
+      const previous = dashboardStore.token;
+      setDashboardToken(values.token.trim());
+      try {
+        await fetchSnapshot();
+      } catch (err) {
+        setDashboardToken(previous);
+        throw err;
+      }
+    },
+    onSuccess: () => navigate('/', { replace: true }),
+  });
 
   const onSignOut = () => {
     setDashboardToken('');
@@ -55,34 +50,30 @@ export function TokenPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="grid gap-4" onSubmit={form.handleSubmit(onSubmit)}>
-            <div className="grid gap-2">
-              <Label htmlFor="token">Bearer token</Label>
-              <Input
-                id="token"
+          <FormProvider {...form}>
+            <form className="grid gap-4" onSubmit={form.handleSubmit((values) => connectMutation.mutate(values))}>
+              <HookFormTextInput<TokenForm>
+                name="token"
+                label="Bearer token"
                 type="password"
                 autoComplete="off"
                 placeholder="paste dashboard token"
-                {...form.register('token')}
               />
-              {form.formState.errors.token && (
-                <span className="text-sm text-red-500">{form.formState.errors.token.message}</span>
+              {connectMutation.error && (
+                <Alert variant="danger">
+                  <AlertDescription>{errorMessage(connectMutation.error)}</AlertDescription>
+                </Alert>
               )}
-            </div>
-            {checkError && (
-              <Alert variant="danger">
-                <AlertDescription>{checkError}</AlertDescription>
-              </Alert>
-            )}
-            <div className="flex gap-2">
-              <Button variant="primary" type="submit" disabled={checking}>
-                {checking ? 'Verifying...' : 'Save and connect'}
-              </Button>
-              <Button variant="outline" type="button" onClick={onSignOut}>
-                Sign out
-              </Button>
-            </div>
-          </form>
+              <div className="flex gap-2">
+                <Button variant="primary" type="submit" disabled={connectMutation.isPending}>
+                  {connectMutation.isPending ? 'Verifying...' : 'Save and connect'}
+                </Button>
+                <Button appearance="outline" type="button" onClick={onSignOut}>
+                  Sign out
+                </Button>
+              </div>
+            </form>
+          </FormProvider>
         </CardContent>
       </Card>
     </div>

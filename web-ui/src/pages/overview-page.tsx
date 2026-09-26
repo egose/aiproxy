@@ -1,9 +1,10 @@
 import { Alert, AlertDescription } from '@egose/shadcn-theme/components/ui/alert';
 import { Button } from '@egose/shadcn-theme/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@egose/shadcn-theme/components/ui/card';
+import { Spinner } from '@egose/shadcn-theme/components/ui/spinner';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { useDashboardToken, useSnapshot } from '../hooks';
+import { useAdminSession, useDashboardToken, useSnapshot } from '../hooks';
 import { errorMessage, isUnauthorized } from '../services/dashboard';
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -19,10 +20,11 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 export function OverviewPage() {
   const token = useDashboardToken();
+  const session = useAdminSession();
   const queryClient = useQueryClient();
   const snapshot = useSnapshot();
 
-  if (!token) {
+  if (!token && !session.accessToken) {
     return (
       <div className="mx-auto grid w-full max-w-2xl gap-6 p-6">
         <Card>
@@ -41,7 +43,11 @@ export function OverviewPage() {
   }
 
   if (snapshot.isPending) {
-    return <div className="p-6 text-sm">Loading snapshot...</div>;
+    return (
+      <div className="p-6 text-sm text-slate-500">
+        <Spinner size="small">Loading snapshot...</Spinner>
+      </div>
+    );
   }
 
   if (snapshot.error) {
@@ -51,7 +57,7 @@ export function OverviewPage() {
           <AlertDescription>{errorMessage(snapshot.error)}</AlertDescription>
         </Alert>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => queryClient.invalidateQueries({ queryKey: ['dashboard'] })}>
+          <Button appearance="outline" onClick={() => queryClient.invalidateQueries({ queryKey: ['dashboard'] })}>
             Retry
           </Button>
           {isUnauthorized(snapshot.error) && (

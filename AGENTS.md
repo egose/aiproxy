@@ -52,12 +52,13 @@ The CLI also includes:
   failure rejects the reload with the old runtime intact. The minted token survives
   `SIGHUP` reloads unchanged. Self-hosted reload is still `SIGHUP` for the
   server side.
-- `aiproxy webui` to print the embedded web dashboard URL (`/dashboard/`)
+- `aiproxy webui` to print the embedded web dashboard URL (`/`)
   of a **running** `aiproxy serve`, after probing that the server answers
   with the UI. It requires a `web_ui` block in the config and prints
   `no server running` when unreachable; pass `--open` to also launch the
   default browser. The UI's live views still authenticate against the
   `dashboard`-gated `/_internal/dashboard/*` APIs with the dashboard token.
+  The UI never claims API surfaces or the reserved `/dashboard` path.
 - `aiproxy paths` to print resolved config and secrets paths
 - `aiproxy examples` for boxed command/config examples
 - `aiproxy configure` for interactive config editing
@@ -76,7 +77,10 @@ The server supports `SIGHUP`-triggered live config reload for auth, providers,
 models, aliases, root and provider upstream header timeouts, root and provider
 user-agent settings, access-log
 enablement, payload-log configuration, metrics config, provider-health config, ingress-guardrail policy, web UI enablement, and metrics-backed inventory
-state. Listener address, listener timeout, logging level, and enabling the
+state. When multi-tenancy is enabled, database-backed providers, aliases, and
+inbound keys merge into the serving catalog on the same reload path (and
+automatically after admin API mutations); invalid rows fail the reload with
+the old runtime intact. Listener address, listener timeout, logging level, and enabling the
 dashboard after startup require restart.
 
 ## Lint / typecheck / test

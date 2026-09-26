@@ -1,7 +1,9 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 .PHONY: help build web-build check-toolchain shell-test lint-shell lint-workflows docs-contract format fmt vet test test-race integration cover clean docker-build \
-        docker-run run validate
+        docker-run run validate sandbox sandbox-up sandbox-provision sandbox-down sandbox-logs sandbox-config sandbox-destroy
+
+COMPOSE := docker compose -f sandbox/docker-compose.yml
 
 # --- Project --------------------------------------------------------------
 
@@ -86,6 +88,29 @@ validate: ## Validate config without starting the server (CONFIG=path/to/config.
 	@if [ -z "$(CONFIG)" ]; then echo "usage: make validate CONFIG=path/to/config.hcl"; exit 1; fi
 	@config="$(CONFIG)"; config=$$(cd -- "$$(dirname -- "$$config")" && pwd -P)/$$(basename -- "$$config"); \
 	  go run $(MAIN_PKG) validate --config "$$config"
+
+# --- Sandbox --------------------------------------------------------------
+
+sandbox: sandbox-up ## Start postgres and print connection info
+
+sandbox-up: ## Start sandbox postgres (add PROFILES=keycloak for Keycloak)
+	$(COMPOSE) up -d --wait postgres
+
+sandbox-provision: ## Provision the local Keycloak realm and client (future OIDC)
+	$(COMPOSE) --profile keycloak up --build keycloak-provision
+
+sandbox-down: ## Stop sandbox containers without removing data
+	$(COMPOSE) down
+
+sandbox-logs: ## Follow sandbox logs
+	$(COMPOSE) logs --tail=100 --follow
+
+sandbox-config: ## Validate the Compose configuration
+	$(COMPOSE) config --quiet
+
+sandbox-destroy: ## Remove sandbox data (requires CONFIRM_DESTROY=1)
+	@test "$(CONFIRM_DESTROY)" = "1" || (printf '%s\n' 'Refusing to remove sandbox data. Re-run with CONFIRM_DESTROY=1.' >&2; exit 1)
+	$(COMPOSE) down --volumes --remove-orphans
 
 # --- Docker ---------------------------------------------------------------
 

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/egose/aiproxy/internal/config"
-	"github.com/egose/aiproxy/internal/webui"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +39,7 @@ func runWebUI(parentCtx context.Context, cfgPath string, explicit bool, openBrow
 		fmt.Fprintln(stderr, "web UI not configured: add a 'web_ui' block to your config")
 		return errors.New("web UI not configured")
 	}
-	pageURL := normalizeBaseURL(rt.Listener.Address) + webui.RoutePrefix + "/"
+	pageURL := normalizeBaseURL(rt.Listener.Address) + "/"
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
 	defer cancel()
