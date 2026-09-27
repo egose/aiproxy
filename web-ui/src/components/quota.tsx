@@ -70,19 +70,19 @@ function parsePositiveInt(raw: string): number | null {
 }
 
 export function QuotaEditor({
-  orgId,
+  workspaceId,
   scope,
   scopeId,
   canEditPolicy,
   canEditEffective,
 }: {
-  orgId: string;
+  workspaceId: string;
   scope: 'users' | 'teams';
   scopeId: string;
   canEditPolicy: boolean;
   canEditEffective: boolean;
 }) {
-  const quota = useScopeQuota(orgId, scope, scopeId, true);
+  const quota = useScopeQuota(workspaceId, scope, scopeId, true);
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const [budget, setBudget] = useState('');
@@ -106,7 +106,7 @@ export function QuotaEditor({
   }, [quota.data, ready]);
 
   const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ['admin', 'orgs', orgId, scope, scopeId, 'quota'] });
+    queryClient.invalidateQueries({ queryKey: ['admin', 'workspaces', workspaceId, scope, scopeId, 'quota'] });
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -132,7 +132,7 @@ export function QuotaEditor({
           }
           return entry;
         });
-      return updateScopeQuota(orgId, scope, scopeId, body);
+      return updateScopeQuota(workspaceId, scope, scopeId, body);
     },
     onSuccess: async () => {
       setError(null);
@@ -142,7 +142,7 @@ export function QuotaEditor({
   });
 
   const resetMutation = useMutation({
-    mutationFn: async () => updateScopeQuota(orgId, scope, scopeId, { reset_spend: true }),
+    mutationFn: async () => updateScopeQuota(workspaceId, scope, scopeId, { reset_spend: true }),
     onSuccess: invalidate,
     onError: (err) => setError(errorMessage(err)),
   });

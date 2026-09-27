@@ -23,17 +23,17 @@ func TestKeySharingBindings(t *testing.T) {
 	st, h, ownerAccess := openUsersTestStore(t)
 	suffix := time.Now().UnixNano()
 
-	orgID := mkOrg(t, st, h, ownerAccess, "keyshare")
+	workspaceID := mkWorkspace(t, st, h, ownerAccess, "keyshare")
 	memberEmail := fmt.Sprintf("keymember-%d@example.com", suffix)
-	_, memberAccess := mkOrgMember(t, st, h, ownerAccess, memberEmail, orgID, "member")
+	_, memberAccess := mkWorkspaceMember(t, st, h, ownerAccess, memberEmail, workspaceID, "member")
 	otherEmail := fmt.Sprintf("keyother-%d@example.com", suffix)
-	otherOrg := mkOrg(t, st, h, ownerAccess, "keyother")
-	_, _ = mkOrgMember(t, st, h, ownerAccess, otherEmail, otherOrg, "member")
+	otherWorkspace := mkWorkspace(t, st, h, ownerAccess, "keyother")
+	_, _ = mkWorkspaceMember(t, st, h, ownerAccess, otherEmail, otherWorkspace, "member")
 
 	memberID := userIDByEmail(t, st, memberEmail)
 	otherID := userIDByEmail(t, st, otherEmail)
 
-	code, body := callAdmin(t, h, ownerAccess, http.MethodPost, "/_internal/admin/orgs/"+orgID+"/teams", map[string]interface{}{
+	code, body := callAdmin(t, h, ownerAccess, http.MethodPost, "/_internal/admin/workspaces/"+workspaceID+"/teams", map[string]interface{}{
 		"name": fmt.Sprintf("kteam-%d", suffix),
 	})
 	if code != http.StatusCreated {
@@ -43,7 +43,7 @@ func TestKeySharingBindings(t *testing.T) {
 	if teamID == "" {
 		t.Fatalf("missing team id: %v", body)
 	}
-	code, _ = callAdmin(t, h, ownerAccess, http.MethodPost, "/_internal/admin/orgs/"+orgID+"/teams/"+teamID+"/members", map[string]interface{}{
+	code, _ = callAdmin(t, h, ownerAccess, http.MethodPost, "/_internal/admin/workspaces/"+workspaceID+"/teams/"+teamID+"/members", map[string]interface{}{
 		"email": memberEmail,
 	})
 	if code != http.StatusCreated && code != http.StatusOK {
@@ -53,7 +53,7 @@ func TestKeySharingBindings(t *testing.T) {
 	expiry := time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339)
 	sharedName := fmt.Sprintf("shared-%d", suffix)
 	code, body = callAdmin(t, h, ownerAccess, http.MethodPost, "/_internal/admin/keys", map[string]interface{}{
-		"name": sharedName, "org_id": orgID, "description": "shared key", "expires_at": expiry,
+		"name": sharedName, "workspace_id": workspaceID, "description": "shared key", "expires_at": expiry,
 		"allowed_models": []interface{}{"alias/fast"}, "user_ids": []interface{}{memberID},
 	})
 	if code != http.StatusCreated {
@@ -72,7 +72,7 @@ func TestKeySharingBindings(t *testing.T) {
 
 	privateName := fmt.Sprintf("private-%d", suffix)
 	code, body = callAdmin(t, h, ownerAccess, http.MethodPost, "/_internal/admin/keys", map[string]interface{}{
-		"name": privateName, "org_id": orgID,
+		"name": privateName, "workspace_id": workspaceID,
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("create private key status = %d", code)
@@ -123,7 +123,7 @@ func TestKeySharingBindings(t *testing.T) {
 
 	personalName := fmt.Sprintf("mine-%d", suffix)
 	code, body = callAdmin(t, h, memberAccess, http.MethodPost, "/_internal/admin/keys", map[string]interface{}{
-		"name": personalName, "org_id": orgID,
+		"name": personalName, "workspace_id": workspaceID,
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("member personal create status = %d, body = %v", code, body)
@@ -143,12 +143,12 @@ func TestKeySharingBindings(t *testing.T) {
 	}
 
 	if code, _ := callAdmin(t, h, memberAccess, http.MethodPost, "/_internal/admin/keys", map[string]interface{}{
-		"name": fmt.Sprintf("other-%d", suffix), "org_id": orgID, "owner_type": "user", "owner_id": otherID,
+		"name": fmt.Sprintf("other-%d", suffix), "workspace_id": workspaceID, "owner_type": "user", "owner_id": otherID,
 	}); code == http.StatusCreated {
 		t.Fatalf("member must not create personal keys for other users")
 	}
 	if code, _ := callAdmin(t, h, memberAccess, http.MethodPost, "/_internal/admin/keys", map[string]interface{}{
-		"name": fmt.Sprintf("tmkey-%d", suffix), "org_id": orgID, "owner_type": "team", "owner_id": teamID,
+		"name": fmt.Sprintf("tmkey-%d", suffix), "workspace_id": workspaceID, "owner_type": "team", "owner_id": teamID,
 	}); code == http.StatusCreated {
 		t.Fatalf("plain team member must not create team keys")
 	}
@@ -184,9 +184,9 @@ func TestKeySharingBindings(t *testing.T) {
 	}
 
 	if code, _ := callAdmin(t, h, ownerAccess, http.MethodPost, "/_internal/admin/keys", map[string]interface{}{
-		"name": fmt.Sprintf("badbind-%d", suffix), "org_id": orgID, "user_ids": []interface{}{otherID},
+		"name": fmt.Sprintf("badbind-%d", suffix), "workspace_id": workspaceID, "user_ids": []interface{}{otherID},
 	}); code == http.StatusCreated {
-		t.Fatalf("cross-org user binding must be rejected")
+		t.Fatalf("cross-workspace user binding must be rejected")
 	}
 	if code, _ := callAdmin(t, h, ownerAccess, http.MethodPut, "/_internal/admin/keys/"+sharedID, map[string]interface{}{
 		"expires_at": "not-a-date",

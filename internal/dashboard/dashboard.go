@@ -5,18 +5,18 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"net"
 	"net/url"
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/dashrpc"
 	"github.com/egose/aiproxy/internal/observability"
 )
 
@@ -50,13 +50,14 @@ type CooldownEntry struct {
 }
 
 type HealthcheckEntry struct {
-	Provider   string
-	Configured bool
-	Checked    bool
-	Healthy    bool
-	StatusCode int
-	Message    string
-	Path       string
+	Provider    string
+	Configured  bool
+	Checked     bool
+	Healthy     bool
+	StatusCode  int
+	Message     string
+	Path        string
+	LastChecked time.Time
 }
 
 type RuntimeSnapshot struct {
@@ -74,6 +75,9 @@ type RuntimeSnapshot struct {
 	Health            HealthViewer
 	Logs              LogsViewer
 	PayloadEnabled    bool
+	ProviderMetadata  map[string]*dashrpc.ProviderDiagnostics
+	ModelMetadata     map[string]*dashrpc.ModelDetails
+	AliasAffinity     map[string]*dashrpc.Affinity
 }
 
 type snapshotMsg struct {
@@ -98,7 +102,7 @@ const (
 	rateLines       = 2
 	footerLines     = 2
 	chromeLines     = headerLines + rateLines + footerLines
-	statsMinHeight  = 4
+	statsMinHeight  = 12
 	bottomMinHeight = 6
 )
 
@@ -109,86 +113,113 @@ const (
 	bottomTabAliases
 	bottomTabPayload
 	bottomTabBlocks
+	bottomTabRequests
 )
 
 type model struct {
-	snapshot             *RuntimeSnapshot
-	pending              *RuntimeSnapshot
-	hasPending           bool
-	health               map[string]bool
-	width                int
-	height               int
-	now                  time.Time
-	quit                 bool
-	dirty                bool
-	rendered             string
-	focus                focusArea
-	bottomTab            bottomTab
-	bottomHeight         int
-	statsHeight          int
-	lastRefresh          time.Time
-	staleErr             string
-	staleAt              time.Time
-	paused               bool
-	showHelp             bool
-	zoomed               bool
-	usageScroll          int
-	providerScroll       int
-	aliasCursor          int
-	aliasOffset          int
-	aliasDetailName      string
-	aliasDetailScroll    int
-	logCursor            int
-	logOffset            int
-	logCursorSeq         uint64
-	logFollow            bool
-	logOldestFirst       bool
-	logDetailOpen        bool
-	logDetailEntry       observability.LogEntry
-	logDetailScroll      int
-	logMinLevel          slog.Level
-	logFilterOn          bool
-	tenantIndex          int
-	errorsOnly           bool
-	usageUpstream        bool
-	ipCache              map[string]string
-	payloadFetcher       PayloadFetcher
-	payloads             []PayloadSummary
-	payloadKnown         bool
-	payloadEnabled       bool
-	payloadCursor        int
-	payloadOffset        int
-	payloadErrorsOnly    bool
-	payloadOldestFirst   bool
-	payloadLoading       bool
-	payloadErr           string
-	payloadDetail        string
-	payloadDetailErr     string
-	payloadDetailID      string
-	payloadPendingID     string
-	payloadDetailScroll  int
-	blockFetcher         BlockFetcher
-	blocks               []BlockSummary
-	blockKnown           bool
-	blockEnabled         bool
-	blockCursor          int
-	blockOffset          int
-	blockLoading         bool
-	blockErr             string
-	blockDetail          BlockCapture
-	blockDetailErr       string
-	blockDetailID        string
-	blockPendingID       string
-	blockDetailScroll    int
-	blockDecisionPending string
-	blockDecisionMsg     string
-	blockDecisionErr     string
+	search                       searchState
+	queries                      [5]string
+	requestCursor, requestOffset int
+	requestErrorsOnly            bool
+	requestDetail                *accounting.Event
+	usageDetail                  *accounting.Summary
+	metadataScroll               int
+	correlation                  *correlationContext
+	correlationNotice            string
+	ctx                          context.Context
+	retry                        func()
+	connection                   ConnectionStatus
+	snapshot                     *RuntimeSnapshot
+	pending                      *RuntimeSnapshot
+	hasPending                   bool
+	health                       map[string]bool
+	width                        int
+	height                       int
+	now                          time.Time
+	quit                         bool
+	dirty                        bool
+	rendered                     string
+	focus                        focusArea
+	bottomTab                    bottomTab
+	bottomHeight                 int
+	statsHeight                  int
+	lastRefresh                  time.Time
+	staleErr                     string
+	staleAt                      time.Time
+	paused                       bool
+	showHelp                     bool
+	helpScroll                   int
+	zoomed                       bool
+	usageScroll                  int
+	providerScroll               int
+	providerCursor               int
+	providerDetailName           string
+	providerDetailScroll         int
+	aliasCursor                  int
+	aliasOffset                  int
+	aliasDetailName              string
+	aliasDetailScroll            int
+	logCursor                    int
+	logOffset                    int
+	logCursorSeq                 uint64
+	logFollow                    bool
+	logOldestFirst               bool
+	logDetailOpen                bool
+	logDetailEntry               observability.LogEntry
+	logDetailScroll              int
+	logMinLevel                  slog.Level
+	logFilterOn                  bool
+	tenantIndex                  int
+	errorsOnly                   bool
+	usageUpstream                bool
+	payloadFetcher               PayloadFetcher
+	payloads                     []PayloadSummary
+	payloadKnown                 bool
+	payloadEnabled               bool
+	payloadCursor                int
+	payloadOffset                int
+	payloadErrorsOnly            bool
+	payloadOldestFirst           bool
+	payloadLoading               bool
+	payloadErr                   string
+	payloadDetail                string
+	payloadDetailErr             string
+	payloadDetailID              string
+	payloadPendingID             string
+	payloadDetailScroll          int
+	blockFetcher                 BlockFetcher
+	blocks                       []BlockSummary
+	blockKnown                   bool
+	blockEnabled                 bool
+	blockCursor                  int
+	blockOffset                  int
+	blockLoading                 bool
+	blockErr                     string
+	blockDetail                  BlockCapture
+	blockDetailErr               string
+	blockDetailID                string
+	blockPendingID               string
+	blockDetailScroll            int
+	blockDecisionPending         string
+	blockDecisionMsg             string
+	blockDecisionErr             string
+	blockFindingCursor           int
+	blockDecisionSHA             string
+	blockDecisionResults         map[string]blockDecisionMsg
+	payloadListRequest           requestSlot
+	payloadDetailRequest         requestSlot
+	blockListRequest             requestSlot
+	blockDetailRequest           requestSlot
+	blockDecisionRequest         requestSlot
+	pausedResults                pausedResults
+	liveNow                      time.Time
+	pauseSource                  *RuntimeSnapshot
 }
 
 type tickMsg time.Time
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(refreshInterval, func(time.Time) tea.Msg { return tickMsg{} })
+	return tea.Tick(refreshInterval, func(now time.Time) tea.Msg { return tickMsg(now) })
 }
 
 func InitialModel(s *RuntimeSnapshot) tea.Model {
@@ -243,146 +274,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dirty = true
 		return m, nil
 	case tea.KeyMsg:
-		if m.aliasDetailOpen() {
-			if msg.String() == "esc" || msg.String() == "enter" {
-				m.aliasDetailName = ""
-				m.aliasDetailScroll = 0
-				m.dirty = true
-				return m, nil
-			}
-			if shouldQuit(msg) {
-				m.quit = true
-				return m, tea.Quit
-			}
-			if handled := m.handleAliasDetailKey(msg); handled {
-				m.dirty = true
-				return m, nil
-			}
-			return m, nil
-		}
-		if m.payloadDetailOpen() || m.payloadPendingID != "" {
-			if msg.String() == "esc" || msg.String() == "enter" {
-				m.payloadDetailID = ""
-				m.payloadPendingID = ""
-				m.payloadDetail = ""
-				m.payloadDetailErr = ""
-				m.payloadDetailScroll = 0
-				m.dirty = true
-				return m, nil
-			}
-			if shouldQuit(msg) {
-				m.quit = true
-				return m, tea.Quit
-			}
-			if handled, cmd := m.handlePayloadKey(msg); handled {
-				m.dirty = true
-				return m, cmd
-			}
-			return m, nil
-		}
-		if m.blockDetailOpen() || m.blockPendingID != "" {
-			if msg.String() == "esc" || msg.String() == "enter" {
-				m.blockDetailID = ""
-				m.blockPendingID = ""
-				m.blockDetail = BlockCapture{}
-				m.blockDetailErr = ""
-				m.blockDetailScroll = 0
-				m.blockDecisionPending = ""
-				m.blockDecisionMsg = ""
-				m.blockDecisionErr = ""
-				m.dirty = true
-				return m, nil
-			}
-			if shouldQuit(msg) {
-				m.quit = true
-				return m, tea.Quit
-			}
-			if handled, cmd := m.handleBlockKey(msg); handled {
-				m.dirty = true
-				return m, cmd
-			}
-			return m, nil
-		}
-		if m.zoomed && msg.String() == "esc" {
-			if m.aliasDetailOpen() {
-				m.aliasDetailName = ""
-				m.aliasDetailScroll = 0
-				m.dirty = true
-				return m, nil
-			}
-			if m.logDetailOpen {
-				m.logDetailOpen = false
-				m.logDetailScroll = 0
-				m.dirty = true
-				return m, nil
-			}
-			m.zoomed = false
-			m.dirty = true
-			return m, nil
-		}
-		if m.logDetailOpen {
-			if msg.String() == "esc" || msg.String() == "enter" {
-				m.logDetailOpen = false
-				m.logDetailScroll = 0
-				m.dirty = true
-				return m, nil
-			}
-			if shouldQuit(msg) {
-				m.quit = true
-				return m, tea.Quit
-			}
-			if handled := m.handleLogDetailKey(msg); handled {
-				m.dirty = true
-				return m, nil
-			}
-			return m, nil
-		}
-		if shouldQuit(msg) {
-			m.quit = true
-			return m, tea.Quit
-		}
-		if m.focus == focusBottom && m.bottomTab == bottomTabAliases {
-			if handled := m.handleAliasKey(msg); handled {
-				m.dirty = true
-				return m, nil
-			}
-		}
-		if m.focus == focusBottom && m.bottomTab == bottomTabPayload {
-			if handled, cmd := m.handlePayloadKey(msg); handled {
-				m.dirty = true
-				return m, cmd
-			}
-		}
-		if m.focus == focusBottom && m.bottomTab == bottomTabBlocks {
-			if handled, cmd := m.handleBlockKey(msg); handled {
-				m.dirty = true
-				return m, cmd
-			}
-		}
-		if m.focus == focusBottom && m.bottomTab == bottomTabLogs {
-			if handled := m.handleLogKey(msg); handled {
-				m.dirty = true
-				return m, nil
-			}
-		}
-		if handled := m.handleKey(msg); handled {
-			m.dirty = true
-			if m.bottomTab == bottomTabPayload && !m.payloadKnown {
-				if cmd := m.requestPayloads(); cmd != nil {
-					return m, cmd
-				}
-			}
-			if m.bottomTab == bottomTabBlocks && !m.blockKnown {
-				if cmd := m.requestBlocks(); cmd != nil {
-					return m, cmd
-				}
-			}
-		}
-		return m, nil
+		return m, m.handleInput(msg)
 	case snapshotMsg:
 		if msg.snapshot != nil {
 			if m.paused {
-				m.pending = msg.snapshot
+				m.pending = frozenSnapshot(msg.snapshot)
+				m.pauseSource = nil
 				m.hasPending = true
 				m.dirty = true
 				return m, nil
@@ -393,6 +290,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pollErrorMsg:
 		m.staleErr = msg.err
 		m.staleAt = msg.at
+		m.dirty = true
+		return m, nil
+	case ConnectionStatus:
+		m.connection = msg
 		m.dirty = true
 		return m, nil
 	case payloadListMsg:
@@ -411,7 +312,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyBlockDecision(msg)
 		return m, nil
 	case tickMsg:
-		m.now = time.Now()
+		m.liveNow = time.Time(msg)
+		if m.liveNow.IsZero() {
+			m.liveNow = time.Now()
+		}
+		if m.paused {
+			return m, tickCmd()
+		}
+		m.now = m.liveNow
 		if m.snapshot != nil && m.snapshot.Health != nil {
 			m.health = m.snapshot.Health.Snapshot()
 		}
@@ -419,13 +327,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dirty = true
 		if m.bottomTab == bottomTabPayload && m.payloadKnown && !m.payloadDetailOpen() &&
 			m.payloadPendingID == "" && m.payloadFetcher != nil && !m.payloadLoading && m.payloadErr == "" {
-			m.payloadLoading = true
-			return m, tea.Batch(tickCmd(), fetchPayloadsCmd(m.payloadFetcher, payloadFetchLimit, m.payloadErrorsOnly))
+			return m, tea.Batch(tickCmd(), m.requestPayloads())
 		}
 		if m.bottomTab == bottomTabBlocks && m.blockKnown && !m.blockDetailOpen() &&
 			m.blockPendingID == "" && m.blockFetcher != nil && !m.blockLoading && m.blockErr == "" {
-			m.blockLoading = true
-			return m, tea.Batch(tickCmd(), fetchBlocksCmd(m.blockFetcher))
+			return m, tea.Batch(tickCmd(), m.requestBlocks())
 		}
 		return m, tickCmd()
 	}
@@ -433,11 +339,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) applySnapshot(s *RuntimeSnapshot) {
+	requests := m.recentRequests()
+	providers, usage, aliases := m.providerList(), m.filteredSummaries(), m.aliasList()
+	logs := m.filteredLogs(1 << 30)
+	tenant := m.activeTenant()
 	m.snapshot = s
+	m.tenantIndex = 0
+	for i, name := range m.tenantNames() {
+		if name == tenant {
+			m.tenantIndex = i + 1
+			break
+		}
+	}
 	m.pending = nil
 	m.hasPending = false
 	if s.Health != nil {
 		m.health = s.Health.Snapshot()
+	} else {
+		m.health = map[string]bool{}
 	}
 	m.payloadEnabled = s.PayloadEnabled
 	if !s.SnapshotAt.IsZero() {
@@ -446,18 +365,18 @@ func (m *model) applySnapshot(s *RuntimeSnapshot) {
 		m.lastRefresh = m.now
 	}
 	m.staleErr = ""
-	m.usageScroll = 0
-	m.providerScroll = 0
+	m.requestCursor = anchoredIndex(requests, m.recentRequests(), m.requestCursor, requestIdentity)
+	m.requestOffset = anchoredIndex(requests, m.recentRequests(), m.requestOffset, requestIdentity)
+	m.usageScroll = anchoredIndex(usage, m.filteredSummaries(), m.usageScroll, usageIdentity)
+	m.providerScroll = anchoredIndex(providers, m.providerList(), m.providerScroll, providerIdentity)
+	m.providerCursor = anchoredIndex(providers, m.providerList(), m.providerCursor, providerIdentity)
+	m.aliasCursor = anchoredIndex(aliases, m.aliasList(), m.aliasCursor, aliasIdentity)
+	m.aliasOffset = anchoredIndex(aliases, m.aliasList(), m.aliasOffset, aliasIdentity)
+	if !m.logFollow {
+		m.logOffset = anchoredIndex(logs, m.filteredLogs(1<<30), m.logOffset, func(e observability.LogEntry) uint64 { return e.Seq })
+	}
 	m.clampScroll()
 	m.dirty = true
-}
-
-func shouldQuit(msg tea.KeyMsg) bool {
-	switch msg.String() {
-	case "q", "esc", "ctrl+c":
-		return true
-	}
-	return false
 }
 
 func (m *model) handleKey(msg tea.KeyMsg) bool {
@@ -469,27 +388,24 @@ func (m *model) handleKey(msg tea.KeyMsg) bool {
 		m.focus = (m.focus + 2) % 3
 		return true
 	case "enter":
-		if m.focus == focusBottom {
-			switch m.bottomTab {
-			case bottomTabAliases:
-				if m.handleAliasKey(msg) {
-					return true
-				}
-			case bottomTabPayload:
-				if handled, cmd := m.handlePayloadKey(msg); handled {
-					_ = cmd
-					return true
-				}
-			default:
-				if m.handleLogKey(msg) {
-					return true
-				}
+		if m.focus == focusUsage {
+			rows := m.filteredSummaries()
+			if m.usageScroll < len(rows) {
+				s := rows[m.usageScroll]
+				m.usageDetail = &s
+				m.metadataScroll = 0
+				return true
 			}
-			return false
 		}
-		m.zoomed = !m.zoomed
-		m.clampScroll()
-		return true
+		if m.focus == focusProviders {
+			providers := m.providerList()
+			if m.providerCursor < len(providers) {
+				m.providerDetailName = providers[m.providerCursor].Name
+				m.providerDetailScroll = 0
+				return true
+			}
+		}
+		return false
 	case "z":
 		m.zoomed = !m.zoomed
 		m.clampScroll()
@@ -510,40 +426,42 @@ func (m *model) handleKey(msg tea.KeyMsg) bool {
 		m.bottomTab = bottomTabBlocks
 		m.focus = focusBottom
 		return true
+	case "5":
+		m.bottomTab = bottomTabRequests
+		m.focus = focusBottom
+		return true
 	case "[", "]":
-		switch m.bottomTab {
-		case bottomTabLogs:
-			m.bottomTab = bottomTabAliases
-		case bottomTabAliases:
-			m.bottomTab = bottomTabPayload
-		case bottomTabPayload:
-			m.bottomTab = bottomTabBlocks
-		default:
-			m.bottomTab = bottomTabLogs
+		tabs := []bottomTab{bottomTabAliases, bottomTabLogs, bottomTabPayload, bottomTabBlocks, bottomTabRequests}
+		for i, tab := range tabs {
+			if tab == m.bottomTab {
+				delta := 1
+				if msg.String() == "[" {
+					delta = -1
+				}
+				m.bottomTab = tabs[(i+delta+len(tabs))%len(tabs)]
+				break
+			}
 		}
 		m.focus = focusBottom
 		return true
-	case "?", "h":
-		m.showHelp = !m.showHelp
-		return true
-	case "p":
-		m.paused = !m.paused
-		if !m.paused && m.hasPending && m.pending != nil {
-			s := m.pending
-			m.pending = nil
-			m.hasPending = false
-			m.applySnapshot(s)
-		}
-		return true
 	case "e":
+		if m.focus != focusUsage {
+			return false
+		}
 		m.errorsOnly = !m.errorsOnly
 		m.usageScroll = 0
 		return true
 	case "u":
+		if m.focus != focusUsage {
+			return false
+		}
 		m.usageUpstream = !m.usageUpstream
 		m.usageScroll = 0
 		return true
 	case "t":
+		if m.focus != focusUsage {
+			return false
+		}
 		m.tenantIndex++
 		if m.tenantIndex > len(m.tenantNames()) {
 			m.tenantIndex = 0
@@ -551,6 +469,9 @@ func (m *model) handleKey(msg tea.KeyMsg) bool {
 		m.usageScroll = 0
 		return true
 	case "l":
+		if m.focus != focusBottom || m.bottomTab != bottomTabLogs {
+			return false
+		}
 		m.cycleLogLevel()
 		m.logCursor = 0
 		m.logOffset = 0
@@ -562,6 +483,9 @@ func (m *model) handleKey(msg tea.KeyMsg) bool {
 		m.clampLogCursor()
 		return true
 	case "o":
+		if m.focus != focusBottom {
+			return false
+		}
 		switch m.bottomTab {
 		case bottomTabLogs:
 			m.toggleLogOrder()
@@ -692,6 +616,9 @@ func (m *model) scrollFocusedPage(sign int) bool {
 
 func (m *model) detailVisibleRows() int {
 	n := zoomBodyHeight(m.height) - 5
+	if m.blockDetailOpen() {
+		n--
+	}
 	if n < 1 {
 		n = 1
 	}
@@ -701,11 +628,7 @@ func (m *model) detailVisibleRows() int {
 func (m *model) scrollTop() bool {
 	switch m.focus {
 	case focusProviders:
-		if m.providerScroll == 0 {
-			return false
-		}
-		m.providerScroll = 0
-		return true
+		return m.scrollProviders(-m.providerDataRows())
 	case focusUsage:
 		if m.usageScroll == 0 {
 			return false
@@ -743,12 +666,7 @@ func (m *model) scrollTop() bool {
 func (m *model) scrollBottom() bool {
 	switch m.focus {
 	case focusProviders:
-		max := m.maxProviderScroll()
-		if m.providerScroll == max {
-			return false
-		}
-		m.providerScroll = max
-		return true
+		return m.scrollProviders(m.providerDataRows())
 	case focusUsage:
 		max := m.maxUsageScroll()
 		if m.usageScroll == max {
@@ -779,18 +697,12 @@ func (m *model) scrollBottom() bool {
 }
 
 func (m *model) scrollProviders(delta int) bool {
-	max := m.maxProviderScroll()
-	next := m.providerScroll + delta
-	if next < 0 {
-		next = 0
-	}
-	if next > max {
-		next = max
-	}
-	if next == m.providerScroll {
+	next := clampInt(m.providerCursor+delta, 0, max(0, m.providerDataRows()-1))
+	if next == m.providerCursor {
 		return false
 	}
-	m.providerScroll = next
+	m.providerCursor = next
+	m.clampProviderCursor()
 	return true
 }
 
@@ -1223,6 +1135,8 @@ func (m *model) handleLogDetailKey(msg tea.KeyMsg) bool {
 }
 
 func (m *model) clampScroll() {
+	m.clampRequestCursor()
+	m.clampProviderCursor()
 	if m.usageScroll > m.maxUsageScroll() {
 		m.usageScroll = m.maxUsageScroll()
 	}
@@ -1287,14 +1201,14 @@ func zoomBodyHeight(height int) int {
 }
 
 func (m *model) effStatsHeight() int {
-	if m.zoomed && m.focus != focusBottom {
-		return zoomBodyHeight(m.height)
+	if m.focusedLayout() {
+		return zoomBodyHeight(m.height) - 1
 	}
 	return m.statsHeight
 }
 
 func (m *model) effBottomHeight() int {
-	if m.zoomed && m.focus == focusBottom {
+	if m.focusedLayout() {
 		return zoomBodyHeight(m.height)
 	}
 	return m.bottomHeight
@@ -1302,6 +1216,9 @@ func (m *model) effBottomHeight() int {
 
 func (m *model) usageVisibleRows() int {
 	_, usageH := m.splitStatsHeight(m.effStatsHeight())
+	if m.focusedLayout() {
+		usageH = m.effStatsHeight()
+	}
 	n := usageH - 5
 	if n < 1 {
 		n = 1
@@ -1326,6 +1243,9 @@ func (m *model) logVisibleRows() int {
 }
 
 func (m *model) resize(delta int) bool {
+	if m.focusedLayout() {
+		return false
+	}
 	newBottom := m.bottomHeight + delta
 	maxBottom := m.height - chromeLines - statsMinHeight
 	if maxBottom < bottomMinHeight {
@@ -1342,6 +1262,7 @@ func (m *model) resize(delta int) bool {
 	}
 	m.bottomHeight = newBottom
 	m.relayoutStatsBottom()
+	m.clampScroll()
 	return true
 }
 
@@ -1352,7 +1273,7 @@ func (m *model) relayout() {
 		return
 	}
 	available := m.height - chromeLines
-	if available < 12 {
+	if m.compactLayout() {
 		m.statsHeight = available
 		m.bottomHeight = 0
 		return
@@ -1400,17 +1321,25 @@ func (m *model) SetNowForTest(now time.Time) {
 }
 
 func (m *model) render() string {
-	if m.snapshot == nil {
-		return "no snapshot"
-	}
 	if m.showHelp {
 		return m.renderHelp()
 	}
 	if m.width < 80 || m.height < 12 {
-		return fmt.Sprintf("Terminal too small (%dx%d). Need at least 80x12.", m.width, m.height)
+		return m.renderNotice(fmt.Sprintf("Terminal too small (%dx%d). Need at least 80x12.", m.width, m.height))
+	}
+	if m.snapshot == nil {
+		return m.renderNotice("no snapshot")
 	}
 	header := renderHeader(m)
 	rate := renderRate(m, m.width)
+	if m.requestDetail != nil || m.usageDetail != nil {
+		body := renderMetadataDetail(m, m.width, zoomBodyHeight(m.height))
+		return fitView(lipgloss.JoinVertical(lipgloss.Left, header, rate, body, renderFooter(m)), m.width)
+	}
+	if m.providerDetailName != "" {
+		body := renderProviderDetail(m, m.width, zoomBodyHeight(m.height))
+		return fitView(lipgloss.JoinVertical(lipgloss.Left, header, rate, body, renderFooter(m)), m.width)
+	}
 	if m.aliasDetailOpen() {
 		bodyHeight := zoomBodyHeight(m.height)
 		body := renderAliasDetail(m, m.width, bodyHeight)
@@ -1431,14 +1360,14 @@ func (m *model) render() string {
 		body := renderLogDetail(m, m.width, bodyHeight)
 		return fitView(lipgloss.JoinVertical(lipgloss.Left, header, rate, body, renderFooter(m)), m.width)
 	}
-	if m.zoomed {
+	if m.focusedLayout() {
 		bodyHeight := zoomBodyHeight(m.height)
 		var body string
 		switch m.focus {
 		case focusProviders:
-			body = renderProviders(m, m.width, bodyHeight)
+			body = lipgloss.JoinVertical(lipgloss.Left, renderTabStrip(m, m.width), renderProviders(m, m.width, bodyHeight-1))
 		case focusUsage:
-			body = renderUsage(m, m.width, bodyHeight)
+			body = lipgloss.JoinVertical(lipgloss.Left, renderTabStrip(m, m.width), renderUsage(m, m.width, bodyHeight-1))
 		default:
 			body = renderBottom(m, m.width, bodyHeight)
 		}
@@ -1498,7 +1427,7 @@ func (m *model) snapshotUsageSummaries() []accounting.Summary {
 var ansiSeq = regexp.MustCompile("\x1b\\[[0-9;:?]*[ -/]*[@-~]|\x1b\\][^\x07]*(?:\x07|\x1b\\\\)|\x1b[()][0-9A-Za-z]")
 
 func visibleLen(s string) int {
-	return len([]rune(ansiSeq.ReplaceAllString(s, "")))
+	return ansi.StringWidth(s)
 }
 
 func padLine(s string, w int) string {
@@ -1511,17 +1440,20 @@ func padLine(s string, w int) string {
 func fitView(out string, width int) string {
 	lines := strings.Split(out, "\n")
 	for i, l := range lines {
-		lines[i] = padLine(l, width)
+		lines[i] = padLine(ansi.Truncate(logOneLine(l), max(0, width), ""), width)
 	}
 	return strings.Join(lines, "\n")
 }
 
 func (m *model) providerVisibleRows() int {
 	notes := 0
-	if m.snapshot != nil {
+	if m.snapshot != nil && m.snapshot.Usage != nil {
 		notes = providerNoteCount(m.snapshot.Usage.Summaries())
 	}
 	provH, _ := m.splitStatsHeight(m.effStatsHeight())
+	if m.focusedLayout() {
+		provH = m.effStatsHeight()
+	}
 	n := provH - 4 - notes
 	if n < 1 {
 		n = 1
@@ -1539,6 +1471,8 @@ func renderBottom(m *model, width, height int) string {
 	switch m.bottomTab {
 	case bottomTabAliases:
 		pane = renderAliases(m, width, paneHeight)
+	case bottomTabRequests:
+		pane = renderRequests(m, width, paneHeight)
 	case bottomTabPayload:
 		pane = renderPayloads(m, width, paneHeight)
 	case bottomTabBlocks:
@@ -1552,30 +1486,21 @@ func renderBottom(m *model, width, height int) string {
 func renderTabStrip(m *model, width int) string {
 	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B"))
-	aliasLabel := fmt.Sprintf("1:Aliases(%d) cool:%d", len(m.snapshot.Aliases), len(m.snapshot.Cooldowns))
-	level := "all"
-	if m.logFilterOn {
-		level = ">=" + m.logMinLevel.String()
+	aliasLabel := "1:Aliases"
+	if width >= 100 && m.snapshot != nil {
+		aliasLabel = fmt.Sprintf("1:Aliases(%d) cool:%d", len(m.snapshot.Aliases), len(m.snapshot.Cooldowns))
 	}
-	logsLabel := fmt.Sprintf("2:Logs(%s,%s)", level, m.logOrderLabel())
-	payloadLabel := fmt.Sprintf("3:Payloads(%s)", m.payloadOrderLabel())
-	if m.payloadKnown {
-		filter := ""
-		if m.payloadErrorsOnly {
-			filter = " errs"
-		}
-		payloadLabel = fmt.Sprintf("3:Payloads(%d%s,%s)", len(m.payloads), filter, m.payloadOrderLabel())
-	} else if !m.payloadEnabled {
-		payloadLabel = "3:Payloads(off)"
-	}
+	logsLabel := "2:Logs"
+	payloadLabel := "3:Payloads"
 	alias := dimStyle.Render("  " + aliasLabel)
 	logs := dimStyle.Render("  " + logsLabel)
 	payload := dimStyle.Render("  " + payloadLabel)
 	blocksLabel := "4:Blocks"
-	if m.blockKnown {
+	if width >= 100 && m.blockKnown {
 		blocksLabel = fmt.Sprintf("4:Blocks(%d)", len(m.blocks))
 	}
 	blocks := dimStyle.Render("  " + blocksLabel)
+	requests := dimStyle.Render("  5:Requests")
 	switch m.bottomTab {
 	case bottomTabAliases:
 		alias = activeStyle.Render("▸ " + aliasLabel)
@@ -1583,10 +1508,12 @@ func renderTabStrip(m *model, width int) string {
 		logs = activeStyle.Render("▸ " + logsLabel)
 	case bottomTabBlocks:
 		blocks = activeStyle.Render("▸ " + blocksLabel)
+	case bottomTabRequests:
+		requests = activeStyle.Render("▸ 5:Requests")
 	default:
 		payload = activeStyle.Render("▸ " + payloadLabel)
 	}
-	return alias + "  " + logs + "  " + payload + "  " + blocks
+	return fitRow(alias+" "+logs+" "+payload+" "+blocks+" "+requests+" [prev ]next", width)
 }
 
 func (m *model) renderHelp() string {
@@ -1594,73 +1521,73 @@ func (m *model) renderHelp() string {
 		"aiproxy dashboard — keys",
 		"",
 		"  tab/shift+tab cycle focus PROVIDERS / USAGE / bottom tabs",
-		"  1/2/3/4 or [/] switch bottom tab (Aliases / Logs / Payloads / Blocks)",
-		"  enter      open selected row detail (all bottom tabs)",
+		"  1/2/3/4/5 or [/] switch tabs (Aliases / Logs / Payloads / Blocks / Requests)",
+		"  [ previous / ] next tab, in numbered display order (wraps)",
+		"  enter      open/close detail; Usage inspects top visible group (n/N cycles groups)",
+		"  /          search Requests/Logs/Payloads; Ctrl+U clears applied search",
+		"  Search: AND case-insensitive substrings; field:value or bare words (max 256 chars)",
+		"  Requests: id/client/tenant/model/resolved/provider/status/op; e toggles errors",
+		"  Logs: id/level (structured metadata only); Payloads: id/model/resolved/provider/status/method/path",
+		"  Editor: arrows/Home/End/Backspace/Delete, Ctrl+U clear, Enter apply, Esc cancel",
+		"  While editing q/p/h/?/digits/brackets are text; Ctrl+C quit, Ctrl+R retry",
+		"  Request detail l/v: exact-ID logs/payload list; Esc returns through detail to Requests",
+		"  Correlation ignores target filters temporarily; no history beyond retained lists",
 		"  z          zoom focused pane to full screen",
-		"  esc        unzoom / close detail (or quit when not zoomed)",
+		"  esc        close help, then detail, then zoom; otherwise quit",
+		"  tab/number/bracket navigation closes detail before switching",
+		"  Under 30 rows: focused pane only; Tab still cycles all panes",
 		"  j/k dn/up  move selection / scroll   g/G,home/end top/bottom",
 		"  pgup/pgdn  page selection / scroll (bottom panes + detail)",
-		"  +/- J/K    resize bottom pane",
-		"  t          cycle tenant filter    e toggle errors-only",
+		"  +/- J/K    resize bottom pane (stacked layout only)",
+		"  t/e/u      tenant/errors/upstream (focused USAGE only)",
 		"  s          toggle payload errs filter (payloads tab)",
-		"  r          refresh payload list (payloads tab)",
+		"  r          refresh payload/block list (focused list only)",
+		"  ctrl+r     retry dashboard connection (does not reload credentials)",
 		"  o          toggle newest/oldest order (logs/payloads tab)",
-		"  u          toggle usage view (public vs upstream model)",
-		"  l          cycle log level filter (all/debug/info/warn/error)",
-		"  p          pause live updates (buffer one snapshot)",
-		"  ?/h        toggle this help       q/Esc/Ctrl+C quit",
+		"  l          cycle log level (focused LOGS only)",
+		"  n/N        next/previous block finding (locked while recording)",
+		"  a/s/d      allow non-secret / redact / deny SELECTED finding hash only",
+		"             Persistent GLOBAL future-match effect; never replays the request.",
+		"             Pending actions cannot repeat; success suppresses the same action.",
+		"             Failure outcome may be unknown; a/s/d deliberately retries.",
+		"  Blocks     Enter consumes take-once capture; re-open is unavailable.",
+		"             Enter works only from a visible row; loading/error lists ignore it.",
+		"  Inspection Payload/block text wraps; j/k, PgUp/PgDn, Home/End inspect all rows.",
+		"             ID, finding scope, status and cap notice stay visible while scrolling.",
+		"             Payload pretty output: 64 KiB; body/pretty truncation is labeled.",
+		"             Block snippets are server-capped; truncation status is unavailable.",
+		"             Controls/invalid UTF-8 display as escapes, never terminal commands.",
+		"  1/2/3/4/5  navigate tabs outside search; never record a decision",
+		"  p          freeze data/clock; resume latest results (connection stays live)",
+		"  ?/h/Esc/Enter close help; q quits outside search; Ctrl+C quits every mode",
+		"  Help owns input: scroll keys work, pane actions are ignored",
 		"",
 		"Legend: ✓ healthy · ✗ unhealthy · ? unknown (no health report yet)",
 		"  HC = upstream healthcheck: ✓ passing · ✗ failing · ? pending · - none.",
+		"  HOST is configured, never DNS-resolved. Provider Enter: probe/models/settings.",
+		"  Probe age uses stored last-check time; missing metadata is unknown.",
+		"  Endpoints omit secrets/opaque paths. Alias counters are provider-wide, not target counts.",
 		"  ERR% excludes 429 (throttled shown separately) · ~ = streaming or",
-		"  untokenized response (no token accounting) · n/a = too few latency",
-		"  samples · cool Ns = alias target cooling with remaining time.",
+		"  untokenized response (no token accounting) · n/a = no positive duration.",
+		"  P95/n: positive durations from last <=200 global completions; no time window.",
+		"  Provider counts: global lifetime. Usage/EST$: retained rolling buckets.",
+		"  EST$ uses current prices; - means unavailable, never a partial subtotal.",
+		"  Rates: global last 60/300 complete seconds; graph: 15 one-minute bins.",
+		"  cool Ns = alias target cooling with remaining time.",
 		"",
-		"Press ? to close.",
+		"End of help. Press ? or Esc to return.",
 	}
-	return lipgloss.NewStyle().Width(m.width).Render(strings.Join(lines, "\n"))
+	return m.renderHelpPage(lines)
 }
 
 func renderFooter(m *model) string {
-	focusName := "USAGE"
-	if m.focus == focusProviders {
-		focusName = "PROVIDERS"
-	} else if m.focus == focusBottom {
-		focusName = "ALIASES"
-		switch m.bottomTab {
-		case bottomTabLogs:
-			focusName = "LOGS"
-		case bottomTabPayload:
-			focusName = "PAYLOADS"
-		case bottomTabBlocks:
-			focusName = "BLOCKS"
-		}
-	}
-	state := "LIVE"
-	if m.paused {
-		state = "PAUSED"
-	} else if m.staleErr != "" {
-		state = "STALE"
-	}
-	zoomHint := "[enter] detail [z] zoom"
-	if m.zoomed {
-		zoomHint = "[esc] unzoom"
-	}
-	base := fmt.Sprintf("%s focus:%s [tab/shift+tab] pane [1/2/3/4] tabs [j/k/pgup/pgdn] scroll [t]enant [e]rrs [s]tatus [r]efresh [o]rder [u]pstream [l]evel [p]ause %s [?]help [q]uit", state, focusName, zoomHint)
-	if len([]rune(base)) > m.width && m.width > 20 {
-		base = truncate(base, m.width)
-	}
-	legend := "ERR% excl 429 · ~=stream/no-tokens · ?=unknown health · HC=healthcheck · n/a=sparse latency · TOKENS=in/out (+cached w=write r=read)"
-	if len([]rune(legend)) > m.width && m.width > 20 {
-		legend = truncate(legend, m.width)
-	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Render(base + "\n" + legend)
+	return m.renderContextFooter()
 }
 
 func renderHeader(m *model) string {
 	snap := m.snapshot
 	uptime := m.now.Sub(snap.StartTime).Round(time.Second)
-	left := fmt.Sprintf("aiproxy %s  %s", snap.Version, snap.Address)
+	left := logOneLine(fmt.Sprintf("aiproxy %s  %s", snap.Version, snap.Address))
 	active := len(snap.Providers)
 	disabled := len(snap.DisabledProviders)
 	status := "LIVE"
@@ -1668,16 +1595,25 @@ func renderHeader(m *model) string {
 	if m.paused {
 		status = "PAUSED"
 		statusColor = "#FBBF24"
-		if m.hasPending {
-			status = "PAUSED+1"
-		}
 	} else if m.staleErr != "" {
 		age := m.now.Sub(m.staleAt).Round(time.Second)
 		status = fmt.Sprintf("STALE %s (%s)", age, truncate(m.staleErr, 40))
 		statusColor = "#F87171"
 	}
+	if m.connection.Denied || m.connection.Reconnecting {
+		status = "RECONNECTING"
+		if m.connection.Denied {
+			status = "DENIED"
+		}
+		if m.paused {
+			status += "/PAUSED"
+		}
+		statusColor = "#F87171"
+	}
 	right := fmt.Sprintf("providers %d (+%d disabled)  aliases %d  auth %s  uptime %s",
 		active, disabled, len(snap.Aliases), snap.AuthMode, uptime)
+	left = truncate(left, max(0, m.width-visibleLen(status)-6))
+	right = logOneLine(right)
 	leftStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
 	rightStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#94A3B8"))
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(statusColor)).Bold(true)
@@ -1690,87 +1626,6 @@ func renderHeader(m *model) string {
 		right = truncate(right, keep)
 	}
 	return leftStyle.Render(left) + "  " + statusStyle.Render("["+status+"]") + "  " + rightStyle.Render(right)
-}
-
-type rateStats struct {
-	perMin     [15]int64
-	errPerMin  [15]int64
-	r429PerMin [15]int64
-	req1m      int64
-	req5m      int64
-	err1m      int64
-	r429       int64
-	tokensMin  int64
-	total      int64
-	unresolved int64
-	cooldowns  int
-}
-
-func computeRates(m *model) rateStats {
-	var rs rateStats
-	rs.cooldowns = len(m.snapshot.Cooldowns)
-	summaries := m.snapshot.Usage.Summaries()
-	for _, s := range summaries {
-		if strings.HasPrefix(s.Model, "_") {
-			rs.unresolved += s.Count
-			continue
-		}
-		rs.total += s.Count
-	}
-	recent := m.snapshot.Usage.Recent(recentLimit)
-	now := m.now
-	if now.IsZero() {
-		now = time.Now()
-	}
-	var tokensRecent int64
-	var tokensN int64
-	for _, e := range recent {
-		if e.Timestamp.IsZero() {
-			continue
-		}
-		age := now.Sub(e.Timestamp)
-		if age < 0 || age > 15*time.Minute {
-			continue
-		}
-		bucket := int(age / time.Minute)
-		if bucket > 14 {
-			bucket = 14
-		}
-		rs.perMin[14-bucket]++
-		if e.StatusCode == 429 {
-			rs.r429PerMin[14-bucket]++
-		} else if e.StatusCode >= 400 || e.StatusCode == 0 {
-			rs.errPerMin[14-bucket]++
-		}
-		if e.TotalTokens > 0 && age <= time.Minute {
-			tokensRecent += e.TotalTokens
-			tokensN++
-		}
-	}
-	for i := 14; i >= 0; i-- {
-		if 14-i < 1 {
-			rs.req1m += rs.perMin[i]
-			rs.err1m += rs.errPerMin[i]
-			rs.r429 += rs.r429PerMin[i]
-		}
-		if 14-i < 5 {
-			rs.req5m += rs.perMin[i]
-		}
-	}
-	_ = tokensN
-	rs.tokensMin = tokensRecent
-	if rs.req1m == 0 && rs.total > 0 {
-		rs.tokensMin = tokensPerMinuteFallback(summaries)
-	}
-	return rs
-}
-
-func tokensPerMinuteFallback(summaries []accounting.Summary) int64 {
-	var total int64
-	for _, s := range summaries {
-		total += s.TotalTokens
-	}
-	return total
 }
 
 func sparkline(vals [15]int64) string {
@@ -1800,36 +1655,14 @@ func sparkline(vals [15]int64) string {
 }
 
 func renderRate(m *model, width int) string {
-	rs := computeRates(m)
-	reqRate1 := float64(rs.req1m) / 60.0
-	reqRate5 := float64(rs.req5m) / 300.0
-	errPct := 0.0
-	if rs.req1m > 0 {
-		errPct = 100 * float64(rs.err1m) / float64(rs.req1m)
-	}
-	line1 := fmt.Sprintf("req/s 1m %.2f 5m %.2f · err1m %.1f%% · 429/1m %s · tok/1m %s · total %s · cool %s · unresolved %s  req/min ▁15m→ [%s]",
-		reqRate1, reqRate5, errPct, comma(rs.r429), comma(rs.tokensMin), comma(rs.total), comma(int64(rs.cooldowns)), comma(rs.unresolved), sparkline(rs.perMin))
+	line1 := rateLine(m.snapshot.Usage)
 	if runeLen(line1) > width && width > 20 {
 		line1 = truncate(line1, width)
 	}
-	filter := "tenant:all"
-	if t := m.activeTenant(); t != "" {
-		filter = "tenant:" + t
+	line2 := providerScope(m.snapshot.Usage) + " · P95/n last≤200 (no time window) · EST$ " + retentionLabel(m.snapshot.Usage)
+	if width < 100 {
+		line2 = providerScope(m.snapshot.Usage) + " · P95/n ≤200 untimed · EST$ " + retentionLabel(m.snapshot.Usage)
 	}
-	if m.errorsOnly {
-		filter += " errs-only"
-	}
-	level := "level:all"
-	if m.logFilterOn {
-		level = "level>=" + m.logMinLevel.String()
-	}
-	usageTotal := len(m.filteredSummaries())
-	usagePos := 0
-	if usageTotal > 0 {
-		usagePos = m.usageScroll + 1
-	}
-	line2 := fmt.Sprintf("filters: %s · %s · usage %d/%d · aliases %d · %s",
-		filter, level, usagePos, usageTotal, len(m.snapshot.Aliases), rateHint(m))
 	if runeLen(line2) > width && width > 20 {
 		line2 = truncate(line2, width)
 	}
@@ -1837,20 +1670,10 @@ func renderRate(m *model, width int) string {
 	return style.Render(line1 + "\n" + line2)
 }
 
-func rateHint(m *model) string {
-	if m.paused {
-		return "paused — p resumes"
-	}
-	if m.staleErr != "" {
-		return "poll failing — showing last snapshot"
-	}
-	return "poll 2s"
-}
-
 func (m *model) tenantNames() []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, s := range m.snapshot.Usage.Summaries() {
+	for _, s := range m.snapshotUsageSummaries() {
 		if s.Tenant == "" || seen[s.Tenant] {
 			continue
 		}
@@ -1866,20 +1689,21 @@ func (m *model) activeTenant() string {
 	if len(names) == 0 || m.tenantIndex <= 0 {
 		return ""
 	}
-	return names[(m.tenantIndex-1)%len(names)]
+	if m.tenantIndex > len(names) {
+		return ""
+	}
+	return names[m.tenantIndex-1]
 }
 
 func (m *model) filteredSummaries() []accounting.Summary {
+	if m.snapshot == nil || m.snapshot.Usage == nil {
+		return nil
+	}
 	summaries := m.snapshot.Usage.Summaries()
 	if m.usageUpstream {
-		summaries = upstreamAsSummaries(m.snapshot.Usage.UpstreamSummaries())
+		summaries = upstreamAsSummaries(retainedUpstream(m.snapshot.Usage))
 	}
-	tenant := ""
-	if names := m.tenantNames(); len(names) > 0 {
-		if m.tenantIndex > 0 {
-			tenant = names[(m.tenantIndex-1)%len(names)]
-		}
-	}
+	tenant := m.activeTenant()
 	var out []accounting.Summary
 	for _, s := range summaries {
 		if strings.HasPrefix(s.Model, "_") {
@@ -1901,7 +1725,21 @@ func (m *model) filteredSummaries() []accounting.Summary {
 
 func upstreamAsSummaries(upstream []accounting.UpstreamSummary) []accounting.Summary {
 	out := make([]accounting.Summary, 0, len(upstream))
+	indices := make(map[accounting.Summary]int)
 	for _, u := range upstream {
+		key := accounting.Summary{Tenant: u.Tenant, Client: u.Client, Model: u.Provider + "/" + u.Model, Operation: u.Operation, StatusCode: u.StatusCode}
+		if i, ok := indices[key]; ok {
+			s := &out[i]
+			s.Count += u.Count
+			s.PromptTokens += u.PromptTokens
+			s.CompletionTokens += u.CompletionTokens
+			s.TotalTokens += u.TotalTokens
+			s.CachedTokens += u.CachedTokens
+			s.CacheCreationTokens += u.CacheCreationTokens
+			s.CacheReadTokens += u.CacheReadTokens
+			continue
+		}
+		indices[key] = len(out)
 		out = append(out, accounting.Summary{
 			Tenant:              u.Tenant,
 			Client:              u.Client,
@@ -1924,17 +1762,18 @@ func renderProviders(m *model, width, height int) string {
 	snap := m.snapshot
 	border, inner := paneBox(width, height, m.focus == focusProviders)
 	summaries := snap.Usage.Summaries()
+	recent := snap.Usage.Recent(recentLimit)
 	stats := snap.Usage.ProviderSummaries()
-	if len(stats) == 0 && len(summaries) > 0 {
-		stats = accounting.ByProvider(summaries)
-	}
 	byName := make(map[string]accounting.ProviderSummary, len(stats))
 	for _, ps := range stats {
 		byName[ps.Provider] = ps
 	}
-	latency, samples := p95WithSamples(snap.Usage.Recent(recentLimit))
+	latency, samples := p95WithSamples(recent, stats)
 	prices := pricingIndex(snap.Providers)
-	upstream := snap.Usage.UpstreamSummaries()
+	upstream := retainedUpstream(snap.Usage)
+	if retainedBilling(snap.Usage) == nil {
+		prices = nil
+	}
 	var names []string
 	var ips []string
 	var reqs, t429s []int64
@@ -1942,22 +1781,23 @@ func renderProviders(m *model, width, height int) string {
 	for _, p := range snap.Providers {
 		ps := byName[p.Name]
 		names = append(names, p.Name)
-		ips = append(ips, m.providerIP(p.BaseURL))
+		ips = append(ips, m.providerHost(p))
 		reqs = append(reqs, ps.Requests)
 		t429s = append(t429s, ps.Throttled)
 		toks = append(toks, providerTokensText(ps))
 		costs = append(costs, providerCostTextWithAliases(p.Name, summaries, prices, snap.Aliases, upstream))
 	}
 	for _, p := range snap.DisabledProviders {
+		ps := byName[p.Name]
 		names = append(names, p.Name)
-		ips = append(ips, m.providerIP(p.BaseURL))
-		reqs = append(reqs, 0)
-		t429s = append(t429s, 0)
-		toks = append(toks, providerTokensText(accounting.ProviderSummary{}))
+		ips = append(ips, m.providerHost(p))
+		reqs = append(reqs, ps.Requests)
+		t429s = append(t429s, ps.Throttled)
+		toks = append(toks, providerTokensText(ps))
 		costs = append(costs, "-")
 	}
-	nameW, ipW, reqW, t429W, tokW, costW := providerColWidths(names, ips, reqs, t429s, toks, costs, inner)
-	rows := []string{headerStyle.Render(fitRow(headerCells([]col{{"PROVIDER", nameW}, {"", 1}, {"HC", 2}, {"REQS", reqW}, {"ERR%", 6}, {"429", t429W}, {"P95", 8}, {"TOKENS", tokW}, {"COST", costW}, {"IP", ipW}}), inner))}
+	nameW, ipW, reqW, t429W, tokW, costW := providerColWidths(names, ips, reqs, t429s, toks, costs, inner-2)
+	rows := []string{headerStyle.Render(fitRow("  "+headerCells([]col{{"PROVIDER", nameW}, {"", 1}, {"HC", 2}, {"REQS", reqW}, {"ERR%", 6}, {"429", t429W}, {"P95/n", 12}, {"TOKENS", tokW}, {"EST$", costW}, {"HOST", ipW}}), inner))}
 	unresolved := int64(0)
 	for _, s := range summaries {
 		if strings.HasPrefix(s.Model, "_") {
@@ -1969,16 +1809,17 @@ func renderProviders(m *model, width, height int) string {
 		dim  bool
 	}
 	var data []providerLine
-	hcByName := healthcheckMarks(m.snapshot.Healthchecks)
+	hcByName := m.probeMarks()
 	for _, p := range snap.Providers {
 		known, healthy := healthKnown(m.health, p.Name)
 		ps := byName[p.Name]
-		data = append(data, providerLine{text: providerRow(p.Name, known, healthy, hcByName[p.Name], ps, ps.Throttled, latency[p.Name], samples[p.Name], false, m.providerIP(p.BaseURL), providerCostTextWithAliases(p.Name, summaries, prices, snap.Aliases, upstream), nameW, ipW, reqW, t429W, tokW, costW)})
+		data = append(data, providerLine{text: providerRow(p.Name, known, healthy, hcByName[p.Name], ps, ps.Throttled, latency[p.Name], samples[p.Name], false, m.providerHost(p), providerCostTextWithAliases(p.Name, summaries, prices, snap.Aliases, upstream), nameW, ipW, reqW, t429W, tokW, costW, providerCountersAvailable(snap.Usage))})
 	}
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B"))
 	for _, p := range snap.DisabledProviders {
+		ps := byName[p.Name]
 		data = append(data, providerLine{
-			text: providerRow(p.Name, true, false, "-", accounting.ProviderSummary{}, 0, 0, 0, true, m.providerIP(p.BaseURL), "-", nameW, ipW, reqW, t429W, tokW, costW),
+			text: providerRow(p.Name, true, false, "-", ps, ps.Throttled, latency[p.Name], samples[p.Name], true, m.providerHost(p), "-", nameW, ipW, reqW, t429W, tokW, costW, providerCountersAvailable(snap.Usage)),
 			dim:  true,
 		})
 	}
@@ -2002,8 +1843,12 @@ func renderProviders(m *model, width, height int) string {
 	if end > len(data) {
 		end = len(data)
 	}
-	for _, d := range data[start:end] {
-		line := fitRow(d.text, inner)
+	for i, d := range data[start:end] {
+		prefix := "  "
+		if start+i == m.providerCursor {
+			prefix = "> "
+		}
+		line := fitRow(prefix+d.text, inner)
 		if d.dim {
 			line = dimStyle.Render(line)
 		}
@@ -2016,7 +1861,7 @@ func renderProviders(m *model, width, height int) string {
 		rows = append(rows, dimStyle.Render(fitRow(fmt.Sprintf("… %d more (j/k scroll)", len(data)-end), inner)))
 	}
 	if unresolved > 0 {
-		rows = append(rows, dimStyle.Render(fitRow(fmt.Sprintf("unresolved/forbidden: %s reqs (hidden)", comma(unresolved)), inner)))
+		rows = append(rows, dimStyle.Render(fitRow(fmt.Sprintf("unresolved/forbidden: %s retained reqs (hidden)", comma(unresolved)), inner)))
 	}
 	return border.Render(strings.Join(rows, "\n"))
 }
@@ -2058,31 +1903,18 @@ func healthcheckDetail(entries []HealthcheckEntry, provider string) string {
 			return ""
 		}
 		if !e.Checked {
-			return "hc pending " + e.Path
+			return "hc pending " + dashrpc.DiagnosticURL(e.Path)
 		}
 		if e.Healthy {
-			return fmt.Sprintf("hc ✓ %s %d", e.Path, e.StatusCode)
+			return fmt.Sprintf("hc ✓ %s %d", dashrpc.DiagnosticURL(e.Path), e.StatusCode)
 		}
-		msg := e.Message
+		msg := dashrpc.DiagnosticReason(e.Message)
 		if msg == "" {
 			msg = fmt.Sprintf("status %d", e.StatusCode)
 		}
-		return fmt.Sprintf("hc ✗ %s %s", e.Path, truncate(msg, 40))
+		return fmt.Sprintf("hc ✗ %s %s", dashrpc.DiagnosticURL(e.Path), truncate(msg, 40))
 	}
 	return ""
-}
-
-var lookupHostIPs = func(ctx context.Context, host string) ([]string, error) {
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(addrs))
-	for _, a := range addrs {
-		out = append(out, a.IP.String())
-	}
-	sort.Strings(out)
-	return out, nil
 }
 
 func baseURLHost(baseURL string) string {
@@ -2096,48 +1928,8 @@ func baseURLHost(baseURL string) string {
 	return u.Hostname()
 }
 
-func formatIPs(addrs []string) string {
-	if len(addrs) == 0 {
-		return "-"
-	}
-	if len(addrs) == 1 {
-		return addrs[0]
-	}
-	return fmt.Sprintf("%s +%d", addrs[0], len(addrs)-1)
-}
-
-func (m *model) providerIP(baseURL string) string {
-	host := baseURLHost(baseURL)
-	if host == "" {
-		return "-"
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return host
-	}
-	if m == nil {
-		return "-"
-	}
-	if m.ipCache == nil {
-		m.ipCache = map[string]string{}
-	}
-	if cached, ok := m.ipCache[host]; ok {
-		return cached
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
-	defer cancel()
-	addrs, err := lookupHostIPs(ctx, host)
-	if err != nil || len(addrs) == 0 {
-		m.ipCache[host] = "-"
-		return "-"
-	}
-	sort.Strings(addrs)
-	display := formatIPs(addrs)
-	m.ipCache[host] = display
-	return display
-}
-
 func runeLen(s string) int {
-	return len([]rune(s))
+	return visibleLen(s)
 }
 
 func comma(n int64) string {
@@ -2170,7 +1962,7 @@ func comma(n int64) string {
 }
 
 func providerColWidths(names, ips []string, requests, throttled []int64, tokens, costs []string, inner int) (nameW, ipW, reqW, t429W, tokW, costW int) {
-	nameW, ipW, reqW, t429W, tokW, costW = len("PROVIDER"), len("IP"), len("REQS"), len("429"), len("TOKENS"), len("COST")
+	nameW, ipW, reqW, t429W, tokW, costW = len("PROVIDER"), len("HOST"), len("REQS"), len("429"), len("TOKENS"), len("COST")
 	for _, n := range names {
 		nameW = max(nameW, runeLen(n))
 	}
@@ -2196,7 +1988,7 @@ func providerColWidths(names, ips []string, requests, throttled []int64, tokens,
 		{content: reqW, min: 4, max: 10},
 		{content: 6, min: 6, max: 6},
 		{content: t429W, min: 3, max: 8},
-		{content: 8, min: 8, max: 8},
+		{content: 12, min: 12, max: 12},
 		{content: tokW, min: 6, max: 0, flex: 3},
 		{content: costW, min: 4, max: 12, flex: 1},
 		{content: ipW, min: 2, max: 32, flex: 1},
@@ -2246,246 +2038,6 @@ func pricingIndex(providers []config.Provider) map[string]*config.ModelPricing {
 	return out
 }
 
-func summaryCostText(s accounting.Summary, prices map[string]*config.ModelPricing) string {
-	cost, ok := summaryCost(s, prices)
-	if !ok {
-		return "-"
-	}
-	return formatCost(cost)
-}
-
-func summaryCostTextWithAliases(s accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) string {
-	cost, ok := summaryCostWithAliases(s, prices, aliases, upstream)
-	if !ok {
-		return "-"
-	}
-	return formatCost(cost)
-}
-
-func summaryCost(s accounting.Summary, prices map[string]*config.ModelPricing) (float64, bool) {
-	return summaryCostWithAliases(s, prices, nil, nil)
-}
-
-func summaryCostWithAliases(s accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) (float64, bool) {
-	if len(prices) == 0 {
-		return 0, false
-	}
-	if p, ok := prices[s.Model]; ok {
-		return p.Cost(s.PromptTokens, s.CompletionTokens, s.CachedTokens, s.CacheCreationTokens, s.CacheReadTokens)
-	}
-	return aliasCost(s, prices, aliases, upstream)
-}
-
-func aliasTargets(aliases []config.Alias, name string) []config.AliasTarget {
-	for _, a := range aliases {
-		if a.Name == name {
-			return a.Targets
-		}
-	}
-	return nil
-}
-
-func aliasCost(s accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) (float64, bool) {
-	entries, ok := aliasCostEntries(s, prices, aliases, upstream)
-	if !ok {
-		return 0, false
-	}
-	if upstreamTokenTotal(entries) > 0 {
-		var total float64
-		priced := false
-		for _, e := range entries {
-			if !e.matched {
-				continue
-			}
-			cost, ok := e.price.Cost(e.prompt, e.completion, e.cached, e.write, e.read)
-			if !ok {
-				continue
-			}
-			total += cost
-			priced = true
-		}
-		if !priced {
-			return 0, false
-		}
-		return total, true
-	}
-	return splitAliasCost(s, entries, "")
-}
-
-type aliasCostEntry struct {
-	provider                                       string
-	price                                          *config.ModelPricing
-	prompt, completion, cached, write, read, count int64
-	matched                                        bool
-}
-
-func aliasCostEntries(s accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) ([]aliasCostEntry, bool) {
-	aliasName, ok := strings.CutPrefix(s.Model, "alias/")
-	if !ok {
-		return nil, false
-	}
-	targets := aliasTargets(aliases, aliasName)
-	if len(targets) == 0 {
-		return nil, false
-	}
-	entries := make([]aliasCostEntry, 0, len(targets))
-	for _, t := range targets {
-		p, ok := prices[t.Provider+"/"+t.Model]
-		if !ok || p == nil {
-			continue
-		}
-		e := aliasCostEntry{provider: t.Provider, price: p}
-		for _, u := range upstream {
-			if u.Provider != t.Provider || u.Model != t.Model {
-				continue
-			}
-			if u.Operation != s.Operation || u.StatusCode != s.StatusCode {
-				continue
-			}
-			if s.Tenant != "" && u.Tenant != s.Tenant {
-				continue
-			}
-			if s.Client != "" && u.Client != s.Client {
-				continue
-			}
-			e.prompt += u.PromptTokens
-			e.completion += u.CompletionTokens
-			e.cached += u.CachedTokens
-			e.write += u.CacheCreationTokens
-			e.read += u.CacheReadTokens
-			e.count += u.Count
-			e.matched = true
-		}
-		entries = append(entries, e)
-	}
-	if len(entries) == 0 {
-		return nil, false
-	}
-	return entries, true
-}
-
-func upstreamTokenTotal(entries []aliasCostEntry) int64 {
-	var total int64
-	for _, e := range entries {
-		if !e.matched {
-			continue
-		}
-		total += e.prompt + e.completion + e.cached + e.write + e.read
-	}
-	return total
-}
-
-func splitAliasCost(s accounting.Summary, entries []aliasCostEntry, provider string) (float64, bool) {
-	var totalWeight int64
-	for _, e := range entries {
-		totalWeight += e.count
-	}
-	var total float64
-	priced := false
-	for _, e := range entries {
-		if provider != "" && e.provider != provider {
-			continue
-		}
-		frac := 1.0 / float64(len(entries))
-		if totalWeight > 0 {
-			if e.count <= 0 {
-				continue
-			}
-			frac = float64(e.count) / float64(totalWeight)
-		}
-		cost, ok := e.price.Cost(
-			int64(float64(s.PromptTokens)*frac),
-			int64(float64(s.CompletionTokens)*frac),
-			int64(float64(s.CachedTokens)*frac),
-			int64(float64(s.CacheCreationTokens)*frac),
-			int64(float64(s.CacheReadTokens)*frac),
-		)
-		if !ok {
-			continue
-		}
-		total += cost
-		priced = true
-	}
-	if !priced {
-		return 0, false
-	}
-	return total, true
-}
-
-func providerCostText(provider string, summaries []accounting.Summary, prices map[string]*config.ModelPricing) string {
-	return providerCostTextWithAliases(provider, summaries, prices, nil, nil)
-}
-
-func providerRowCost(provider string, s accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) (float64, bool) {
-	if prov := accounting.EventProvider(accounting.Event{Model: s.Model}); prov == provider {
-		return summaryCostWithAliases(s, prices, aliases, upstream)
-	}
-	if _, ok := strings.CutPrefix(s.Model, "alias/"); !ok {
-		return 0, false
-	}
-	return aliasProviderCost(s, provider, prices, aliases, upstream)
-}
-
-func aliasProviderCost(s accounting.Summary, provider string, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) (float64, bool) {
-	entries, ok := aliasCostEntries(s, prices, aliases, upstream)
-	if !ok {
-		return 0, false
-	}
-	mine := false
-	for _, e := range entries {
-		if e.provider == provider {
-			mine = true
-			break
-		}
-	}
-	if !mine {
-		return 0, false
-	}
-	if upstreamTokenTotal(entries) > 0 {
-		var total float64
-		priced := false
-		for _, e := range entries {
-			if e.provider != provider || !e.matched {
-				continue
-			}
-			cost, ok := e.price.Cost(e.prompt, e.completion, e.cached, e.write, e.read)
-			if !ok {
-				continue
-			}
-			total += cost
-			priced = true
-		}
-		if !priced {
-			return 0, false
-		}
-		return total, true
-	}
-	return splitAliasCost(s, entries, provider)
-}
-
-func providerCostTextWithAliases(provider string, summaries []accounting.Summary, prices map[string]*config.ModelPricing, aliases []config.Alias, upstream []accounting.UpstreamSummary) string {
-	if len(prices) == 0 {
-		return "-"
-	}
-	var total float64
-	priced := false
-	for _, s := range summaries {
-		if strings.HasPrefix(s.Model, "_") {
-			continue
-		}
-		cost, ok := providerRowCost(provider, s, prices, aliases, upstream)
-		if !ok {
-			continue
-		}
-		total += cost
-		priced = true
-	}
-	if !priced {
-		return "-"
-	}
-	return formatCost(total)
-}
-
 func formatCost(dollars float64) string {
 	if dollars < 0 {
 		dollars = 0
@@ -2529,7 +2081,7 @@ func formatTokenSplit(prompt, completion, total, cached, cacheWrite, cacheRead i
 	return split
 }
 
-func providerRow(name string, known, healthy bool, hcMark string, ps accounting.ProviderSummary, throttled int64, p95 time.Duration, samples int, disabled bool, ip, cost string, nameW, ipW, reqW, t429W, tokW, costW int) string {
+func providerRow(name string, known, healthy bool, hcMark string, ps accounting.ProviderSummary, throttled int64, p95 time.Duration, samples int, disabled bool, ip, cost string, nameW, ipW, reqW, t429W, tokW, costW int, countersAvailable ...bool) string {
 	status := "✓"
 	if disabled {
 		status = "✗"
@@ -2539,28 +2091,32 @@ func providerRow(name string, known, healthy bool, hcMark string, ps accounting.
 		status = "✗"
 	}
 	if hcMark == "" {
-		hcMark = "-"
+		hcMark = "?"
 	}
 	errPct := 0.0
 	if ps.Requests > 0 {
 		errPct = 100 * float64(ps.Errors) / float64(ps.Requests)
 	}
-	p95cell := "     n/a"
+	p95cell := "n/a/0"
 	if samples > 0 {
-		p95cell = fmt.Sprintf("%8s", p95.Round(time.Millisecond))
+		p95cell = fmt.Sprintf("%s/%d", p95.Round(time.Millisecond), samples)
+	}
+	reqs, errors, throttles, tokens := comma(ps.Requests), fmt.Sprintf("%.1f%%", errPct), comma(throttled), providerTokensText(ps)
+	if len(countersAvailable) > 0 && !countersAvailable[0] {
+		reqs, errors, throttles, tokens = "n/a", "n/a", "n/a", "n/a"
 	}
 	return dataRow([]string{
 		truncate(name, nameW),
 		status,
 		hcMark,
-		fmt.Sprintf("%*s", reqW, comma(ps.Requests)),
-		fmt.Sprintf("%5.1f%%", errPct),
-		fmt.Sprintf("%*s", t429W, comma(throttled)),
+		fmt.Sprintf("%*s", reqW, reqs),
+		fmt.Sprintf("%6s", errors),
+		fmt.Sprintf("%*s", t429W, throttles),
 		p95cell,
-		fmt.Sprintf("%*s", tokW, truncate(providerTokensText(ps), tokW)),
+		fmt.Sprintf("%*s", tokW, truncate(tokens, tokW)),
 		fmt.Sprintf("%*s", costW, truncate(cost, costW)),
 		truncate(ip, ipW),
-	}, []int{nameW, 1, 2, reqW, 6, t429W, 8, tokW, costW, ipW})
+	}, []int{nameW, 1, 2, reqW, 6, t429W, 12, tokW, costW, ipW})
 }
 
 func p95LatencyByProvider(recent []accounting.Event) map[string]time.Duration {
@@ -2568,15 +2124,28 @@ func p95LatencyByProvider(recent []accounting.Event) map[string]time.Duration {
 	return latency
 }
 
-func p95WithSamples(recent []accounting.Event) (map[string]time.Duration, map[string]int) {
+func p95WithSamples(recent []accounting.Event, stats ...[]accounting.ProviderSummary) (map[string]time.Duration, map[string]int) {
 	out := map[string]time.Duration{}
 	counts := map[string]int{}
 	byProvider := map[string][]time.Duration{}
+	names := map[uint64]string{}
+	for _, group := range stats {
+		for _, p := range group {
+			if p.ProviderID != 0 {
+				names[p.ProviderID] = p.Provider
+			}
+		}
+	}
 	for _, e := range recent {
 		if e.Duration <= 0 {
 			continue
 		}
 		prov := accounting.EventProvider(e)
+		if name, ok := names[e.ProviderID]; ok {
+			prov = name
+		} else if e.Truncated.Provider || (e.Provider == "" && e.Truncated.Model) {
+			continue
+		}
 		byProvider[prov] = append(byProvider[prov], e.Duration)
 	}
 	for prov, durs := range byProvider {
@@ -2604,12 +2173,17 @@ func percentile(durs []time.Duration, p float64) time.Duration {
 func renderUsage(m *model, width, height int) string {
 	border, inner := paneBox(width, height, m.focus == focusUsage)
 	tenant := m.activeTenant()
-	title := "USAGE"
+	title := "USAGE " + retentionLabel(m.snapshot.Usage) + " · estimated cost (- unavailable)"
+	if m.focus == focusUsage {
+		title = "USAGE [enter] top identity · " + retentionLabel(m.snapshot.Usage) + " · EST$"
+	}
 	if m.usageUpstream {
 		title += " upstream"
 	}
 	if tenant != "" {
-		title += " " + tenant
+		title += " · tenant:" + tenant
+	} else {
+		title += " · all tenants/clients"
 	}
 	if m.errorsOnly {
 		title += " errs-only"
@@ -2617,10 +2191,13 @@ func renderUsage(m *model, width, height int) string {
 	summaries := m.filteredSummaries()
 	prices := pricingIndex(m.snapshot.Providers)
 	aliases := m.snapshot.Aliases
-	upstream := m.snapshot.Usage.UpstreamSummaries()
+	upstream := retainedUpstream(m.snapshot.Usage)
+	if retainedBilling(m.snapshot.Usage) == nil {
+		prices = nil
+	}
 	modelW, opW, countW, tokW, costW := usageColWidths(summaries, costTexts(summaries, prices, aliases, upstream), inner)
-	header := headerStyle.Render(fitRow(headerCells([]col{{"MODEL", modelW}, {"OP", opW}, {"STATUS", 6}, {"COUNT", countW}, {"TOKENS", tokW}, {"COST", costW}}), inner))
-	rows := []string{title, header}
+	header := headerStyle.Render(fitRow(headerCells([]col{{"MODEL", modelW}, {"OP", opW}, {"STATUS", 6}, {"COUNT", countW}, {"TOKENS", tokW}, {"EST$", costW}}), inner))
+	rows := []string{fitRow(title, inner), header}
 	visible := m.usageVisibleRows()
 	total := len(summaries)
 	start := m.usageScroll
@@ -2642,7 +2219,11 @@ func renderUsage(m *model, width, height int) string {
 		}, []int{modelW, opW, 6, countW, tokW, costW}), inner))
 	}
 	if total == 0 {
-		rows = append(rows, "no usage recorded yet")
+		if m.usageUpstream && retainedBilling(m.snapshot.Usage) == nil {
+			rows = append(rows, "retained upstream usage unavailable")
+		} else {
+			rows = append(rows, "no usage recorded yet")
+		}
 	} else if end < total {
 		rows = append(rows, fmt.Sprintf("… %d more (j/k scroll)", total-end))
 	}
@@ -2814,12 +2395,15 @@ func renderAliasDetail(m *model, width, height int) string {
 	if algo == "" {
 		algo = "-"
 	}
-	affinity := "-"
+	affinity := "disabled"
 	if a.SessionAffinity != nil {
 		affinity = strings.Join(config.SessionAffinityHeaders(*a), ",")
 		if affinity == "" {
 			affinity = "default"
 		}
+	}
+	if m.snapshot.AliasAffinity != nil && m.snapshot.AliasAffinity[a.Name] == nil {
+		affinity = "unknown (snapshot metadata unavailable)"
 	}
 	cooldown := map[string]time.Duration{}
 	for _, c := range m.snapshot.Cooldowns {
@@ -2835,12 +2419,13 @@ func renderAliasDetail(m *model, width, height int) string {
 			stats[ps.Provider] = ps
 		}
 	}
-	hcByName := healthcheckMarks(m.snapshot.Healthchecks)
+	hcByName := m.probeMarks()
 	raw := []string{
 		"alias: " + a.Name,
 		"algorithm: " + algo,
 		"retry: " + retry,
 		"session_affinity: " + affinity,
+		"Counters: provider-wide lifetime; repeated per target, NOT target/alias counts.",
 	}
 	for _, t := range a.Targets {
 		key := a.Name + "\x00" + t.Provider + "\x00" + t.Model
@@ -2858,16 +2443,24 @@ func renderAliasDetail(m *model, width, height int) string {
 		ps := stats[t.Provider]
 		hc := hcByName[t.Provider]
 		if hc == "" {
-			hc = "-"
+			hc = "?"
 		}
-		line := fmt.Sprintf("%s %s/%s hc:%s reqs:%s errs:%s 429:%s tok:%s %s",
+		line := fmt.Sprintf("%s %s/%s hc:%s provider-wide lifetime reqs:%s errs:%s 429:%s tok:%s %s",
 			mark, t.Provider, t.Model, hc, comma(ps.Requests), comma(ps.Errors),
 			comma(ps.Throttled), comma(ps.TotalTokens), state)
+		if !providerCountersAvailable(m.snapshot.Usage) {
+			line = fmt.Sprintf("%s %s/%s hc:%s provider counters unavailable %s", mark, t.Provider, t.Model, hc, state)
+		}
 		raw = append(raw, wrapText(line, inner)...)
 		if detail := healthcheckDetail(m.snapshot.Healthchecks, t.Provider); detail != "" {
 			raw = append(raw, wrapText("  "+detail, inner)...)
 		}
 	}
+	var wrapped []string
+	for _, line := range raw {
+		wrapped = append(wrapped, wrapText(line, inner)...)
+	}
+	raw = wrapped
 	lines := []string{"ALIAS " + a.Name}
 	visible := height - 5
 	if visible < 1 {
@@ -2925,9 +2518,10 @@ func (m *model) toggleLogOrder() {
 }
 
 func (m *model) togglePayloadOrder() {
+	before := m.orderedPayloads()
 	m.payloadOldestFirst = !m.payloadOldestFirst
-	m.payloadCursor = 0
-	m.payloadOffset = 0
+	m.payloadCursor = anchoredIndex(before, m.orderedPayloads(), m.payloadCursor, payloadIdentity)
+	m.payloadOffset = anchoredIndex(before, m.orderedPayloads(), m.payloadOffset, payloadIdentity)
 	m.clampPayloadCursor()
 }
 
@@ -2942,8 +2536,19 @@ func (m *model) filteredLogs(limit int) []observability.LogEntry {
 		return nil
 	}
 	all := m.snapshot.Logs.Since(1 << 30)
+	filtered := make([]observability.LogEntry, 0, len(all))
+	for _, e := range all {
+		if m.correlation != nil && m.bottomTab == bottomTabLogs {
+			if e.RequestID == m.correlation.event.RequestID {
+				filtered = append(filtered, e)
+			}
+		} else if metadataMatch(m.queries[bottomTabLogs], map[string]string{"id": e.RequestID, "level": e.Level.String()}) {
+			filtered = append(filtered, e)
+		}
+	}
+	all = filtered
 	var out []observability.LogEntry
-	if !m.logFilterOn {
+	if !m.logFilterOn || (m.correlation != nil && m.bottomTab == bottomTabLogs) {
 		if len(all) > limit {
 			out = all[len(all)-limit:]
 		} else {
@@ -3030,17 +2635,20 @@ func renderLogs(m *model, width, height int) string {
 	if m.logFilterOn {
 		levelName = ">=" + m.logMinLevel.String()
 	}
+	if m.correlation != nil && m.bottomTab == bottomTabLogs {
+		levelName = "ID-only"
+	}
 	order := "newest-first"
 	if m.logOldestFirst {
 		order = "oldest-first"
 	}
-	title := fmt.Sprintf("LOGS %s (%s) [o]rder", order, levelName)
+	title := fmt.Sprintf("LOGS %s (%s) %s", order, levelName, m.searchLabel(bottomTabLogs))
 	rows := []string{title, headerStyle.Render(fitRow(headerCells([]col{{"TIME", 8}, {"LEVEL", 6}, {"MESSAGE", msgWidth}, {"ATTRS", attrsWidth}}), inner))}
 	if height <= 3 {
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if len(entries) == 0 {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("no logs captured"))
+		rows = append(rows, m.emptySearchText(bottomTabLogs, "no logs captured"))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
@@ -3102,14 +2710,7 @@ func wrapText(s string, width int) []string {
 	if width < 1 {
 		return []string{s}
 	}
-	r := []rune(s)
-	var out []string
-	for len(r) > width {
-		out = append(out, string(r[:width]))
-		r = r[width:]
-	}
-	out = append(out, string(r))
-	return out
+	return strings.Split(ansi.Hardwrap(s, width, true), "\n")
 }
 
 func logOneLine(s string) string {
@@ -3214,18 +2815,14 @@ func orDash(s string) string {
 }
 
 func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
 	if n <= 0 {
 		return ""
 	}
-	return string(r[:n-1]) + "…"
+	return ansi.Truncate(logOneLine(s), n, "…")
 }
 
 func padRight(s string, w int) string {
-	n := len([]rune(s))
+	n := visibleLen(s)
 	if w == 0 || n >= w {
 		return s
 	}
@@ -3242,7 +2839,7 @@ func clampInt(v, lo, hi int) int {
 	return v
 }
 
-func paneBox(width, height int, focused bool) (lipgloss.Style, int) {
+func paneBox(width, height int, focused bool) (paneFrame, int) {
 	inner := width - 2
 	if inner < 10 {
 		inner = 10
@@ -3251,11 +2848,11 @@ func paneBox(width, height int, focused bool) (lipgloss.Style, int) {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#334155")).
 		Width(width).
-		Height(height - 2)
+		Height(height)
 	if focused {
 		border = border.BorderForeground(lipgloss.Color("#38BDF8"))
 	}
-	return border, inner
+	return paneFrame{style: border, width: width, height: height}, inner
 }
 
 type flexCol struct {
@@ -3404,58 +3001,4 @@ func shrinkFlex(out []int, cols []flexCol, budget int) []int {
 		}
 	}
 	return out
-}
-
-type Program struct {
-	program *tea.Program
-	mu      sync.Mutex
-	closed  bool
-}
-
-type RefreshHook interface {
-	Refresh(snap *RuntimeSnapshot)
-}
-
-func Run(ctx context.Context, snap *RuntimeSnapshot, fetcher PayloadFetcher) *Program {
-	return RunWithBlockFetcher(ctx, snap, fetcher, nil)
-}
-
-func RunWithBlockFetcher(ctx context.Context, snap *RuntimeSnapshot, fetcher PayloadFetcher, blocks BlockFetcher) *Program {
-	opts := []tea.ProgramOption{
-		tea.WithContext(ctx),
-		tea.WithoutCatchPanics(),
-	}
-	p := tea.NewProgram(InitialModelWithBlockFetcher(snap, fetcher, blocks), opts...)
-	go func() {
-		_, _ = p.Run()
-	}()
-	return &Program{program: p}
-}
-
-func (p *Program) Refresh(snap *RuntimeSnapshot) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closed {
-		return
-	}
-	p.program.Send(snapshotMsg{snapshot: snap})
-}
-
-func (p *Program) RefreshError(err error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closed || err == nil {
-		return
-	}
-	p.program.Send(pollErrorMsg{err: err.Error(), at: time.Now()})
-}
-
-func (p *Program) Close() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closed {
-		return
-	}
-	p.closed = true
-	p.program.Quit()
 }

@@ -183,7 +183,7 @@ func TestMergeCatalogEndToEnd(t *testing.T) {
 			ModelByName: map[string]config.Model{"gpt-4o": {Name: "gpt-4o", UpstreamName: "gpt-4o"}},
 		},
 	}, nil, nil)
-	merged, err := MergeCatalog(ctx, st, static)
+	merged, err := MergeCatalog(ctx, st, &config.Runtime{Catalog: static})
 	if err != nil {
 		t.Fatalf("MergeCatalog = %v", err)
 	}

@@ -9,7 +9,7 @@ import { useNavigate } from 'react-router';
 import { useSnapshot } from 'valtio';
 import { dashboardStore, setDashboardToken } from '../store';
 import { tokenFormSchema, type TokenForm } from '../types';
-import { errorMessage, fetchSnapshot } from '../services/dashboard';
+import { connectDashboardToken, errorMessage } from '../services/dashboard';
 
 export function TokenPage() {
   const navigate = useNavigate();
@@ -20,16 +20,7 @@ export function TokenPage() {
   });
 
   const connectMutation = useMutation({
-    mutationFn: async (values: TokenForm) => {
-      const previous = dashboardStore.token;
-      setDashboardToken(values.token.trim());
-      try {
-        await fetchSnapshot();
-      } catch (err) {
-        setDashboardToken(previous);
-        throw err;
-      }
-    },
+    mutationFn: (values: TokenForm) => connectDashboardToken(values.token.trim()),
     onSuccess: () => navigate('/', { replace: true }),
   });
 

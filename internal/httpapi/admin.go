@@ -77,11 +77,14 @@ func (h *Handler) handleAdmin(deps Dependencies, w http.ResponseWriter, r *http.
 	case len(segments) == 1 && segments[0] == "register" && r.Method == http.MethodPost:
 		h.adminRegister(deps, w, r)
 		return true
-	case len(segments) >= 1 && segments[0] == "orgs":
-		h.adminOrgs(deps, w, r, segments[1:])
+	case len(segments) >= 1 && segments[0] == "workspaces":
+		h.adminWorkspaces(deps, w, r, segments[1:])
 		return true
 	case len(segments) >= 1 && segments[0] == "providers":
 		h.adminProviders(deps, w, r, segments[1:])
+		return true
+	case len(segments) >= 1 && segments[0] == "copilot-device-flows":
+		h.adminCopilotFlows(deps, w, r, segments[1:])
 		return true
 	case len(segments) == 1 && segments[0] == "provider-types" && r.Method == http.MethodGet:
 		h.adminProviderTypes(deps, w, r)
@@ -130,6 +133,18 @@ func (h *Handler) adminClaims(deps Dependencies, r *http.Request) (*adminauth.Cl
 	claims, err := adminauth.VerifyAccess(adminBearer(r))
 	if err != nil {
 		return nil, false
+	}
+	if deps.AdminStore != nil {
+		id, err := uuid.Parse(claims.Subject)
+		if err != nil {
+			return nil, false
+		}
+		u, err := deps.AdminStore.GetUserByID(r.Context(), id)
+		if err != nil || u.Disabled {
+			return nil, false
+		}
+		claims.Email = u.Email
+		claims.IsAdmin = u.IsAdmin
 	}
 	return claims, true
 }

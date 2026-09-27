@@ -8,6 +8,14 @@ const boolMap = z.record(z.string(), z.boolean()).catch({});
 
 export const modelPriceSchema = z.object({
   name: z.string(),
+  details: z
+    .object({
+      display_name: z.string(),
+      upstream_name: z.string(),
+      protocol: z.string(),
+      capabilities: arrayOf(z.string()),
+    })
+    .nullish(),
   input_per_million: z.number().nullable().optional(),
   output_per_million: z.number().nullable().optional(),
   cached_per_million: z.number().nullable().optional(),
@@ -20,6 +28,22 @@ export const providerSchema = z.object({
   display_name: z.string().optional(),
   base_url: z.string().optional(),
   models: z.array(modelPriceSchema),
+  diagnostics: z
+    .object({
+      header_timeout: z.string(),
+      probe: z
+        .object({
+          path: z.string(),
+          method: z.string(),
+          expected_status: z.number(),
+          interval: z.string(),
+          timeout: z.string(),
+          failure_threshold: z.number(),
+          success_threshold: z.number(),
+        })
+        .nullish(),
+    })
+    .nullish(),
 });
 
 export const aliasTargetSchema = z.object({
@@ -32,6 +56,7 @@ export const aliasSchema = z.object({
   algorithm: z.string(),
   retry_status_codes: z.array(z.number()).optional(),
   targets: z.array(aliasTargetSchema),
+  session_affinity: z.object({ enabled: z.boolean(), headers: arrayOf(z.string()) }).nullish(),
 });
 
 export const usageSchema = z.object({
@@ -44,9 +69,56 @@ export const usageSchema = z.object({
   PromptTokens: z.number().optional().default(0),
   CompletionTokens: z.number().optional().default(0),
   TotalTokens: z.number().optional().default(0),
+  CachedTokens: z.number().optional().default(0),
+  CacheCreationTokens: z.number().optional().default(0),
+  CacheReadTokens: z.number().optional().default(0),
+});
+
+export const upstreamUsageSchema = usageSchema.extend({
+  PublicModel: z.string().optional(),
+  Provider: z.string(),
+});
+
+const rateCountsSchema = z.object({
+  requests: z.number(),
+  errors: z.number(),
+  throttled: z.number(),
+  tokens: z.number(),
+});
+
+export const rateSnapshotSchema = z.object({
+  window_end: z.string(),
+  bucket_seconds: z.number(),
+  minute: rateCountsSchema,
+  five_minutes: rateCountsSchema,
+  minutes: z.array(rateCountsSchema).length(15),
+});
+
+export const billingSnapshotSchema = z.object({
+  as_of: z.string(),
+  retention_seconds: z.number(),
+  bucket_seconds: z.number(),
+  usage: arrayOf(usageSchema),
+  upstream: arrayOf(upstreamUsageSchema),
 });
 
 export const recentSchema = z.object({
+  Truncated: z
+    .object({
+      RequestID: z.boolean().optional(),
+      PublicModel: z.boolean().optional(),
+      Tenant: z.boolean().optional(),
+      Client: z.boolean().optional(),
+      Model: z.boolean().optional(),
+      Operation: z.boolean().optional(),
+      Provider: z.boolean().optional(),
+      UpstreamModel: z.boolean().optional(),
+    })
+    .optional(),
+  RecentSequence: z.string().optional(),
+  ProviderID: z.string().optional(),
+  RequestID: z.string().optional(),
+  PublicModel: z.string().optional(),
   Timestamp: z.string().optional(),
   Tenant: z.string().optional(),
   Client: z.string().optional(),
@@ -59,6 +131,9 @@ export const recentSchema = z.object({
   CompletionTokens: z.number().optional(),
   TotalTokens: z.number().optional(),
   Duration: z.number().optional(),
+  CachedTokens: z.number().optional(),
+  CacheCreationTokens: z.number().optional(),
+  CacheReadTokens: z.number().optional(),
 });
 
 export const cooldownSchema = z.object({
@@ -80,6 +155,7 @@ export const healthcheckSchema = z.object({
 });
 
 export const logEntrySchema = z.object({
+  request_id: z.string().optional(),
   seq: z.number().optional(),
   time: z.string().optional(),
   level: z.string().optional(),
@@ -104,6 +180,8 @@ export const snapshotSchema = z.object({
   logs: arrayOf(logEntrySchema),
   last_seq: z.number(),
   payload_enabled: z.boolean().optional().default(false),
+  rates: rateSnapshotSchema.nullish(),
+  billing: billingSnapshotSchema.nullish(),
 });
 
 export const payloadSummarySchema = z.object({
@@ -204,13 +282,30 @@ export const adminProviderSchema = z.object({
   api_key_ref_key: z.string().optional().default(''),
   copilot_credential_path: z.string().optional().default(''),
   copilot_credential_name: z.string().optional().default(''),
+  copilot_credential_source: z.string().optional().default(''),
+  updated_at: z.string().optional().default(''),
   enabled: z.boolean().catch(true),
   source: sourceSchema,
-  org_id: z.string().optional().default(''),
-  org_name: z.string().optional().default(''),
+  workspace_id: z.string().optional().default(''),
+  workspace_name: z.string().optional().default(''),
   has_credential: z.boolean().catch(false),
   healthcheck: adminHealthcheckSchema.optional(),
   models: z.array(adminModelSchema).catch([]),
+});
+
+export const copilotDeviceFlowStatusSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().optional().default(''),
+  status: z.string(),
+  user_code: z.string().optional().default(''),
+  verification_uri: z.string().optional().default(''),
+  expires_at: z.string().optional(),
+  poll_after_ms: z.number().catch(0).optional().default(0),
+  ready_expires_at: z.string().optional(),
+  provider_name: z.string().optional().default(''),
+  consumed_provider_id: z.string().optional(),
+  consumed_updated_at: z.string().optional(),
+  error_code: z.string().optional().default(''),
 });
 
 export const adminProvidersSchema = z.object({
@@ -235,8 +330,8 @@ export const adminAliasSchema = z.object({
     })
     .optional(),
   source: sourceSchema,
-  org_id: z.string().optional().default(''),
-  org_name: z.string().optional().default(''),
+  workspace_id: z.string().optional().default(''),
+  workspace_name: z.string().optional().default(''),
   targets: z.array(adminAliasTargetSchema).catch([]),
 });
 
@@ -271,8 +366,8 @@ export const adminKeySchema = z.object({
   allowed_models: z.array(z.string()).catch([]),
   enabled: z.boolean().catch(true),
   source: sourceSchema,
-  org_id: z.string().optional().default(''),
-  org_name: z.string().optional().default(''),
+  workspace_id: z.string().optional().default(''),
+  workspace_name: z.string().optional().default(''),
   description: z.string().optional().default(''),
   expires_at: z.string().optional().default(''),
   user_ids: z.array(z.string()).optional().default([]),
@@ -296,7 +391,7 @@ export const adminUserSchema = z.object({
   is_admin: z.boolean().catch(false),
   disabled: z.boolean().catch(false),
   source: sourceSchema.optional().default('database'),
-  orgs: z.array(z.object({ id: z.string(), name: z.string(), role: z.string() })).catch([]),
+  workspaces: z.array(z.object({ id: z.string(), name: z.string(), role: z.string() })).catch([]),
 });
 
 export const adminUsersSchema = z.object({
@@ -307,9 +402,9 @@ export const adminInviteSchema = z.object({
   id: z.string(),
   email: z.string(),
   role: z.enum(['admin', 'user']).catch('user'),
-  org_id: z.string().optional().default(''),
-  org_name: z.string().optional().default(''),
-  org_role: z.enum(['admin', 'member']).catch('member'),
+  workspace_id: z.string().optional().default(''),
+  workspace_name: z.string().optional().default(''),
+  workspace_role: z.enum(['admin', 'member']).catch('member'),
   expires_at: z.string(),
 });
 
@@ -317,21 +412,22 @@ export const adminInvitesSchema = z.object({
   invites: arrayOf(adminInviteSchema),
 });
 
-export const adminOrgSchema = z.object({
+export const adminWorkspaceSchema = z.object({
   id: z.string(),
   name: z.string(),
   display_name: z.string().optional().default(''),
   is_system: z.boolean().catch(false),
+  kind: z.enum(['personal', 'organization']).catch('organization'),
   role: z.enum(['admin', 'member']).optional().default('member'),
 });
 
-export const adminOrgsSchema = z.object({
-  organizations: arrayOf(adminOrgSchema),
+export const adminWorkspacesSchema = z.object({
+  workspaces: arrayOf(adminWorkspaceSchema),
 });
 
 export const adminTeamSchema = z.object({
   id: z.string(),
-  org_id: z.string(),
+  workspace_id: z.string(),
   name: z.string(),
   description: z.string().optional().default(''),
   members: z.number().optional().default(0),
@@ -342,7 +438,7 @@ export const adminTeamsSchema = z.object({
   teams: arrayOf(adminTeamSchema),
 });
 
-export const adminOrgMemberSchema = z.object({
+export const adminWorkspaceMemberSchema = z.object({
   user_id: z.string(),
   email: z.string(),
   role: z.enum(['admin', 'member']).catch('member'),
@@ -396,6 +492,7 @@ export const providerTypeInfoSchema = z.object({
   credential: z.string(),
   requires_base_url: z.boolean().catch(false),
   supports_healthcheck: z.boolean().catch(true),
+  supports_device_authorization: z.boolean().catch(false),
   model_protocol_required: z.boolean().catch(false),
   protocols: z.array(z.string()).catch([]),
   default_capabilities: z.array(z.string()).catch([]),
@@ -418,6 +515,7 @@ export type BlockList = z.infer<typeof blockListSchema>;
 export type BlockCapture = z.infer<typeof blockCaptureSchema>;
 export type TokenForm = z.infer<typeof tokenFormSchema>;
 export type AdminStatus = z.infer<typeof adminStatusSchema>;
+export type CopilotDeviceFlowStatus = z.infer<typeof copilotDeviceFlowStatusSchema>;
 export type AdminModel = z.infer<typeof adminModelSchema>;
 export type AdminProvider = z.infer<typeof adminProviderSchema>;
 export type AdminAlias = z.infer<typeof adminAliasSchema>;
@@ -426,9 +524,9 @@ export type AdminKeyQuota = z.infer<typeof adminKeyQuotaSchema>;
 export type AdminKeyTPM = z.infer<typeof adminKeyTPMSchema>;
 export type AdminUser = z.infer<typeof adminUserSchema>;
 export type AdminInvite = z.infer<typeof adminInviteSchema>;
-export type AdminOrg = z.infer<typeof adminOrgSchema>;
+export type AdminWorkspace = z.infer<typeof adminWorkspaceSchema>;
 export type AdminTeam = z.infer<typeof adminTeamSchema>;
-export type AdminOrgMember = z.infer<typeof adminOrgMemberSchema>;
+export type AdminWorkspaceMember = z.infer<typeof adminWorkspaceMemberSchema>;
 export type AdminTeamMember = z.infer<typeof adminTeamMemberSchema>;
 export type AdminQuota = z.infer<typeof adminQuotaSchema>;
 export type AdminLogin = z.infer<typeof adminLoginSchema>;

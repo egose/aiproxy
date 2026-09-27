@@ -1,14 +1,17 @@
 import { Alert, AlertDescription } from '@egose/shadcn-theme/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@egose/shadcn-theme/components/ui/card';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { setAdminSession } from '../store';
 
 export function OidcCallbackPage() {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
+  const consumed = useRef(false);
 
   useEffect(() => {
+    if (consumed.current) return;
+    consumed.current = true;
     const hash = window.location.hash.replace(/^#/, '');
     const params = new URLSearchParams(hash);
     const err = params.get('error');

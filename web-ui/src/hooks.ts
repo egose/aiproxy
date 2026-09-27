@@ -1,18 +1,19 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery as usePublicQuery } from '@tanstack/react-query';
+import { useSensitiveQuery as useQuery } from './sensitive-query';
 import { useSnapshot as useTokenSnapshot } from 'valtio';
-import { adminOrgStore, adminStore, dashboardStore } from './store';
+import { adminWorkspaceStore, adminStore, dashboardStore } from './store';
 import {
   fetchAdminAliases,
   fetchAdminInvites,
   fetchAdminKeys,
   fetchAdminMe,
   fetchAdminOIDCConfig,
-  fetchAdminOrgs,
+  fetchAdminWorkspaces,
   fetchAdminProviders,
   fetchAdminStatus,
   fetchAdminUsers,
-  fetchOrgMembers,
-  fetchOrgTeams,
+  fetchWorkspaceMembers,
+  fetchWorkspaceTeams,
   fetchProviderTypes,
   fetchScopeQuota,
   fetchTeamMembers,
@@ -26,8 +27,15 @@ export function useDashboardToken() {
 export function useDataAuth() {
   const token = useDashboardToken();
   const session = useAdminSession();
-  const authed = token ? 'token' : session.accessToken ? 'session' : 'anon';
-  return { authed, enabled: !!token || !!session.accessToken };
+  const me = useAdminMe();
+  const operator = !!session.accessToken && !me.error && me.data?.is_admin === true;
+  const authed = token ? 'token' : operator ? 'session' : 'anon';
+  return {
+    authed,
+    enabled: !!token || operator,
+    pending: !token && !!session.accessToken && me.isPending,
+    error: !token ? me.error : null,
+  };
 }
 
 export function useSnapshot(enabled = true) {
@@ -83,7 +91,7 @@ export function useBlock(blockId: string | null) {
 }
 
 export function useAdminStatus() {
-  return useQuery({
+  return usePublicQuery({
     queryKey: ['admin', 'status'],
     queryFn: fetchAdminStatus,
     retry: false,
@@ -105,23 +113,23 @@ export function useAdminMe(enabled = true) {
   });
 }
 
-export function useAdminOrg() {
-  return useTokenSnapshot(adminOrgStore);
+export function useAdminWorkspace() {
+  return useTokenSnapshot(adminWorkspaceStore);
 }
 
-export function useCurrentOrg() {
-  const orgs = useAdminOrgs(true);
-  const { orgId } = useAdminOrg();
-  const list = orgs.data ?? [];
-  const org = list.some((o) => o.id === orgId) ? list.find((o) => o.id === orgId) : list[0];
-  return { org, orgs };
+export function useCurrentWorkspace() {
+  const workspaces = useAdminWorkspaces(true);
+  const { workspaceId } = useAdminWorkspace();
+  const list = workspaces.data ?? [];
+  const workspace = list.some((o) => o.id === workspaceId) ? list.find((o) => o.id === workspaceId) : list[0];
+  return { workspace, workspaces };
 }
 
 export function useAdminProviders(enabled = true) {
   const session = useAdminSession();
-  const orgId = useAdminOrg().orgId;
+  const workspaceId = useAdminWorkspace().workspaceId;
   return useQuery({
-    queryKey: ['admin', 'providers', session.accessToken ? 'authed' : 'anon', orgId || 'all'],
+    queryKey: ['admin', 'providers', session.accessToken ? 'authed' : 'anon', workspaceId || 'all'],
     queryFn: fetchAdminProviders,
     enabled: enabled && !!session.accessToken,
     retry: false,
@@ -141,9 +149,9 @@ export function useProviderTypes(enabled = true) {
 
 export function useAdminAliases(enabled = true) {
   const session = useAdminSession();
-  const orgId = useAdminOrg().orgId;
+  const workspaceId = useAdminWorkspace().workspaceId;
   return useQuery({
-    queryKey: ['admin', 'aliases', session.accessToken ? 'authed' : 'anon', orgId || 'all'],
+    queryKey: ['admin', 'aliases', session.accessToken ? 'authed' : 'anon', workspaceId || 'all'],
     queryFn: fetchAdminAliases,
     enabled: enabled && !!session.accessToken,
     retry: false,
@@ -152,9 +160,9 @@ export function useAdminAliases(enabled = true) {
 
 export function useAdminKeys(enabled = true) {
   const session = useAdminSession();
-  const orgId = useAdminOrg().orgId;
+  const workspaceId = useAdminWorkspace().workspaceId;
   return useQuery({
-    queryKey: ['admin', 'keys', session.accessToken ? 'authed' : 'anon', orgId || 'all'],
+    queryKey: ['admin', 'keys', session.accessToken ? 'authed' : 'anon', workspaceId || 'all'],
     queryFn: fetchAdminKeys,
     enabled: enabled && !!session.accessToken,
     retry: false,
@@ -191,52 +199,52 @@ export function useAdminOIDCConfig(enabled = true) {
   });
 }
 
-export function useAdminOrgs(enabled = true) {
+export function useAdminWorkspaces(enabled = true) {
   const session = useAdminSession();
   return useQuery({
-    queryKey: ['admin', 'orgs', session.accessToken ? 'authed' : 'anon'],
-    queryFn: fetchAdminOrgs,
+    queryKey: ['admin', 'workspaces', session.accessToken ? 'authed' : 'anon'],
+    queryFn: fetchAdminWorkspaces,
     enabled: enabled && !!session.accessToken,
     retry: false,
   });
 }
 
-export function useOrgTeams(orgId: string | null, enabled = true) {
+export function useWorkspaceTeams(workspaceId: string | null, enabled = true) {
   const session = useAdminSession();
   return useQuery({
-    queryKey: ['admin', 'orgs', orgId, 'teams', session.accessToken ? 'authed' : 'anon'],
-    queryFn: () => fetchOrgTeams(orgId ?? ''),
-    enabled: enabled && !!session.accessToken && !!orgId,
+    queryKey: ['admin', 'workspaces', workspaceId, 'teams', session.accessToken ? 'authed' : 'anon'],
+    queryFn: () => fetchWorkspaceTeams(workspaceId ?? ''),
+    enabled: enabled && !!session.accessToken && !!workspaceId,
     retry: false,
   });
 }
 
-export function useOrgMembers(orgId: string | null, enabled = true) {
+export function useWorkspaceMembers(workspaceId: string | null, enabled = true) {
   const session = useAdminSession();
   return useQuery({
-    queryKey: ['admin', 'orgs', orgId, 'members', session.accessToken ? 'authed' : 'anon'],
-    queryFn: () => fetchOrgMembers(orgId ?? ''),
-    enabled: enabled && !!session.accessToken && !!orgId,
+    queryKey: ['admin', 'workspaces', workspaceId, 'members', session.accessToken ? 'authed' : 'anon'],
+    queryFn: () => fetchWorkspaceMembers(workspaceId ?? ''),
+    enabled: enabled && !!session.accessToken && !!workspaceId,
     retry: false,
   });
 }
 
-export function useScopeQuota(orgId: string | null, scope: 'users' | 'teams', id: string | null, enabled = true) {
+export function useScopeQuota(workspaceId: string | null, scope: 'users' | 'teams', id: string | null, enabled = true) {
   const session = useAdminSession();
   return useQuery({
-    queryKey: ['admin', 'orgs', orgId, scope, id, 'quota', session.accessToken ? 'authed' : 'anon'],
-    queryFn: () => fetchScopeQuota(orgId ?? '', scope, id ?? ''),
-    enabled: enabled && !!session.accessToken && !!orgId && !!id,
+    queryKey: ['admin', 'workspaces', workspaceId, scope, id, 'quota', session.accessToken ? 'authed' : 'anon'],
+    queryFn: () => fetchScopeQuota(workspaceId ?? '', scope, id ?? ''),
+    enabled: enabled && !!session.accessToken && !!workspaceId && !!id,
     retry: false,
   });
 }
 
-export function useTeamMembers(orgId: string | null, teamId: string | null, enabled = true) {
+export function useTeamMembers(workspaceId: string | null, teamId: string | null, enabled = true) {
   const session = useAdminSession();
   return useQuery({
-    queryKey: ['admin', 'orgs', orgId, 'teams', teamId, 'members', session.accessToken ? 'authed' : 'anon'],
-    queryFn: () => fetchTeamMembers(orgId ?? '', teamId ?? ''),
-    enabled: enabled && !!session.accessToken && !!orgId && !!teamId,
+    queryKey: ['admin', 'workspaces', workspaceId, 'teams', teamId, 'members', session.accessToken ? 'authed' : 'anon'],
+    queryFn: () => fetchTeamMembers(workspaceId ?? '', teamId ?? ''),
+    enabled: enabled && !!session.accessToken && !!workspaceId && !!teamId,
     retry: false,
   });
 }

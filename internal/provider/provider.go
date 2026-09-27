@@ -16,6 +16,7 @@ import (
 	"github.com/andybalholm/brotli"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/copilotlogin"
+	"github.com/egose/aiproxy/internal/upstreamhttp"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -347,28 +348,46 @@ func readUpstreamBody(r io.Reader) ([]byte, error) {
 	return body, nil
 }
 
-const inspectDecodeMaxBytes = 1 << 20
+const (
+	inspectDecodeMaxBytes    = 1 << 20
+	inspectMaxEncodingLayers = 4
+	inspectMaxEncodingBytes  = 256
+)
 
-func DecodeBodyForInspection(header http.Header, body []byte) []byte {
-	if len(body) == 0 || len(header.Get("Content-Encoding")) == 0 {
-		return body
-	}
-	encodings := parseContentEncodings(header.Get("Content-Encoding"))
-	if len(encodings) == 0 {
-		return body
+func DecodeBodyForInspection(header http.Header, body []byte) ([]byte, bool) {
+	encodings, ok := parseContentEncodings(header.Values("Content-Encoding"))
+	if !ok {
+		return body, false
 	}
 	decoded := body
 	for i := len(encodings) - 1; i >= 0; i-- {
 		next, ok := decodeContentEncoding(encodings[i], decoded)
 		if !ok {
-			return body
+			return body, false
 		}
 		decoded = next
 	}
-	return decoded
+	return decoded, true
 }
 
-func parseContentEncodings(value string) []string {
+func parseContentEncodings(values []string) ([]string, bool) {
+	if len(values) == 0 {
+		return nil, true
+	}
+	if len(values) > inspectMaxEncodingLayers {
+		return nil, false
+	}
+	size := len(values) - 1
+	for _, value := range values {
+		if len(value) > inspectMaxEncodingBytes-size {
+			return nil, false
+		}
+		size += len(value)
+	}
+	value := strings.Join(values, ",")
+	if strings.Count(value, ",") >= inspectMaxEncodingLayers {
+		return nil, false
+	}
 	parts := strings.Split(value, ",")
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
@@ -376,9 +395,14 @@ func parseContentEncodings(value string) []string {
 		if token == "" || token == "identity" {
 			continue
 		}
+		switch token {
+		case "gzip", "x-gzip", "deflate", "br", "zstd":
+		default:
+			return nil, false
+		}
 		out = append(out, token)
 	}
-	return out
+	return out, true
 }
 
 func decodeContentEncoding(encoding string, body []byte) ([]byte, bool) {
@@ -398,31 +422,30 @@ func decodeContentEncoding(encoding string, body []byte) ([]byte, bool) {
 	case "br":
 		reader = brotli.NewReader(bytes.NewReader(body))
 	case "zstd":
-		r, err := zstd.NewReader(nil)
+		r, err := zstd.NewReader(nil,
+			zstd.WithDecoderConcurrency(1),
+			zstd.WithDecoderLowmem(true),
+			zstd.WithDecoderMaxWindow(inspectDecodeMaxBytes),
+			zstd.WithDecoderMaxMemory(inspectDecodeMaxBytes),
+			zstd.WithDecodeAllCapLimit(true),
+		)
 		if err != nil {
 			return nil, false
 		}
 		defer r.Close()
-		decoded, err := r.DecodeAll(body, nil)
+		decoded, err := r.DecodeAll(body, make([]byte, 0, inspectDecodeMaxBytes))
 		if err != nil {
 			return nil, false
 		}
-		return capInspectDecoded(decoded), true
+		return decoded, true
 	default:
 		return nil, false
 	}
-	decoded, err := io.ReadAll(io.LimitReader(reader, inspectDecodeMaxBytes))
-	if err != nil {
+	decoded, err := io.ReadAll(io.LimitReader(reader, inspectDecodeMaxBytes+1))
+	if err != nil || len(decoded) > inspectDecodeMaxBytes {
 		return nil, false
 	}
 	return decoded, true
-}
-
-func capInspectDecoded(decoded []byte) []byte {
-	if len(decoded) > inspectDecodeMaxBytes {
-		return decoded[:inspectDecodeMaxBytes]
-	}
-	return decoded
 }
 
 func requestBody(r Request) ([]byte, error) {
@@ -495,7 +518,7 @@ func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHand
 		}
 		return res
 	}
-	resp, err := clientFor(r).Do(req)
+	resp, err := upstreamhttp.Do(clientFor(r), req)
 	if err != nil {
 		return nil, fmt.Errorf("upstream call: %w", err)
 	}

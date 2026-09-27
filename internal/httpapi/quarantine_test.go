@@ -62,7 +62,7 @@ func (a quarantineTestAdapter) TakeBlock(blockID string) (dashrpc.BlockCapture, 
 	}
 	out := dashrpc.BlockCapture{BlockID: c.BlockID, Operation: c.Operation, PublicModel: c.PublicModel, RuleIDs: c.RuleIDs}
 	for _, f := range c.Findings {
-		out.Findings = append(out.Findings, dashrpc.BlockFinding{RuleID: f.RuleID, Secret: f.Secret, Match: f.Match, Line: f.Line})
+		out.Findings = append(out.Findings, dashrpc.BlockFinding{RuleID: f.RuleID, Description: f.Description, Secret: f.Secret, SecretSHA: f.SecretSHA, Match: f.Match, Line: f.Line})
 	}
 	return out, true
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/copilotlogin"
 	"github.com/egose/aiproxy/internal/dashrpc"
 	"github.com/egose/aiproxy/internal/guardrails"
 	"github.com/egose/aiproxy/internal/modelresolver"
@@ -30,34 +31,35 @@ import (
 )
 
 type Dependencies struct {
-	Resolver          *modelresolver.Resolver
-	Adapter           provider.Adapter
-	Auth              auth.Authenticator
-	Authorizer        auth.Authorizer
-	Client            *http.Client
-	ClientForProvider func(config.Provider) *http.Client
-	Catalog           config.Catalog
-	Metrics           *observability.Metrics
-	MetricsToken      string
-	Health            *providerhealth.Tracker
-	RateLimiter       ratelimit.Limiter
-	Quota             *QuotaTracker
-	Accounting        accounting.Recorder
-	Usage             accounting.Reader
-	AccessLog         bool
-	HasAccessLog      bool
-	PayloadLog        payloadlog.Recorder
-	Logger            *slog.Logger
-	Dashboard         dashrpc.Source
-	WebUI             config.WebUI
-	MultiTenancy      config.MultiTenancy
-	AdminStore        *store.Store
-	AdminAuthConfig   config.Auth
-	RequestReload     func() error
-	Version           string
-	Guardrails        *guardrails.Scanner
-	Quarantine        *guardrails.Quarantine
-	Exceptions        *guardrails.Exceptions
+	Resolver            *modelresolver.Resolver
+	Adapter             provider.Adapter
+	Auth                auth.Authenticator
+	Authorizer          auth.Authorizer
+	Client              *http.Client
+	ClientForProvider   func(config.Provider) *http.Client
+	Catalog             config.Catalog
+	Metrics             *observability.Metrics
+	MetricsToken        string
+	Health              *providerhealth.Tracker
+	RateLimiter         ratelimit.Limiter
+	Quota               *QuotaTracker
+	Accounting          accounting.Recorder
+	Usage               accounting.Reader
+	AccessLog           bool
+	HasAccessLog        bool
+	PayloadLog          payloadlog.Recorder
+	Logger              *slog.Logger
+	Dashboard           dashrpc.Source
+	WebUI               config.WebUI
+	MultiTenancy        config.MultiTenancy
+	AdminStore          *store.Store
+	AdminAuthConfig     config.Auth
+	CopilotDeviceClient func() *copilotlogin.Client
+	RequestReload       func() error
+	Version             string
+	Guardrails          *guardrails.Scanner
+	Quarantine          *guardrails.Quarantine
+	Exceptions          *guardrails.Exceptions
 }
 
 const maxRequestBodyBytes int64 = 8 << 20
@@ -124,6 +126,10 @@ func (h *Handler) current() Dependencies {
 	return deps
 }
 
+func (h *Handler) SnapshotDependencies() Dependencies {
+	return h.current()
+}
+
 func payloadUpstreamRequest(result *provider.Result, maxBody int, omitBody bool) (payloadlog.EntrySide, bool) {
 	if result == nil || result.UpstreamRequestHeaders == nil {
 		return payloadlog.EntrySide{}, false
@@ -172,6 +178,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				usage = result.Usage
 			}
 			deps.Accounting.Record(accounting.Event{
+				RequestID:           requestID,
+				PublicModel:         publicModel,
 				Timestamp:           time.Now(),
 				Tenant:              principalTenant(principal),
 				Client:              principalName(principal),
@@ -624,12 +632,9 @@ func (h *Handler) handleBilling(deps Dependencies, w http.ResponseWriter, r *htt
 		h.writeRequestError(deps.Metrics, w, r, http.StatusNotFound, "not_found", "billing usage not configured")
 		return true
 	}
-	summaries := accounting.FilterSummaries(deps.Usage.Summaries(), principalTenant(principal), principalName(principal))
-	var upstream []accounting.UpstreamSummary
-	if deps.Usage != nil {
-		upstream = deps.Usage.UpstreamSummaries()
-	}
-	h.writeBillingUsage(w, summaries, billingPrices(deps.Catalog), deps.Catalog.Aliases(), upstream)
+	summaries, upstream := deps.Usage.BillingSummaries()
+	summaries = accounting.FilterSummaries(summaries, principalTenant(principal), principalName(principal))
+	h.writeBillingUsage(w, summaries, billingPrices(deps.Catalog), upstream)
 	return true
 }
 

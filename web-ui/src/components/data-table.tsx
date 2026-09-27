@@ -10,6 +10,7 @@ import {
   tableFeatures,
   useTable,
   type ColumnDef,
+  type RowData,
   type SortingState,
 } from '@tanstack/react-table';
 import { Input } from '@egose/shadcn-theme/components/ui/input';
@@ -24,9 +25,9 @@ export const managementTableFeatures = tableFeatures({
   filterFns: { includesString: filterFn_includesString },
 });
 
-export type ManagementColumnDef<TData> = ColumnDef<typeof managementTableFeatures, TData>;
+export type ManagementColumnDef<TData extends RowData> = ColumnDef<typeof managementTableFeatures, TData>;
 
-export function DataTable<TData>({
+export function DataTable<TData extends RowData>({
   columns,
   data,
   filterPlaceholder = 'Filter...',

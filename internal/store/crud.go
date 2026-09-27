@@ -2,9 +2,13 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func (s *Store) ListProviders(ctx context.Context) ([]DBProvider, error) {
@@ -20,22 +24,28 @@ func (s *Store) GetProvider(ctx context.Context, name string) (DBProvider, error
 }
 
 func (s *Store) CreateProvider(ctx context.Context, p *DBProvider) error {
-	p.ID = uuid.New()
-	p.CreatedAt = time.Now()
-	p.UpdatedAt = p.CreatedAt
-	_, err := s.DB.NewInsert().Model(p).Exec(ctx)
-	return err
+	return s.CreateProviderAggregate(ctx, p, nil)
 }
 
 func (s *Store) UpdateProvider(ctx context.Context, p *DBProvider) error {
-	p.UpdatedAt = time.Now()
-	_, err := s.DB.NewUpdate().Model(p).Where("id = ?", p.ID).Exec(ctx)
-	return err
+	return s.UpdateProviderAggregate(ctx, p, nil)
 }
 
 func (s *Store) DeleteProvider(ctx context.Context, id uuid.UUID) error {
-	_, err := s.DB.NewDelete().Model((*DBProvider)(nil)).Where("id = ?", id).Exec(ctx)
-	return err
+	return s.DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var p DBProvider
+		if err := tx.NewSelect().Model(&p).Where("id = ?", id).Scan(ctx); err != nil {
+			return err
+		}
+		if err := lockMembershipWorkspace(ctx, tx, p.WorkspaceID); err != nil {
+			return err
+		}
+		if _, err := tx.NewDelete().Model((*copilotDeviceFlow)(nil)).Where("provider_id = ?", id).Exec(ctx); err != nil {
+			return err
+		}
+		_, err := tx.NewDelete().Model((*DBProvider)(nil)).Where("id = ?", id).Exec(ctx)
+		return err
+	})
 }
 
 func (s *Store) ListProviderModels(ctx context.Context, providerID uuid.UUID) ([]DBProviderModel, error) {
@@ -49,17 +59,18 @@ func (s *Store) ReplaceProviderModels(ctx context.Context, providerID uuid.UUID,
 	if err != nil {
 		return err
 	}
-	if _, err := tx.NewDelete().Model((*DBProviderModel)(nil)).Where("provider_id = ?", providerID).Exec(ctx); err != nil {
-		_ = tx.Rollback()
+	defer tx.Rollback()
+	result, err := tx.NewUpdate().Model((*DBProvider)(nil)).Set("updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')").Where("id = ?", providerID).Exec(ctx)
+	if err != nil {
 		return err
 	}
-	for i := range models {
-		models[i].ID = uuid.New()
-		models[i].ProviderID = providerID
-		if _, err := tx.NewInsert().Model(&models[i]).Exec(ctx); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
+	if n, err := result.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return ErrCatalogConflict
+	}
+	if err := replaceProviderModels(ctx, tx, providerID, models); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -77,12 +88,16 @@ func (s *Store) GetAlias(ctx context.Context, name string) (DBAlias, error) {
 }
 
 func (s *Store) CreateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTarget) error {
+	output := a
+	copy := *a
+	a = &copy
+	targets = append([]DBAliasTarget(nil), targets...)
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	a.ID = uuid.New()
-	a.CreatedAt = time.Now()
+	a.CreatedAt = time.Now().UTC().Truncate(time.Microsecond)
 	a.UpdatedAt = a.CreatedAt
 	if _, err := tx.NewInsert().Model(a).Exec(ctx); err != nil {
 		_ = tx.Rollback()
@@ -96,18 +111,34 @@ func (s *Store) CreateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTa
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	*output = *a
+	return nil
 }
 
 func (s *Store) UpdateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTarget) error {
+	output := a
+	copy := *a
+	a = &copy
+	targets = append([]DBAliasTarget(nil), targets...)
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	a.UpdatedAt = time.Now()
-	if _, err := tx.NewUpdate().Model(a).Where("id = ?", a.ID).Exec(ctx); err != nil {
+	defer tx.Rollback()
+	previous := a.UpdatedAt
+	a.UpdatedAt = nextCatalogRevision(previous)
+	result, err := tx.NewUpdate().Model(a).Where("id = ? AND updated_at = ?", a.ID, previous).Exec(ctx)
+	if err != nil {
 		_ = tx.Rollback()
 		return err
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return ErrCatalogConflict
 	}
 	if _, err := tx.NewDelete().Model((*DBAliasTarget)(nil)).Where("alias_id = ?", a.ID).Exec(ctx); err != nil {
 		_ = tx.Rollback()
@@ -121,7 +152,11 @@ func (s *Store) UpdateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTa
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	*output = *a
+	return nil
 }
 
 func (s *Store) DeleteAlias(ctx context.Context, id uuid.UUID) error {
@@ -155,6 +190,18 @@ func (s *Store) UpdateInboundKey(ctx context.Context, k *InboundKey) error {
 	return err
 }
 
+func (s *Store) RotateInboundKey(ctx context.Context, id uuid.UUID, hash, prefix string) error {
+	_, err := s.DB.NewUpdate().Model((*InboundKey)(nil)).Set("token_hash = ?", hash).
+		Set("token_prefix = ?", prefix).Set("enabled = TRUE").Set("updated_at = ?", time.Now()).Where("id = ?", id).Exec(ctx)
+	return err
+}
+
+func (s *Store) SetInboundKeyEnabled(ctx context.Context, id uuid.UUID, enabled bool) error {
+	_, err := s.DB.NewUpdate().Model((*InboundKey)(nil)).Set("enabled = ?", enabled).
+		Set("updated_at = ?", time.Now()).Where("id = ?", id).Exec(ctx)
+	return err
+}
+
 func (s *Store) DeleteInboundKey(ctx context.Context, id uuid.UUID) error {
 	_, err := s.DB.NewDelete().Model((*InboundKey)(nil)).Where("id = ?", id).Exec(ctx)
 	return err
@@ -181,32 +228,7 @@ func (s *Store) ListKeyTeamIDs(ctx context.Context, keyID uuid.UUID) ([]uuid.UUI
 }
 
 func (s *Store) SetKeyBindings(ctx context.Context, keyID uuid.UUID, userIDs, teamIDs []uuid.UUID) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if _, err := tx.NewDelete().Model((*KeyUser)(nil)).Where("key_id = ?", keyID).Exec(ctx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if _, err := tx.NewDelete().Model((*KeyTeam)(nil)).Where("key_id = ?", keyID).Exec(ctx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	now := time.Now()
-	for _, uid := range userIDs {
-		if _, err := tx.NewInsert().Model(&KeyUser{KeyID: keyID, UserID: uid, CreatedAt: now}).Exec(ctx); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-	}
-	for _, tid := range teamIDs {
-		if _, err := tx.NewInsert().Model(&KeyTeam{KeyID: keyID, TeamID: tid, CreatedAt: now}).Exec(ctx); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-	}
-	return tx.Commit()
+	return s.updateKeyPolicy(ctx, keyID, nil, InboundKeyPolicyPatch{ReplaceBindings: true, UserIDs: userIDs, TeamIDs: teamIDs})
 }
 
 func (s *Store) ListInboundKeysVisibleToMember(ctx context.Context, userID uuid.UUID) ([]InboundKey, error) {
@@ -227,6 +249,12 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) 
 	return u, err
 }
 
+func (s *Store) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
+	var u User
+	err := s.DB.NewSelect().Model(&u).Where("id = ?", id).Scan(ctx)
+	return u, err
+}
+
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	var out []User
 	err := s.DB.NewSelect().Model(&out).Order("email ASC").Scan(ctx)
@@ -242,8 +270,33 @@ func (s *Store) CreateUser(ctx context.Context, u *User) error {
 }
 
 func (s *Store) UpdateUser(ctx context.Context, u *User) error {
-	u.UpdatedAt = time.Now()
-	_, err := s.DB.NewUpdate().Model(u).Where("id = ?", u.ID).Exec(ctx)
+	next := *u
+	next.UpdatedAt = time.Now()
+	err := s.DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var current User
+		if err := tx.NewSelect().Model(&current).Where("id = ?", u.ID).For("UPDATE").Scan(ctx); err != nil {
+			return err
+		}
+		if (!current.Disabled && next.Disabled) || (current.IsAdmin && !next.IsAdmin) {
+			var workspaceIDs []uuid.UUID
+			if err := tx.NewSelect().Model((*copilotDeviceFlow)(nil)).Column("workspace_id").Distinct().Where("actor_id = ? AND state IN ('starting','pending','ready')", u.ID).Order("workspace_id").Scan(ctx, &workspaceIDs); err != nil {
+				return err
+			}
+			for _, workspaceID := range workspaceIDs {
+				if err := lockMembershipWorkspace(ctx, tx, workspaceID); err != nil {
+					return err
+				}
+			}
+			if err := invalidateCopilotFlows(ctx, tx, u.ID, nil); err != nil {
+				return err
+			}
+		}
+		_, err := tx.NewUpdate().Model(&next).Where("id = ?", u.ID).Exec(ctx)
+		return err
+	})
+	if err == nil {
+		*u = next
+	}
 	return err
 }
 
@@ -314,112 +367,184 @@ func (s *Store) DeleteInvite(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+var ErrInviteUnavailable = errors.New("invite is expired or already accepted")
+var ErrInviteEmailRegistered = errors.New("email is already registered")
+var ErrInviteChanged = errors.New("invite changed during acceptance; retry with the current invitation")
+
 func (s *Store) AcceptInvite(ctx context.Context, inv *Invite, u *User) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
+	var scope Invite
+	if err := tx.NewSelect().Model(&scope).
+		Where("id = ? AND token_hash = ?", inv.ID, inv.TokenHash).Scan(ctx); err != nil {
+		return err
+	}
+	if scope.WorkspaceID != nil {
+		var workspace Workspace
+		if err := tx.NewSelect().Model(&workspace).Where("id = ?", *scope.WorkspaceID).For("KEY SHARE").Scan(ctx); err != nil {
+			return err
+		}
+	}
+	var current Invite
+	if err := tx.NewSelect().Model(&current).
+		Where("id = ? AND token_hash = ?", inv.ID, inv.TokenHash).
+		For("UPDATE").Scan(ctx); err != nil {
+		return err
+	}
+	if (scope.WorkspaceID == nil) != (current.WorkspaceID == nil) || (scope.WorkspaceID != nil && current.WorkspaceID != nil && *scope.WorkspaceID != *current.WorkspaceID) {
+		return ErrInviteChanged
+	}
+	result, err := tx.NewUpdate().Model(&current).
+		Set("accepted_at = clock_timestamp()").
+		Where("id = ? AND accepted_at IS NULL AND expires_at > clock_timestamp()", current.ID).
+		Returning("accepted_at").Exec(ctx)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrInviteUnavailable
+	}
 	now := time.Now()
-	inv.AcceptedAt = &now
-	if _, err := tx.NewUpdate().Model(inv).Column("accepted_at").Where("id = ?", inv.ID).Exec(ctx); err != nil {
-		_ = tx.Rollback()
+	created := User{ID: uuid.New(), Email: current.Email, PasswordHash: u.PasswordHash, IsAdmin: current.IsAdmin, CreatedAt: now, UpdatedAt: now}
+	if _, err := tx.NewInsert().Model(&created).Exec(ctx); err != nil {
+		var pgErr pgdriver.Error
+		if errors.As(err, &pgErr) && pgErr.Field('C') == "23505" && pgErr.Field('n') == "users_email_key" {
+			return ErrInviteEmailRegistered
+		}
 		return err
 	}
-	u.ID = uuid.New()
-	u.CreatedAt = now
-	u.UpdatedAt = now
-	if _, err := tx.NewInsert().Model(u).Exec(ctx); err != nil {
-		_ = tx.Rollback()
+	if current.WorkspaceID != nil {
+		role := current.WorkspaceRole
+		if role != "admin" && role != "member" {
+			role = "member"
+		}
+		membership := WorkspaceMember{UserID: created.ID, WorkspaceID: *current.WorkspaceID, Role: role, CreatedAt: now}
+		if err := insertMembership(ctx, tx, &membership); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
-	return tx.Commit()
+	*inv = current
+	*u = created
+	return nil
 }
 
 func (s *Store) CountEnabledAdmins(ctx context.Context) (int, error) {
 	return s.DB.NewSelect().Model((*User)(nil)).Where("is_admin = true AND disabled = false").Count(ctx)
 }
 
-func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
-	_, err := s.DB.NewDelete().Model((*User)(nil)).Where("id = ?", id).Exec(ctx)
-	return err
-}
+var SystemWorkspaceID = uuid.MustParse("00000000-0000-0000-0000-000000000000")
 
-var SystemOrgID = uuid.MustParse("00000000-0000-0000-0000-000000000000")
-
-func (s *Store) GetOrganization(ctx context.Context, id uuid.UUID) (Organization, error) {
-	var out Organization
+func (s *Store) GetWorkspace(ctx context.Context, id uuid.UUID) (Workspace, error) {
+	var out Workspace
 	err := s.DB.NewSelect().Model(&out).Where("id = ?", id).Scan(ctx)
 	return out, err
 }
 
-func (s *Store) GetOrganizationByName(ctx context.Context, name string) (Organization, error) {
-	var out Organization
+func (s *Store) GetWorkspaceByName(ctx context.Context, name string) (Workspace, error) {
+	var out Workspace
 	err := s.DB.NewSelect().Model(&out).Where("name = ?", name).Scan(ctx)
 	return out, err
 }
 
-func (s *Store) ListOrganizations(ctx context.Context) ([]Organization, error) {
-	var out []Organization
+func (s *Store) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
+	var out []Workspace
 	err := s.DB.NewSelect().Model(&out).Order("name ASC").Scan(ctx)
 	return out, err
 }
 
-func (s *Store) CreateOrganization(ctx context.Context, org *Organization) error {
-	org.ID = uuid.New()
-	org.CreatedAt = time.Now()
-	org.UpdatedAt = org.CreatedAt
-	_, err := s.DB.NewInsert().Model(org).Exec(ctx)
+func (s *Store) CreateWorkspace(ctx context.Context, workspace *Workspace) error {
+	kind, err := normalizeWorkspaceKind(workspace.Kind)
+	if err != nil {
+		return err
+	}
+	workspace.Kind = kind
+	workspace.ID = uuid.New()
+	workspace.CreatedAt = time.Now()
+	workspace.UpdatedAt = workspace.CreatedAt
+	_, err = s.DB.NewInsert().Model(workspace).Exec(ctx)
 	return err
 }
 
-func (s *Store) UpdateOrganization(ctx context.Context, org *Organization) error {
-	org.UpdatedAt = time.Now()
-	_, err := s.DB.NewUpdate().Model(org).Where("id = ?", org.ID).Exec(ctx)
+func (s *Store) CreatePersonalWorkspace(ctx context.Context, userID uuid.UUID, workspace *Workspace) error {
+	return s.DB.RunInTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, func(ctx context.Context, tx bun.Tx) error {
+		if err := lockMembershipUser(ctx, tx, userID); err != nil {
+			return err
+		}
+		workspace.Kind = WorkspaceKindPersonal
+		existing, err := personalWorkspaceForUserTx(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+		if existing != uuid.Nil {
+			return ErrPersonalWorkspaceExists
+		}
+		now := time.Now()
+		workspace.ID = uuid.New()
+		workspace.CreatedAt = now
+		workspace.UpdatedAt = now
+		if _, err := tx.NewInsert().Model(workspace).Exec(ctx); err != nil {
+			return err
+		}
+		return insertMembership(ctx, tx, &WorkspaceMember{UserID: userID, WorkspaceID: workspace.ID, Role: "admin", CreatedAt: now})
+	})
+}
+
+func (s *Store) UpdateWorkspace(ctx context.Context, workspace *Workspace) error {
+	kind, err := normalizeWorkspaceKind(workspace.Kind)
+	if err != nil {
+		return err
+	}
+	workspace.Kind = kind
+	workspace.UpdatedAt = time.Now()
+	_, err = s.DB.NewUpdate().Model(workspace).Where("id = ?", workspace.ID).Exec(ctx)
 	return err
 }
 
-func (s *Store) DeleteOrganization(ctx context.Context, id uuid.UUID) error {
-	_, err := s.DB.NewDelete().Model((*Organization)(nil)).Where("id = ?", id).Exec(ctx)
+func (s *Store) DeleteWorkspace(ctx context.Context, id uuid.UUID) error {
+	_, err := s.DB.NewDelete().Model((*Workspace)(nil)).Where("id = ?", id).Exec(ctx)
 	return err
 }
 
-func (s *Store) GetMembership(ctx context.Context, userID, orgID uuid.UUID) (OrganizationMember, error) {
-	var out OrganizationMember
-	err := s.DB.NewSelect().Model(&out).Where("user_id = ? AND org_id = ?", userID, orgID).Scan(ctx)
+func (s *Store) GetMembership(ctx context.Context, userID, workspaceID uuid.UUID) (WorkspaceMember, error) {
+	var out WorkspaceMember
+	err := s.DB.NewSelect().Model(&out).Where("user_id = ? AND workspace_id = ?", userID, workspaceID).Scan(ctx)
 	return out, err
 }
 
-func (s *Store) ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]OrganizationMember, error) {
-	var out []OrganizationMember
+func (s *Store) ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]WorkspaceMember, error) {
+	var out []WorkspaceMember
 	err := s.DB.NewSelect().Model(&out).Where("user_id = ?", userID).Scan(ctx)
 	return out, err
 }
 
-func (s *Store) ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]OrganizationMember, error) {
-	var out []OrganizationMember
-	err := s.DB.NewSelect().Model(&out).Where("org_id = ?", orgID).Scan(ctx)
+func (s *Store) ListMembershipsByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]WorkspaceMember, error) {
+	var out []WorkspaceMember
+	err := s.DB.NewSelect().Model(&out).Where("workspace_id = ?", workspaceID).Scan(ctx)
 	return out, err
 }
 
-func (s *Store) UpsertMembership(ctx context.Context, m *OrganizationMember) error {
-	m.CreatedAt = time.Now()
-	_, err := s.DB.NewInsert().Model(m).
-		On("CONFLICT (user_id, org_id) DO UPDATE").
-		Set("role = EXCLUDED.role").
-		Exec(ctx)
-	return err
+func (s *Store) CountWorkspaceAdmins(ctx context.Context, workspaceID uuid.UUID) (int, error) {
+	return s.DB.NewSelect().Model((*WorkspaceMember)(nil)).Where("workspace_id = ? AND role = 'admin'", workspaceID).Count(ctx)
 }
 
-func (s *Store) DeleteMembership(ctx context.Context, userID, orgID uuid.UUID) error {
-	_, err := s.DB.NewDelete().Model((*OrganizationMember)(nil)).Where("user_id = ? AND org_id = ?", userID, orgID).Exec(ctx)
-	return err
-}
-
-func (s *Store) CountOrgAdmins(ctx context.Context, orgID uuid.UUID) (int, error) {
-	return s.DB.NewSelect().Model((*OrganizationMember)(nil)).Where("org_id = ? AND role = 'admin'", orgID).Count(ctx)
-}
-
-func (s *Store) CreateTeam(ctx context.Context, t *OrganizationTeam) error {
+func (s *Store) CreateTeam(ctx context.Context, t *WorkspaceTeam) error {
+	var kind string
+	if err := s.DB.NewSelect().Model((*Workspace)(nil)).Column("kind").Where("id = ?", t.WorkspaceID).Scan(ctx, &kind); err != nil {
+		return err
+	}
+	if kind == WorkspaceKindPersonal {
+		return ErrPersonalWorkspaceTeams
+	}
 	t.ID = uuid.New()
 	t.CreatedAt = time.Now()
 	t.UpdatedAt = t.CreatedAt
@@ -427,42 +552,26 @@ func (s *Store) CreateTeam(ctx context.Context, t *OrganizationTeam) error {
 	return err
 }
 
-func (s *Store) GetTeam(ctx context.Context, id uuid.UUID) (OrganizationTeam, error) {
-	var out OrganizationTeam
+func (s *Store) GetTeam(ctx context.Context, id uuid.UUID) (WorkspaceTeam, error) {
+	var out WorkspaceTeam
 	err := s.DB.NewSelect().Model(&out).Where("id = ?", id).Scan(ctx)
 	return out, err
 }
 
-func (s *Store) ListTeamsByOrg(ctx context.Context, orgID uuid.UUID) ([]OrganizationTeam, error) {
-	var out []OrganizationTeam
-	err := s.DB.NewSelect().Model(&out).Where("org_id = ?", orgID).Order("name ASC").Scan(ctx)
+func (s *Store) ListTeamsByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]WorkspaceTeam, error) {
+	var out []WorkspaceTeam
+	err := s.DB.NewSelect().Model(&out).Where("workspace_id = ?", workspaceID).Order("name ASC").Scan(ctx)
 	return out, err
 }
 
-func (s *Store) UpdateTeam(ctx context.Context, t *OrganizationTeam) error {
+func (s *Store) UpdateTeam(ctx context.Context, t *WorkspaceTeam) error {
 	t.UpdatedAt = time.Now()
 	_, err := s.DB.NewUpdate().Model(t).Where("id = ?", t.ID).Exec(ctx)
 	return err
 }
 
 func (s *Store) DeleteTeam(ctx context.Context, id uuid.UUID) error {
-	_, err := s.DB.NewDelete().Model((*OrganizationTeam)(nil)).Where("id = ?", id).Exec(ctx)
-	return err
-}
-
-func (s *Store) AddTeamMember(ctx context.Context, userID, teamID uuid.UUID, role string) error {
-	if role == "" {
-		role = "member"
-	}
-	m := &TeamMember{UserID: userID, TeamID: teamID, Role: role, CreatedAt: time.Now()}
-	_, err := s.DB.NewInsert().Model(m).
-		On("CONFLICT (user_id, team_id) DO UPDATE SET role = EXCLUDED.role").
-		Exec(ctx)
-	return err
-}
-
-func (s *Store) RemoveTeamMember(ctx context.Context, userID, teamID uuid.UUID) error {
-	_, err := s.DB.NewDelete().Model((*TeamMember)(nil)).Where("user_id = ? AND team_id = ?", userID, teamID).Exec(ctx)
+	_, err := s.DB.NewDelete().Model((*WorkspaceTeam)(nil)).Where("id = ?", id).Exec(ctx)
 	return err
 }
 
@@ -470,11 +579,6 @@ func (s *Store) GetTeamMember(ctx context.Context, userID, teamID uuid.UUID) (Te
 	var out TeamMember
 	err := s.DB.NewSelect().Model(&out).Where("user_id = ? AND team_id = ?", userID, teamID).Scan(ctx)
 	return out, err
-}
-
-func (s *Store) SetTeamMemberRole(ctx context.Context, userID, teamID uuid.UUID, role string) error {
-	_, err := s.DB.NewUpdate().Model((*TeamMember)(nil)).Set("role = ?", role).Where("user_id = ? AND team_id = ?", userID, teamID).Exec(ctx)
-	return err
 }
 
 func (s *Store) CountTeamAdmins(ctx context.Context, teamID uuid.UUID) (int, error) {
@@ -507,29 +611,29 @@ func (s *Store) ListTeamMembershipsByUser(ctx context.Context, userID uuid.UUID)
 	return out, err
 }
 
-func (s *Store) ListTeamsByUser(ctx context.Context, userID uuid.UUID) ([]OrganizationTeam, error) {
-	var out []OrganizationTeam
+func (s *Store) ListTeamsByUser(ctx context.Context, userID uuid.UUID) ([]WorkspaceTeam, error) {
+	var out []WorkspaceTeam
 	err := s.DB.NewSelect().Model(&out).
-		Join("JOIN team_members tm ON tm.team_id = ot.id").
+		Join("JOIN team_members tm ON tm.team_id = wt.id").
 		Where("tm.user_id = ?", userID).
-		Order("ot.name ASC").
+		Order("wt.name ASC").
 		Scan(ctx)
 	return out, err
 }
 
-func (s *Store) CountProvidersByOrg(ctx context.Context, orgID uuid.UUID) (int, error) {
-	return s.DB.NewSelect().Model((*DBProvider)(nil)).Where("org_id = ?", orgID).Count(ctx)
+func (s *Store) CountProvidersByWorkspace(ctx context.Context, workspaceID uuid.UUID) (int, error) {
+	return s.DB.NewSelect().Model((*DBProvider)(nil)).Where("workspace_id = ?", workspaceID).Count(ctx)
 }
 
-func (s *Store) CountAliasesByOrg(ctx context.Context, orgID uuid.UUID) (int, error) {
-	return s.DB.NewSelect().Model((*DBAlias)(nil)).Where("org_id = ?", orgID).Count(ctx)
+func (s *Store) CountAliasesByWorkspace(ctx context.Context, workspaceID uuid.UUID) (int, error) {
+	return s.DB.NewSelect().Model((*DBAlias)(nil)).Where("workspace_id = ?", workspaceID).Count(ctx)
 }
 
-func (s *Store) CountKeysByOrg(ctx context.Context, orgID uuid.UUID) (int, error) {
-	return s.DB.NewSelect().Model((*InboundKey)(nil)).Where("org_id = ?", orgID).Count(ctx)
+func (s *Store) CountKeysByWorkspace(ctx context.Context, workspaceID uuid.UUID) (int, error) {
+	return s.DB.NewSelect().Model((*InboundKey)(nil)).Where("workspace_id = ?", workspaceID).Count(ctx)
 }
 
-func (s *Store) CreateUserWithOrg(ctx context.Context, u *User, org *Organization, role string) error {
+func (s *Store) CreateUserWithWorkspace(ctx context.Context, u *User, workspace *Workspace, role string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -542,26 +646,27 @@ func (s *Store) CreateUserWithOrg(ctx context.Context, u *User, org *Organizatio
 		_ = tx.Rollback()
 		return err
 	}
-	org.ID = uuid.New()
-	org.CreatedAt = now
-	org.UpdatedAt = now
-	if _, err := tx.NewInsert().Model(org).Exec(ctx); err != nil {
+	workspace.Kind = WorkspaceKindPersonal
+	workspace.ID = uuid.New()
+	workspace.CreatedAt = now
+	workspace.UpdatedAt = now
+	if _, err := tx.NewInsert().Model(workspace).Exec(ctx); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
-	if _, err := tx.NewInsert().Model(&OrganizationMember{UserID: u.ID, OrgID: org.ID, Role: role, CreatedAt: now}).Exec(ctx); err != nil {
+	if err := insertMembership(ctx, tx, &WorkspaceMember{UserID: u.ID, WorkspaceID: workspace.ID, Role: role, CreatedAt: now}); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
 	return tx.Commit()
 }
 
-func (s *Store) MembershipsWithOrg(ctx context.Context, userID uuid.UUID) ([]Organization, error) {
-	var out []Organization
-	err := s.DB.NewSelect().Model((*Organization)(nil)).
-		Join("JOIN organization_members om ON om.org_id = organization.id").
-		Where("om.user_id = ?", userID).
-		Order("organization.name ASC").
+func (s *Store) MembershipsWithWorkspace(ctx context.Context, userID uuid.UUID) ([]Workspace, error) {
+	var out []Workspace
+	err := s.DB.NewSelect().Model((*Workspace)(nil)).
+		Join("JOIN workspace_members wm ON wm.workspace_id = workspace.id").
+		Where("wm.user_id = ?", userID).
+		Order("workspace.name ASC").
 		Scan(ctx, &out)
 	return out, err
 }
@@ -572,23 +677,23 @@ func (s *Store) UpsertScopeQuota(ctx context.Context, q *ScopeQuota) error {
 		q.CreatedAt = q.UpdatedAt
 	}
 	_, err := s.DB.NewInsert().Model(q).
-		On("CONFLICT (org_id, scope_type, scope_id, model) DO UPDATE SET budget_micros = EXCLUDED.budget_micros, tpm_ceiling = EXCLUDED.tpm_ceiling, tpm_effective = EXCLUDED.tpm_effective, spent_offset_micros = EXCLUDED.spent_offset_micros, updated_at = EXCLUDED.updated_at").
+		On("CONFLICT (workspace_id, scope_type, scope_id, model) DO UPDATE SET budget_micros = EXCLUDED.budget_micros, tpm_ceiling = EXCLUDED.tpm_ceiling, tpm_effective = EXCLUDED.tpm_effective, spent_offset_micros = EXCLUDED.spent_offset_micros, updated_at = EXCLUDED.updated_at").
 		Exec(ctx)
 	return err
 }
 
-func (s *Store) GetScopeQuota(ctx context.Context, orgID uuid.UUID, scopeType string, scopeID uuid.UUID, model string) (ScopeQuota, error) {
+func (s *Store) GetScopeQuota(ctx context.Context, workspaceID uuid.UUID, scopeType string, scopeID uuid.UUID, model string) (ScopeQuota, error) {
 	var out ScopeQuota
 	err := s.DB.NewSelect().Model(&out).
-		Where("org_id = ? AND scope_type = ? AND scope_id = ? AND model = ?", orgID, scopeType, scopeID, model).
+		Where("workspace_id = ? AND scope_type = ? AND scope_id = ? AND model = ?", workspaceID, scopeType, scopeID, model).
 		Scan(ctx)
 	return out, err
 }
 
-func (s *Store) ListScopeQuotasByScope(ctx context.Context, orgID uuid.UUID, scopeType string, scopeID uuid.UUID) ([]ScopeQuota, error) {
+func (s *Store) ListScopeQuotasByScope(ctx context.Context, workspaceID uuid.UUID, scopeType string, scopeID uuid.UUID) ([]ScopeQuota, error) {
 	var out []ScopeQuota
 	err := s.DB.NewSelect().Model(&out).
-		Where("org_id = ? AND scope_type = ? AND scope_id = ?", orgID, scopeType, scopeID).
+		Where("workspace_id = ? AND scope_type = ? AND scope_id = ?", workspaceID, scopeType, scopeID).
 		Order("model ASC").Scan(ctx)
 	return out, err
 }
@@ -600,7 +705,7 @@ func (s *Store) InsertSpendEntry(ctx context.Context, e *SpendEntry) error {
 	return err
 }
 
-func (s *Store) SumScopeSpend(ctx context.Context, orgID uuid.UUID, scopeType string, scopeID uuid.UUID) (int64, error) {
+func (s *Store) SumScopeSpend(ctx context.Context, workspaceID uuid.UUID, scopeType string, scopeID uuid.UUID) (int64, error) {
 	var sum int64
 	col := "user_id"
 	if scopeType == "team" {
@@ -608,19 +713,19 @@ func (s *Store) SumScopeSpend(ctx context.Context, orgID uuid.UUID, scopeType st
 	}
 	err := s.DB.NewSelect().Model((*SpendEntry)(nil)).
 		ColumnExpr("COALESCE(SUM(cost_micros), 0)").
-		Where("org_id = ? AND "+col+" = ?", orgID, scopeID).
+		Where("workspace_id = ? AND "+col+" = ?", workspaceID, scopeID).
 		Scan(ctx, &sum)
 	return sum, err
 }
 
-func (s *Store) KeyUsageByOrg(ctx context.Context, orgID uuid.UUID) ([]KeyUsage, error) {
+func (s *Store) KeyUsageByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]KeyUsage, error) {
 	var out []KeyUsage
 	err := s.DB.NewSelect().Model((*SpendEntry)(nil)).
 		Column("key_id").
 		ColumnExpr("COUNT(*) AS requests").
 		ColumnExpr("COALESCE(SUM(tokens), 0) AS tokens").
 		ColumnExpr("COALESCE(SUM(cost_micros), 0) AS spend").
-		Where("org_id = ?", orgID).
+		Where("workspace_id = ?", workspaceID).
 		Group("key_id").
 		Scan(ctx, &out)
 	return out, err

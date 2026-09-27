@@ -41,7 +41,7 @@ func TestSummaryCostTextPricedAndUnpriced(t *testing.T) {
 	}
 }
 
-func TestAliasCostAttributesByUpstreamWeight(t *testing.T) {
+func TestAliasCostRejectsUnattributedUpstreamWeights(t *testing.T) {
 	prices := map[string]*config.ModelPricing{
 		"dxc-openshift/muse-spark-1.3-contributor-free":  {InputPerMillion: 0.1, OutputPerMillion: 0.2, CachedPerMillion: 0.002},
 		"gold-openshift/muse-spark-1.3-contributor-free": {InputPerMillion: 0.1, OutputPerMillion: 0.2, CachedPerMillion: 0.002},
@@ -55,36 +55,23 @@ func TestAliasCostAttributesByUpstreamWeight(t *testing.T) {
 		{Provider: "gold-openshift", Model: "muse-spark-1.3-contributor-free", Operation: "responses", StatusCode: 200, Count: 3},
 	}
 	s := accounting.Summary{Model: "alias/muse-spark-1.3-contributor-free", Operation: "responses", StatusCode: 200, Count: 12, PromptTokens: 4000000, CompletionTokens: 2000, TotalTokens: 4002000, CachedTokens: 3000000}
-	cost, ok := summaryCostWithAliases(s, prices, aliases, upstream)
-	if !ok {
-		t.Fatal("alias row must be priced from targets")
+	if _, ok := summaryCostWithAliases(s, prices, aliases, upstream); ok {
+		t.Fatal("unattributed lifetime counts must not price alias usage")
 	}
-	want := (1.0*0.1 + 0.002*0.002 + 0.0) + (3.0*0.1 + 0.0 + 0.0)
-	_ = want
-	half, _ := prices["dxc-openshift/muse-spark-1.3-contributor-free"].Cost(3000000, 1500, 2250000, 0, 0)
-	quarter, _ := prices["gold-openshift/muse-spark-1.3-contributor-free"].Cost(1000000, 500, 750000, 0, 0)
-	if cost < half+quarter-1e-9 || cost > half+quarter+1e-9 {
-		t.Fatalf("cost = %v, want 3:1 weighted %v", cost, half+quarter)
-	}
-	if got := summaryCostTextWithAliases(s, prices, aliases, upstream); got == "-" {
-		t.Fatal("alias cost text must not be dash")
+	if got := summaryCostTextWithAliases(s, prices, aliases, upstream); got != "-" {
+		t.Fatal("unavailable attribution must render dash")
 	}
 }
 
-func TestAliasCostFallsBackToEvenSplit(t *testing.T) {
+func TestAliasCostNeverFallsBackToEvenSplit(t *testing.T) {
 	prices := map[string]*config.ModelPricing{
 		"a/m": {InputPerMillion: 2},
 		"b/m": {InputPerMillion: 4},
 	}
 	aliases := []config.Alias{{Name: "x", Targets: []config.AliasTarget{{Provider: "a", Model: "m"}, {Provider: "b", Model: "m"}}}}
 	s := accounting.Summary{Model: "alias/x", Operation: "chat", StatusCode: 200, Count: 2, PromptTokens: 2000000, TotalTokens: 2000000}
-	cost, ok := summaryCostWithAliases(s, prices, aliases, nil)
-	if !ok {
-		t.Fatal("alias row must be priced with even split")
-	}
-	want := 1.0*2 + 1.0*4
-	if cost < want-1e-9 || cost > want+1e-9 {
-		t.Fatalf("cost = %v, want %v", cost, want)
+	if _, ok := summaryCostWithAliases(s, prices, aliases, nil); ok {
+		t.Fatal("configured targets alone cannot price alias usage")
 	}
 }
 
@@ -98,9 +85,9 @@ func TestAliasCostAttributesByUpstreamTokens(t *testing.T) {
 		{Provider: "gold", Model: "m"},
 	}}}
 	upstream := []accounting.UpstreamSummary{
-		{Provider: "dxc", Model: "m", Operation: "responses", StatusCode: 200, Count: 9,
+		{PublicModel: "alias/x", Provider: "dxc", Model: "m", Operation: "responses", StatusCode: 200, Count: 9,
 			PromptTokens: 90000, CompletionTokens: 900, TotalTokens: 90900, CachedTokens: 10000},
-		{Provider: "gold", Model: "m", Operation: "responses", StatusCode: 200, Count: 3,
+		{PublicModel: "alias/x", Provider: "gold", Model: "m", Operation: "responses", StatusCode: 200, Count: 3,
 			PromptTokens: 3000000, CompletionTokens: 300, TotalTokens: 3000300, CachedTokens: 2900000},
 	}
 	s := accounting.Summary{Model: "alias/x", Operation: "responses", StatusCode: 200, Count: 12,
@@ -153,8 +140,10 @@ func TestProviderCostTextAttributesAliasShare(t *testing.T) {
 		{Provider: "gold", Model: "m"},
 	}}}
 	upstream := []accounting.UpstreamSummary{
-		{Provider: "dxc", Model: "m", Operation: "responses", StatusCode: 200, Count: 9},
-		{Provider: "gold", Model: "m", Operation: "responses", StatusCode: 200, Count: 3},
+		{PublicModel: "alias/x", Provider: "dxc", Model: "m", Operation: "responses", StatusCode: 200, Count: 9,
+			PromptTokens: 3000000, CompletionTokens: 1500, TotalTokens: 3001500, CachedTokens: 2250000},
+		{PublicModel: "alias/x", Provider: "gold", Model: "m", Operation: "responses", StatusCode: 200, Count: 3,
+			PromptTokens: 1000000, CompletionTokens: 500, TotalTokens: 1000500, CachedTokens: 750000},
 	}
 	summaries := []accounting.Summary{
 		{Model: "alias/x", Operation: "responses", StatusCode: 200, Count: 12, PromptTokens: 4000000, CompletionTokens: 2000, TotalTokens: 4002000, CachedTokens: 3000000},
@@ -191,7 +180,7 @@ func TestPaneBoxKeepsRowsInsideBorder(t *testing.T) {
 		t.Fatalf("inner = %d, want 118 (content = Width - borders)", inner)
 	}
 	usage := accounting.NewAggregator()
-	usage.Record(accounting.Event{Model: "alias/m", Operation: "responses", StatusCode: 200,
+	usage.Record(accounting.Event{Model: "alias/m", Provider: "dxc", UpstreamModel: "m", Operation: "responses", StatusCode: 200,
 		PromptTokens: 682573, CompletionTokens: 385, TotalTokens: 682958, CachedTokens: 676962})
 	price := &config.ModelPricing{InputPerMillion: 0.1, OutputPerMillion: 0.2, CachedPerMillion: 0.002}
 	snap := &RuntimeSnapshot{
@@ -210,7 +199,7 @@ func TestPaneBoxKeepsRowsInsideBorder(t *testing.T) {
 	}
 }
 
-func TestProviderCostTextSumsPricedModelsOnly(t *testing.T) {
+func TestProviderCostTextRejectsPartialSubtotal(t *testing.T) {
 	prices := map[string]*config.ModelPricing{
 		"openai/a": {InputPerMillion: 1, OutputPerMillion: 1},
 	}
@@ -219,8 +208,8 @@ func TestProviderCostTextSumsPricedModelsOnly(t *testing.T) {
 		{Model: "openai/b", PromptTokens: 1000000, TotalTokens: 1000000},
 		{Model: "_unresolved_model", PromptTokens: 999},
 	}
-	if got := providerCostText("openai", summaries, prices); got != "$2.00" {
-		t.Errorf("provider cost = %q, want $2.00", got)
+	if got := providerCostText("openai", summaries, prices); got != "-" {
+		t.Errorf("provider cost = %q, want unavailable for used unpriced model", got)
 	}
 	if got := providerCostText("zen", summaries, prices); got != "-" {
 		t.Errorf("unpriced provider = %q, want -", got)

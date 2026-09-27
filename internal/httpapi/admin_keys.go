@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -27,8 +29,8 @@ type adminKeyView struct {
 	AllowedModels []string          `json:"allowed_models"`
 	Enabled       bool              `json:"enabled"`
 	Source        string            `json:"source"`
-	OrgID         string            `json:"org_id,omitempty"`
-	OrgName       string            `json:"org_name,omitempty"`
+	WorkspaceID   string            `json:"workspace_id,omitempty"`
+	WorkspaceName string            `json:"workspace_name,omitempty"`
 	Description   string            `json:"description,omitempty"`
 	ExpiresAt     string            `json:"expires_at,omitempty"`
 	UserIDs       []string          `json:"user_ids,omitempty"`
@@ -47,8 +49,8 @@ type adminKeyMemberView struct {
 	TokenPrefix   string            `json:"token_prefix"`
 	AllowedModels []string          `json:"allowed_models"`
 	Source        string            `json:"source"`
-	OrgID         string            `json:"org_id,omitempty"`
-	OrgName       string            `json:"org_name,omitempty"`
+	WorkspaceID   string            `json:"workspace_id,omitempty"`
+	WorkspaceName string            `json:"workspace_name,omitempty"`
 	Description   string            `json:"description,omitempty"`
 	ExpiresAt     string            `json:"expires_at,omitempty"`
 	OwnerUserID   string            `json:"owner_user_id,omitempty"`
@@ -78,11 +80,11 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 	if len(rest) == 0 || rest[0] == "" {
 		switch r.Method {
 		case http.MethodGet:
-			filterOrg, ok := h.resolveOrgFilter(deps, w, r, claims, r.URL.Query().Get("org_id"))
+			filterWorkspace, ok := h.resolveWorkspaceFilter(deps, w, r, claims, r.URL.Query().Get("workspace_id"))
 			if !ok {
 				return
 			}
-			views, err := h.mergedKeyViews(ctx, deps, r, claims, filterOrg)
+			views, err := h.mergedKeyViews(ctx, deps, r, claims, filterWorkspace)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -94,7 +96,7 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 				Name          string   `json:"name"`
 				Tenant        string   `json:"tenant"`
 				AllowedModels []string `json:"allowed_models"`
-				OrgID         string   `json:"org_id"`
+				WorkspaceID   string   `json:"workspace_id"`
 				Description   string   `json:"description"`
 				ExpiresAt     string   `json:"expires_at"`
 				UserIDs       []string `json:"user_ids"`
@@ -106,11 +108,11 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 				http.Error(w, "invalid body", http.StatusBadRequest)
 				return
 			}
-			org, ok := h.resolveKeyWriteOrg(deps, w, r, claims, req.OrgID)
+			workspace, ok := h.resolveKeyWriteWorkspace(deps, w, r, claims, req.WorkspaceID)
 			if !ok {
 				return
 			}
-			owner, ok := h.resolveKeyOwner(deps, w, r, claims, org, req.OwnerType, req.OwnerID)
+			owner, ok := h.resolveKeyOwner(deps, w, r, claims, workspace, req.OwnerType, req.OwnerID)
 			if !ok {
 				return
 			}
@@ -126,11 +128,11 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 			if !ok {
 				return
 			}
-			boundUsers, boundTeams, ok := h.resolveKeyBindings(deps, w, r, org, userIDs, teamIDs)
+			boundUsers, boundTeams, ok := h.resolveKeyBindings(deps, w, r, workspace, userIDs, teamIDs)
 			if !ok {
 				return
 			}
-			view, token, err := h.createDBKey(ctx, deps, org, req.Name, req.Tenant, req.AllowedModels, req.Description, expires, owner)
+			view, token, err := h.createDBKey(ctx, deps, workspace, req.Name, req.Tenant, req.AllowedModels, req.Description, expires, owner)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
@@ -249,47 +251,51 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 				http.Error(w, "invalid body", http.StatusBadRequest)
 				return
 			}
-			org, err := deps.AdminStore.GetOrganization(ctx, target.OrgID)
+			workspace, err := deps.AdminStore.GetWorkspace(ctx, target.WorkspaceID)
 			if err != nil {
-				http.Error(w, "organization not found", http.StatusNotFound)
+				http.Error(w, "workspace not found", http.StatusNotFound)
 				return
 			}
+			patch := store.InboundKeyPolicyPatch{Description: req.Description, Tenant: req.Tenant, AllowedModels: req.AllowedModels, SetExpiry: req.ExpiresAt != nil, ReplaceBindings: req.UserIDs != nil || req.TeamIDs != nil}
 			if req.Description != nil {
-				target.Description = strings.TrimSpace(*req.Description)
+				*patch.Description = strings.TrimSpace(*req.Description)
 			}
 			if req.ExpiresAt != nil {
 				expires, ok := h.parseKeyExpiry(w, *req.ExpiresAt)
 				if !ok {
 					return
 				}
-				target.ExpiresAt = expires
+				patch.ExpiresAt = expires
 			}
 			if req.Tenant != nil {
-				target.Tenant = strings.TrimSpace(*req.Tenant)
-			}
-			if req.AllowedModels != nil {
-				target.AllowedModels = req.AllowedModels
-			}
-			if err := deps.AdminStore.UpdateInboundKey(ctx, target); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
+				*patch.Tenant = strings.TrimSpace(*req.Tenant)
 			}
 			if req.UserIDs != nil || req.TeamIDs != nil {
-				boundUsers, boundTeams, ok := h.resolveKeyBindings(deps, w, r, org, req.UserIDs, req.TeamIDs)
+				boundUsers, boundTeams, ok := h.resolveKeyBindings(deps, w, r, workspace, req.UserIDs, req.TeamIDs)
 				if !ok {
 					return
 				}
-				if err := deps.AdminStore.SetKeyBindings(ctx, target.ID, boundUsers, boundTeams); err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
+				patch.UserIDs, patch.TeamIDs = boundUsers, boundTeams
+			}
+			if err := deps.AdminStore.UpdateInboundKeyPolicy(ctx, target.ID, mustParseUUID(claims.Subject), patch); err != nil {
+				switch {
+				case errors.Is(err, store.ErrKeyManagerRequired):
+					http.Error(w, err.Error(), http.StatusForbidden)
+				case errors.Is(err, store.ErrInvalidKeyBinding):
+					http.Error(w, err.Error(), http.StatusBadRequest)
+				case errors.Is(err, sql.ErrNoRows):
+					http.Error(w, "key or workspace not found", http.StatusNotFound)
+				default:
+					http.Error(w, "could not update key", http.StatusInternalServerError)
 				}
+				return
+			}
+			if !h.activateChange(deps, w) {
+				return
 			}
 			view, err := h.fullKeyView(ctx, deps, r, claims, target.ID)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if !h.activateChange(deps, w) {
 				return
 			}
 			writeAdminJSON(w, http.StatusOK, map[string]interface{}{"key": view})
@@ -314,16 +320,16 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 	}
 }
 
-func (h *Handler) mergedKeyViews(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, filterOrg string) ([]interface{}, error) {
-	visible, _ := h.visibleOrgIDs(deps, r, claims)
-	names := h.orgNameMap(deps, r, claims)
+func (h *Handler) mergedKeyViews(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, filterWorkspace string) ([]interface{}, error) {
+	visible, _ := h.visibleWorkspaceIDs(deps, r, claims)
+	names := h.workspaceNameMap(deps, r, claims)
 	views := []interface{}{}
-	if h.canSeeSystemOrg(deps, r, claims, filterOrg) {
+	if h.canSeeSystemWorkspace(deps, r, claims, filterWorkspace) {
 		for name := range deps.AdminAuthConfig.Clients {
 			views = append(views, adminKeyView{Name: name, Tenant: deps.AdminAuthConfig.Clients[name].Tenant, AllowedModels: deps.AdminAuthConfig.Clients[name].AllowedModels, Enabled: true, Source: "config"})
 		}
 	}
-	adminOrgs := map[string]bool{}
+	adminWorkspaces := map[string]bool{}
 	sharedKeys := map[string]bool{}
 	callerTeams := map[string]bool{}
 	caller := mustParseUUID(claims.Subject)
@@ -331,7 +337,7 @@ func (h *Handler) mergedKeyViews(ctx context.Context, deps Dependencies, r *http
 		memberships, _ := deps.AdminStore.ListMembershipsByUser(ctx, caller)
 		for _, m := range memberships {
 			if m.Role == roleAdmin {
-				adminOrgs[m.OrgID.String()] = true
+				adminWorkspaces[m.WorkspaceID.String()] = true
 			}
 		}
 		shared, _ := deps.AdminStore.ListInboundKeysVisibleToMember(ctx, caller)
@@ -349,12 +355,12 @@ func (h *Handler) mergedKeyViews(ctx context.Context, deps Dependencies, r *http
 	}
 	emails, teamNames := h.keyOwnerNames(deps, ctx, rows)
 	usageByKey := map[string]adminKeyUsageView{}
-	usageOrgs := map[string]bool{}
+	usageWorkspaces := map[string]bool{}
 	for _, k := range rows {
-		usageOrgs[k.OrgID.String()] = true
+		usageWorkspaces[k.WorkspaceID.String()] = true
 	}
-	for orgStr := range usageOrgs {
-		if used, err := deps.AdminStore.KeyUsageByOrg(ctx, mustParseUUID(orgStr)); err == nil {
+	for workspaceStr := range usageWorkspaces {
+		if used, err := deps.AdminStore.KeyUsageByWorkspace(ctx, mustParseUUID(workspaceStr)); err == nil {
 			for _, u := range used {
 				usageByKey[u.KeyID.String()] = adminKeyUsageView{Requests: u.Requests, Tokens: u.Tokens, Spend: u.Spend}
 			}
@@ -368,19 +374,19 @@ func (h *Handler) mergedKeyViews(ctx context.Context, deps Dependencies, r *http
 		if !manageable && scope.typ == quotaScopeUser {
 			return nil
 		}
-		if view, err := h.quotaView(deps, ctx, k.OrgID, scope); err == nil {
+		if view, err := h.quotaView(deps, ctx, k.WorkspaceID, scope); err == nil {
 			return &view
 		}
 		return nil
 	}
 	for _, k := range rows {
-		if filterOrg != "" && k.OrgID.String() != filterOrg {
+		if filterWorkspace != "" && k.WorkspaceID.String() != filterWorkspace {
 			continue
 		}
-		if visible != nil && !visible[k.OrgID.String()] {
+		if visible != nil && !visible[k.WorkspaceID.String()] {
 			continue
 		}
-		manageable := claims.IsAdmin || adminOrgs[k.OrgID.String()] ||
+		manageable := claims.IsAdmin || adminWorkspaces[k.WorkspaceID.String()] ||
 			(k.OwnerUserID != nil && *k.OwnerUserID == caller) ||
 			(k.OwnerTeamID != nil && callerTeams[k.OwnerTeamID.String()])
 		if manageable {
@@ -430,7 +436,7 @@ func (h *Handler) parseKeyExpiry(w http.ResponseWriter, raw string) (*time.Time,
 	return &utc, true
 }
 
-func (h *Handler) resolveKeyBindings(deps Dependencies, w http.ResponseWriter, r *http.Request, org store.Organization, userIDs, teamIDs []string) ([]uuid.UUID, []uuid.UUID, bool) {
+func (h *Handler) resolveKeyBindings(deps Dependencies, w http.ResponseWriter, r *http.Request, workspace store.Workspace, userIDs, teamIDs []string) ([]uuid.UUID, []uuid.UUID, bool) {
 	ctx := r.Context()
 	boundUsers := make([]uuid.UUID, 0, len(userIDs))
 	for _, raw := range userIDs {
@@ -439,8 +445,8 @@ func (h *Handler) resolveKeyBindings(deps Dependencies, w http.ResponseWriter, r
 			http.Error(w, "invalid user id", http.StatusBadRequest)
 			return nil, nil, false
 		}
-		if _, err := deps.AdminStore.GetMembership(ctx, uid, org.ID); err != nil {
-			http.Error(w, "user is not an organization member", http.StatusBadRequest)
+		if _, err := deps.AdminStore.GetMembership(ctx, uid, workspace.ID); err != nil {
+			http.Error(w, "user is not an workspace member", http.StatusBadRequest)
 			return nil, nil, false
 		}
 		boundUsers = append(boundUsers, uid)
@@ -457,8 +463,8 @@ func (h *Handler) resolveKeyBindings(deps Dependencies, w http.ResponseWriter, r
 			http.Error(w, "team not found", http.StatusNotFound)
 			return nil, nil, false
 		}
-		if team.OrgID != org.ID {
-			http.Error(w, "team belongs to a different organization", http.StatusBadRequest)
+		if team.WorkspaceID != workspace.ID {
+			http.Error(w, "team belongs to a different workspace", http.StatusBadRequest)
 			return nil, nil, false
 		}
 		boundTeams = append(boundTeams, tid)
@@ -530,7 +536,7 @@ func (h *Handler) buildFullKeyView(ctx context.Context, deps Dependencies, names
 	return adminKeyView{
 		ID: k.ID.String(), Name: k.Name, TokenPrefix: k.TokenPrefix, Tenant: k.Tenant,
 		AllowedModels: k.AllowedModels, Enabled: k.Enabled, Source: "database",
-		OrgID: k.OrgID.String(), OrgName: names[k.OrgID.String()],
+		WorkspaceID: k.WorkspaceID.String(), WorkspaceName: names[k.WorkspaceID.String()],
 		Description: k.Description, ExpiresAt: formatKeyExpiry(k.ExpiresAt),
 		UserIDs: users, TeamIDs: teams,
 		OwnerUserID: ownerUserID, OwnerTeamID: ownerTeamID, OwnerName: ownerName,
@@ -543,7 +549,7 @@ func (h *Handler) buildMemberKeyView(names, emails, teamNames map[string]string,
 	return adminKeyMemberView{
 		ID: k.ID.String(), Name: k.Name, TokenPrefix: k.TokenPrefix,
 		AllowedModels: k.AllowedModels, Source: "database",
-		OrgID: k.OrgID.String(), OrgName: names[k.OrgID.String()],
+		WorkspaceID: k.WorkspaceID.String(), WorkspaceName: names[k.WorkspaceID.String()],
 		Description: k.Description, ExpiresAt: formatKeyExpiry(k.ExpiresAt),
 		OwnerUserID: ownerUserID, OwnerTeamID: ownerTeamID, OwnerName: ownerName,
 		Usage: usage, Quota: quota,
@@ -554,7 +560,10 @@ func (h *Handler) canManageKey(deps Dependencies, ctx context.Context, claims *a
 	if claims.IsAdmin {
 		return true
 	}
-	if h.canWriteOrg(deps, ctx, claims, k.OrgID) {
+	if !h.canAccessWorkspace(deps, ctx, claims, k.WorkspaceID) {
+		return false
+	}
+	if h.canWriteWorkspace(deps, ctx, claims, k.WorkspaceID) {
 		return true
 	}
 	caller := mustParseUUID(claims.Subject)
@@ -567,57 +576,57 @@ func (h *Handler) canManageKey(deps Dependencies, ctx context.Context, claims *a
 	return false
 }
 
-func (h *Handler) resolveKeyWriteOrg(deps Dependencies, w http.ResponseWriter, r *http.Request, claims *adminauth.Claims, orgIDStr string) (store.Organization, bool) {
+func (h *Handler) resolveKeyWriteWorkspace(deps Dependencies, w http.ResponseWriter, r *http.Request, claims *adminauth.Claims, workspaceIDStr string) (store.Workspace, bool) {
 	ctx := r.Context()
-	orgIDStr = h.requestOrgID(r, orgIDStr)
-	if orgIDStr != "" {
-		orgID, err := uuid.Parse(orgIDStr)
+	workspaceIDStr = h.requestWorkspaceID(r, workspaceIDStr)
+	if workspaceIDStr != "" {
+		workspaceID, err := uuid.Parse(workspaceIDStr)
 		if err != nil {
-			http.Error(w, "invalid organization id", http.StatusBadRequest)
-			return store.Organization{}, false
+			http.Error(w, "invalid workspace id", http.StatusBadRequest)
+			return store.Workspace{}, false
 		}
-		if h.canWriteOrg(deps, ctx, claims, orgID) {
-			org, err := deps.AdminStore.GetOrganization(ctx, orgID)
+		if h.canWriteWorkspace(deps, ctx, claims, workspaceID) {
+			workspace, err := deps.AdminStore.GetWorkspace(ctx, workspaceID)
 			if err != nil {
-				http.Error(w, "organization not found", http.StatusNotFound)
-				return store.Organization{}, false
+				http.Error(w, "workspace not found", http.StatusNotFound)
+				return store.Workspace{}, false
 			}
-			return org, true
+			return workspace, true
 		}
-		if _, err := deps.AdminStore.GetMembership(ctx, mustParseUUID(claims.Subject), orgID); err != nil {
-			http.Error(w, "organization not found", http.StatusNotFound)
-			return store.Organization{}, false
+		if _, err := deps.AdminStore.GetMembership(ctx, mustParseUUID(claims.Subject), workspaceID); err != nil {
+			http.Error(w, "workspace not found", http.StatusNotFound)
+			return store.Workspace{}, false
 		}
-		org, err := deps.AdminStore.GetOrganization(ctx, orgID)
+		workspace, err := deps.AdminStore.GetWorkspace(ctx, workspaceID)
 		if err != nil {
-			http.Error(w, "organization not found", http.StatusNotFound)
-			return store.Organization{}, false
+			http.Error(w, "workspace not found", http.StatusNotFound)
+			return store.Workspace{}, false
 		}
-		return org, true
+		return workspace, true
 	}
 	memberships, err := deps.AdminStore.ListMembershipsByUser(ctx, mustParseUUID(claims.Subject))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return store.Organization{}, false
+		return store.Workspace{}, false
 	}
 	if claims.IsAdmin && len(memberships) == 0 {
-		org, err := deps.AdminStore.GetOrganization(ctx, store.SystemOrgID)
+		workspace, err := deps.AdminStore.GetWorkspace(ctx, store.SystemWorkspaceID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return store.Organization{}, false
+			return store.Workspace{}, false
 		}
-		return org, true
+		return workspace, true
 	}
 	if len(memberships) == 1 {
-		org, err := deps.AdminStore.GetOrganization(ctx, memberships[0].OrgID)
+		workspace, err := deps.AdminStore.GetWorkspace(ctx, memberships[0].WorkspaceID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return store.Organization{}, false
+			return store.Workspace{}, false
 		}
-		return org, true
+		return workspace, true
 	}
-	http.Error(w, "specify organization id", http.StatusBadRequest)
-	return store.Organization{}, false
+	http.Error(w, "specify workspace id", http.StatusBadRequest)
+	return store.Workspace{}, false
 }
 
 type keyOwner struct {
@@ -625,18 +634,18 @@ type keyOwner struct {
 	teamID *uuid.UUID
 }
 
-func (h *Handler) resolveKeyOwner(deps Dependencies, w http.ResponseWriter, r *http.Request, claims *adminauth.Claims, org store.Organization, ownerType, ownerID string) (keyOwner, bool) {
+func (h *Handler) resolveKeyOwner(deps Dependencies, w http.ResponseWriter, r *http.Request, claims *adminauth.Claims, workspace store.Workspace, ownerType, ownerID string) (keyOwner, bool) {
 	ctx := r.Context()
 	caller := mustParseUUID(claims.Subject)
-	admin := h.canWriteOrg(deps, ctx, claims, org.ID)
+	admin := h.canWriteWorkspace(deps, ctx, claims, workspace.ID)
 	ownerType = strings.ToLower(strings.TrimSpace(ownerType))
 	if ownerType == "" {
 		if admin {
 			return keyOwner{}, true
 		}
 		uid := caller
-		if _, err := deps.AdminStore.GetMembership(ctx, uid, org.ID); err != nil {
-			http.Error(w, "organization not found", http.StatusNotFound)
+		if _, err := deps.AdminStore.GetMembership(ctx, uid, workspace.ID); err != nil {
+			http.Error(w, "workspace not found", http.StatusNotFound)
 			return keyOwner{}, false
 		}
 		return keyOwner{userID: &uid}, true
@@ -652,8 +661,8 @@ func (h *Handler) resolveKeyOwner(deps Dependencies, w http.ResponseWriter, r *h
 			}
 			uid = parsed
 		}
-		if _, err := deps.AdminStore.GetMembership(ctx, uid, org.ID); err != nil {
-			http.Error(w, "owner is not an organization member", http.StatusBadRequest)
+		if _, err := deps.AdminStore.GetMembership(ctx, uid, workspace.ID); err != nil {
+			http.Error(w, "owner is not an workspace member", http.StatusBadRequest)
 			return keyOwner{}, false
 		}
 		if !admin && uid != caller {
@@ -668,7 +677,7 @@ func (h *Handler) resolveKeyOwner(deps Dependencies, w http.ResponseWriter, r *h
 			return keyOwner{}, false
 		}
 		team, err := deps.AdminStore.GetTeam(ctx, tid)
-		if err != nil || team.OrgID != org.ID {
+		if err != nil || team.WorkspaceID != workspace.ID {
 			http.Error(w, "team not found", http.StatusNotFound)
 			return keyOwner{}, false
 		}
@@ -702,10 +711,13 @@ func appendUUIDString(out []string, id string) []string {
 }
 
 func (h *Handler) keyDetailView(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, k store.InboundKey) (interface{}, bool) {
-	names := h.orgNameMap(deps, r, claims)
+	if !h.canAccessWorkspace(deps, ctx, claims, k.WorkspaceID) {
+		return nil, false
+	}
+	names := h.workspaceNameMap(deps, r, claims)
 	emails, teamNames := h.keyOwnerNames(deps, ctx, []store.InboundKey{k})
 	usage := adminKeyUsageView{}
-	if used, err := deps.AdminStore.KeyUsageByOrg(ctx, k.OrgID); err == nil {
+	if used, err := deps.AdminStore.KeyUsageByWorkspace(ctx, k.WorkspaceID); err == nil {
 		for _, u := range used {
 			if u.KeyID == k.ID {
 				usage = adminKeyUsageView{Requests: u.Requests, Tokens: u.Tokens, Spend: u.Spend}
@@ -720,7 +732,7 @@ func (h *Handler) keyDetailView(ctx context.Context, deps Dependencies, r *http.
 		if !manageable && scope.typ == quotaScopeUser {
 			return nil
 		}
-		if view, err := h.quotaView(deps, ctx, k.OrgID, scope); err == nil {
+		if view, err := h.quotaView(deps, ctx, k.WorkspaceID, scope); err == nil {
 			return &view
 		}
 		return nil
@@ -732,8 +744,8 @@ func (h *Handler) keyDetailView(ctx context.Context, deps Dependencies, r *http.
 		}
 		return full, true
 	}
-	visible, _ := h.visibleOrgIDs(deps, r, claims)
-	if visible != nil && !visible[k.OrgID.String()] {
+	visible, _ := h.visibleWorkspaceIDs(deps, r, claims)
+	if visible != nil && !visible[k.WorkspaceID.String()] {
 		return nil, false
 	}
 	shared, err := deps.AdminStore.ListInboundKeysVisibleToMember(ctx, mustParseUUID(claims.Subject))
@@ -749,7 +761,7 @@ func (h *Handler) keyDetailView(ctx context.Context, deps Dependencies, r *http.
 }
 
 func (h *Handler) fullKeyView(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, id uuid.UUID) (adminKeyView, error) {
-	names := h.orgNameMap(deps, r, claims)
+	names := h.workspaceNameMap(deps, r, claims)
 	rows, err := deps.AdminStore.ListInboundKeys(ctx)
 	if err != nil {
 		return adminKeyView{}, err
@@ -759,7 +771,7 @@ func (h *Handler) fullKeyView(ctx context.Context, deps Dependencies, r *http.Re
 		if k.ID == id {
 			var quota *adminQuotaView
 			if scope, ok := keyOwnerScope(k); ok {
-				if view, err := h.quotaView(deps, ctx, k.OrgID, scope); err == nil {
+				if view, err := h.quotaView(deps, ctx, k.WorkspaceID, scope); err == nil {
 					quota = &view
 				}
 			}
@@ -769,7 +781,7 @@ func (h *Handler) fullKeyView(ctx context.Context, deps Dependencies, r *http.Re
 	return adminKeyView{}, errBad("key not found")
 }
 
-func (h *Handler) createDBKey(ctx context.Context, deps Dependencies, org store.Organization, name, tenant string, allowed []string, description string, expires *time.Time, owner keyOwner) (adminKeyView, string, error) {
+func (h *Handler) createDBKey(ctx context.Context, deps Dependencies, workspace store.Workspace, name, tenant string, allowed []string, description string, expires *time.Time, owner keyOwner) (adminKeyView, string, error) {
 	name = strings.TrimSpace(name)
 	if !validResourceName(name) {
 		return adminKeyView{}, "", errBad("invalid key name")
@@ -778,14 +790,14 @@ func (h *Handler) createDBKey(ctx context.Context, deps Dependencies, org store.
 	if err != nil {
 		return adminKeyView{}, "", err
 	}
-	k := &store.InboundKey{Name: name, TokenHash: store.TokenHash(token), TokenPrefix: token[:12], Tenant: tenant, AllowedModels: allowed, Enabled: true, OrgID: org.ID, Description: strings.TrimSpace(description), ExpiresAt: expires, OwnerUserID: owner.userID, OwnerTeamID: owner.teamID}
+	k := &store.InboundKey{Name: name, TokenHash: store.TokenHash(token), TokenPrefix: token[:12], Tenant: tenant, AllowedModels: allowed, Enabled: true, WorkspaceID: workspace.ID, Description: strings.TrimSpace(description), ExpiresAt: expires, OwnerUserID: owner.userID, OwnerTeamID: owner.teamID}
 	if k.AllowedModels == nil {
 		k.AllowedModels = []string{}
 	}
 	if err := deps.AdminStore.CreateInboundKey(ctx, k); err != nil {
 		return adminKeyView{}, "", err
 	}
-	return adminKeyView{ID: k.ID.String(), Name: k.Name, TokenPrefix: k.TokenPrefix, Tenant: k.Tenant, AllowedModels: k.AllowedModels, Enabled: true, Source: "database", OrgID: org.ID.String(), OrgName: org.Name, Description: k.Description, ExpiresAt: formatKeyExpiry(k.ExpiresAt), CanManage: true}, token, nil
+	return adminKeyView{ID: k.ID.String(), Name: k.Name, TokenPrefix: k.TokenPrefix, Tenant: k.Tenant, AllowedModels: k.AllowedModels, Enabled: true, Source: "database", WorkspaceID: workspace.ID.String(), WorkspaceName: workspace.Name, Description: k.Description, ExpiresAt: formatKeyExpiry(k.ExpiresAt), CanManage: true}, token, nil
 }
 
 func (h *Handler) findInboundKey(ctx context.Context, deps Dependencies, id uuid.UUID) (*store.InboundKey, error) {
@@ -807,16 +819,12 @@ func (h *Handler) rotateDBKey(ctx context.Context, deps Dependencies, k *store.I
 	if err != nil {
 		return "", err
 	}
-	k.TokenHash = store.TokenHash(token)
-	k.TokenPrefix = token[:12]
-	k.Enabled = true
-	if err := deps.AdminStore.UpdateInboundKey(ctx, k); err != nil {
+	if err := deps.AdminStore.RotateInboundKey(ctx, k.ID, store.TokenHash(token), token[:12]); err != nil {
 		return "", err
 	}
 	return token, nil
 }
 
 func (h *Handler) setDBKeyEnabled(ctx context.Context, deps Dependencies, k *store.InboundKey, enabled bool) error {
-	k.Enabled = enabled
-	return deps.AdminStore.UpdateInboundKey(ctx, k)
+	return deps.AdminStore.SetInboundKeyEnabled(ctx, k.ID, enabled)
 }

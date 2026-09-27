@@ -57,7 +57,9 @@ The CLI also includes:
   with the UI. It requires a `web_ui` block in the config and prints
   `no server running` when unreachable; pass `--open` to also launch the
   default browser. The UI's live views still authenticate against the
-  `dashboard`-gated `/_internal/dashboard/*` APIs with the dashboard token.
+  `dashboard`-gated `/_internal/dashboard/*` APIs with the dashboard token or a
+  JWT for an active, currently stored system administrator. These APIs are global
+  operator surfaces; ordinary users and workspace administrators receive `403`.
   The UI never claims API surfaces or the reserved `/dashboard` path.
 - `aiproxy paths` to print resolved config and secrets paths
 - `aiproxy examples` for boxed command/config examples
@@ -234,7 +236,22 @@ matrices.
   `aiproxy configure provider --credential/--credential-path` references the
   saved login without OAuth networking or token display, and upstream model
   listing (`GET {base}/models`) shares the same auth without changing the
-  static inventory.
+  static inventory. With multi-tenancy enabled, the web provider form offers
+  Connect GitHub as a database alternative: enter the same explicitly supplied
+  public OAuth client ID, approve at the shown URL with the shown code, then
+  save the provider to apply. The server performs the device challenge over
+  the fixed issuer/scope/verification page and stores the result as an
+  AES-GCM-encrypted database credential (never a sidecar, never a raw-token
+  API input); the browser receives only the authorization URL/code and status.
+  Database credentials require the shared database encryption key on every
+  instance. Abandoned device sessions expire and are reaped by a bounded
+  per-minute cleanup (100/batch); provider saves set
+  `X-Aiproxy-Catalog-Saved: true` once the commit is durable, including
+  saved-but-activation-failed outcomes, and activation applies to the receiving
+  instance only (no cluster broadcast). Hermetically verified; live GitHub compatibility unverified.
+  Mock-only checks and their coverage layers are documented in
+  `website/docs/operations.md#mock-only-copilot-verification`; live compatibility
+  remains deferred in task COPILOT-LIVE-01.
 
 Public endpoint/provider support matrix:
 

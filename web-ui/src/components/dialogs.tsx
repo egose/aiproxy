@@ -17,9 +17,9 @@ import { useMutation } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { createAdminOrg } from '../services/admin';
+import { createAdminWorkspace } from '../services/admin';
 import { errorMessage } from '../services/dashboard';
-import type { AdminOrg } from '../types';
+import type { AdminWorkspace } from '../types';
 
 interface SecretArgs {
   title: string;
@@ -80,22 +80,22 @@ export async function showSecret(
   }
 }
 
-const newOrgSchema = z.object({
-  name: z.string().trim().min(1, 'Enter an organization name.'),
+const newWorkspaceSchema = z.object({
+  name: z.string().trim().min(1, 'Enter a workspace name.'),
   display_name: z.string().optional(),
 });
 
-type NewOrgForm = z.infer<typeof newOrgSchema>;
+type NewWorkspaceForm = z.infer<typeof newWorkspaceSchema>;
 
-export const NewOrganizationDialog = createTypedDialog<object, AdminOrg | null>(({ open, onClose }) => {
-  const form = useForm<NewOrgForm>({
-    resolver: zodResolver(newOrgSchema),
+export const NewWorkspaceDialog = createTypedDialog<object, AdminWorkspace | null>(({ open, onClose }) => {
+  const form = useForm<NewWorkspaceForm>({
+    resolver: zodResolver(newWorkspaceSchema),
     defaultValues: { name: '', display_name: '' },
   });
 
   const createMutation = useMutation({
-    mutationFn: async (values: NewOrgForm) =>
-      createAdminOrg({ name: values.name.trim(), display_name: (values.display_name ?? '').trim() }),
+    mutationFn: async (values: NewWorkspaceForm) =>
+      createAdminWorkspace({ name: values.name.trim(), display_name: (values.display_name ?? '').trim() }),
     onSuccess: (created) => onClose(created),
   });
 
@@ -103,13 +103,16 @@ export const NewOrganizationDialog = createTypedDialog<object, AdminOrg | null>(
     <Dialog open={open} onOpenChange={(o) => !o && onClose(null)}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>New organization</DialogTitle>
-          <DialogDescription>You will be the initial admin of this organization.</DialogDescription>
+          <DialogTitle>New workspace</DialogTitle>
+          <DialogDescription>
+            Your first workspace is personal and created automatically. New workspaces you create here are organization
+            workspaces for team collaboration. You will be the initial admin of this workspace.
+          </DialogDescription>
         </DialogHeader>
         <FormProvider {...form}>
           <form className="grid gap-4" onSubmit={form.handleSubmit((values) => createMutation.mutate(values))}>
-            <HookFormTextInput<NewOrgForm> name="name" label="Name (lowercase, no spaces)" placeholder="acme" />
-            <HookFormTextInput<NewOrgForm> name="display_name" label="Display name (optional)" />
+            <HookFormTextInput<NewWorkspaceForm> name="name" label="Name (lowercase, no spaces)" placeholder="acme" />
+            <HookFormTextInput<NewWorkspaceForm> name="display_name" label="Display name (optional)" />
             {createMutation.error && (
               <Alert variant="danger">
                 <AlertDescription>{errorMessage(createMutation.error)}</AlertDescription>
@@ -120,7 +123,7 @@ export const NewOrganizationDialog = createTypedDialog<object, AdminOrg | null>(
                 Cancel
               </Button>
               <Button variant="primary" type="submit" disabled={createMutation.isPending}>
-                {createMutation.isPending ? 'Creating...' : 'Create organization'}
+                {createMutation.isPending ? 'Creating...' : 'Create workspace'}
               </Button>
             </DialogFooter>
           </form>

@@ -1,7 +1,21 @@
 import axios from 'axios';
 import { z } from 'zod';
 
-import { adminOrgStore, adminStore, clearAdminSession } from '../store';
+import {
+  adminWorkspaceStore,
+  adminStore,
+  clearAdminSession,
+  refreshAdminSession,
+  setAdminSession,
+  setDashboardToken,
+} from '../store';
+import {
+  assertAdminSession,
+  assertAuthGeneration,
+  authLifecycle,
+  guardAuthClient,
+  type AuthRequestConfig,
+} from '../auth-lifecycle';
 import {
   adminAliasSchema,
   adminAliasesSchema,
@@ -11,9 +25,9 @@ import {
   adminKeysSchema,
   adminMeSchema,
   adminOIDCConfigSchema,
-  adminOrgMemberSchema,
-  adminOrgSchema,
-  adminOrgsSchema,
+  adminWorkspaceMemberSchema,
+  adminWorkspaceSchema,
+  adminWorkspacesSchema,
   adminProviderSchema,
   adminProvidersSchema,
   adminQuotaSchema,
@@ -23,68 +37,95 @@ import {
   adminTeamsSchema,
   adminUserSchema,
   adminUsersSchema,
+  copilotDeviceFlowStatusSchema,
   providerTypesSchema,
   type AdminAlias,
   type AdminInvite,
   type AdminKey,
   type AdminMe,
   type AdminOIDCConfig,
-  type AdminOrg,
-  type AdminOrgMember,
+  type AdminWorkspace,
+  type AdminWorkspaceMember,
   type AdminProvider,
   type AdminQuota,
   type AdminStatus,
   type AdminTeam,
   type AdminTeamMember,
   type AdminUser,
+  type CopilotDeviceFlowStatus,
   type ProviderTypeInfo,
 } from '../types';
 
 export const adminStatusPath = '/_internal/admin/status';
 
-export const adminOrgHeader = 'X-Org-ID';
+export const adminWorkspaceHeader = 'X-Workspace-ID';
 
 export const adminClient = axios.create({
   timeout: 10_000,
   headers: { 'Content-Type': 'application/json' },
 });
 
-adminClient.interceptors.request.use((config) => {
-  const token = adminStore.accessToken;
-  if (token) {
-    config.headers = config.headers ?? {};
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  const orgId = adminOrgStore.orgId;
-  if (orgId !== '' && typeof config.url === 'string' && config.url.startsWith('/_internal/admin/')) {
-    config.headers = config.headers ?? {};
-    if (config.headers[adminOrgHeader] == null) {
-      config.headers[adminOrgHeader] = orgId;
+guardAuthClient(adminClient);
+
+adminClient.interceptors.request.use(
+  (config: AuthRequestConfig) => {
+    const token = adminStore.accessToken;
+    config.authAccessToken = token;
+    if (token) {
+      config.headers = config.headers ?? {};
+      config.headers.Authorization = `Bearer ${token}`;
     }
-  }
-  return config;
-});
+    const workspaceId = adminWorkspaceStore.workspaceId;
+    if (workspaceId !== '' && typeof config.url === 'string' && config.url.startsWith('/_internal/admin/')) {
+      config.headers = config.headers ?? {};
+      if (config.headers[adminWorkspaceHeader] == null) {
+        config.headers[adminWorkspaceHeader] = workspaceId;
+      }
+    }
+    return config;
+  },
+  undefined,
+  { synchronous: true },
+);
+
+let refresh: { session: number; promise: Promise<void> } | undefined;
+
+function refreshSession(session: number): Promise<void> {
+  assertAdminSession(session);
+  if (refresh?.session === session) return refresh.promise;
+  const refreshToken = adminStore.refreshToken;
+  const promise = (async () => {
+    try {
+      const res = await axios.post<{ access_token: string; refresh_token: string }>(
+        '/_internal/admin/refresh',
+        { refresh_token: refreshToken },
+        { timeout: 10_000 },
+      );
+      refreshAdminSession(session, res.data.access_token, res.data.refresh_token);
+    } catch (error) {
+      assertAdminSession(session);
+      clearAdminSession();
+      throw error;
+    } finally {
+      if (refresh?.session === session) refresh = undefined;
+    }
+  })();
+  refresh = { session, promise };
+  return promise;
+}
 
 adminClient.interceptors.response.use(
   (res) => res,
   async (err) => {
-    const original = err?.config as (typeof err.config & { _retried?: boolean }) | undefined;
+    const original = err?.config as AuthRequestConfig | undefined;
     if (err?.response?.status === 401 && original && !original._retried && adminStore.refreshToken) {
+      assertAuthGeneration(original.authGeneration!);
       original._retried = true;
-      try {
-        const res = await axios.post<{ access_token: string; refresh_token: string }>(
-          '/_internal/admin/refresh',
-          { refresh_token: adminStore.refreshToken },
-          { timeout: 10_000 },
-        );
-        const { setAdminSession } = await import('../store');
-        setAdminSession(res.data.access_token, res.data.refresh_token);
-        original.headers = original.headers ?? {};
-        original.headers.Authorization = `Bearer ${res.data.access_token}`;
-        return adminClient.request(original);
-      } catch {
-        clearAdminSession();
+      if (original.authAccessToken === adminStore.accessToken) {
+        await refreshSession(original.authSession!);
       }
+      assertAuthGeneration(original.authGeneration!);
+      return adminClient.request(original);
     }
     return Promise.reject(err);
   },
@@ -96,20 +137,30 @@ export async function fetchAdminStatus(): Promise<AdminStatus> {
 }
 
 export async function adminLogin(email: string, password: string) {
+  const session = authLifecycle.session;
   const res = await axios.post<{ access_token: string; refresh_token: string }>(
     '/_internal/admin/login',
     { email, password },
     { timeout: 10_000 },
   );
+  assertAdminSession(session);
+  setAdminSession(res.data.access_token, res.data.refresh_token);
   return res.data;
 }
 
 export async function adminLogout() {
-  try {
-    await adminClient.post('/_internal/admin/logout', { refresh_token: adminStore.refreshToken || undefined });
-  } finally {
-    clearAdminSession();
-  }
+  const accessToken = adminStore.accessToken;
+  const refreshToken = adminStore.refreshToken;
+  clearAdminSession();
+  setDashboardToken('');
+  await axios.post(
+    '/_internal/admin/logout',
+    { refresh_token: refreshToken || undefined },
+    {
+      timeout: 10_000,
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+  );
 }
 
 export async function fetchAdminMe(): Promise<AdminMe> {
@@ -143,6 +194,51 @@ export async function deleteAdminProvider(name: string) {
 
 export async function setProviderCredential(name: string, body: Record<string, unknown>) {
   await adminClient.put(`/_internal/admin/providers/${encodeURIComponent(name)}/credential`, body);
+}
+
+export const copilotDeviceFlowTimeout = 25_000;
+
+export async function startCopilotDeviceFlow(
+  body: Record<string, unknown>,
+  options?: { signal?: AbortSignal },
+): Promise<CopilotDeviceFlowStatus> {
+  const res = await adminClient.post<unknown>('/_internal/admin/copilot-device-flows', body, {
+    timeout: copilotDeviceFlowTimeout,
+    signal: options?.signal,
+  });
+  return copilotDeviceFlowStatusSchema.parse(res.data);
+}
+
+export async function fetchCopilotDeviceFlow(
+  id: string,
+  options?: { signal?: AbortSignal },
+): Promise<CopilotDeviceFlowStatus> {
+  const res = await adminClient.get<unknown>(`/_internal/admin/copilot-device-flows/${encodeURIComponent(id)}`, {
+    signal: options?.signal,
+  });
+  return copilotDeviceFlowStatusSchema.parse(res.data);
+}
+
+export async function pollCopilotDeviceFlow(
+  id: string,
+  options?: { signal?: AbortSignal },
+): Promise<CopilotDeviceFlowStatus> {
+  const res = await adminClient.post<unknown>(
+    `/_internal/admin/copilot-device-flows/${encodeURIComponent(id)}/poll`,
+    {},
+    { timeout: copilotDeviceFlowTimeout, signal: options?.signal },
+  );
+  return copilotDeviceFlowStatusSchema.parse(res.data);
+}
+
+export async function cancelCopilotDeviceFlow(
+  id: string,
+  options?: { signal?: AbortSignal },
+): Promise<CopilotDeviceFlowStatus> {
+  const res = await adminClient.delete<unknown>(`/_internal/admin/copilot-device-flows/${encodeURIComponent(id)}`, {
+    signal: options?.signal,
+  });
+  return copilotDeviceFlowStatusSchema.parse(res.data);
 }
 
 export async function fetchAdminAliases(): Promise<AdminAlias[]> {
@@ -251,115 +347,129 @@ export async function updateAdminOIDCConfig(body: Record<string, unknown>): Prom
   return adminOIDCConfigSchema.parse(res.data);
 }
 
-export async function fetchAdminOrgs(): Promise<AdminOrg[]> {
-  const res = await adminClient.get<unknown>('/_internal/admin/orgs');
-  return adminOrgsSchema.parse(res.data).organizations;
+export async function fetchAdminWorkspaces(): Promise<AdminWorkspace[]> {
+  const res = await adminClient.get<unknown>('/_internal/admin/workspaces');
+  return adminWorkspacesSchema.parse(res.data).workspaces;
 }
 
-export async function createAdminOrg(body: Record<string, unknown>): Promise<AdminOrg> {
-  const res = await adminClient.post<unknown>('/_internal/admin/orgs', body);
-  return adminOrgSchema.parse({
+export async function createAdminWorkspace(body: Record<string, unknown>): Promise<AdminWorkspace> {
+  const res = await adminClient.post<unknown>('/_internal/admin/workspaces', body);
+  return adminWorkspaceSchema.parse({
     ...((res.data as Record<string, unknown>) ?? {}),
     role: (res.data as Record<string, unknown>)?.role ?? 'admin',
   });
 }
 
-export async function fetchAdminOrg(id: string): Promise<Record<string, unknown>> {
-  const res = await adminClient.get<unknown>(`/_internal/admin/orgs/${encodeURIComponent(id)}`);
+export async function fetchAdminWorkspace(id: string): Promise<Record<string, unknown>> {
+  const res = await adminClient.get<unknown>(`/_internal/admin/workspaces/${encodeURIComponent(id)}`);
   return res.data as Record<string, unknown>;
 }
 
-export async function updateAdminOrg(id: string, body: Record<string, unknown>) {
-  await adminClient.put(`/_internal/admin/orgs/${encodeURIComponent(id)}`, body);
+export async function updateAdminWorkspace(id: string, body: Record<string, unknown>) {
+  await adminClient.put(`/_internal/admin/workspaces/${encodeURIComponent(id)}`, body);
 }
 
-export async function deleteAdminOrg(id: string) {
-  await adminClient.delete(`/_internal/admin/orgs/${encodeURIComponent(id)}`);
+export async function deleteAdminWorkspace(id: string) {
+  await adminClient.delete(`/_internal/admin/workspaces/${encodeURIComponent(id)}`);
 }
 
-export async function fetchOrgTeams(orgId: string): Promise<AdminTeam[]> {
-  const res = await adminClient.get<unknown>(`/_internal/admin/orgs/${encodeURIComponent(orgId)}/teams`);
+export async function fetchWorkspaceTeams(workspaceId: string): Promise<AdminTeam[]> {
+  const res = await adminClient.get<unknown>(`/_internal/admin/workspaces/${encodeURIComponent(workspaceId)}/teams`);
   return adminTeamsSchema.parse(res.data).teams;
 }
 
-export async function createOrgTeam(orgId: string, body: Record<string, unknown>): Promise<AdminTeam> {
-  const res = await adminClient.post<unknown>(`/_internal/admin/orgs/${encodeURIComponent(orgId)}/teams`, body);
-  return adminTeamSchema.parse(res.data);
-}
-
-export async function updateOrgTeam(orgId: string, teamId: string, body: Record<string, unknown>): Promise<AdminTeam> {
-  const res = await adminClient.put<unknown>(
-    `/_internal/admin/orgs/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}`,
+export async function createWorkspaceTeam(workspaceId: string, body: Record<string, unknown>): Promise<AdminTeam> {
+  const res = await adminClient.post<unknown>(
+    `/_internal/admin/workspaces/${encodeURIComponent(workspaceId)}/teams`,
     body,
   );
   return adminTeamSchema.parse(res.data);
 }
 
-export async function deleteOrgTeam(orgId: string, teamId: string) {
-  await adminClient.delete(`/_internal/admin/orgs/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}`);
+export async function updateWorkspaceTeam(
+  workspaceId: string,
+  teamId: string,
+  body: Record<string, unknown>,
+): Promise<AdminTeam> {
+  const res = await adminClient.put<unknown>(
+    `/_internal/admin/workspaces/${encodeURIComponent(workspaceId)}/teams/${encodeURIComponent(teamId)}`,
+    body,
+  );
+  return adminTeamSchema.parse(res.data);
 }
 
-export async function fetchOrgMembers(orgId: string): Promise<AdminOrgMember[]> {
-  const res = await adminClient.get<unknown>(`/_internal/admin/orgs/${encodeURIComponent(orgId)}/members`);
-  return z.object({ members: z.array(adminOrgMemberSchema) }).parse(res.data).members;
+export async function deleteWorkspaceTeam(workspaceId: string, teamId: string) {
+  await adminClient.delete(
+    `/_internal/admin/workspaces/${encodeURIComponent(workspaceId)}/teams/${encodeURIComponent(teamId)}`,
+  );
 }
 
-export async function addOrgMember(orgId: string, body: Record<string, unknown>) {
-  await adminClient.post(`/_internal/admin/orgs/${encodeURIComponent(orgId)}/members`, body);
+export async function fetchWorkspaceMembers(workspaceId: string): Promise<AdminWorkspaceMember[]> {
+  const res = await adminClient.get<unknown>(`/_internal/admin/workspaces/${encodeURIComponent(workspaceId)}/members`);
+  return z.object({ members: z.array(adminWorkspaceMemberSchema) }).parse(res.data).members;
 }
 
-export async function setOrgMemberRole(orgId: string, userId: string, role: string) {
-  await adminClient.put(`/_internal/admin/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`, {
-    role,
-  });
+export async function addWorkspaceMember(workspaceId: string, body: Record<string, unknown>) {
+  await adminClient.post(`/_internal/admin/workspaces/${encodeURIComponent(workspaceId)}/members`, body);
 }
 
-export async function removeOrgMember(orgId: string, userId: string) {
-  await adminClient.delete(`/_internal/admin/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`);
+export async function setWorkspaceMemberRole(workspaceId: string, userId: string, role: string) {
+  await adminClient.put(
+    `/_internal/admin/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}`,
+    {
+      role,
+    },
+  );
 }
 
-export async function fetchTeamMembers(orgId: string, teamId: string): Promise<AdminTeamMember[]> {
+export async function removeWorkspaceMember(workspaceId: string, userId: string) {
+  await adminClient.delete(
+    `/_internal/admin/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}`,
+  );
+}
+
+export async function fetchTeamMembers(workspaceId: string, teamId: string): Promise<AdminTeamMember[]> {
   const res = await adminClient.get<unknown>(
-    `/_internal/admin/orgs/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}/members`,
+    `/_internal/admin/workspaces/${encodeURIComponent(workspaceId)}/teams/${encodeURIComponent(teamId)}/members`,
   );
   return z.object({ members: z.array(adminTeamMemberSchema) }).parse(res.data).members;
 }
 
-export async function addTeamMember(orgId: string, teamId: string, body: Record<string, unknown>) {
+export async function addTeamMember(workspaceId: string, teamId: string, body: Record<string, unknown>) {
   await adminClient.post(
-    `/_internal/admin/orgs/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}/members`,
+    `/_internal/admin/workspaces/${encodeURIComponent(workspaceId)}/teams/${encodeURIComponent(teamId)}/members`,
     body,
   );
 }
 
-export async function removeTeamMember(orgId: string, teamId: string, userId: string) {
+export async function removeTeamMember(workspaceId: string, teamId: string, userId: string) {
   await adminClient.delete(
-    `/_internal/admin/orgs/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(userId)}`,
+    `/_internal/admin/workspaces/${encodeURIComponent(workspaceId)}/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(userId)}`,
   );
 }
 
-export async function setTeamMemberRole(orgId: string, teamId: string, userId: string, role: string) {
+export async function setTeamMemberRole(workspaceId: string, teamId: string, userId: string, role: string) {
   await adminClient.put(
-    `/_internal/admin/orgs/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(userId)}`,
+    `/_internal/admin/workspaces/${encodeURIComponent(workspaceId)}/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(userId)}`,
     { role },
   );
 }
 
-export async function fetchScopeQuota(orgId: string, scope: 'users' | 'teams', id: string): Promise<AdminQuota> {
+export async function fetchScopeQuota(workspaceId: string, scope: 'users' | 'teams', id: string): Promise<AdminQuota> {
   const res = await adminClient.get<unknown>(
-    `/_internal/admin/orgs/${encodeURIComponent(orgId)}/${scope}/${encodeURIComponent(id)}/quota`,
+    `/_internal/admin/workspaces/${encodeURIComponent(workspaceId)}/${scope}/${encodeURIComponent(id)}/quota`,
   );
   return adminQuotaSchema.parse(res.data);
 }
 
 export async function updateScopeQuota(
-  orgId: string,
+  workspaceId: string,
   scope: 'users' | 'teams',
   id: string,
   body: Record<string, unknown>,
 ): Promise<AdminQuota> {
   const res = await adminClient.put<unknown>(
-    `/_internal/admin/orgs/${encodeURIComponent(orgId)}/${scope}/${encodeURIComponent(id)}/quota`,
+    `/_internal/admin/workspaces/${encodeURIComponent(workspaceId)}/${scope}/${encodeURIComponent(id)}/quota`,
     body,
   );
   return adminQuotaSchema.parse(res.data);

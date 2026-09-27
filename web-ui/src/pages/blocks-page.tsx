@@ -52,8 +52,10 @@ export function BlocksPage() {
               <AlertDescription>{errorMessage(list.error)}</AlertDescription>
             </Alert>
           )}
-          {list.data && !list.data.enabled && <span>Guardrail quarantine is not enabled on this server.</span>}
-          {(list.data?.blocks ?? []).map((b) => (
+          {!list.error && list.data && !list.data.enabled && (
+            <span>Guardrail quarantine is not enabled on this server.</span>
+          )}
+          {(!list.error ? (list.data?.blocks ?? []) : []).map((b) => (
             <Button
               key={b.block_id}
               variant={selected === b.block_id ? 'primary' : undefined}
@@ -75,7 +77,12 @@ export function BlocksPage() {
         </CardHeader>
         <CardContent className="grid gap-4 pt-0 text-sm">
           {!detail.data && <span>Select a block. Opening it consumes the quarantine capture server-side.</span>}
-          {detail.data && (
+          {detail.error && (
+            <Alert variant="danger">
+              <AlertDescription>{errorMessage(detail.error)}</AlertDescription>
+            </Alert>
+          )}
+          {detail.data && !detail.error && !list.error && (
             <>
               <div className="font-mono text-xs">{JSON.stringify(detail.data, null, 2).slice(0, 4000)}</div>
               <FormProvider {...form}>

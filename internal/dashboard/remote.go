@@ -8,17 +8,30 @@ import (
 )
 
 // remoteUsage wraps a dashrpc snapshot's usage state behind the dashboard's
-// UsageViewer interface. The dashboard TUI reads recent events for p95
-// latency calculations only; the JSON snapshot already carries them.
+// UsageViewer interface, including bounded recent completion metadata.
 type remoteUsage struct {
-	summaries []accounting.Summary
-	recent    []accounting.Event
-	providers []accounting.ProviderSummary
-	upstream  []accounting.UpstreamSummary
+	summaries              []accounting.Summary
+	recent                 []accounting.Event
+	providers              []accounting.ProviderSummary
+	upstream               []accounting.UpstreamSummary
+	rates                  *accounting.RateSnapshot
+	billing                *accounting.BillingSnapshot
+	providerStatsAvailable bool
 }
 
+func (u *remoteUsage) RateSnapshot() *accounting.RateSnapshot       { return u.rates }
+func (u *remoteUsage) BillingSnapshot() *accounting.BillingSnapshot { return u.billing }
+
 func (u *remoteUsage) Summaries() []accounting.Summary { return u.summaries }
-func (u *remoteUsage) Recent(int) []accounting.Event   { return u.recent }
+func (u *remoteUsage) Recent(n int) []accounting.Event {
+	if n <= 0 {
+		return nil
+	}
+	if n > len(u.recent) {
+		n = len(u.recent)
+	}
+	return u.recent[len(u.recent)-n:]
+}
 func (u *remoteUsage) ProviderSummaries() []accounting.ProviderSummary {
 	return u.providers
 }
@@ -60,6 +73,10 @@ func (l *remoteLogs) Since(n int) []observability.LogEntry {
 // SnapshotFromTransport converts a dashrpc.Snapshot into a dashboard
 // RuntimeSnapshot suitable for the existing TUI renderer.
 func SnapshotFromTransport(s dashrpc.Snapshot) *RuntimeSnapshot {
+	usage := s.Usage
+	if s.Billing != nil {
+		usage = s.Billing.Usage
+	}
 	cooldowns := make([]CooldownEntry, 0, len(s.Cooldowns))
 	for _, c := range s.Cooldowns {
 		cooldowns = append(cooldowns, CooldownEntry{
@@ -70,6 +87,16 @@ func SnapshotFromTransport(s dashrpc.Snapshot) *RuntimeSnapshot {
 		})
 	}
 	var providers, disabled []config.Provider
+	metadata := make(map[string]*dashrpc.ProviderDiagnostics)
+	modelMetadata := make(map[string]*dashrpc.ModelDetails)
+	for _, group := range [][]dashrpc.Provider{s.Providers, s.DisabledProviders} {
+		for _, p := range group {
+			metadata[p.Name] = p.Diagnostics
+			for _, model := range p.Models {
+				modelMetadata[p.Name+"/"+model.Name] = model.Details
+			}
+		}
+	}
 	for _, p := range s.Providers {
 		providers = append(providers, config.Provider{
 			Type:        config.ProviderType(p.Type),
@@ -89,7 +116,13 @@ func SnapshotFromTransport(s dashrpc.Snapshot) *RuntimeSnapshot {
 		})
 	}
 	var aliases []config.Alias
+	affinity := make(map[string]*dashrpc.Affinity)
 	for _, a := range s.Aliases {
+		affinity[a.Name] = a.SessionAffinity
+		var session *config.SessionAffinity
+		if a.SessionAffinity != nil && a.SessionAffinity.Enabled {
+			session = &config.SessionAffinity{Headers: append([]string(nil), a.SessionAffinity.Headers...)}
+		}
 		var targets []config.AliasTarget
 		for _, t := range a.Targets {
 			targets = append(targets, config.AliasTarget{Provider: t.Provider, Model: t.Model})
@@ -99,6 +132,7 @@ func SnapshotFromTransport(s dashrpc.Snapshot) *RuntimeSnapshot {
 			Algorithm:        config.Algorithm(a.Algorithm),
 			RetryStatusCodes: a.RetryStatusCodes,
 			Targets:          targets,
+			SessionAffinity:  session,
 		})
 	}
 	return &RuntimeSnapshot{
@@ -112,10 +146,14 @@ func SnapshotFromTransport(s dashrpc.Snapshot) *RuntimeSnapshot {
 		Aliases:           aliases,
 		Cooldowns:         cooldowns,
 		Healthchecks:      healthchecksFromTransport(s.Healthchecks),
-		Usage:             &remoteUsage{summaries: s.Usage, recent: s.Recent, providers: s.ProviderStats, upstream: s.Upstream},
-		Health:            &remoteHealth{states: s.Health},
-		Logs:              &remoteLogs{entries: s.Logs},
-		PayloadEnabled:    s.PayloadEnabled,
+		ProviderMetadata:  metadata,
+		ModelMetadata:     modelMetadata,
+		AliasAffinity:     affinity,
+		Usage: &remoteUsage{summaries: usage, recent: s.Recent, providers: s.ProviderStats, upstream: s.Upstream,
+			rates: s.Rates, billing: s.Billing, providerStatsAvailable: s.ProviderStats != nil || s.Billing != nil},
+		Health:         &remoteHealth{states: s.Health},
+		Logs:           &remoteLogs{entries: s.Logs},
+		PayloadEnabled: s.PayloadEnabled,
 	}
 }
 
@@ -126,20 +164,20 @@ func healthchecksFromTransport(in []dashrpc.HealthcheckStatus) []HealthcheckEntr
 	out := make([]HealthcheckEntry, 0, len(in))
 	for _, h := range in {
 		out = append(out, HealthcheckEntry{
-			Provider:   h.Provider,
-			Configured: h.Configured,
-			Checked:    h.Checked,
-			Healthy:    h.Healthy,
-			StatusCode: h.StatusCode,
-			Message:    h.Message,
-			Path:       h.Path,
+			Provider:    h.Provider,
+			Configured:  h.Configured,
+			Checked:     h.Checked,
+			Healthy:     h.Healthy,
+			StatusCode:  h.StatusCode,
+			Message:     dashrpc.DiagnosticReason(h.Message),
+			Path:        dashrpc.DiagnosticURL(h.Path),
+			LastChecked: h.LastChecked,
 		})
 	}
 	return out
 }
 
-// configModels converts a list of model names into the minimal config.Model
-// shape the dashboard renderer reads (it only inspects m.Name).
+// configModels retains diagnostic metadata without reconstructing credentials.
 func configModels(names []dashrpc.ModelPrice) []config.Model {
 	if len(names) == 0 {
 		return nil
@@ -147,6 +185,11 @@ func configModels(names []dashrpc.ModelPrice) []config.Model {
 	out := make([]config.Model, len(names))
 	for i, n := range names {
 		out[i] = config.Model{Name: n.Name, Pricing: modelPricing(n)}
+		if d := n.Details; d != nil {
+			out[i].DisplayName, out[i].UpstreamName = d.DisplayName, d.UpstreamName
+			out[i].Protocol = config.ModelProtocol(d.Protocol)
+			out[i].Capabilities = append([]config.Capability(nil), d.Capabilities...)
+		}
 	}
 	return out
 }

@@ -1,8 +1,6 @@
 package dashboard
 
 import (
-	"context"
-	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -219,6 +217,7 @@ func TestProviderPaneAttributesAliasTraffic(t *testing.T) {
 	if !strings.Contains(got, "100ms") {
 		t.Errorf("provider P95 missing alias-served latency:\n%s", got)
 	}
+	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
 	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "u"}))
 	if got := mm.View().Content; !strings.Contains(got, "zen/spark") {
 		t.Errorf("upstream view missing resolved model:\n%s", got)
@@ -333,7 +332,7 @@ func TestStaleIndicatorOnPollError(t *testing.T) {
 
 func TestTenantFilterCycles(t *testing.T) {
 	snap := newSnapshot()
-	m := &model{snapshot: snap, health: map[string]bool{}, now: time.Now(), dirty: true}
+	m := &model{snapshot: snap, health: map[string]bool{}, now: time.Now(), dirty: true, focus: focusUsage}
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	mod := mm.(*model)
 	if got := len(mod.filteredSummaries()); got != 3 {
@@ -752,54 +751,7 @@ func TestBaseURLHostParsing(t *testing.T) {
 	}
 }
 
-func TestFormatIPs(t *testing.T) {
-	if got := formatIPs(nil); got != "-" {
-		t.Errorf("formatIPs(nil) = %q, want -", got)
-	}
-	if got := formatIPs([]string{"1.2.3.4"}); got != "1.2.3.4" {
-		t.Errorf("formatIPs single = %q", got)
-	}
-	if got := formatIPs([]string{"10.0.0.1", "10.0.0.2", "10.0.0.3"}); got != "10.0.0.1 +2" {
-		t.Errorf("formatIPs multi = %q", got)
-	}
-}
-
-func TestProviderIPResolutionCachesPerHost(t *testing.T) {
-	old := lookupHostIPs
-	defer func() { lookupHostIPs = old }()
-	calls := 0
-	lookupHostIPs = func(ctx context.Context, host string) ([]string, error) {
-		calls++
-		if host == "api.example.com" {
-			return []string{"10.0.0.2", "10.0.0.1"}, nil
-		}
-		return nil, errors.New("dns failure")
-	}
-	m := &model{}
-	if got := m.providerIP("https://api.example.com/v1"); got != "10.0.0.1 +1" {
-		t.Fatalf("providerIP = %q, want 10.0.0.1 +1", got)
-	}
-	if got := m.providerIP("https://api.example.com/other"); got != "10.0.0.1 +1" {
-		t.Fatalf("providerIP cached = %q", got)
-	}
-	if calls != 1 {
-		t.Fatalf("lookup calls = %d, want 1 (cached)", calls)
-	}
-	if got := m.providerIP("http://127.0.0.1:8080"); got != "127.0.0.1" {
-		t.Errorf("IP literal = %q, want 127.0.0.1", got)
-	}
-	if got := m.providerIP(""); got != "-" {
-		t.Errorf("empty base = %q, want -", got)
-	}
-	if got := m.providerIP("https://unknown.invalid"); got != "-" {
-		t.Errorf("lookup error = %q, want -", got)
-	}
-	if calls != 2 {
-		t.Errorf("lookup calls = %d, want 2", calls)
-	}
-}
-
-func TestProviderPaneShowsIPColumn(t *testing.T) {
+func TestProviderPaneShowsHostColumn(t *testing.T) {
 	usage := accounting.NewAggregator()
 	snap := &RuntimeSnapshot{
 		Version: "test", Address: ":8080", AuthMode: "none",
@@ -811,11 +763,11 @@ func TestProviderPaneShowsIPColumn(t *testing.T) {
 	m := &model{snapshot: snap, health: map[string]bool{"local": true}, now: time.Now(), dirty: true, lastRefresh: time.Now()}
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
 	got := mm.View().Content
-	if !strings.Contains(got, "IP") {
-		t.Fatalf("missing IP header in:\n%s", got)
+	if !strings.Contains(got, "HOST") {
+		t.Fatalf("missing HOST header in:\n%s", got)
 	}
 	if !strings.Contains(got, "127.0.0.1") {
-		t.Errorf("missing resolved IP in:\n%s", got)
+		t.Errorf("missing configured host in:\n%s", got)
 	}
 }
 

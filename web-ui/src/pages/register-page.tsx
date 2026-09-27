@@ -13,7 +13,7 @@ import { errorMessage } from '../services/dashboard';
 const registerSchema = z.object({
   email: z.string().trim().min(1, 'Enter your email.').email('Enter a valid email.'),
   password: z.string().min(8, 'Password must be at least 8 characters.'),
-  org_name: z.string().optional(),
+  workspace_name: z.string().optional(),
 });
 
 type RegisterForm = z.infer<typeof registerSchema>;
@@ -22,7 +22,7 @@ export function RegisterPage() {
   const navigate = useNavigate();
   const form = useForm<RegisterForm>({
     resolver: zodResolver(registerSchema),
-    defaultValues: { email: '', password: '', org_name: '' },
+    defaultValues: { email: '', password: '', workspace_name: '' },
   });
 
   const registerMutation = useMutation({
@@ -30,7 +30,7 @@ export function RegisterPage() {
       publicRegister({
         email: values.email.trim(),
         password: values.password,
-        org_name: values.org_name?.trim() || undefined,
+        workspace_name: values.workspace_name?.trim() || undefined,
       }),
     onSuccess: () => navigate('/login', { replace: true }),
   });
@@ -41,8 +41,8 @@ export function RegisterPage() {
         <CardHeader>
           <CardTitle>Create account</CardTitle>
           <CardDescription>
-            Registering creates your own tenant organization where you are the tenant admin. You can invite teammates
-            and manage teams from there.
+            Registering creates your own personal workspace where you are the workspace admin. You can create
+            organization workspaces and manage teams from there.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -61,8 +61,8 @@ export function RegisterPage() {
                 autoComplete="new-password"
               />
               <HookFormTextInput<RegisterForm>
-                name="org_name"
-                label="Organization name (optional, derived from email)"
+                name="workspace_name"
+                label="Workspace name (optional, derived from email)"
                 placeholder="acme"
               />
               {registerMutation.error && (

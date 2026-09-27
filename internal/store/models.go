@@ -2,10 +2,23 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
+)
+
+const (
+	WorkspaceKindPersonal     = "personal"
+	WorkspaceKindOrganization = "organization"
+)
+
+var (
+	ErrInvalidWorkspaceKind     = errors.New(`kind must be "personal" or "organization"`)
+	ErrPersonalWorkspaceExists  = errors.New("user already has a personal workspace")
+	ErrPersonalWorkspaceTeams   = errors.New("personal workspaces do not support teams")
+	ErrPersonalWorkspaceMembers = errors.New("personal workspaces support exactly one member")
 )
 
 type User struct {
@@ -30,27 +43,28 @@ type RefreshToken struct {
 }
 
 type DBProvider struct {
-	bun.BaseModel         `bun:"table:db_providers,alias:p"`
-	ID                    uuid.UUID       `bun:"id,pk,type:uuid,default:gen_random_uuid()"`
-	Name                  string          `bun:"name,unique,notnull"`
-	Type                  string          `bun:"type,notnull"`
-	DisplayName           string          `bun:"display_name,notnull,default:''"`
-	BaseURL               string          `bun:"base_url,notnull,default:''"`
-	UpstreamTimeoutMs     *int64          `bun:"upstream_header_timeout_ms"`
-	UserAgent             string          `bun:"user_agent,notnull,default:''"`
-	ForwardUserAgent      bool            `bun:"forward_user_agent,notnull,default:false"`
-	ForwardHeaders        []string        `bun:"forward_headers,type:jsonb,nullzero"`
-	APIKeyEncrypted       []byte          `bun:"api_key_encrypted"`
-	APIKeyRefPath         string          `bun:"api_key_ref_path,notnull,default:''"`
-	APIKeyRefKey          string          `bun:"api_key_ref_key,notnull,default:''"`
-	CopilotCredentialPath string          `bun:"copilot_credential_path,notnull,default:''"`
-	CopilotCredentialName string          `bun:"copilot_credential_name,notnull,default:''"`
-	Extends               string          `bun:"extends,notnull,default:''"`
-	Enabled               bool            `bun:"enabled,notnull"`
-	OrgID                 uuid.UUID       `bun:"org_id,notnull,type:uuid"`
-	Healthcheck           json.RawMessage `bun:"healthcheck,type:jsonb,nullzero"`
-	CreatedAt             time.Time       `bun:"created_at,notnull,default:now()"`
-	UpdatedAt             time.Time       `bun:"updated_at,notnull,default:now()"`
+	bun.BaseModel              `bun:"table:db_providers,alias:p"`
+	ID                         uuid.UUID       `bun:"id,pk,type:uuid,default:gen_random_uuid()"`
+	Name                       string          `bun:"name,unique,notnull"`
+	Type                       string          `bun:"type,notnull"`
+	DisplayName                string          `bun:"display_name,notnull,default:''"`
+	BaseURL                    string          `bun:"base_url,notnull,default:''"`
+	UpstreamTimeoutMs          *int64          `bun:"upstream_header_timeout_ms"`
+	UserAgent                  string          `bun:"user_agent,notnull,default:''"`
+	ForwardUserAgent           bool            `bun:"forward_user_agent,notnull,default:false"`
+	ForwardHeaders             []string        `bun:"forward_headers,type:jsonb,nullzero"`
+	APIKeyEncrypted            []byte          `bun:"api_key_encrypted"`
+	APIKeyRefPath              string          `bun:"api_key_ref_path,notnull,default:''"`
+	APIKeyRefKey               string          `bun:"api_key_ref_key,notnull,default:''"`
+	CopilotCredentialPath      string          `bun:"copilot_credential_path,notnull,default:''"`
+	CopilotCredentialName      string          `bun:"copilot_credential_name,notnull,default:''"`
+	CopilotCredentialEncrypted []byte          `bun:"copilot_credential_encrypted" json:"-"`
+	Extends                    string          `bun:"extends,notnull,default:''"`
+	Enabled                    bool            `bun:"enabled,notnull"`
+	WorkspaceID                uuid.UUID       `bun:"workspace_id,notnull,type:uuid"`
+	Healthcheck                json.RawMessage `bun:"healthcheck,type:jsonb,nullzero"`
+	CreatedAt                  time.Time       `bun:"created_at,notnull,default:now()"`
+	UpdatedAt                  time.Time       `bun:"updated_at,notnull,default:now()"`
 }
 
 type DBProviderModel struct {
@@ -73,7 +87,7 @@ type DBAlias struct {
 	RetryStatusCodes   []int           `bun:"retry_status_codes,type:jsonb,nullzero"`
 	SessionAffinity    json.RawMessage `bun:"session_affinity,type:jsonb,nullzero"`
 	EncryptedReasoning json.RawMessage `bun:"encrypted_reasoning,type:jsonb,nullzero"`
-	OrgID              uuid.UUID       `bun:"org_id,notnull,type:uuid"`
+	WorkspaceID        uuid.UUID       `bun:"workspace_id,notnull,type:uuid"`
 	CreatedAt          time.Time       `bun:"created_at,notnull,default:now()"`
 	UpdatedAt          time.Time       `bun:"updated_at,notnull,default:now()"`
 }
@@ -95,7 +109,7 @@ type InboundKey struct {
 	Tenant        string     `bun:"tenant,notnull,default:''"`
 	AllowedModels []string   `bun:"allowed_models,type:jsonb,nullzero"`
 	Enabled       bool       `bun:"enabled,notnull"`
-	OrgID         uuid.UUID  `bun:"org_id,notnull,type:uuid"`
+	WorkspaceID   uuid.UUID  `bun:"workspace_id,notnull,type:uuid"`
 	Description   string     `bun:"description,notnull,default:''"`
 	ExpiresAt     *time.Time `bun:"expires_at"`
 	OwnerUserID   *uuid.UUID `bun:"owner_user_id,type:uuid"`
@@ -143,33 +157,34 @@ type Invite struct {
 	ExpiresAt     time.Time  `bun:"expires_at,notnull"`
 	AcceptedAt    *time.Time `bun:"accepted_at"`
 	CreatedBy     *uuid.UUID `bun:"created_by,type:uuid"`
-	OrgID         *uuid.UUID `bun:"org_id,type:uuid"`
-	OrgRole       string     `bun:"org_role,notnull,default:'member'"`
+	WorkspaceID   *uuid.UUID `bun:"workspace_id,type:uuid"`
+	WorkspaceRole string     `bun:"workspace_role,notnull,default:'member'"`
 	CreatedAt     time.Time  `bun:"created_at,notnull,default:now()"`
 }
 
-type Organization struct {
-	bun.BaseModel `bun:"table:organizations,alias:o"`
+type Workspace struct {
+	bun.BaseModel `bun:"table:workspaces,alias:w"`
 	ID            uuid.UUID `bun:"id,pk,type:uuid"`
 	Name          string    `bun:"name,unique,notnull"`
 	DisplayName   string    `bun:"display_name,notnull,default:''"`
 	IsSystem      bool      `bun:"is_system,notnull,default:false"`
+	Kind          string    `bun:"kind,notnull,default:'organization'"`
 	CreatedAt     time.Time `bun:"created_at,notnull,default:now()"`
 	UpdatedAt     time.Time `bun:"updated_at,notnull,default:now()"`
 }
 
-type OrganizationMember struct {
-	bun.BaseModel `bun:"table:organization_members,alias:om"`
+type WorkspaceMember struct {
+	bun.BaseModel `bun:"table:workspace_members,alias:wm"`
 	UserID        uuid.UUID `bun:"user_id,pk,type:uuid"`
-	OrgID         uuid.UUID `bun:"org_id,pk,type:uuid"`
+	WorkspaceID   uuid.UUID `bun:"workspace_id,pk,type:uuid"`
 	Role          string    `bun:"role,notnull,default:'member'"`
 	CreatedAt     time.Time `bun:"created_at,notnull,default:now()"`
 }
 
-type OrganizationTeam struct {
-	bun.BaseModel `bun:"table:organization_teams,alias:ot"`
+type WorkspaceTeam struct {
+	bun.BaseModel `bun:"table:workspace_teams,alias:wt"`
 	ID            uuid.UUID `bun:"id,pk,type:uuid,default:gen_random_uuid()"`
-	OrgID         uuid.UUID `bun:"org_id,notnull,type:uuid"`
+	WorkspaceID   uuid.UUID `bun:"workspace_id,notnull,type:uuid"`
 	Name          string    `bun:"name,notnull"`
 	Description   string    `bun:"description,notnull,default:''"`
 	CreatedAt     time.Time `bun:"created_at,notnull,default:now()"`
@@ -186,7 +201,7 @@ type TeamMember struct {
 
 type ScopeQuota struct {
 	bun.BaseModel     `bun:"table:scope_quotas,alias:sq"`
-	OrgID             uuid.UUID `bun:"org_id,pk,type:uuid"`
+	WorkspaceID       uuid.UUID `bun:"workspace_id,pk,type:uuid"`
 	ScopeType         string    `bun:"scope_type,pk"`
 	ScopeID           uuid.UUID `bun:"scope_id,pk,type:uuid"`
 	Model             string    `bun:"model,pk,default:''"`
@@ -201,7 +216,7 @@ type ScopeQuota struct {
 type SpendEntry struct {
 	bun.BaseModel `bun:"table:spend_ledger,alias:sl"`
 	ID            uuid.UUID  `bun:"id,pk,type:uuid,default:gen_random_uuid()"`
-	OrgID         uuid.UUID  `bun:"org_id,notnull,type:uuid"`
+	WorkspaceID   uuid.UUID  `bun:"workspace_id,notnull,type:uuid"`
 	KeyID         uuid.UUID  `bun:"key_id,notnull,type:uuid"`
 	UserID        *uuid.UUID `bun:"user_id,type:uuid"`
 	TeamID        *uuid.UUID `bun:"team_id,type:uuid"`

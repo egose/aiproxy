@@ -26,14 +26,14 @@ import { DataTable, type ManagementColumnDef } from '../components/data-table';
 import { showSecret, useConfirm } from '../components/dialogs';
 import { KeyQuotaLine } from '../components/quota';
 import { SourceBadge } from '../components/source-badge';
-import { OrgBadge, OrgSelect } from '../components/org-select';
-import { useAdminKeys, useAdminOrg, useAdminOrgs, useOrgMembers, useOrgTeams } from '../hooks';
+import { WorkspaceBadge, WorkspaceSelect } from '../components/workspace-select';
+import { useAdminKeys, useAdminWorkspace, useAdminWorkspaces, useWorkspaceMembers, useWorkspaceTeams } from '../hooks';
 import { createAdminKey, deleteAdminKey, revokeAdminKey, rotateAdminKey, updateAdminKey } from '../services/admin';
 import { errorMessage } from '../services/dashboard';
 import type { AdminKey } from '../types';
 
 const issueKeySchema = z.object({
-  org_id: z.string().optional(),
+  workspace_id: z.string().optional(),
   owner_type: z.enum(['personal', 'team']).optional(),
   team_id: z.string().optional(),
   name: z.string().trim().min(1, 'Enter a key name.'),
@@ -43,7 +43,8 @@ const issueKeySchema = z.object({
   expires_at: z.string().optional(),
 });
 
-type IssueKeyForm = z.infer<typeof issueKeySchema>;
+type IssueKeyForm = z.input<typeof issueKeySchema>;
+type IssueKeyValues = z.output<typeof issueKeySchema>;
 
 const editKeySchema = z.object({
   description: z.string().optional(),
@@ -52,17 +53,18 @@ const editKeySchema = z.object({
   allowed_models: z.array(z.string()).optional().default([]),
 });
 
-type EditKeyForm = z.infer<typeof editKeySchema>;
+type EditKeyForm = z.input<typeof editKeySchema>;
+type EditKeyValues = z.output<typeof editKeySchema>;
 
 const EditKeyDialog = createTypedDialog<{ key: AdminKey }, boolean>(({ open, args, onClose }) => {
   const key = args.key;
-  const members = useOrgMembers(key.org_id || null, true);
-  const teams = useOrgTeams(key.org_id || null, true);
+  const members = useWorkspaceMembers(key.workspace_id || null, true);
+  const teams = useWorkspaceTeams(key.workspace_id || null, true);
   const [userIds, setUserIds] = useState<string[]>(key.user_ids ?? []);
   const [teamIds, setTeamIds] = useState<string[]>(key.team_ids ?? []);
   const [error, setError] = useState<string | null>(null);
 
-  const form = useForm<EditKeyForm>({
+  const form = useForm<EditKeyForm, unknown, EditKeyValues>({
     resolver: zodResolver(editKeySchema),
     defaultValues: {
       description: key.description ?? '',
@@ -77,7 +79,7 @@ const EditKeyDialog = createTypedDialog<{ key: AdminKey }, boolean>(({ open, arg
   };
 
   const saveMutation = useMutation({
-    mutationFn: async (values: EditKeyForm) =>
+    mutationFn: async (values: EditKeyValues) =>
       updateAdminKey(key.id, {
         description: (values.description ?? '').trim(),
         expires_at: (values.expires_at ?? '').trim(),
@@ -111,7 +113,7 @@ const EditKeyDialog = createTypedDialog<{ key: AdminKey }, boolean>(({ open, arg
               placeholder="Type a model and press Enter"
             />
             <div className="grid gap-2">
-              <Label>Visible to users (optional, empty = org admins only)</Label>
+              <Label>Visible to users (optional, empty = workspace admins only)</Label>
               {(members.data ?? []).map((m) => (
                 <label key={m.user_id} className="flex items-center gap-2 text-sm">
                   <Checkbox
@@ -164,16 +166,16 @@ const EditKeyDialog = createTypedDialog<{ key: AdminKey }, boolean>(({ open, arg
   );
 });
 
-const IssueKeyDialog = createTypedDialog<{ fixedOrgId?: string; canAdminOrg?: boolean }, boolean>(
+const IssueKeyDialog = createTypedDialog<{ fixedWorkspaceId?: string; canAdminWorkspace?: boolean }, boolean>(
   ({ open, args, onClose }) => {
     const { openDialog } = useDialog();
-    const orgs = useAdminOrgs(true);
-    const adminOrg = useAdminOrg();
+    const workspaces = useAdminWorkspaces(true);
+    const adminWorkspace = useAdminWorkspace();
     const [error, setError] = useState<string | null>(null);
-    const form = useForm<IssueKeyForm>({
+    const form = useForm<IssueKeyForm, unknown, IssueKeyValues>({
       resolver: zodResolver(issueKeySchema),
       defaultValues: {
-        org_id: '',
+        workspace_id: '',
         owner_type: 'personal',
         team_id: '',
         name: '',
@@ -183,16 +185,16 @@ const IssueKeyDialog = createTypedDialog<{ fixedOrgId?: string; canAdminOrg?: bo
         expires_at: '',
       },
     });
-    const effectiveOrgId = args.fixedOrgId ?? adminOrg.orgId;
+    const effectiveWorkspaceId = args.fixedWorkspaceId ?? adminWorkspace.workspaceId;
     useEffect(() => {
-      form.setValue('org_id', effectiveOrgId);
-    }, [effectiveOrgId, form]);
-    const manageableTeams = (useOrgTeams(effectiveOrgId || null, true).data ?? []).filter(
-      (t) => args.canAdminOrg === true || t.my_role === 'admin',
+      form.setValue('workspace_id', effectiveWorkspaceId);
+    }, [effectiveWorkspaceId, form]);
+    const manageableTeams = (useWorkspaceTeams(effectiveWorkspaceId || null, true).data ?? []).filter(
+      (t) => args.canAdminWorkspace === true || t.my_role === 'admin',
     );
 
     const issueMutation = useMutation({
-      mutationFn: async (values: IssueKeyForm) => {
+      mutationFn: async (values: IssueKeyValues) => {
         const body: Record<string, unknown> = {
           name: values.name.trim(),
           tenant: (values.tenant ?? '').trim(),
@@ -200,8 +202,8 @@ const IssueKeyDialog = createTypedDialog<{ fixedOrgId?: string; canAdminOrg?: bo
           description: (values.description ?? '').trim(),
           expires_at: (values.expires_at ?? '').trim(),
         };
-        const orgId = args.fixedOrgId ?? values.org_id ?? '';
-        if (orgId !== '') body.org_id = orgId;
+        const workspaceId = args.fixedWorkspaceId ?? values.workspace_id ?? '';
+        if (workspaceId !== '') body.workspace_id = workspaceId;
         if ((values.owner_type ?? 'personal') === 'team') {
           body.owner_type = 'team';
           body.owner_id = values.team_id ?? '';
@@ -222,7 +224,7 @@ const IssueKeyDialog = createTypedDialog<{ fixedOrgId?: string; canAdminOrg?: bo
       onError: (err) => setError(errorMessage(err)),
     });
 
-    const orgId = form.watch('org_id');
+    const workspaceId = form.watch('workspace_id');
 
     return (
       <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
@@ -237,12 +239,12 @@ const IssueKeyDialog = createTypedDialog<{ fixedOrgId?: string; canAdminOrg?: bo
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               )}
-              {args.fixedOrgId === undefined && (orgs.data ?? []).length >= 2 && (
-                <OrgSelect
-                  orgs={orgs.data}
-                  value={orgId ?? ''}
-                  onChange={(v) => form.setValue('org_id', v)}
-                  id="ak-org"
+              {args.fixedWorkspaceId === undefined && (workspaces.data ?? []).length >= 2 && (
+                <WorkspaceSelect
+                  workspaces={workspaces.data}
+                  value={workspaceId ?? ''}
+                  onChange={(v) => form.setValue('workspace_id', v)}
+                  id="ak-workspace"
                 />
               )}
               <HookFormNativeSelect<IssueKeyForm>
@@ -292,7 +294,13 @@ const IssueKeyDialog = createTypedDialog<{ fixedOrgId?: string; canAdminOrg?: bo
   },
 );
 
-export function AdminKeysPage({ fixedOrgId, canAdminOrg }: { fixedOrgId?: string; canAdminOrg?: boolean }) {
+export function AdminKeysPage({
+  fixedWorkspaceId,
+  canAdminWorkspace,
+}: {
+  fixedWorkspaceId?: string;
+  canAdminWorkspace?: boolean;
+}) {
   const keys = useAdminKeys();
   const queryClient = useQueryClient();
   const { openDialog } = useDialog();
@@ -352,7 +360,7 @@ export function AdminKeysPage({ fixedOrgId, canAdminOrg }: { fixedOrgId?: string
 
   const openCreate = async () => {
     try {
-      const created = await openDialog(IssueKeyDialog, { fixedOrgId, canAdminOrg });
+      const created = await openDialog(IssueKeyDialog, { fixedWorkspaceId, canAdminWorkspace });
       if (created) {
         setError(null);
         await invalidate();
@@ -375,10 +383,12 @@ export function AdminKeysPage({ fixedOrgId, canAdminOrg }: { fixedOrgId?: string
         cell: ({ row }) => <SourceBadge source={row.original.source} />,
       },
       {
-        id: 'org',
-        header: 'Org',
-        accessorFn: (row) => row.org_name || row.org_id,
-        cell: ({ row }) => <OrgBadge orgId={row.original.org_id} orgName={row.original.org_name} />,
+        id: 'workspace',
+        header: 'Workspace',
+        accessorFn: (row) => row.workspace_name || row.workspace_id,
+        cell: ({ row }) => (
+          <WorkspaceBadge workspaceId={row.original.workspace_id} workspaceName={row.original.workspace_name} />
+        ),
       },
       {
         id: 'owner',

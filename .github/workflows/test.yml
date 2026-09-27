@@ -65,6 +65,56 @@ jobs:
     - name: go test -race ./...
       run: make test-race
 
+  database-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: aiproxy_test
+          POSTGRES_PASSWORD: ci_fixture_only # pragma: allowlist secret
+          POSTGRES_DB: aiproxy_test
+        ports:
+        - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U aiproxy_test -d aiproxy_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+
+    - name: Setup Tools (asdf)
+      uses: ./.github/actions/setup-tools
+
+    - name: PostgreSQL-backed race tests (shared tables, serial packages)
+      env:
+        AIPROXY_TEST_DATABASE_URL: postgres://aiproxy_test:ci_fixture_only@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/aiproxy_test?sslmode=disable # pragma: allowlist secret
+      run: go test -race -p 1 -count=1 -v ./internal/store ./internal/dbmerge ./internal/httpapi ./internal/app
+
+  frontend-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+
+    - name: Setup Tools (asdf)
+      uses: ./.github/actions/setup-tools
+
+    - name: Install npm dependencies
+      run: pnpm install --frozen-lockfile
+
+    - name: Frontend tests
+      run: pnpm --filter @aiproxy/web-ui test
+
+    - name: Frontend application and tooling typecheck
+      run: pnpm --filter @aiproxy/web-ui typecheck
+
   integration-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -75,6 +125,9 @@ jobs:
 
     - name: Setup Tools (asdf)
       uses: ./.github/actions/setup-tools
+
+    - name: Install npm dependencies
+      run: pnpm install --frozen-lockfile
 
     - name: hermetic binary integration tests
       run: make integration

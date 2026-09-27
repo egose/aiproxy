@@ -26,15 +26,15 @@ func quotaSetup(t *testing.T) (*store.Store, *Handler, string, string, string, s
 	t.Helper()
 	st, h, ownerAccess := openUsersTestStore(t)
 	suffix := time.Now().UnixNano()
-	orgID := mkOrg(t, st, h, ownerAccess, "quota")
+	workspaceID := mkWorkspace(t, st, h, ownerAccess, "quota")
 	memberEmail := fmt.Sprintf("qmember-%d@example.com", suffix)
 	adminEmail := fmt.Sprintf("qteamadmin-%d@example.com", suffix)
-	_, memberAccess := mkOrgMember(t, st, h, ownerAccess, memberEmail, orgID, "member")
-	_, adminAccess := mkOrgMember(t, st, h, ownerAccess, adminEmail, orgID, "member")
+	_, memberAccess := mkWorkspaceMember(t, st, h, ownerAccess, memberEmail, workspaceID, "member")
+	_, adminAccess := mkWorkspaceMember(t, st, h, ownerAccess, adminEmail, workspaceID, "member")
 	memberID := userIDByEmail(t, st, memberEmail)
 	adminID := userIDByEmail(t, st, adminEmail)
 
-	code, body := callAdmin(t, h, ownerAccess, http.MethodPost, "/_internal/admin/orgs/"+orgID+"/teams", map[string]interface{}{
+	code, body := callAdmin(t, h, ownerAccess, http.MethodPost, "/_internal/admin/workspaces/"+workspaceID+"/teams", map[string]interface{}{
 		"name": fmt.Sprintf("qteam-%d", suffix),
 	})
 	if code != http.StatusCreated {
@@ -42,26 +42,26 @@ func quotaSetup(t *testing.T) (*store.Store, *Handler, string, string, string, s
 	}
 	teamID, _ := body["id"].(string)
 	for _, tc := range []struct{ email, role string }{{adminEmail, "admin"}, {memberEmail, "member"}} {
-		if code, _ := callAdmin(t, h, ownerAccess, http.MethodPost, "/_internal/admin/orgs/"+orgID+"/teams/"+teamID+"/members", map[string]interface{}{
+		if code, _ := callAdmin(t, h, ownerAccess, http.MethodPost, "/_internal/admin/workspaces/"+workspaceID+"/teams/"+teamID+"/members", map[string]interface{}{
 			"email": tc.email, "role": tc.role,
 		}); code != http.StatusCreated {
 			t.Fatalf("add %s status = %d", tc.email, code)
 		}
 	}
-	return st, h, ownerAccess, orgID, memberAccess, adminAccess, memberID, adminID
+	return st, h, ownerAccess, workspaceID, memberAccess, adminAccess, memberID, adminID
 }
 
 func TestUserQuotaPermissions(t *testing.T) {
-	_, h, ownerAccess, orgID, memberAccess, _, memberID, _ := quotaSetup(t)
+	_, h, ownerAccess, workspaceID, memberAccess, _, memberID, _ := quotaSetup(t)
 
-	userQuota := "/_internal/admin/orgs/" + orgID + "/users/" + memberID + "/quota"
+	userQuota := "/_internal/admin/workspaces/" + workspaceID + "/users/" + memberID + "/quota"
 
 	code, body := callAdmin(t, h, ownerAccess, http.MethodPut, userQuota, map[string]interface{}{
 		"budget_micros": 5000000,
 		"tpm":           []interface{}{map[string]interface{}{"model": "alias/fast", "ceiling": 60000, "effective": 30000}},
 	})
 	if code != http.StatusOK {
-		t.Fatalf("org admin set quota status = %d, body = %v", code, body)
+		t.Fatalf("workspace admin set quota status = %d, body = %v", code, body)
 	}
 	if body["budget_micros"] != float64(5000000) {
 		t.Fatalf("budget not echoed: %v", body)
@@ -96,9 +96,9 @@ func TestUserQuotaPermissions(t *testing.T) {
 }
 
 func TestTeamQuotaPermissions(t *testing.T) {
-	_, h, ownerAccess, orgID, memberAccess, adminAccess, _, _ := quotaSetup(t)
+	_, h, ownerAccess, workspaceID, memberAccess, adminAccess, _, _ := quotaSetup(t)
 
-	code, body := callAdmin(t, h, ownerAccess, http.MethodGet, "/_internal/admin/orgs/"+orgID+"/teams", nil)
+	code, body := callAdmin(t, h, ownerAccess, http.MethodGet, "/_internal/admin/workspaces/"+workspaceID+"/teams", nil)
 	if code != http.StatusOK {
 		t.Fatalf("list teams status = %d, body = %v", code, body)
 	}
@@ -107,14 +107,14 @@ func TestTeamQuotaPermissions(t *testing.T) {
 		t.Fatalf("want 1 team: %v", body)
 	}
 	teamID, _ := items[0].(map[string]interface{})["id"].(string)
-	teamQuota := "/_internal/admin/orgs/" + orgID + "/teams/" + teamID + "/quota"
+	teamQuota := "/_internal/admin/workspaces/" + workspaceID + "/teams/" + teamID + "/quota"
 
 	code, _ = callAdmin(t, h, ownerAccess, http.MethodPut, teamQuota, map[string]interface{}{
 		"budget_micros": 9000000,
 		"tpm":           []interface{}{map[string]interface{}{"model": "alias/fast", "ceiling": 100000}},
 	})
 	if code != http.StatusOK {
-		t.Fatalf("org admin set team quota status = %d", code)
+		t.Fatalf("workspace admin set team quota status = %d", code)
 	}
 
 	code, _ = callAdmin(t, h, adminAccess, http.MethodPut, teamQuota, map[string]interface{}{
@@ -143,13 +143,13 @@ func TestTeamQuotaPermissions(t *testing.T) {
 }
 
 func TestBudgetEnforcement(t *testing.T) {
-	st, h, _, orgID, memberAccess, _, memberID, _ := quotaSetup(t)
+	st, h, _, workspaceID, memberAccess, _, memberID, _ := quotaSetup(t)
 	ctx := context.Background()
-	orgUUID := mustParseUUID(orgID)
+	workspaceUUID := mustParseUUID(workspaceID)
 	memberUUID := mustParseUUID(memberID)
 
 	code, body := callAdmin(t, h, memberAccess, http.MethodPost, "/_internal/admin/keys", map[string]interface{}{
-		"name": fmt.Sprintf("qkey-%d", time.Now().UnixNano()), "org_id": orgID,
+		"name": fmt.Sprintf("qkey-%d", time.Now().UnixNano()), "workspace_id": workspaceID,
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("create key status = %d, body = %v", code, body)
@@ -159,13 +159,13 @@ func TestBudgetEnforcement(t *testing.T) {
 	t.Cleanup(func() { _ = st.DeleteInboundKey(context.Background(), mustParseUUID(keyID)) })
 
 	deps := Dependencies{MultiTenancy: config.MultiTenancy{Enabled: true}, AdminStore: st, Quota: NewQuotaTracker(st)}
-	if err := st.UpsertScopeQuota(ctx, &store.ScopeQuota{OrgID: orgUUID, ScopeType: "user", ScopeID: memberUUID, BudgetMicros: 100}); err != nil {
+	if err := st.UpsertScopeQuota(ctx, &store.ScopeQuota{WorkspaceID: workspaceUUID, ScopeType: "user", ScopeID: memberUUID, BudgetMicros: 100}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.InsertSpendEntry(ctx, &store.SpendEntry{OrgID: orgUUID, KeyID: mustParseUUID(keyID), UserID: &memberUUID, Model: "alias/fast", Tokens: 10, CostMicros: 150}); err != nil {
+	if err := st.InsertSpendEntry(ctx, &store.SpendEntry{WorkspaceID: workspaceUUID, KeyID: mustParseUUID(keyID), UserID: &memberUUID, Model: "alias/fast", Tokens: 10, CostMicros: 150}); err != nil {
 		t.Fatal(err)
 	}
-	principal := &auth.Principal{Name: "k", KeyID: uuid.New(), OrgID: orgUUID, OwnerUserID: memberUUID}
+	principal := &auth.Principal{Name: "k", KeyID: uuid.New(), WorkspaceID: workspaceUUID, OwnerUserID: memberUUID}
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	w := httptest.NewRecorder()
 	if h.allowQuota(deps, w, req, principal, "alias/fast") {
@@ -182,13 +182,13 @@ func TestBudgetEnforcement(t *testing.T) {
 func TestQuotaProxyEndToEnd(t *testing.T) {
 	st, h, ownerAccess := openUsersTestStore(t)
 	suffix := time.Now().UnixNano()
-	orgID := mkOrg(t, st, h, ownerAccess, "qproxy")
+	workspaceID := mkWorkspace(t, st, h, ownerAccess, "qproxy")
 	memberEmail := fmt.Sprintf("qproxy-%d@example.com", suffix)
-	_, _ = mkOrgMember(t, st, h, ownerAccess, memberEmail, orgID, "member")
+	_, _ = mkWorkspaceMember(t, st, h, ownerAccess, memberEmail, workspaceID, "member")
 	memberID := userIDByEmail(t, st, memberEmail)
 
 	code, body := callAdmin(t, h, ownerAccess, http.MethodPost, "/_internal/admin/keys", map[string]interface{}{
-		"name": fmt.Sprintf("qproxy-key-%d", suffix), "org_id": orgID,
+		"name": fmt.Sprintf("qproxy-key-%d", suffix), "workspace_id": workspaceID,
 		"allowed_models": []interface{}{"openai/gpt-4o-mini"},
 		"owner_type":     "user", "owner_id": memberID,
 	})
@@ -221,7 +221,7 @@ func TestQuotaProxyEndToEnd(t *testing.T) {
 	dyn := []auth.DynamicClient{{
 		TokenHash: store.TokenHash(token), Name: created["name"].(string),
 		AllowedModels: []string{"openai/gpt-4o-mini"},
-		KeyID:         mustParseUUID(keyID), OrgID: mustParseUUID(orgID), OwnerUserID: mustParseUUID(memberID),
+		KeyID:         mustParseUUID(keyID), WorkspaceID: mustParseUUID(workspaceID), OwnerUserID: mustParseUUID(memberID),
 	}}
 	agg := accounting.NewAggregator()
 	proxy := NewHandler(Dependencies{
@@ -252,7 +252,7 @@ func TestQuotaProxyEndToEnd(t *testing.T) {
 	if w := callProxy(); w.Code != http.StatusOK {
 		t.Fatalf("proxy status = %d, body = %s", w.Code, w.Body.String())
 	}
-	used, err := st.KeyUsageByOrg(context.Background(), mustParseUUID(orgID))
+	used, err := st.KeyUsageByWorkspace(context.Background(), mustParseUUID(workspaceID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +260,7 @@ func TestQuotaProxyEndToEnd(t *testing.T) {
 		t.Fatalf("ledger wrong: %+v", used)
 	}
 
-	userQuota := "/_internal/admin/orgs/" + orgID + "/users/" + memberID + "/quota"
+	userQuota := "/_internal/admin/workspaces/" + workspaceID + "/users/" + memberID + "/quota"
 	if code, _ := callAdmin(t, h, ownerAccess, http.MethodPut, userQuota, map[string]interface{}{"budget_micros": 10000}); code != http.StatusOK {
 		t.Fatalf("set budget status = %d", code)
 	}
@@ -280,17 +280,17 @@ func TestQuotaProxyEndToEnd(t *testing.T) {
 }
 
 func TestTPMEnforcement(t *testing.T) {
-	st, h, _, orgID, _, _, memberID, _ := quotaSetup(t)
+	st, h, _, workspaceID, _, _, memberID, _ := quotaSetup(t)
 	ctx := context.Background()
-	orgUUID := mustParseUUID(orgID)
+	workspaceUUID := mustParseUUID(workspaceID)
 	memberUUID := mustParseUUID(memberID)
 
 	deps := Dependencies{MultiTenancy: config.MultiTenancy{Enabled: true}, AdminStore: st, Quota: NewQuotaTracker(st)}
-	if err := st.UpsertScopeQuota(ctx, &store.ScopeQuota{OrgID: orgUUID, ScopeType: "user", ScopeID: memberUUID, Model: "alias/fast", TPMCeiling: 100}); err != nil {
+	if err := st.UpsertScopeQuota(ctx, &store.ScopeQuota{WorkspaceID: workspaceUUID, ScopeType: "user", ScopeID: memberUUID, Model: "alias/fast", TPMCeiling: 100}); err != nil {
 		t.Fatal(err)
 	}
-	deps.Quota.recordTokens(orgUUID, quotaScope{typ: "user", id: memberUUID}, "alias/fast", 100)
-	principal := &auth.Principal{Name: "k", KeyID: uuid.New(), OrgID: orgUUID, OwnerUserID: memberUUID}
+	deps.Quota.recordTokens(workspaceUUID, quotaScope{typ: "user", id: memberUUID}, "alias/fast", 100)
+	principal := &auth.Principal{Name: "k", KeyID: uuid.New(), WorkspaceID: workspaceUUID, OwnerUserID: memberUUID}
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	w := httptest.NewRecorder()
 	if h.allowQuota(deps, w, req, principal, "alias/fast") {

@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -24,8 +26,8 @@ type adminAliasView struct {
 	SessionAffinity    *adminSessionAffinity  `json:"session_affinity,omitempty"`
 	EncryptedReasoning *adminEncryptedReason  `json:"encrypted_reasoning,omitempty"`
 	Source             string                 `json:"source"`
-	OrgID              string                 `json:"org_id,omitempty"`
-	OrgName            string                 `json:"org_name,omitempty"`
+	WorkspaceID        string                 `json:"workspace_id,omitempty"`
+	WorkspaceName      string                 `json:"workspace_name,omitempty"`
 	Targets            []adminAliasTargetView `json:"targets"`
 }
 
@@ -53,11 +55,11 @@ func (h *Handler) adminAliases(deps Dependencies, w http.ResponseWriter, r *http
 	if len(rest) == 0 || rest[0] == "" {
 		switch r.Method {
 		case http.MethodGet:
-			filterOrg, ok := h.resolveOrgFilter(deps, w, r, claims, r.URL.Query().Get("org_id"))
+			filterWorkspace, ok := h.resolveWorkspaceFilter(deps, w, r, claims, r.URL.Query().Get("workspace_id"))
 			if !ok {
 				return
 			}
-			views, err := h.mergedAliasViews(ctx, deps, r, claims, filterOrg)
+			views, err := h.mergedAliasViews(ctx, deps, r, claims, filterWorkspace)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -70,16 +72,21 @@ func (h *Handler) adminAliases(deps Dependencies, w http.ResponseWriter, r *http
 				http.Error(w, "invalid body", http.StatusBadRequest)
 				return
 			}
-			org, ok := h.resolveWriteOrg(deps, w, r, claims, req.OrgID)
+			workspace, ok := h.resolveWriteWorkspace(deps, w, r, claims, req.WorkspaceID)
 			if !ok {
 				return
 			}
-			view, err := h.createDBAlias(ctx, deps, r, claims, org, req)
+			view, err := h.createDBAlias(ctx, deps, r, claims, workspace, req)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				writeCatalogError(deps, w, err)
 				return
 			}
-			if !h.activateChange(deps, w) {
+			if !activateCatalogChange(deps, w) {
+				return
+			}
+			view, err = h.aliasViewByName(ctx, deps, r, claims, view.Name)
+			if err != nil {
+				writeCatalogPresentationError(deps, w, err)
 				return
 			}
 			writeAdminJSON(w, http.StatusCreated, view)
@@ -91,11 +98,11 @@ func (h *Handler) adminAliases(deps Dependencies, w http.ResponseWriter, r *http
 	name := rest[0]
 	switch r.Method {
 	case http.MethodGet:
-		filterOrg, ok := h.resolveOrgFilter(deps, w, r, claims, r.URL.Query().Get("org_id"))
+		filterWorkspace, ok := h.resolveWorkspaceFilter(deps, w, r, claims, r.URL.Query().Get("workspace_id"))
 		if !ok {
 			return
 		}
-		views, err := h.mergedAliasViews(ctx, deps, r, claims, filterOrg)
+		views, err := h.mergedAliasViews(ctx, deps, r, claims, filterWorkspace)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -116,10 +123,15 @@ func (h *Handler) adminAliases(deps Dependencies, w http.ResponseWriter, r *http
 		req.Name = name
 		view, err := h.updateDBAlias(ctx, deps, r, claims, req)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeCatalogError(deps, w, err)
 			return
 		}
-		if !h.activateChange(deps, w) {
+		if !activateCatalogChange(deps, w) {
+			return
+		}
+		view, err = h.aliasViewByName(ctx, deps, r, claims, view.Name)
+		if err != nil {
+			writeCatalogPresentationError(deps, w, err)
 			return
 		}
 		writeAdminJSON(w, http.StatusOK, view)
@@ -133,7 +145,7 @@ func (h *Handler) adminAliases(deps Dependencies, w http.ResponseWriter, r *http
 			http.Error(w, "alias not found", http.StatusNotFound)
 			return
 		}
-		if !h.requireResourceOrg(deps, w, r, claims, a.OrgID) {
+		if !h.requireResourceWorkspace(deps, w, r, claims, a.WorkspaceID) {
 			return
 		}
 		if err := deps.AdminStore.DeleteAlias(ctx, a.ID); err != nil {
@@ -166,7 +178,7 @@ type adminEncryptedReasonUpsert struct {
 
 type adminAliasUpsert struct {
 	Name               string                      `json:"name"`
-	OrgID              string                      `json:"org_id"`
+	WorkspaceID        string                      `json:"workspace_id"`
 	Algorithm          *string                     `json:"algorithm"`
 	RetryStatusCodes   []int                       `json:"retry_status_codes"`
 	Providers          []string                    `json:"providers"`
@@ -176,11 +188,11 @@ type adminAliasUpsert struct {
 	Targets            *[]adminAliasTargetUpsert   `json:"targets"`
 }
 
-func (h *Handler) mergedAliasViews(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, filterOrg string) ([]adminAliasView, error) {
-	visible, _ := h.visibleOrgIDs(deps, r, claims)
-	names := h.orgNameMap(deps, r, claims)
+func (h *Handler) mergedAliasViews(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, filterWorkspace string) ([]adminAliasView, error) {
+	visible, _ := h.visibleWorkspaceIDs(deps, r, claims)
+	names := h.workspaceNameMap(deps, r, claims)
 	views := map[string]*adminAliasView{}
-	if h.canSeeSystemOrg(deps, r, claims, filterOrg) {
+	if h.canSeeSystemWorkspace(deps, r, claims, filterWorkspace) {
 		for _, a := range deps.Catalog.Aliases() {
 			v := adminAliasView{Name: a.Name, Algorithm: string(a.Algorithm), RetryStatusCodes: append([]int(nil), a.RetryStatusCodes...), Source: "config"}
 			if a.SessionAffinity != nil {
@@ -204,17 +216,17 @@ func (h *Handler) mergedAliasViews(ctx context.Context, deps Dependencies, r *ht
 		return nil, err
 	}
 	for _, a := range rows {
-		if filterOrg != "" && a.OrgID.String() != filterOrg {
+		if filterWorkspace != "" && a.WorkspaceID.String() != filterWorkspace {
 			continue
 		}
-		if visible != nil && !visible[a.OrgID.String()] {
+		if visible != nil && !visible[a.WorkspaceID.String()] {
 			continue
 		}
 		targets, err := deps.AdminStore.ListAliasTargets(ctx, a.ID)
 		if err != nil {
 			return nil, err
 		}
-		v := adminAliasView{Name: a.Name, Algorithm: a.Algorithm, RetryStatusCodes: append([]int(nil), a.RetryStatusCodes...), Source: "database", OrgID: a.OrgID.String(), OrgName: names[a.OrgID.String()]}
+		v := adminAliasView{Name: a.Name, Algorithm: a.Algorithm, RetryStatusCodes: append([]int(nil), a.RetryStatusCodes...), Source: "database", WorkspaceID: a.WorkspaceID.String(), WorkspaceName: names[a.WorkspaceID.String()]}
 		if jsonBlockPresent(a.SessionAffinity) {
 			var affinity adminSessionAffinity
 			if unmarshalJSONBlock(a.SessionAffinity, &affinity) {
@@ -379,7 +391,7 @@ func (h *Handler) checkDisabledTargets(deps Dependencies, ctx context.Context, a
 	}
 	rows, err := deps.AdminStore.ListProviders(ctx)
 	if err != nil {
-		return err
+		return catalogStorageError{err}
 	}
 	for _, p := range rows {
 		if !p.Enabled {
@@ -394,13 +406,15 @@ func (h *Handler) checkDisabledTargets(deps Dependencies, ctx context.Context, a
 	return nil
 }
 
-func (h *Handler) createDBAlias(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, org store.Organization, req adminAliasUpsert) (adminAliasView, error) {
+func (h *Handler) createDBAlias(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, workspace store.Workspace, req adminAliasUpsert) (adminAliasView, error) {
 	name := strings.TrimSpace(req.Name)
 	if !config.IsLowercaseName(name) {
 		return adminAliasView{}, errBad("invalid alias name: must be lowercase, no spaces, no '/', and start with [a-z0-9]")
 	}
 	if _, err := deps.AdminStore.GetAlias(ctx, name); err == nil {
 		return adminAliasView{}, errBad("alias already exists")
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return adminAliasView{}, catalogStorageError{err}
 	}
 	for _, a := range deps.Catalog.Aliases() {
 		if a.Name == name {
@@ -428,12 +442,12 @@ func (h *Handler) createDBAlias(ctx context.Context, deps Dependencies, r *http.
 	}
 	catalog, err := h.mergedAliasCatalog(ctx, deps)
 	if err != nil {
-		return adminAliasView{}, err
+		return adminAliasView{}, catalogStorageError{err}
 	}
 	if err := config.ValidateDynamicAlias(alias, catalog); err != nil {
 		return adminAliasView{}, err
 	}
-	row := &store.DBAlias{Name: name, Algorithm: algorithm, RetryStatusCodes: append([]int(nil), alias.RetryStatusCodes...), OrgID: org.ID}
+	row := &store.DBAlias{Name: name, Algorithm: algorithm, RetryStatusCodes: append([]int(nil), alias.RetryStatusCodes...), WorkspaceID: workspace.ID}
 	if alias.SessionAffinity != nil {
 		raw, err := json.Marshal(adminSessionAffinity{Headers: alias.SessionAffinity.Headers})
 		if err != nil {
@@ -452,15 +466,18 @@ func (h *Handler) createDBAlias(ctx context.Context, deps Dependencies, r *http.
 		row.EncryptedReasoning = raw
 	}
 	if err := deps.AdminStore.CreateAlias(ctx, row, targetRows); err != nil {
-		return adminAliasView{}, err
+		return adminAliasView{}, catalogStorageError{err}
 	}
-	return h.aliasViewByName(ctx, deps, r, claims, name)
+	return adminAliasView{Name: name}, nil
 }
 
 func (h *Handler) updateDBAlias(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, req adminAliasUpsert) (adminAliasView, error) {
 	name := strings.TrimSpace(req.Name)
 	current, err := deps.AdminStore.GetAlias(ctx, name)
 	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return adminAliasView{}, catalogStorageError{err}
+		}
 		for _, a := range deps.Catalog.Aliases() {
 			if a.Name == name {
 				return adminAliasView{}, errBad("config-managed: edit the HCL file")
@@ -468,8 +485,8 @@ func (h *Handler) updateDBAlias(ctx context.Context, deps Dependencies, r *http.
 		}
 		return adminAliasView{}, errBad("alias not found")
 	}
-	if !h.canWriteOrg(deps, ctx, claims, current.OrgID) {
-		return adminAliasView{}, errBad("organization admin required")
+	if !h.canWriteWorkspace(deps, ctx, claims, current.WorkspaceID) {
+		return adminAliasView{}, errBad("workspace admin required")
 	}
 	effective := req
 	if effective.Algorithm == nil {
@@ -498,7 +515,7 @@ func (h *Handler) updateDBAlias(ctx context.Context, deps Dependencies, r *http.
 	if effective.Targets == nil && len(effective.Providers) == 0 && effective.Model == nil {
 		rows, err := deps.AdminStore.ListAliasTargets(ctx, current.ID)
 		if err != nil {
-			return adminAliasView{}, err
+			return adminAliasView{}, catalogStorageError{err}
 		}
 		kept := make([]adminAliasTargetUpsert, 0, len(rows))
 		for _, t := range rows {
@@ -524,7 +541,7 @@ func (h *Handler) updateDBAlias(ctx context.Context, deps Dependencies, r *http.
 	}
 	catalog, err := h.mergedAliasCatalog(ctx, deps)
 	if err != nil {
-		return adminAliasView{}, err
+		return adminAliasView{}, catalogStorageError{err}
 	}
 	if err := config.ValidateDynamicAlias(alias, catalog); err != nil {
 		return adminAliasView{}, err
@@ -553,9 +570,9 @@ func (h *Handler) updateDBAlias(ctx context.Context, deps Dependencies, r *http.
 		current.EncryptedReasoning = nil
 	}
 	if err := deps.AdminStore.UpdateAlias(ctx, &current, targetRows); err != nil {
-		return adminAliasView{}, err
+		return adminAliasView{}, catalogStorageError{err}
 	}
-	return h.aliasViewByName(ctx, deps, r, claims, name)
+	return adminAliasView{Name: name}, nil
 }
 
 func (h *Handler) aliasViewByName(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, name string) (adminAliasView, error) {

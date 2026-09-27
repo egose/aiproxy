@@ -2,6 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
@@ -47,48 +50,51 @@ func NewQuotaTracker(st *store.Store) *QuotaTracker {
 	return &QuotaTracker{store: st, windows: map[string][]tpmSample{}, spend: map[string]cachedSpend{}}
 }
 
-func quotaWindowKey(orgID uuid.UUID, scope quotaScope, model string) string {
-	return orgID.String() + "|" + scope.typ + "|" + scope.id.String() + "|" + model
+func quotaWindowKey(workspaceID uuid.UUID, scope quotaScope, model string) string {
+	return workspaceID.String() + "|" + scope.typ + "|" + scope.id.String() + "|" + model
 }
 
-func (q *QuotaTracker) quotaRow(ctx context.Context, orgID uuid.UUID, scope quotaScope, model string) (store.ScopeQuota, bool) {
+func (q *QuotaTracker) quotaRow(ctx context.Context, workspaceID uuid.UUID, scope quotaScope, model string) (store.ScopeQuota, bool, error) {
 	if q == nil || q.store == nil {
-		return store.ScopeQuota{}, false
+		return store.ScopeQuota{}, false, errors.New("quota store unavailable")
 	}
-	row, err := q.store.GetScopeQuota(ctx, orgID, scope.typ, scope.id, model)
+	row, err := q.store.GetScopeQuota(ctx, workspaceID, scope.typ, scope.id, model)
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.ScopeQuota{}, false, nil
+	}
 	if err != nil {
-		return store.ScopeQuota{}, false
+		return store.ScopeQuota{}, false, fmt.Errorf("read quota for model %q: %w", model, err)
 	}
-	return row, true
+	return row, true, nil
 }
 
-func (q *QuotaTracker) scopeSpend(ctx context.Context, orgID uuid.UUID, scope quotaScope) int64 {
+func (q *QuotaTracker) scopeSpend(ctx context.Context, workspaceID uuid.UUID, scope quotaScope) (int64, error) {
 	if q == nil || q.store == nil {
-		return 0
+		return 0, errors.New("quota store unavailable")
 	}
-	key := orgID.String() + "|" + scope.typ + "|" + scope.id.String()
+	key := workspaceID.String() + "|" + scope.typ + "|" + scope.id.String()
 	now := time.Now()
 	q.mu.Lock()
 	cached, ok := q.spend[key]
 	q.mu.Unlock()
 	if ok && now.Sub(cached.at) < quotaSpendTTL {
-		return cached.sum
+		return cached.sum, nil
 	}
-	sum, err := q.store.SumScopeSpend(ctx, orgID, scope.typ, scope.id)
+	sum, err := q.store.SumScopeSpend(ctx, workspaceID, scope.typ, scope.id)
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("read quota spend: %w", err)
 	}
 	q.mu.Lock()
 	q.spend[key] = cachedSpend{sum: sum, at: now}
 	q.mu.Unlock()
-	return sum
+	return sum, nil
 }
 
-func (q *QuotaTracker) windowTokens(orgID uuid.UUID, scope quotaScope, model string) (int64, time.Duration) {
+func (q *QuotaTracker) windowTokens(workspaceID uuid.UUID, scope quotaScope, model string) (int64, time.Duration) {
 	if q == nil {
 		return 0, 0
 	}
-	key := quotaWindowKey(orgID, scope, model)
+	key := quotaWindowKey(workspaceID, scope, model)
 	now := time.Now()
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -116,22 +122,22 @@ func (q *QuotaTracker) windowTokens(orgID uuid.UUID, scope quotaScope, model str
 	return used, retry
 }
 
-func (q *QuotaTracker) recordTokens(orgID uuid.UUID, scope quotaScope, model string, tokens int64) {
+func (q *QuotaTracker) recordTokens(workspaceID uuid.UUID, scope quotaScope, model string, tokens int64) {
 	if q == nil || tokens <= 0 {
 		return
 	}
-	key := quotaWindowKey(orgID, scope, model)
+	key := quotaWindowKey(workspaceID, scope, model)
 	q.mu.Lock()
 	q.windows[key] = append(q.windows[key], tpmSample{at: time.Now(), tokens: tokens})
 	q.mu.Unlock()
 }
 
-func (q *QuotaTracker) Invalidate(orgID uuid.UUID, scope quotaScope) {
+func (q *QuotaTracker) Invalidate(workspaceID uuid.UUID, scope quotaScope) {
 	if q == nil {
 		return
 	}
 	q.mu.Lock()
-	delete(q.spend, orgID.String()+"|"+scope.typ+"|"+scope.id.String())
+	delete(q.spend, workspaceID.String()+"|"+scope.typ+"|"+scope.id.String())
 	q.mu.Unlock()
 }
 
@@ -155,8 +161,16 @@ func (h *Handler) allowQuota(deps Dependencies, w http.ResponseWriter, r *http.R
 	}
 	ctx := r.Context()
 	for _, scope := range quotaScopes(principal) {
-		if row, ok := deps.Quota.quotaRow(ctx, principal.OrgID, scope, quotaBudgetModel); ok && row.BudgetMicros > 0 {
-			spent := deps.Quota.scopeSpend(ctx, principal.OrgID, scope) - row.SpentOffsetMicros
+		row, ok, err := deps.Quota.quotaRow(ctx, principal.WorkspaceID, scope, quotaBudgetModel)
+		if err != nil {
+			return h.rejectQuotaUnavailable(deps, w, r, principal, scope, err)
+		}
+		if ok && row.BudgetMicros > 0 {
+			spent, err := deps.Quota.scopeSpend(ctx, principal.WorkspaceID, scope)
+			if err != nil {
+				return h.rejectQuotaUnavailable(deps, w, r, principal, scope, err)
+			}
+			spent -= row.SpentOffsetMicros
 			if spent < 0 {
 				spent = 0
 			}
@@ -165,13 +179,17 @@ func (h *Handler) allowQuota(deps Dependencies, w http.ResponseWriter, r *http.R
 				return false
 			}
 		}
-		if row, ok := deps.Quota.quotaRow(ctx, principal.OrgID, scope, model); ok {
+		row, ok, err = deps.Quota.quotaRow(ctx, principal.WorkspaceID, scope, model)
+		if err != nil {
+			return h.rejectQuotaUnavailable(deps, w, r, principal, scope, err)
+		}
+		if ok {
 			limit := row.TPMEffective
 			if limit <= 0 {
 				limit = row.TPMCeiling
 			}
 			if limit > 0 {
-				used, retry := deps.Quota.windowTokens(principal.OrgID, scope, model)
+				used, retry := deps.Quota.windowTokens(principal.WorkspaceID, scope, model)
 				if used >= limit {
 					seconds := int(retry / time.Second)
 					if retry%time.Second != 0 {
@@ -188,6 +206,12 @@ func (h *Handler) allowQuota(deps Dependencies, w http.ResponseWriter, r *http.R
 		}
 	}
 	return true
+}
+
+func (h *Handler) rejectQuotaUnavailable(deps Dependencies, w http.ResponseWriter, r *http.Request, principal *auth.Principal, scope quotaScope, err error) bool {
+	deps.Logger.Warn("quota admission unavailable", "error", err, "workspace_id", principal.WorkspaceID, "scope_type", scope.typ, "scope_id", scope.id, "request_id", w.Header().Get("X-Request-Id"))
+	h.writeRequestError(deps.Metrics, w, r, http.StatusServiceUnavailable, "quota_unavailable", "quota data temporarily unavailable")
+	return false
 }
 
 func quotaTokens(usage provider.Usage) int64 {
@@ -224,7 +248,7 @@ func (h *Handler) recordQuotaUsage(deps Dependencies, principal *auth.Principal,
 		teamID = &tid
 	}
 	entry := &store.SpendEntry{
-		OrgID: principal.OrgID, KeyID: principal.KeyID,
+		WorkspaceID: principal.WorkspaceID, KeyID: principal.KeyID,
 		UserID: userID, TeamID: teamID,
 		Model: publicModel, Tokens: tokens, CostMicros: costMicros,
 	}
@@ -233,7 +257,7 @@ func (h *Handler) recordQuotaUsage(deps Dependencies, principal *auth.Principal,
 	}
 	if deps.Quota != nil {
 		for _, scope := range quotaScopes(principal) {
-			deps.Quota.recordTokens(principal.OrgID, scope, publicModel, tokens)
+			deps.Quota.recordTokens(principal.WorkspaceID, scope, publicModel, tokens)
 		}
 	}
 }

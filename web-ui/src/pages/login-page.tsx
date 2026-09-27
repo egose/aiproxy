@@ -8,7 +8,6 @@ import { FormProvider, useForm } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router';
 import { adminLogin } from '../services/admin';
 import { errorMessage } from '../services/dashboard';
-import { setAdminSession } from '../store';
 import { adminLoginSchema, type AdminLogin } from '../types';
 import { useAdminStatus } from '../hooks';
 
@@ -22,8 +21,7 @@ export function LoginPage() {
 
   const loginMutation = useMutation({
     mutationFn: async (values: AdminLogin) => adminLogin(values.email.trim(), values.password),
-    onSuccess: (session) => {
-      setAdminSession(session.access_token, session.refresh_token);
+    onSuccess: () => {
       navigate('/', { replace: true });
     },
   });
@@ -38,7 +36,7 @@ export function LoginPage() {
         <CardHeader>
           <CardTitle>Sign in</CardTitle>
           <CardDescription>
-            Sign in with your account email and password to manage your organizations, API keys, and usage.
+            Sign in with your account email and password to manage your workspaces, API keys, and usage.
           </CardDescription>
         </CardHeader>
         <CardContent>

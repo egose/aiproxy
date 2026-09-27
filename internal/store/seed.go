@@ -2,10 +2,10 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -38,15 +38,15 @@ func EnsureAdmin(ctx context.Context, s *Store) (bool, error) {
 	return true, nil
 }
 
-func (s *Store) EnsureSystemOrg(ctx context.Context) error {
-	var existing Organization
-	err := s.DB.NewSelect().Model(&existing).Where("id = ?", SystemOrgID).Scan(ctx)
+func (s *Store) EnsureSystemWorkspace(ctx context.Context) error {
+	var existing Workspace
+	err := s.DB.NewSelect().Model(&existing).Where("id = ?", SystemWorkspaceID).Scan(ctx)
 	if err == nil {
 		return s.syncSystemMemberships(ctx)
 	}
-	org := &Organization{ID: SystemOrgID, Name: "system", DisplayName: "System", IsSystem: true}
-	if _, err := s.DB.NewInsert().Model(org).Exec(ctx); err != nil {
-		return fmt.Errorf("seed system org: %w", err)
+	workspace := &Workspace{ID: SystemWorkspaceID, Name: "system", DisplayName: "System", IsSystem: true, Kind: WorkspaceKindOrganization}
+	if _, err := s.DB.NewInsert().Model(workspace).Exec(ctx); err != nil {
+		return fmt.Errorf("seed system workspace: %w", err)
 	}
 	return s.syncSystemMemberships(ctx)
 }
@@ -65,8 +65,9 @@ func (s *Store) syncSystemMemberships(ctx context.Context) error {
 }
 
 func (s *Store) addSystemMembership(ctx context.Context, userID uuid.UUID) error {
-	_, err := s.DB.NewInsert().Model(&OrganizationMember{UserID: userID, OrgID: SystemOrgID, Role: "admin", CreatedAt: time.Now()}).
-		On("CONFLICT DO NOTHING").
-		Exec(ctx)
+	err := s.AddMembership(ctx, &WorkspaceMember{UserID: userID, WorkspaceID: SystemWorkspaceID, Role: "admin"})
+	if errors.Is(err, ErrMembershipExists) {
+		return nil
+	}
 	return err
 }

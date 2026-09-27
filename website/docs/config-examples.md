@@ -178,6 +178,12 @@ Use this when:
 
 ## GitHub Copilot Chat
 
+**Hermetically verified; live GitHub compatibility unverified.** Model names below
+are illustrative, not confirmed GitHub availability. Use the
+[mock-only verification workflow](operations.md#mock-only-copilot-verification)
+to test locally without an OAuth application/account; the production login below
+contacts GitHub and requires your own explicit client ID.
+
 This setup exposes a chat-only Copilot model backed by a device-flow login.
 Provision first (your own public OAuth client ID, no secret), then serve; the
 config validates only after the sidecar exists.
@@ -219,7 +225,7 @@ Public model names are `copilot/gpt-5.4-nano` and `alias/copilot_chat`. Only
 `POST /v1/chat/completions` (JSON and SSE) is served; every other operation is
 rejected before upstream I/O. `GET /v1/models` and `GET /v1/billing/usage`
 stay proxy-owned. Restart or `SIGHUP` after `login`; re-run `login` + reload
-on upstream `401`/`403`, revocation, or expiry. The complete validated
+on upstream `401`/`403`, revocation, or expiry. The complete example
 version of this block lives in `examples/github-copilot.hcl`.
 
 Use this when:

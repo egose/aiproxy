@@ -167,16 +167,16 @@ func TestPayloadTabStripAndCycle(t *testing.T) {
 		t.Fatalf("[ from logs should reach aliases, got %v", mod.bottomTab)
 	}
 	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "["}))
-	if mod := mm.(*model); mod.bottomTab != bottomTabPayload {
-		t.Fatalf("[ from aliases should reach payload, got %v", mod.bottomTab)
+	if mod := mm.(*model); mod.bottomTab != bottomTabRequests {
+		t.Fatalf("[ from aliases should wrap to requests, got %v", mod.bottomTab)
 	}
 	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "]"}))
-	if mod := mm.(*model); mod.bottomTab != bottomTabBlocks {
-		t.Fatalf("] from payload should reach blocks, got %v", mod.bottomTab)
+	if mod := mm.(*model); mod.bottomTab != bottomTabAliases {
+		t.Fatalf("] from requests should wrap to aliases, got %v", mod.bottomTab)
 	}
 	mm, _ = mm.Update(tea.KeyPressMsg(tea.Key{Text: "]"}))
 	if mod := mm.(*model); mod.bottomTab != bottomTabLogs {
-		t.Fatalf("] from blocks should wrap to logs, got %v", mod.bottomTab)
+		t.Fatalf("] from aliases should reach logs, got %v", mod.bottomTab)
 	}
 }
 
@@ -227,8 +227,8 @@ func TestPayloadOrderToggle(t *testing.T) {
 		t.Fatal("expected detail fetch cmd on enter in oldest-first")
 	}
 	mm, _ = mm.Update(cmd())
-	if mod := mm.(*model); mod.payloadDetailID != "req-old" {
-		t.Fatalf("detail id = %q, want req-old", mod.payloadDetailID)
+	if mod := mm.(*model); mod.payloadDetailID != "req-new" {
+		t.Fatalf("detail id = %q, want preserved selection req-new", mod.payloadDetailID)
 	}
 }
 

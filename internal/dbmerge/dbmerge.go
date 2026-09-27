@@ -48,11 +48,12 @@ func jsonPresent(raw []byte) bool {
 	return trimmed != "" && !strings.EqualFold(trimmed, "null")
 }
 
-func MergeCatalog(ctx context.Context, st *store.Store, static config.Catalog) (Merged, error) {
+func MergeCatalog(ctx context.Context, st *store.Store, rt *config.Runtime) (Merged, error) {
 	var out Merged
 	if st == nil {
 		return out, nil
 	}
+	static := rt.Catalog
 	rows, err := st.ListProviders(ctx)
 	if err != nil {
 		return out, fmt.Errorf("database providers: %w", err)
@@ -83,6 +84,9 @@ func MergeCatalog(ctx context.Context, st *store.Store, static config.Catalog) (
 			built, err := BuildProvider(row, modelsByProvider[row.Name], enabled)
 			if err != nil {
 				return out, err
+			}
+			if row.Extends == "" {
+				built = rt.ApplyProviderDefaults(built)
 			}
 			if err := config.ValidateDynamicProvider(built); err != nil {
 				return out, err
@@ -245,6 +249,28 @@ func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases m
 }
 
 func attachCredential(p *config.Provider, row store.DBProvider) error {
+	hasAPI := len(row.APIKeyEncrypted) > 0 || row.APIKeyRefKey != "" || row.APIKeyRefPath != ""
+	hasCopilotRef := row.CopilotCredentialName != "" || row.CopilotCredentialPath != ""
+	hasCopilotDB := row.CopilotCredentialEncrypted != nil
+	if p.Type == config.ProviderTypeGitHubCopilot && hasAPI {
+		return fmt.Errorf("provider %q: api_key and api_key_ref are not supported by github-copilot; use credential_ref or a database credential", p.Name)
+	}
+	if p.Type != config.ProviderTypeGitHubCopilot && (hasCopilotRef || hasCopilotDB) {
+		return fmt.Errorf("provider %q: Copilot credentials are only supported by github-copilot", p.Name)
+	}
+	if hasCopilotDB && hasCopilotRef {
+		return fmt.Errorf("provider %q: only one Copilot credential source may be set", p.Name)
+	}
+	if row.CopilotCredentialPath != "" && row.CopilotCredentialName == "" {
+		return fmt.Errorf("provider %q: credential_ref name is required", p.Name)
+	}
+	if hasCopilotDB {
+		cred, err := store.DecryptCopilotCredential(row.CopilotCredentialEncrypted, time.Now())
+		if err != nil {
+			return fmt.Errorf("provider %q: %w", p.Name, err)
+		}
+		p.CopilotToken = cred.AccessToken
+	}
 	if len(row.APIKeyEncrypted) > 0 {
 		plain, err := store.DecryptSecret(row.APIKeyEncrypted)
 		if err != nil {
@@ -361,10 +387,15 @@ func mergeKeys(ctx context.Context, st *store.Store) ([]auth.DynamicClient, erro
 		if k.ExpiresAt != nil && !k.ExpiresAt.After(now) {
 			continue
 		}
+		var expiresAt time.Time
+		if k.ExpiresAt != nil {
+			expiresAt = *k.ExpiresAt
+		}
 		out = append(out, auth.DynamicClient{
 			TokenHash: k.TokenHash, Name: k.Name, Tenant: k.Tenant,
+			ExpiresAt:     expiresAt,
 			AllowedModels: append([]string(nil), k.AllowedModels...),
-			KeyID:         k.ID, OrgID: k.OrgID,
+			KeyID:         k.ID, WorkspaceID: k.WorkspaceID,
 			OwnerUserID: uuidOrNil(k.OwnerUserID), OwnerTeamID: uuidOrNil(k.OwnerTeamID),
 		})
 	}

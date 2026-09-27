@@ -24,6 +24,8 @@ vi.mock('axios', () => ({
 }));
 
 import {
+  cancelCopilotDeviceFlow,
+  copilotDeviceFlowTimeout,
   createAdminAlias,
   createAdminKey,
   createAdminProvider,
@@ -32,6 +34,9 @@ import {
   fetchAdminKeys,
   fetchAdminProviders,
   fetchAdminUsers,
+  fetchCopilotDeviceFlow,
+  pollCopilotDeviceFlow,
+  startCopilotDeviceFlow,
 } from './admin';
 
 beforeEach(() => {
@@ -78,5 +83,35 @@ describe('admin service envelopes', () => {
     expect(created.key).toMatchObject({ name: 'k' });
     expect(created.token).toBe('sekret');
     expect(await createAdminUser({ email: 'a@b.c' })).toMatchObject({ email: 'a@b.c' });
+  });
+
+  it('starts/polls device flows with a 25s timeout and sanitized status only', async () => {
+    expect(copilotDeviceFlowTimeout).toBe(25_000);
+    const pending = {
+      id: 'flow-1',
+      workspace_id: 'ws-1',
+      status: 'pending',
+      user_code: 'ABCD-1234',
+      verification_uri: 'https://github.com/login/device',
+      expires_at: '2026-09-27T11:00:00Z',
+      poll_after_ms: 5000,
+    };
+    mocks.post.mockImplementation((url: string, _body: unknown, config: unknown) => {
+      expect((config as { timeout?: number }).timeout).toBe(25_000);
+      if (url.endsWith('/copilot-device-flows')) return Promise.resolve({ data: pending });
+      if (url.endsWith('/poll')) return Promise.resolve({ data: { ...pending, status: 'ready' } });
+      throw new Error(`unexpected POST ${url}`);
+    });
+    mocks.get.mockResolvedValue({ data: pending });
+    mocks.delete.mockResolvedValue({ data: { ...pending, status: 'cancelled' } });
+    const started = await startCopilotDeviceFlow({ client_id: 'Iv1.test' });
+    expect(started.user_code).toBe('ABCD-1234');
+    expect(started).not.toHaveProperty('device_code');
+    expect(started).not.toHaveProperty('access_token');
+    expect(JSON.stringify(started)).not.toContain('token');
+    const polled = await pollCopilotDeviceFlow('flow-1');
+    expect(polled.status).toBe('ready');
+    expect(await fetchCopilotDeviceFlow('flow-1')).toMatchObject({ id: 'flow-1' });
+    expect(await cancelCopilotDeviceFlow('flow-1')).toMatchObject({ status: 'cancelled' });
   });
 });

@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -13,6 +15,7 @@ import (
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/dbmerge"
 	"github.com/egose/aiproxy/internal/store"
+	"github.com/google/uuid"
 )
 
 type adminModelView struct {
@@ -37,26 +40,41 @@ type adminHealthcheckView struct {
 }
 
 type adminProviderView struct {
-	Name                  string                `json:"name"`
-	Type                  string                `json:"type"`
-	DisplayName           string                `json:"display_name,omitempty"`
-	BaseURL               string                `json:"base_url,omitempty"`
-	UpstreamHeaderTimeout string                `json:"upstream_header_timeout,omitempty"`
-	UserAgent             string                `json:"user_agent,omitempty"`
-	ForwardUserAgent      bool                  `json:"forward_user_agent"`
-	ForwardHeaders        []string              `json:"forward_headers,omitempty"`
-	Extends               string                `json:"extends,omitempty"`
-	APIKeyRefPath         string                `json:"api_key_ref_path,omitempty"`
-	APIKeyRefKey          string                `json:"api_key_ref_key,omitempty"`
-	CopilotCredentialPath string                `json:"copilot_credential_path,omitempty"`
-	CopilotCredentialName string                `json:"copilot_credential_name,omitempty"`
-	Enabled               bool                  `json:"enabled"`
-	Source                string                `json:"source"`
-	OrgID                 string                `json:"org_id,omitempty"`
-	OrgName               string                `json:"org_name,omitempty"`
-	HasCredential         bool                  `json:"has_credential"`
-	Healthcheck           *adminHealthcheckView `json:"healthcheck,omitempty"`
-	Models                []adminModelView      `json:"models"`
+	Name                    string                `json:"name"`
+	Type                    string                `json:"type"`
+	DisplayName             string                `json:"display_name,omitempty"`
+	BaseURL                 string                `json:"base_url,omitempty"`
+	UpstreamHeaderTimeout   string                `json:"upstream_header_timeout,omitempty"`
+	UserAgent               string                `json:"user_agent,omitempty"`
+	ForwardUserAgent        bool                  `json:"forward_user_agent"`
+	ForwardHeaders          []string              `json:"forward_headers,omitempty"`
+	Extends                 string                `json:"extends,omitempty"`
+	APIKeyRefPath           string                `json:"api_key_ref_path,omitempty"`
+	APIKeyRefKey            string                `json:"api_key_ref_key,omitempty"`
+	CopilotCredentialPath   string                `json:"copilot_credential_path,omitempty"`
+	CopilotCredentialName   string                `json:"copilot_credential_name,omitempty"`
+	CopilotCredentialSource string                `json:"copilot_credential_source,omitempty"`
+	UpdatedAt               string                `json:"updated_at,omitempty"`
+	Enabled                 bool                  `json:"enabled"`
+	Source                  string                `json:"source"`
+	WorkspaceID             string                `json:"workspace_id,omitempty"`
+	WorkspaceName           string                `json:"workspace_name,omitempty"`
+	HasCredential           bool                  `json:"has_credential"`
+	Healthcheck             *adminHealthcheckView `json:"healthcheck,omitempty"`
+	Models                  []adminModelView      `json:"models"`
+}
+
+func copilotCredentialSource(providerType string, encrypted []byte, refPath, refName string) string {
+	if providerType != "github-copilot" {
+		return ""
+	}
+	if len(encrypted) > 0 {
+		return "database"
+	}
+	if strings.TrimSpace(refPath) != "" || strings.TrimSpace(refName) != "" {
+		return "sidecar"
+	}
+	return "none"
 }
 
 func knownProviderType(t string) bool {
@@ -134,7 +152,8 @@ func (h *Handler) adminProviderTypes(deps Dependencies, w http.ResponseWriter, r
 		out = append(out, map[string]interface{}{
 			"type": info.Type, "credential": info.Credential,
 			"requires_base_url": info.RequiresBaseURL, "supports_healthcheck": info.SupportsHealthcheck,
-			"model_protocol_required": info.ModelProtocolRequired, "protocols": protocols,
+			"supports_device_authorization": info.Type == config.ProviderTypeGitHubCopilot,
+			"model_protocol_required":       info.ModelProtocolRequired, "protocols": protocols,
 			"default_capabilities": defaults, "supported_capabilities": supported,
 		})
 	}
@@ -151,11 +170,11 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 	if len(rest) == 0 || rest[0] == "" {
 		switch r.Method {
 		case http.MethodGet:
-			filterOrg, ok := h.resolveOrgFilter(deps, w, r, claims, r.URL.Query().Get("org_id"))
+			filterWorkspace, ok := h.resolveWorkspaceFilter(deps, w, r, claims, r.URL.Query().Get("workspace_id"))
 			if !ok {
 				return
 			}
-			views, err := h.mergedProviderViews(ctx, deps, r, claims, filterOrg)
+			views, err := h.mergedProviderViews(ctx, deps, r, claims, filterWorkspace)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -168,16 +187,22 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 				http.Error(w, "invalid body", http.StatusBadRequest)
 				return
 			}
-			org, ok := h.resolveWriteOrg(deps, w, r, claims, req.OrgID)
+			workspace, ok := h.resolveWriteWorkspace(deps, w, r, claims, req.WorkspaceID)
 			if !ok {
 				return
 			}
-			view, err := h.createDBProvider(ctx, deps, r, claims, org, req)
+			view, err := h.createDBProvider(ctx, deps, r, claims, workspace, req)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				writeCatalogError(deps, w, err)
 				return
 			}
-			if !h.activateChange(deps, w) {
+			w.Header().Set(catalogSavedHeader, "true")
+			if !activateCatalogChange(deps, w) {
+				return
+			}
+			view, err = h.providerViewByName(ctx, deps, r, claims, view.Name)
+			if err != nil {
+				writeCatalogPresentationError(deps, w, err)
 				return
 			}
 			writeAdminJSON(w, http.StatusCreated, view)
@@ -198,10 +223,11 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 			return
 		}
 		if err := h.setProviderCredential(ctx, deps, claims, name, req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeCatalogError(deps, w, err)
 			return
 		}
-		if !h.activateChange(deps, w) {
+		w.Header().Set(catalogSavedHeader, "true")
+		if !activateCatalogChange(deps, w) {
 			return
 		}
 		writeAdminJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -209,11 +235,11 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 	}
 	switch r.Method {
 	case http.MethodGet:
-		filterOrg, ok := h.resolveOrgFilter(deps, w, r, claims, r.URL.Query().Get("org_id"))
+		filterWorkspace, ok := h.resolveWorkspaceFilter(deps, w, r, claims, r.URL.Query().Get("workspace_id"))
 		if !ok {
 			return
 		}
-		views, err := h.mergedProviderViews(ctx, deps, r, claims, filterOrg)
+		views, err := h.mergedProviderViews(ctx, deps, r, claims, filterWorkspace)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -234,10 +260,16 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 		req.Name = name
 		view, err := h.updateDBProvider(ctx, deps, r, claims, req)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeCatalogError(deps, w, err)
 			return
 		}
-		if !h.activateChange(deps, w) {
+		w.Header().Set(catalogSavedHeader, "true")
+		if !activateCatalogChange(deps, w) {
+			return
+		}
+		view, err = h.providerViewByName(ctx, deps, r, claims, view.Name)
+		if err != nil {
+			writeCatalogPresentationError(deps, w, err)
 			return
 		}
 		writeAdminJSON(w, http.StatusOK, view)
@@ -251,7 +283,7 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 			http.Error(w, "provider not found", http.StatusNotFound)
 			return
 		}
-		if !h.requireResourceOrg(deps, w, r, claims, p.OrgID) {
+		if !h.requireResourceWorkspace(deps, w, r, claims, p.WorkspaceID) {
 			return
 		}
 		if err := deps.AdminStore.DeleteProvider(ctx, p.ID); err != nil {
@@ -300,7 +332,7 @@ type adminCredentialRefUpsert struct {
 
 type adminProviderUpsert struct {
 	Name                  string                    `json:"name"`
-	OrgID                 string                    `json:"org_id"`
+	WorkspaceID           string                    `json:"workspace_id"`
 	Type                  *string                   `json:"type"`
 	DisplayName           *string                   `json:"display_name"`
 	BaseURL               *string                   `json:"base_url"`
@@ -311,6 +343,8 @@ type adminProviderUpsert struct {
 	APIKey                *string                   `json:"api_key"`
 	APIKeyRef             *adminAPIKeyRefUpsert     `json:"api_key_ref"`
 	CredentialRef         *adminCredentialRefUpsert `json:"credential_ref"`
+	CopilotDeviceFlowID   *string                   `json:"copilot_device_flow_id"`
+	ExpectedUpdatedAt     *string                   `json:"expected_updated_at"`
 	Enabled               *bool                     `json:"enabled"`
 	Extends               *string                   `json:"extends"`
 	Healthcheck           *adminHealthcheckUpsert   `json:"healthcheck"`
@@ -342,11 +376,11 @@ func (h *Handler) isStaticProvider(deps Dependencies, name string) bool {
 	return ok
 }
 
-func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, filterOrg string) ([]adminProviderView, error) {
-	visible, _ := h.visibleOrgIDs(deps, r, claims)
-	names := h.orgNameMap(deps, r, claims)
+func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, filterWorkspace string) ([]adminProviderView, error) {
+	visible, _ := h.visibleWorkspaceIDs(deps, r, claims)
+	names := h.workspaceNameMap(deps, r, claims)
 	views := map[string]*adminProviderView{}
-	if h.canSeeSystemOrg(deps, r, claims, filterOrg) {
+	if h.canSeeSystemWorkspace(deps, r, claims, filterWorkspace) {
 		for _, p := range deps.Catalog.Providers() {
 			mv := adminProviderView{Name: p.Name, Type: string(p.Type), DisplayName: p.DisplayName, BaseURL: p.BaseURL, Enabled: true, Source: "config", HasCredential: true}
 			if p.UpstreamHeaderTimeout > 0 {
@@ -379,10 +413,10 @@ func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r 
 		return nil, err
 	}
 	for _, p := range rows {
-		if filterOrg != "" && p.OrgID.String() != filterOrg {
+		if filterWorkspace != "" && p.WorkspaceID.String() != filterWorkspace {
 			continue
 		}
-		if visible != nil && !visible[p.OrgID.String()] {
+		if visible != nil && !visible[p.WorkspaceID.String()] {
 			continue
 		}
 		models, err := deps.AdminStore.ListProviderModels(ctx, p.ID)
@@ -396,9 +430,11 @@ func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r 
 			ForwardHeaders: append([]string(nil), p.ForwardHeaders...),
 			Extends:        p.Extends, APIKeyRefPath: p.APIKeyRefPath, APIKeyRefKey: p.APIKeyRefKey,
 			CopilotCredentialPath: p.CopilotCredentialPath, CopilotCredentialName: p.CopilotCredentialName,
-			Enabled: p.Enabled, Source: "database",
-			OrgID: p.OrgID.String(), OrgName: names[p.OrgID.String()],
-			HasCredential: len(p.APIKeyEncrypted) > 0 || p.APIKeyRefKey != "" || p.CopilotCredentialName != "",
+			CopilotCredentialSource: copilotCredentialSource(p.Type, p.CopilotCredentialEncrypted, p.CopilotCredentialPath, p.CopilotCredentialName),
+			UpdatedAt:               p.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			Enabled:                 p.Enabled, Source: "database",
+			WorkspaceID: p.WorkspaceID.String(), WorkspaceName: names[p.WorkspaceID.String()],
+			HasCredential: len(p.APIKeyEncrypted) > 0 || p.APIKeyRefKey != "" || p.CopilotCredentialName != "" || len(p.CopilotCredentialEncrypted) > 0,
 			Healthcheck:   providerHealthcheckView(p.Healthcheck),
 		}
 		for _, m := range models {
@@ -534,7 +570,7 @@ func (h *Handler) buildConfigProvider(deps Dependencies, row store.DBProvider, m
 	return dbmerge.BuildProvider(row, models, bases)
 }
 
-func (h *Handler) createDBProvider(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, org store.Organization, req adminProviderUpsert) (adminProviderView, error) {
+func (h *Handler) createDBProvider(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, workspace store.Workspace, req adminProviderUpsert) (adminProviderView, error) {
 	name := strings.TrimSpace(req.Name)
 	if !config.IsLowercaseName(name) {
 		return adminProviderView{}, errBad("invalid provider name: must be lowercase, no spaces, no '/', and start with [a-z0-9]")
@@ -544,6 +580,8 @@ func (h *Handler) createDBProvider(ctx context.Context, deps Dependencies, r *ht
 	}
 	if _, err := deps.AdminStore.GetProvider(ctx, name); err == nil {
 		return adminProviderView{}, errBad("provider already exists")
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return adminProviderView{}, catalogStorageError{err}
 	}
 	if h.isStaticProvider(deps, name) {
 		return adminProviderView{}, errBad("provider exists in static config")
@@ -556,9 +594,12 @@ func (h *Handler) createDBProvider(ctx context.Context, deps Dependencies, r *ht
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-	row := store.DBProvider{Name: name, Type: providerType, Enabled: enabled, OrgID: org.ID, ForwardHeaders: []string{}}
+	row := store.DBProvider{Name: name, Type: providerType, Enabled: enabled, WorkspaceID: workspace.ID, ForwardHeaders: []string{}}
 	if err := h.applyProviderUpsert(name, &row, req); err != nil {
 		return adminProviderView{}, err
+	}
+	if flowID := trimmedOrEmpty(req.CopilotDeviceFlowID); flowID != "" {
+		return h.createDBProviderWithFlow(ctx, deps, claims, req, &row, flowID)
 	}
 	if err := h.validateExtends(deps, name, row.Extends, providerType); err != nil {
 		return adminProviderView{}, err
@@ -574,13 +615,166 @@ func (h *Handler) createDBProvider(ctx context.Context, deps Dependencies, r *ht
 	if err := config.ValidateDynamicProvider(cfgProvider); err != nil {
 		return adminProviderView{}, err
 	}
-	if err := deps.AdminStore.CreateProvider(ctx, &row); err != nil {
+	if err := deps.AdminStore.CreateProviderAggregate(ctx, &row, models); err != nil {
+		return adminProviderView{}, catalogStorageError{err}
+	}
+	return adminProviderView{Name: name}, nil
+}
+
+func trimmedOrEmpty(raw *string) string {
+	if raw == nil {
+		return ""
+	}
+	return strings.TrimSpace(*raw)
+}
+
+func flowCredentialConflict(req adminProviderUpsert) bool {
+	if req.APIKey != nil && strings.TrimSpace(*req.APIKey) != "" { // pragma: allowlist secret
+		return true
+	}
+	if req.APIKeyRef != nil && (strings.TrimSpace(req.APIKeyRef.Path) != "" || strings.TrimSpace(req.APIKeyRef.Key) != "") { // pragma: allowlist secret
+		return true
+	}
+	if req.CredentialRef != nil && (strings.TrimSpace(req.CredentialRef.Path) != "" || strings.TrimSpace(req.CredentialRef.Name) != "") {
+		return true
+	}
+	return false
+}
+
+func (h *Handler) readyFlowSnapshot(ctx context.Context, deps Dependencies, claims *adminauth.Claims, flowID string) (store.CopilotFlowSnapshot, error) {
+	id, err := uuid.Parse(strings.TrimSpace(flowID))
+	if err != nil {
+		return store.CopilotFlowSnapshot{}, errBad("invalid copilot_device_flow_id")
+	}
+	snapshot, err := deps.AdminStore.ReadyCopilotFlow(ctx, mustParseUUID(claims.Subject), id)
+	if err != nil {
+		if errors.Is(err, store.ErrCopilotFlowUnavailable) {
+			return store.CopilotFlowSnapshot{}, errDeviceFlowNotReady
+		}
+		if errors.Is(err, store.ErrCopilotFlowNotFound) {
+			return store.CopilotFlowSnapshot{}, errBad("device flow not found")
+		}
+		if errors.Is(err, store.ErrCopilotFlowForbidden) {
+			return store.CopilotFlowSnapshot{}, errBad("workspace admin required")
+		}
+		if errors.Is(err, store.ErrCopilotFlowUnauthorized) {
+			return store.CopilotFlowSnapshot{}, errBad("unauthorized")
+		}
+		return store.CopilotFlowSnapshot{}, catalogStorageError{err}
+	}
+	return snapshot, nil
+}
+
+func (h *Handler) createDBProviderWithFlow(ctx context.Context, deps Dependencies, claims *adminauth.Claims, req adminProviderUpsert, row *store.DBProvider, flowID string) (adminProviderView, error) {
+	name := strings.TrimSpace(req.Name)
+	if row.Type != "github-copilot" {
+		return adminProviderView{}, errBad("copilot_device_flow_id is only supported by github-copilot")
+	}
+	if flowCredentialConflict(req) {
+		return adminProviderView{}, errBad("copilot_device_flow_id cannot be combined with a credential")
+	}
+	if err := h.validateExtends(deps, name, row.Extends, row.Type); err != nil {
 		return adminProviderView{}, err
 	}
-	if err := deps.AdminStore.ReplaceProviderModels(ctx, row.ID, models); err != nil {
+	snapshot, err := h.readyFlowSnapshot(ctx, deps, claims, flowID)
+	if err != nil {
 		return adminProviderView{}, err
 	}
-	return h.providerViewByName(ctx, deps, r, claims, name)
+	if err := snapshot.AttachCredential(row); err != nil {
+		return adminProviderView{}, errBad("device flow does not authorize this provider")
+	}
+	models, err := h.buildDBModels(name, req.Models)
+	if err != nil {
+		return adminProviderView{}, err
+	}
+	cfgProvider, err := h.buildConfigProvider(deps, *row, models)
+	if err != nil {
+		return adminProviderView{}, err
+	}
+	if err := config.ValidateDynamicProvider(cfgProvider); err != nil {
+		return adminProviderView{}, err
+	}
+	if err := deps.AdminStore.ConsumeCopilotFlow(ctx, snapshot, row, &models); err != nil {
+		if errors.Is(err, store.ErrCatalogConflict) {
+			return adminProviderView{}, err
+		}
+		if errors.Is(err, store.ErrCopilotFlowUnavailable) || errors.Is(err, store.ErrCopilotFlowInput) {
+			return adminProviderView{}, errDeviceFlowNotReady
+		}
+		return adminProviderView{}, catalogStorageError{err}
+	}
+	return adminProviderView{Name: name}, nil
+}
+
+func (h *Handler) updateDBProviderWithFlow(ctx context.Context, deps Dependencies, claims *adminauth.Claims, req adminProviderUpsert, current store.DBProvider, flowID string) (adminProviderView, error) {
+	name := strings.TrimSpace(req.Name)
+	if current.Type != "github-copilot" {
+		return adminProviderView{}, errBad("copilot_device_flow_id is only supported by github-copilot")
+	}
+	if flowCredentialConflict(req) {
+		return adminProviderView{}, errBad("copilot_device_flow_id cannot be combined with a credential")
+	}
+	expectedRaw := trimmedOrEmpty(req.ExpectedUpdatedAt)
+	if expectedRaw == "" {
+		return adminProviderView{}, errBad("expected_updated_at is required when saving with a device flow")
+	}
+	expected, err := time.Parse(time.RFC3339Nano, expectedRaw)
+	if err != nil {
+		return adminProviderView{}, errBad("invalid expected_updated_at")
+	}
+	if !current.UpdatedAt.Equal(expected) {
+		return adminProviderView{}, store.ErrCatalogConflict
+	}
+	candidate := current
+	if err := h.applyProviderUpsert(name, &candidate, req); err != nil {
+		return adminProviderView{}, err
+	}
+	if candidate.Type != "github-copilot" {
+		return adminProviderView{}, errBad("copilot_device_flow_id is only supported by github-copilot")
+	}
+	if err := h.validateExtends(deps, name, candidate.Extends, candidate.Type); err != nil {
+		return adminProviderView{}, err
+	}
+	snapshot, err := h.readyFlowSnapshot(ctx, deps, claims, flowID)
+	if err != nil {
+		return adminProviderView{}, err
+	}
+	if err := snapshot.AttachCredential(&candidate); err != nil {
+		return adminProviderView{}, errBad("device flow does not authorize this provider")
+	}
+	var models []store.DBProviderModel
+	if req.Models != nil {
+		models, err = h.buildDBModels(name, req.Models)
+		if err != nil {
+			return adminProviderView{}, err
+		}
+	} else {
+		models, err = deps.AdminStore.ListProviderModels(ctx, candidate.ID)
+		if err != nil {
+			return adminProviderView{}, catalogStorageError{err}
+		}
+	}
+	cfgProvider, err := h.buildConfigProvider(deps, candidate, models)
+	if err != nil {
+		return adminProviderView{}, err
+	}
+	if err := config.ValidateDynamicProvider(cfgProvider); err != nil {
+		return adminProviderView{}, err
+	}
+	var replacement *[]store.DBProviderModel
+	if req.Models != nil {
+		replacement = &models
+	}
+	if err := deps.AdminStore.ConsumeCopilotFlow(ctx, snapshot, &candidate, replacement); err != nil {
+		if errors.Is(err, store.ErrCatalogConflict) {
+			return adminProviderView{}, err
+		}
+		if errors.Is(err, store.ErrCopilotFlowUnavailable) || errors.Is(err, store.ErrCopilotFlowInput) {
+			return adminProviderView{}, errDeviceFlowNotReady
+		}
+		return adminProviderView{}, catalogStorageError{err}
+	}
+	return adminProviderView{Name: name}, nil
 }
 
 func (h *Handler) applyProviderUpsert(name string, row *store.DBProvider, req adminProviderUpsert) error {
@@ -608,7 +802,7 @@ func (h *Handler) applyProviderUpsert(name string, row *store.DBProvider, req ad
 		row.ForwardUserAgent = *req.ForwardUserAgent
 	}
 	if req.ForwardHeaders != nil {
-		row.ForwardHeaders = append([]string(nil), req.ForwardHeaders...)
+		row.ForwardHeaders = append([]string{}, req.ForwardHeaders...)
 	}
 	if req.Enabled != nil {
 		row.Enabled = *req.Enabled
@@ -634,6 +828,9 @@ func (h *Handler) applyProviderUpsert(name string, row *store.DBProvider, req ad
 	if req.CredentialRef != nil {
 		row.CopilotCredentialPath = strings.TrimSpace(req.CredentialRef.Path)
 		row.CopilotCredentialName = strings.TrimSpace(req.CredentialRef.Name)
+	}
+	if row.Type == "github-copilot" && (strings.TrimSpace(row.CopilotCredentialPath) != "" || strings.TrimSpace(row.CopilotCredentialName) != "") {
+		row.CopilotCredentialEncrypted = nil
 	}
 	if req.Healthcheck != nil {
 		hc, err := buildHealthcheckJSON(name, row.Healthcheck, req.Healthcheck)
@@ -680,19 +877,25 @@ func (h *Handler) updateDBProvider(ctx context.Context, deps Dependencies, r *ht
 	name := strings.TrimSpace(req.Name)
 	p, err := deps.AdminStore.GetProvider(ctx, name)
 	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return adminProviderView{}, catalogStorageError{err}
+		}
 		if h.isStaticProvider(deps, name) {
 			return adminProviderView{}, errBad("config-managed: edit the HCL file")
 		}
 		return adminProviderView{}, errBad("provider not found")
 	}
-	if !h.canWriteOrg(deps, ctx, claims, p.OrgID) {
-		return adminProviderView{}, errBad("organization admin required")
+	if !h.canWriteWorkspace(deps, ctx, claims, p.WorkspaceID) {
+		return adminProviderView{}, errBad("workspace admin required")
 	}
 	if req.Type != nil {
 		if !knownProviderType(strings.TrimSpace(*req.Type)) {
 			return adminProviderView{}, errBad("unknown provider type")
 		}
 		p.Type = strings.TrimSpace(*req.Type)
+	}
+	if flowID := trimmedOrEmpty(req.CopilotDeviceFlowID); flowID != "" {
+		return h.updateDBProviderWithFlow(ctx, deps, claims, req, p, flowID)
 	}
 	if err := h.applyProviderUpsert(name, &p, req); err != nil {
 		return adminProviderView{}, err
@@ -709,7 +912,7 @@ func (h *Handler) updateDBProvider(ctx context.Context, deps Dependencies, r *ht
 	} else {
 		models, err = deps.AdminStore.ListProviderModels(ctx, p.ID)
 		if err != nil {
-			return adminProviderView{}, err
+			return adminProviderView{}, catalogStorageError{err}
 		}
 	}
 	cfgProvider, err := h.buildConfigProvider(deps, p, models)
@@ -719,15 +922,14 @@ func (h *Handler) updateDBProvider(ctx context.Context, deps Dependencies, r *ht
 	if err := config.ValidateDynamicProvider(cfgProvider); err != nil {
 		return adminProviderView{}, err
 	}
-	if err := deps.AdminStore.UpdateProvider(ctx, &p); err != nil {
-		return adminProviderView{}, err
-	}
+	var replacement *[]store.DBProviderModel
 	if req.Models != nil {
-		if err := deps.AdminStore.ReplaceProviderModels(ctx, p.ID, models); err != nil {
-			return adminProviderView{}, err
-		}
+		replacement = &models
 	}
-	return h.providerViewByName(ctx, deps, r, claims, name)
+	if err := deps.AdminStore.UpdateProviderAggregate(ctx, &p, replacement); err != nil {
+		return adminProviderView{}, catalogStorageError{err}
+	}
+	return adminProviderView{Name: name}, nil
 }
 
 func (h *Handler) providerViewByName(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, name string) (adminProviderView, error) {
@@ -746,13 +948,16 @@ func (h *Handler) providerViewByName(ctx context.Context, deps Dependencies, r *
 func (h *Handler) setProviderCredential(ctx context.Context, deps Dependencies, claims *adminauth.Claims, name string, req adminCredentialUpsert) error {
 	p, err := deps.AdminStore.GetProvider(ctx, name)
 	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return catalogStorageError{err}
+		}
 		if h.isStaticProvider(deps, name) {
 			return errBad("config-managed: edit the HCL file")
 		}
 		return errBad("provider not found")
 	}
-	if !h.canWriteOrg(deps, ctx, claims, p.OrgID) {
-		return errBad("organization admin required")
+	if !h.canWriteWorkspace(deps, ctx, claims, p.WorkspaceID) {
+		return errBad("workspace admin required")
 	}
 	if req.APIKey != nil { // pragma: allowlist secret
 		if *req.APIKey == "" {
@@ -775,9 +980,12 @@ func (h *Handler) setProviderCredential(ctx context.Context, deps Dependencies, 
 	if req.CopilotCredentialName != nil {
 		p.CopilotCredentialName = strings.TrimSpace(*req.CopilotCredentialName)
 	}
+	if p.Type == "github-copilot" && (strings.TrimSpace(p.CopilotCredentialPath) != "" || strings.TrimSpace(p.CopilotCredentialName) != "") {
+		p.CopilotCredentialEncrypted = nil
+	}
 	models, err := deps.AdminStore.ListProviderModels(ctx, p.ID)
 	if err != nil {
-		return err
+		return catalogStorageError{err}
 	}
 	cfgProvider, err := h.buildConfigProvider(deps, p, models)
 	if err != nil {
@@ -786,5 +994,8 @@ func (h *Handler) setProviderCredential(ctx context.Context, deps Dependencies, 
 	if err := config.ValidateDynamicProvider(cfgProvider); err != nil {
 		return err
 	}
-	return deps.AdminStore.UpdateProvider(ctx, &p)
+	if err := deps.AdminStore.UpdateProvider(ctx, &p); err != nil {
+		return catalogStorageError{err}
+	}
+	return nil
 }

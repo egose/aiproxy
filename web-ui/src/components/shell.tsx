@@ -16,9 +16,18 @@ import {
 } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation } from 'react-router';
-import { useAdminMe, useAdminOrg, useAdminOrgs, useAdminSession, useAdminStatus, useSnapshot } from '../hooks';
-import { setAdminOrgId } from '../store';
-import { NewOrganizationDialog } from './dialogs';
+import {
+  useAdminMe,
+  useAdminWorkspace,
+  useAdminWorkspaces,
+  useAdminSession,
+  useAdminStatus,
+  useDataAuth,
+  useSnapshot,
+} from '../hooks';
+import { setAdminWorkspaceId } from '../store';
+import { assertAuthGeneration, authLifecycle } from '../auth-lifecycle';
+import { NewWorkspaceDialog } from './dialogs';
 
 function ShellHeader({ title, group }: { title: string; group: string }) {
   return (
@@ -45,10 +54,10 @@ const sectionMeta: Record<string, { group: string; title: string }> = {
   '/register': { group: 'Admin', title: 'Create account' },
   '/logout': { group: 'Admin', title: 'Sign out' },
   '/admin/oidc/callback': { group: 'Admin', title: 'Sign in' },
-  '/admin/organizations': { group: 'Admin', title: 'Organizations' },
+  '/admin/workspaces': { group: 'Admin', title: 'Workspaces' },
   '/admin/users': { group: 'Admin', title: 'Users' },
   '/admin/oidc': { group: 'Admin', title: 'Single sign-on' },
-  '/manage/organization': { group: 'Management', title: 'Organization' },
+  '/manage/workspace': { group: 'Management', title: 'Workspace' },
   '/manage/members': { group: 'Management', title: 'Members' },
   '/manage/teams': { group: 'Management', title: 'Teams' },
   '/manage/keys': { group: 'Management', title: 'API keys' },
@@ -69,30 +78,33 @@ export function Shell({ children }: { children: ReactNode }) {
   const adminStatus = useAdminStatus();
   const multi = adminStatus.data?.multi_tenancy_enabled === true;
   const session = useAdminSession();
+  const dashboardAccess = useDataAuth();
   const meQuery = useAdminMe(multi);
   const signedIn = multi && !!session.accessToken;
   const meta = sectionMeta[location.pathname] ?? { group: 'Dashboard', title: 'Overview' };
   useEffect(() => {
     document.title = `${meta.title} · aiproxy`;
   }, [meta.title]);
-  const orgsQuery = useAdminOrgs(signedIn);
-  const adminOrg = useAdminOrg();
+  const workspacesQuery = useAdminWorkspaces(signedIn);
+  const adminWorkspace = useAdminWorkspace();
   const queryClient = useQueryClient();
   const { openDialog } = useDialog();
-  const orgList = multi && signedIn ? (orgsQuery.data ?? []) : [];
-  const currentOrgId = orgList.some((o) => o.id === adminOrg.orgId) ? adminOrg.orgId : (orgList[0]?.id ?? '');
+  const workspaceList = multi && signedIn ? (workspacesQuery.data ?? []) : [];
+  const currentWorkspaceId = workspaceList.some((o) => o.id === adminWorkspace.workspaceId)
+    ? adminWorkspace.workspaceId
+    : (workspaceList[0]?.id ?? '');
   useEffect(() => {
     if (
       multi &&
       signedIn &&
-      orgsQuery.data &&
-      orgList.length > 0 &&
-      currentOrgId !== '' &&
-      currentOrgId !== adminOrg.orgId
+      workspacesQuery.data &&
+      workspaceList.length > 0 &&
+      currentWorkspaceId !== '' &&
+      currentWorkspaceId !== adminWorkspace.workspaceId
     ) {
-      setAdminOrgId(currentOrgId);
+      setAdminWorkspaceId(currentWorkspaceId);
     }
-  }, [multi, signedIn, orgsQuery.data, orgList.length, currentOrgId, adminOrg.orgId]);
+  }, [multi, signedIn, workspacesQuery.data, workspaceList.length, currentWorkspaceId, adminWorkspace.workspaceId]);
   if (multi && !signedIn) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
@@ -109,7 +121,10 @@ export function Shell({ children }: { children: ReactNode }) {
       : meta.group;
   const headerTitle = version ? `${meta.title} · ${version}` : meta.title;
   const showAdmin =
-    multi && signedIn && me?.is_admin === true && orgList.find((o) => o.id === currentOrgId)?.is_system === true;
+    multi &&
+    signedIn &&
+    me?.is_admin === true &&
+    workspaceList.find((o) => o.id === currentWorkspaceId)?.is_system === true;
 
   const data: ISidebarData = {
     user: me
@@ -126,13 +141,13 @@ export function Shell({ children }: { children: ReactNode }) {
     context:
       multi && signedIn
         ? {
-            title: 'Organizations',
+            title: 'Workspaces',
             canAdd: true,
-            addText: 'New Organization',
-            items: orgList.map((o) => ({
+            addText: 'New Workspace',
+            items: workspaceList.map((o) => ({
               name: o.display_name || o.name,
               text: o.display_name !== '' ? `${o.name} · ${o.role}` : o.role,
-              active: o.id === currentOrgId,
+              active: o.id === currentWorkspaceId,
             })),
           }
         : {
@@ -141,36 +156,50 @@ export function Shell({ children }: { children: ReactNode }) {
             items: [{ name: 'Local server', text: snapshotQuery.data?.address ?? 'serve', active: true }],
           },
     menus: [
-      {
-        title: 'Dashboard',
-        items: [
-          { title: 'Overview', url: '/', icon: IconGauge, isActive: location.pathname === '/' },
-          ...(!manageResources
-            ? [
-                { title: 'Providers', url: '/providers', icon: IconBox, isActive: location.pathname === '/providers' },
+      ...(!multi || dashboardAccess.enabled
+        ? [
+            {
+              title: 'Dashboard',
+              items: [
+                { title: 'Overview', url: '/', icon: IconGauge, isActive: location.pathname === '/' },
+                ...(!manageResources
+                  ? [
+                      {
+                        title: 'Providers',
+                        url: '/providers',
+                        icon: IconBox,
+                        isActive: location.pathname === '/providers',
+                      },
+                      {
+                        title: 'Aliases',
+                        url: '/aliases',
+                        icon: IconShare,
+                        isActive: location.pathname === '/aliases',
+                      },
+                    ]
+                  : []),
                 {
-                  title: 'Aliases',
-                  url: '/aliases',
-                  icon: IconShare,
-                  isActive: location.pathname === '/aliases',
+                  title: 'Recent requests',
+                  url: '/requests',
+                  icon: IconListDetails,
+                  isActive: location.pathname === '/requests',
                 },
-              ]
-            : []),
-          {
-            title: 'Recent requests',
-            url: '/requests',
-            icon: IconListDetails,
-            isActive: location.pathname === '/requests',
-          },
-          { title: 'Payloads', url: '/payloads', icon: IconActivity, isActive: location.pathname === '/payloads' },
-          {
-            title: 'Guardrail blocks',
-            url: '/blocks',
-            icon: IconShieldLock,
-            isActive: location.pathname === '/blocks',
-          },
-        ],
-      },
+                {
+                  title: 'Payloads',
+                  url: '/payloads',
+                  icon: IconActivity,
+                  isActive: location.pathname === '/payloads',
+                },
+                {
+                  title: 'Guardrail blocks',
+                  url: '/blocks',
+                  icon: IconShieldLock,
+                  isActive: location.pathname === '/blocks',
+                },
+              ],
+            },
+          ]
+        : []),
       ...(multi
         ? []
         : [
@@ -205,10 +234,10 @@ export function Shell({ children }: { children: ReactNode }) {
                   isActive: location.pathname === '/manage/keys',
                 },
                 {
-                  title: 'Organization',
-                  url: '/manage/organization',
+                  title: 'Workspace',
+                  url: '/manage/workspace',
                   icon: IconShare,
-                  isActive: location.pathname === '/manage/organization',
+                  isActive: location.pathname === '/manage/workspace',
                 },
               ],
             },
@@ -220,10 +249,10 @@ export function Shell({ children }: { children: ReactNode }) {
               title: 'Admin',
               items: [
                 {
-                  title: 'Organizations',
-                  url: '/admin/organizations',
+                  title: 'Workspaces',
+                  url: '/admin/workspaces',
                   icon: IconListDetails,
-                  isActive: location.pathname === '/admin/organizations',
+                  isActive: location.pathname === '/admin/workspaces',
                 },
                 { title: 'Users', url: '/admin/users', icon: IconUser, isActive: location.pathname === '/admin/users' },
                 {
@@ -243,18 +272,21 @@ export function Shell({ children }: { children: ReactNode }) {
     ],
     events: {
       contextSelect: (ctx: { name: string }) => {
-        const match = orgList.find((o) => (o.display_name || o.name) === ctx.name);
+        const match = workspaceList.find((o) => (o.display_name || o.name) === ctx.name);
         if (match) {
-          setAdminOrgId(match.id);
+          setAdminWorkspaceId(match.id);
         }
       },
       newContext: () => {
+        const generation = authLifecycle.generation;
         void (async () => {
           try {
-            const created = await openDialog(NewOrganizationDialog, {});
+            const created = await openDialog(NewWorkspaceDialog, {});
             if (created) {
-              await queryClient.invalidateQueries({ queryKey: ['admin', 'orgs'] });
-              setAdminOrgId(created.id);
+              assertAuthGeneration(generation);
+              await queryClient.invalidateQueries({ queryKey: ['admin', 'workspaces'] });
+              assertAuthGeneration(generation);
+              setAdminWorkspaceId(created.id);
             }
           } catch {
             return;

@@ -80,8 +80,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return true
 		}
-		if !h.dashboardAuthenticated(deps, r) {
-			h.respondDashboardAuthFailure(w, r)
+		if !h.requireDashboardOperator(deps, w, r) {
 			return true
 		}
 		h.writeDashboardSnapshot(deps, w, r)
@@ -93,8 +92,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return true
 		}
-		if !h.dashboardAuthenticated(deps, r) {
-			h.respondDashboardAuthFailure(w, r)
+		if !h.requireDashboardOperator(deps, w, r) {
 			return true
 		}
 		h.writeDashboardLogs(deps, w, r)
@@ -106,8 +104,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return true
 		}
-		if !h.dashboardAuthenticated(deps, r) {
-			h.respondDashboardAuthFailure(w, r)
+		if !h.requireDashboardOperator(deps, w, r) {
 			return true
 		}
 		h.writeDashboardPayloads(deps, w, r)
@@ -119,8 +116,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return true
 		}
-		if !h.dashboardAuthenticated(deps, r) {
-			h.respondDashboardAuthFailure(w, r)
+		if !h.requireDashboardOperator(deps, w, r) {
 			return true
 		}
 		h.writeDashboardPayload(deps, w, r)
@@ -132,8 +128,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return true
 		}
-		if !h.dashboardAuthenticated(deps, r) {
-			h.respondDashboardAuthFailure(w, r)
+		if !h.requireDashboardOperator(deps, w, r) {
 			return true
 		}
 		h.writeDashboardBlocks(deps, w, r)
@@ -146,8 +141,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return true
 			}
-			if !h.dashboardAuthenticated(deps, r) {
-				h.respondDashboardAuthFailure(w, r)
+			if !h.requireDashboardOperator(deps, w, r) {
 				return true
 			}
 			h.writeDashboardBlockDecision(deps, w, r)
@@ -158,8 +152,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return true
 		}
-		if !h.dashboardAuthenticated(deps, r) {
-			h.respondDashboardAuthFailure(w, r)
+		if !h.requireDashboardOperator(deps, w, r) {
 			return true
 		}
 		h.writeDashboardBlock(deps, w, r)
@@ -195,15 +188,21 @@ func (h *Handler) respondDashboardAuthFailure(w http.ResponseWriter, r *http.Req
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 }
 
-func (h *Handler) dashboardAuthenticated(deps Dependencies, r *http.Request) bool {
+func (h *Handler) requireDashboardOperator(deps Dependencies, w http.ResponseWriter, r *http.Request) bool {
 	if dashboardAuthorized(deps.Dashboard, r) {
 		return true
 	}
-	if deps.AdminStore == nil {
-		return false
+	if deps.AdminStore != nil {
+		if claims, ok := h.adminClaims(deps, r); ok {
+			if claims.IsAdmin {
+				return true
+			}
+			http.Error(w, "dashboard operator access required", http.StatusForbidden)
+			return false
+		}
 	}
-	_, ok := h.adminClaims(deps, r)
-	return ok
+	h.respondDashboardAuthFailure(w, r)
+	return false
 }
 
 func dashboardAuthorized(source dashrpc.Source, r *http.Request) bool {

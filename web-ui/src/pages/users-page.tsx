@@ -186,8 +186,8 @@ export function UsersPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono font-medium">{u.email}</span>
                 <RoleBadge role={u.role} />
-                {(u.orgs ?? []).map((o) => (
-                  <Badge key={o.id} variant="secondary" size="sm" title={`Organization role: ${o.role}`}>
+                {(u.workspaces ?? []).map((o) => (
+                  <Badge key={o.id} variant="secondary" size="sm" title={`Workspace role: ${o.role}`}>
                     {o.name} · {o.role}
                   </Badge>
                 ))}

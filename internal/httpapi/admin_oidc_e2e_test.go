@@ -187,7 +187,7 @@ func TestAdminOIDCFullCodeFlow(t *testing.T) {
 	fmt.Println("provisioned:", u.Email)
 }
 
-func TestDashboardAcceptsAdminJWTWithStore(t *testing.T) {
+func TestDashboardRejectsOrdinaryJWTWithStore(t *testing.T) {
 	dbURL := os.Getenv("AIPROXY_TEST_DATABASE_URL")
 	if dbURL == "" {
 		t.Skip("AIPROXY_TEST_DATABASE_URL not set")
@@ -234,8 +234,8 @@ func TestDashboardAcceptsAdminJWTWithStore(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+access)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("snapshot with admin JWT = %d, want 200", w.Code)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("snapshot with ordinary JWT = %d, want 403", w.Code)
 	}
 
 	bad := httptest.NewRequest(http.MethodGet, "/_internal/dashboard/snapshot", nil)

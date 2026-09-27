@@ -48,7 +48,12 @@ func validationTestHandler(t *testing.T, st *store.Store) (*Handler, string) {
 	deps.MultiTenancy = config.MultiTenancy{Enabled: true}
 	deps.AdminStore = st
 	h := NewHandler(deps)
-	access, _, err := adminauth.IssueAccess("admin-1", "admin@example.com", true)
+	u := &store.User{Email: uniqName(t, "validation-admin") + "@example.com", IsAdmin: true}
+	if err := st.CreateUser(context.Background(), u); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.DeleteUser(context.Background(), u.ID) })
+	access, _, err := adminauth.IssueAccess(u.ID.String(), u.Email, true)
 	if err != nil {
 		t.Fatal(err)
 	}

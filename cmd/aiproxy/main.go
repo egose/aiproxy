@@ -174,7 +174,7 @@ func checkDatabaseCatalog(cmd *cobra.Command, rt *config.Runtime) error {
 	if len(status.Pending) > 0 {
 		return fmt.Errorf("database catalog: %d pending migrations (run aiproxy migrate up)", len(status.Pending))
 	}
-	merged, err := dbmerge.MergeCatalog(ctx, st, rt.Catalog)
+	merged, err := dbmerge.MergeCatalog(ctx, st, rt)
 	if err != nil {
 		return fmt.Errorf("database catalog: %w", err)
 	}

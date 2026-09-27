@@ -17,6 +17,7 @@ import (
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/copilotlogin"
 	"github.com/egose/aiproxy/internal/dashrpc"
 	"github.com/egose/aiproxy/internal/dbmerge"
 	"github.com/egose/aiproxy/internal/guardrails"
@@ -30,6 +31,7 @@ import (
 	"github.com/egose/aiproxy/internal/providerhealth"
 	"github.com/egose/aiproxy/internal/ratelimit"
 	"github.com/egose/aiproxy/internal/store"
+	"github.com/egose/aiproxy/internal/upstreamhttp"
 )
 
 const (
@@ -70,6 +72,8 @@ type App struct {
 	quarantine            *guardrails.Quarantine
 	exceptions            *guardrails.Exceptions
 	adminStore            *store.Store
+	copilotCleanup        *copilotFlowCleanup
+	copilotDeviceClient   func() *copilotlogin.Client
 	buildOpt              BuildOptions
 	startTime             time.Time
 	dashboardTokenMinted  bool
@@ -78,7 +82,39 @@ type App struct {
 	shutdownTimeout       time.Duration
 }
 
-func Build(ctx context.Context, opts BuildOptions) (*App, error) {
+type candidateResources struct {
+	health *providerhealth.Tracker
+	disk   *payloadlog.Logger
+	mongo  *mongolog.Logger
+	store  *store.Store
+}
+
+func (c *candidateResources) cleanup(err *error) {
+	if *err == nil {
+		return
+	}
+	var cleanupErr error
+	if c.mongo != nil {
+		cleanupErr = errors.Join(cleanupErr, c.mongo.Close())
+	}
+	if c.disk != nil {
+		cleanupErr = errors.Join(cleanupErr, c.disk.Close())
+	}
+	if c.health != nil {
+		cleanupErr = errors.Join(cleanupErr, c.health.Close())
+	}
+	if c.store != nil {
+		cleanupErr = errors.Join(cleanupErr, c.store.Close())
+	}
+	if cleanupErr != nil {
+		*err = errors.Join(*err, fmt.Errorf("candidate cleanup: %w", cleanupErr))
+	}
+}
+
+func Build(ctx context.Context, opts BuildOptions) (_ *App, err error) {
+	var candidate candidateResources
+	defer candidate.cleanup(&err)
+
 	rt, err := loadRuntime(opts)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
@@ -87,11 +123,11 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	candidate.store = adminStore
 	var dynKeys []auth.DynamicClient
 	if adminStore != nil {
-		merged, err := dbmerge.MergeCatalog(ctx, adminStore, rt.Catalog)
+		merged, err := dbmerge.MergeCatalog(ctx, adminStore, rt)
 		if err != nil {
-			_ = adminStore.Close()
 			return nil, fmt.Errorf("database catalog: %w", err)
 		}
 		rt.Catalog = config.NewCatalog(merged.Providers, merged.DisabledProviders, merged.Aliases)
@@ -121,15 +157,15 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	metrics.RecordConfig(rt)
 	usage := accounting.NewAggregator()
 	health := providerhealth.New(metrics, rt.ProviderHealth)
-	health.SetProviders(rt.Catalog)
+	candidate.health = health
 	healthchecks := healthcheck.New(health, metrics, opts.Version)
-	healthchecks.SetProviders(rt.Catalog)
 	rateLimiter := ratelimit.New(rt.Auth)
 
 	payloadLog, payloadMongo, payloadRecorder, err := openPayloadSinks(rt.Logging.PayloadLog)
 	if err != nil {
 		return nil, err
 	}
+	candidate.disk, candidate.mongo = payloadLog, payloadMongo
 
 	scanner, err := guardrails.New(guardrailPolicy(rt))
 	if err != nil {
@@ -149,12 +185,18 @@ func Build(ctx context.Context, opts BuildOptions) (*App, error) {
 	app := &App{Config: rt, metrics: metrics, logger: logger, adapter: adapter, resolver: resolver, clients: httpClients, health: health, healthchecks: healthchecks, rateLimiter: rateLimiter, quotaTracker: httpapi.NewQuotaTracker(adminStore), usage: usage, logs: logs, payloadLog: payloadLog, payloadMongo: payloadMongo, payloadRecorder: payloadRecorder, guardrails: scanner, quarantine: quarantine, exceptions: exceptions, adminStore: adminStore, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}
 	deps.Quota = app.quotaTracker
 	deps.RequestReload = app.Reload
+	deps.CopilotDeviceClient = app.copilotDeviceClient
 	app.handler = httpapi.NewHandler(deps)
 	server := &http.Server{
 		Handler: app.handler,
 	}
 	applyServerConfig(server, rt.Listener)
 	app.Server = server
+	health.SetProviders(rt.Catalog)
+	healthchecks.SetProviders(rt.Catalog)
+	if adminStore != nil {
+		app.copilotCleanup = startCopilotFlowCleanup(adminStore, logger)
+	}
 	return app, nil
 }
 
@@ -260,9 +302,11 @@ func (a *App) RunReady(ctx context.Context, ready func() error) (runErr error) {
 	}
 }
 
-func (a *App) Reload() error {
+func (a *App) Reload() (err error) {
 	a.reloadMu.Lock()
 	defer a.reloadMu.Unlock()
+	var candidate candidateResources
+	defer candidate.cleanup(&err)
 
 	rt, err := loadRuntime(a.buildOpt)
 	if err != nil {
@@ -270,7 +314,7 @@ func (a *App) Reload() error {
 	}
 	var dynKeys []auth.DynamicClient
 	if a.adminStore != nil {
-		merged, err := dbmerge.MergeCatalog(context.Background(), a.adminStore, rt.Catalog)
+		merged, err := dbmerge.MergeCatalog(context.Background(), a.adminStore, rt)
 		if err != nil {
 			return fmt.Errorf("database catalog: %w", err)
 		}
@@ -301,19 +345,20 @@ func (a *App) Reload() error {
 	if current != nil {
 		currentDashboard = current.Dashboard
 	}
-	dashboardTokenMinted, dashboardTokenPublished, err := ensureDashboardToken(rt, currentDashboard, true)
-	if err != nil {
-		return fmt.Errorf("dashboard token: %w", err)
-	}
-
 	nextResolver := modelresolver.NewWithPrevious(rt, currentResolver)
 	nextHealth := reloadHealthTracker(a.health, a.metrics, current, rt)
-	nextHealth.SetProviders(rt.Catalog)
-	a.healthchecks.SetTracker(nextHealth)
-	a.healthchecks.SetProviders(rt.Catalog)
+	if nextHealth != a.health {
+		candidate.health = nextHealth
+	}
 	nextPayloadLog, nextPayloadMongo, nextPayloadRecorder, err := reloadPayloadSinks(a.payloadLog, a.payloadMongo, current, rt)
 	if err != nil {
 		return err
+	}
+	if nextPayloadLog != a.payloadLog {
+		candidate.disk = nextPayloadLog
+	}
+	if nextPayloadMongo != a.payloadMongo {
+		candidate.mongo = nextPayloadMongo
 	}
 	nextGuardrails, err := guardrails.New(guardrailPolicy(rt))
 	if err != nil {
@@ -335,11 +380,22 @@ func (a *App) Reload() error {
 	if current == nil || !ratelimit.ConfigEqual(current.Auth, rt.Auth) {
 		nextRateLimiter = ratelimit.New(rt.Auth)
 	}
+	dashboardTokenMinted, dashboardTokenPublished, err := ensureDashboardToken(rt, currentDashboard, true)
+	if err != nil {
+		return fmt.Errorf("dashboard token: %w", err)
+	}
+
+	nextHealth.SetProviders(rt.Catalog)
+	a.healthchecks.SetTracker(nextHealth)
+	a.healthchecks.SetProviders(rt.Catalog)
 	a.metrics.SetBuildInfo(a.buildOpt.Version)
 	a.metrics.RecordConfig(rt)
 	deps := buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadRecorder, payloadDirOf(nextPayloadLog), nextGuardrails, nextQuarantine, nextExceptions, a.adminStore, dynKeys)
 	deps.Quota = a.quotaTracker
 	deps.RequestReload = a.Reload
+	a.mu.RLock()
+	deps.CopilotDeviceClient = a.copilotDeviceClient
+	a.mu.RUnlock()
 	a.handler.UpdateDependencies(deps)
 	oldHealth := a.health
 	oldPayloadLog := a.payloadLog
@@ -383,7 +439,11 @@ func (a *App) Close() error {
 		payloadLog := a.payloadLog
 		payloadMongo := a.payloadMongo
 		adminStore := a.adminStore
+		cleanup := a.copilotCleanup
 		a.mu.RUnlock()
+		if cleanup != nil {
+			cleanup.stop()
+		}
 		if healthchecks != nil {
 			healthchecks.Close()
 		}
@@ -657,9 +717,9 @@ func openAdminStore(ctx context.Context, rt *config.Runtime) (*store.Store, erro
 		_ = st.Close()
 		return nil, fmt.Errorf("database seed admin: %w", err)
 	}
-	if err := st.EnsureSystemOrg(ctx); err != nil {
+	if err := st.EnsureSystemWorkspace(ctx); err != nil {
 		_ = st.Close()
-		return nil, fmt.Errorf("database seed system org: %w", err)
+		return nil, fmt.Errorf("database seed system workspace: %w", err)
 	}
 	return st, nil
 }
@@ -702,7 +762,7 @@ func newHTTPClient(upstreamHeaderTimeout time.Duration) *http.Client {
 		return http.ProxyFromEnvironment(r)
 	}
 	transport.ResponseHeaderTimeout = upstreamHeaderTimeout
-	return &http.Client{Transport: transport}
+	return &http.Client{Transport: transport, CheckRedirect: upstreamhttp.CheckRedirect}
 }
 
 func payloadDirOf(disk *payloadlog.Logger) string {

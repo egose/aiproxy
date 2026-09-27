@@ -74,6 +74,20 @@ required `protocol`: `chat` defaults to `chat`, `responses` defaults to
 
 ### Provider Types
 
+Use `aiproxy models --provider <name> --upstream` to discover upstream models with
+display names and configured-model annotations. Discovery has fixed inclusive
+limits: **100 pages, 10,000 model entries, 8 MiB per response body, 32 MiB total
+response bodies, and two minutes for the whole listing**. Entries include blank
+IDs and duplicates; body bytes include metadata/whitespace and are measured after
+Go's automatic HTTP decompression when applicable. Earlier caller deadlines and
+per-request timeouts still apply. Cursor cycles, malformed continuation metadata,
+oversized responses, and exhausted budgets return an incomplete-discovery error
+without printing partial results. Anthropic continuation requires a nonempty page
+and a matching `last_id`; Gemini empty pages with a next-page token continue within
+the same budgets. Cursors are query-escaped. If a limit is reached, check the upstream
+catalog or pagination implementation. See [discovery design](docs/design.md#upstream-model-discovery)
+for the bounds and rationale; proxy-owned `GET /v1/models` is unaffected.
+
 - `openai` – built-in OpenAI adapter (pass-through)
 - `openai-compatible` – any OpenAI-compatible endpoint (requires `base_url`)
 - `anthropic` – chat and responses translation to Anthropic Messages API
@@ -157,6 +171,13 @@ provider "zenmux" "zenmux" {
 
 ### GitHub Copilot
 
+**Hermetically verified; live GitHub compatibility unverified.** Local synthetic
+fixtures verify the implementation, not OAuth-app eligibility, direct-Bearer
+acceptance, available models, required upstream headers, or exchange/refresh needs.
+See [mock-only verification](website/docs/operations.md#mock-only-copilot-verification)
+for repeatable checks requiring no real client ID/account. Live verification is
+separately deferred in [COPILOT-LIVE-01](docs/tasks/20260927-102347-copilot-live-compatibility.md).
+
 `github-copilot` serves `POST /v1/chat/completions` (JSON and SSE) only. All
 other operations are rejected before upstream I/O. Inventory and usage stay
 proxy-owned: `GET /v1/models` and `GET /v1/billing/usage` never call upstream.
@@ -197,8 +218,10 @@ runtime. On upstream `401`/`403`, or after revocation/expiry, re-run the same
 `login` command and reload again. `base_url` is an optional transport override
 only (default `https://api.githubcopilot.com`); upstream inference is
 `POST {base}/chat/completions`, and `GET {base}/models` via
-`aiproxy models --config ...` uses the same stored bearer credential without
-changing the static inventory.
+`aiproxy models --config ... --provider copilot --upstream` uses the same stored
+bearer credential without changing the static inventory. Each listing loads the
+current sidecar; an already running server keeps its loaded credential until reload.
+The example model name is illustrative, not a verified available GitHub model.
 
 ### Routing
 
@@ -218,7 +241,11 @@ changing the static inventory.
   caller-bound opaque reasoning blobs (`encrypted_content`, `signature`,
   redacted thinking) before fan-out (`passthrough = false`), or retries
   the same target once stripped when an upstream `400` matches
-  `match_messages` (`on_caller_mismatch = "strip_and_retry")
+  `match_messages` (`on_caller_mismatch = "strip_and_retry"). Optional compressed
+  inspection accepts up to four encoding layers, 256 bytes of encoding metadata,
+  and 1 MiB of decoded data per layer; zstd windows are limited to 1 MiB.
+  Unsupported, corrupt, or over-budget encodings skip the mismatch retry and
+  preserve the original response bytes.
 
 ### Not Implemented
 
@@ -275,7 +302,17 @@ skip the config file (explicit `--config` overrides it; `serve -d` and
 `configure`/`login` file workflows require a file). The config also accepts
 HCL's JSON form, which is single-line safe when newlines cannot survive the
 transport (for example a single-line input field). Use `aiproxy convert
-[target-file]` to translate a config between HCL and JSON.
+[target-file]` to translate a config between HCL and JSON. Conversion resolves
+`env("VAR")` into literal values, including secrets, and validates the result
+before writing. On Linux and macOS, files are published atomically with exact `0600` permissions;
+without `--force`, an existing destination is never overwritten, even when
+conversions compete. `--force` atomically replaces regular files and tightens
+their permissions; symlinks (including dangling links) and non-regular targets
+are rejected. Missing parent directories are created with mode `0700` (subject
+to umask). Use `-` as the target for stdout, which also contains resolved secrets.
+Windows file conversion is rejected before creating files or directories: this
+writer cannot guarantee owner-only permissions and atomic replacement there.
+Use stdout conversion with a suitably secured external tool to save its output.
 
 Foreground `aiproxy serve` is supported across the advertised release targets.
 Linux additionally supports `aiproxy serve -d` and the `aiproxy status`,
@@ -444,6 +481,16 @@ aiproxy configure alias \
 
 Use `upstream_header_timeout` to control how long the proxy waits for upstream response headers. Provider values override the root value; otherwise the default is 90 seconds. This timeout does not cap response bodies or SSE streams after headers arrive.
 
+Upstream inference, health probes, and CLI model discovery follow at most 10 redirects, all within
+the original request's origin (same scheme, case-insensitive hostname, and effective
+port; omitted ports mean 80 for HTTP and 443 for HTTPS). Cross-origin redirects,
+including HTTPS-to-HTTP downgrades and port changes, fail before sending credentials,
+custom forwarded headers, or request bodies to the destination. Configure the final
+upstream `base_url` directly if a provider redirects to another origin. A blocked
+redirect or redirect loop produces an upstream error: direct inference returns
+`502`, aliases can try their next configured target, and CLI discovery reports an
+error. OAuth login continues to refuse all redirects.
+
 Use root `user_agent` and `forward_user_agent` attributes as defaults for all providers. A provider-level `user_agent` overrides the root value, while `forward_user_agent` is effective when set at either level (there is no per-provider opt-out when the root enables it; set the flag per provider instead).
 
 Use `extends` when several credentials share one provider type, endpoint, timeout, and model inventory. A derived provider keeps the two-label provider form and may declare only `extends`, optional `display_name`, and exactly one local credential (`api_key` or `api_key_ref`):
@@ -505,6 +552,7 @@ make vet test               # vet + unit tests
 make test-race              # unit tests with the race detector
 make integration             # hermetic binary-level integration tests
 make docs-contract           # public docs contract matrix check
+make lint-workflows          # actionlint, version declared in .tool-versions
 ```
 
 The repo also includes stub-backed end-to-end tests that run as part of the
@@ -513,7 +561,54 @@ providers so the full request path can be exercised without external services.
 
 Hermetic binary-level integration tests run with local upstream stubs and are
 part of normal CI. Real-provider sandbox tests remain separate and optional so
-normal test runs do not require paid credentials or external services.
+normal test runs do not require paid credentials or real-provider access.
+
+The Test workflow also runs a dedicated PostgreSQL 17 service and race-enabled
+tests for `internal/store`, `internal/dbmerge`, `internal/httpapi`, and
+`internal/app`. The service must pass `pg_isready` before the job starts; each job
+gets an isolated database and dynamically mapped host port. Database tests skip
+when `AIPROXY_TEST_DATABASE_URL` is absent and fail on connection/migration errors
+when it is set. Use a disposable database: fixtures reset shared tables. Keep
+packages serial (`-p 1`) and do not run another test command against the same
+database concurrently.
+
+Equivalent local database verification (run from the repository root):
+
+```sh
+docker run --detach --rm --name aiproxy-test-postgres \
+  -e POSTGRES_USER=aiproxy_test -e POSTGRES_PASSWORD=ci_fixture_only \
+  -e POSTGRES_DB=aiproxy_test -p 127.0.0.1:39586:5432 \
+  --health-cmd 'pg_isready -U aiproxy_test -d aiproxy_test' \
+  --health-interval 5s --health-timeout 5s --health-retries 12 postgres:17
+# Wait for this to report healthy before testing:
+docker inspect --format '{{.State.Health.Status}}' aiproxy-test-postgres
+export AIPROXY_TEST_DATABASE_URL='postgres://aiproxy_test:ci_fixture_only@127.0.0.1:39586/aiproxy_test?sslmode=disable' # pragma: allowlist secret
+go test -race -p 1 -count=1 -v ./internal/store ./internal/dbmerge ./internal/httpapi ./internal/app
+# For the full Go gates against this same disposable fixture:
+GOFLAGS=-p=1 make vet test test-race
+# When finished with this fixture:
+docker stop aiproxy-test-postgres
+unset AIPROXY_TEST_DATABASE_URL
+```
+
+Frontend CI uses the repository's shared asdf setup and frozen workspace lockfile.
+With the versions from `.tool-versions` installed, run the same commands locally:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter @aiproxy/web-ui test
+pnpm --filter @aiproxy/web-ui typecheck
+pnpm --filter @aiproxy/web-ui build
+```
+
+`typecheck` runs `tsc -b --force` across both referenced projects: all application
+and test sources under `web-ui/src`, plus `vite.config.ts` and `vitest.config.ts`.
+Each project retains strict checks and `noEmit`; forcing the check prevents stale
+build-info state from bypassing diagnostics. Plain `tsc --noEmit` against the empty
+reference-root config does not traverse those projects. The build script runs
+this same typecheck before bundling the embedded UI. Serialize UI, host,
+integration, and release builds because they share generated output directories.
+Go vet/tests also read embedded UI assets: finish UI builds before starting them.
 
 Documentation-only changes run the `Docs Contract` workflow, which executes
 `make docs-contract` to keep the public endpoint/provider and capability
@@ -590,6 +685,18 @@ dashboard {
   over loopback plain HTTP with bearer authentication and refuses non-loopback
   listener hosts. Remote dashboard access requires a future explicit transport
   design.
+- All dashboard APIs are global, operator-only surfaces: snapshot, logs, payload
+  lists/details, quarantine lists/take-once captures, and exception decisions.
+  They accept the dashboard bearer secret or, with multi-tenancy enabled, a JWT
+  for an active **system administrator**, checked against the current stored user
+  on each request. Ordinary users and workspace administrators receive `403`;
+  selecting another workspace does not grant access or scope this global data.
+  Demotion takes effect immediately; disabled/deleted accounts are rejected even
+  while their JWT is unexpired. Invalid credentials receive `401`, or `429` after
+  repeated failures. Denied requests cannot consume captures or persist decisions.
+  The web UI hides global dashboard navigation for non-operators and keeps
+  workspace management available. An ordinary account JWT no longer grants
+  dashboard access.
 
 ### `ingress_guardrails`
 

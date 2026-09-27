@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@egose/shadcn-theme/components/ui/card';
 import { Input } from '@egose/shadcn-theme/components/ui/input';
+import { Alert, AlertDescription } from '@egose/shadcn-theme/components/ui/alert';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@egose/shadcn-theme/components/ui/table';
 import { useSnapshot } from '../hooks';
+import { errorMessage } from '../services/dashboard';
 import type { Recent } from '../types';
 
 type RequestSortKey = 'Model' | 'Operation' | 'StatusCode' | 'Provider' | 'TotalTokens' | 'Client';
@@ -65,6 +67,16 @@ export function RequestsPage() {
       return { key, desc: !prev.desc };
     });
   };
+
+  if (snapshot.error) {
+    return (
+      <div className="p-6">
+        <Alert variant="danger">
+          <AlertDescription>{errorMessage(snapshot.error)}</AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
 
   return (
     <div className="grid w-full gap-6 p-6">

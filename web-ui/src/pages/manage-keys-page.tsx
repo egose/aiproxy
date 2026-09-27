@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@egose/shadcn-theme/co
 import { Empty, EmptyDescription, EmptyTitle } from '@egose/shadcn-theme/components/ui/empty';
 import { Spinner } from '@egose/shadcn-theme/components/ui/spinner';
 import { KeyQuotaLine } from '../components/quota';
-import { useAdminKeys, useAdminMe, useCurrentOrg, useOrgTeams } from '../hooks';
+import { useAdminKeys, useAdminMe, useCurrentWorkspace, useWorkspaceTeams } from '../hooks';
 import { AdminKeysPage } from './admin-keys-page';
 
 function MemberKeysView() {
@@ -55,30 +55,30 @@ function MemberKeysView() {
 }
 
 export function ManageKeysPage() {
-  const { org, orgs } = useCurrentOrg();
+  const { workspace, workspaces } = useCurrentWorkspace();
   const me = useAdminMe(true);
-  const teams = useOrgTeams(org?.id ?? null, true);
+  const teams = useWorkspaceTeams(workspace?.id ?? null, true);
 
-  if (orgs.isLoading) {
+  if (workspaces.isLoading) {
     return (
       <div className="p-6 text-sm text-slate-500">
         <Spinner size="small">Loading API keys...</Spinner>
       </div>
     );
   }
-  if (!org) {
+  if (!workspace) {
     return (
       <div className="p-6">
         <Empty>
-          <EmptyTitle>No organization selected</EmptyTitle>
+          <EmptyTitle>No workspace selected</EmptyTitle>
         </Empty>
       </div>
     );
   }
-  const orgAdmin = me.data?.is_admin === true || org.role === 'admin';
+  const workspaceAdmin = me.data?.is_admin === true || workspace.role === 'admin';
   const teamAdmin = (teams.data ?? []).some((t) => t.my_role === 'admin');
-  if (!orgAdmin && !teamAdmin) {
+  if (!workspaceAdmin && !teamAdmin) {
     return <MemberKeysView />;
   }
-  return <AdminKeysPage key={org.id} fixedOrgId={org.id} canAdminOrg={orgAdmin} />;
+  return <AdminKeysPage key={workspace.id} fixedWorkspaceId={workspace.id} canAdminWorkspace={workspaceAdmin} />;
 }

@@ -3,9 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
-	"embed"
+	_ "embed"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/uptrace/bun"
@@ -13,8 +12,10 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 )
 
-//go:embed migrations/*.sql
-var migrationFS embed.FS
+//go:embed schema.sql
+var schemaSQL string
+
+const schemaVersion = "schema.sql"
 
 type Store struct {
 	DB *bun.DB
@@ -47,22 +48,6 @@ type MigrationStatus struct {
 	Pending []string
 }
 
-func migrationNames() ([]string, error) {
-	entries, err := migrationFS.ReadDir("migrations")
-	if err != nil {
-		return nil, err
-	}
-	var names []string
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
-			continue
-		}
-		names = append(names, e.Name())
-	}
-	sort.Strings(names)
-	return names, nil
-}
-
 func ensureMigrationsTable(ctx context.Context, db *bun.DB) error {
 	_, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`)
 	return err
@@ -88,10 +73,6 @@ func (s *Store) Status(ctx context.Context) (MigrationStatus, error) {
 }
 
 func migrationStatus(ctx context.Context, db *bun.DB) (MigrationStatus, error) {
-	names, err := migrationNames()
-	if err != nil {
-		return MigrationStatus{}, err
-	}
 	if err := ensureMigrationsTable(ctx, db); err != nil {
 		return MigrationStatus{}, err
 	}
@@ -99,15 +80,10 @@ func migrationStatus(ctx context.Context, db *bun.DB) (MigrationStatus, error) {
 	if err != nil {
 		return MigrationStatus{}, err
 	}
-	var st MigrationStatus
-	for _, n := range names {
-		if applied[n] {
-			st.Applied = append(st.Applied, n)
-		} else {
-			st.Pending = append(st.Pending, n)
-		}
+	if applied[schemaVersion] {
+		return MigrationStatus{Applied: []string{schemaVersion}}, nil
 	}
-	return st, nil
+	return MigrationStatus{Pending: []string{schemaVersion}}, nil
 }
 
 func (s *Store) MigrateUp(ctx context.Context) ([]string, error) {
@@ -119,28 +95,23 @@ func migrateUp(ctx context.Context, db *bun.DB) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var applied []string
-	for _, name := range st.Pending {
-		raw, err := migrationFS.ReadFile("migrations/" + name)
-		if err != nil {
-			return applied, err
-		}
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			return applied, err
-		}
-		if _, err := tx.ExecContext(ctx, string(raw)); err != nil {
-			_ = tx.Rollback()
-			return applied, fmt.Errorf("migration %s: %w", name, err)
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (name) VALUES (?) ON CONFLICT DO NOTHING`, name); err != nil {
-			_ = tx.Rollback()
-			return applied, err
-		}
-		if err := tx.Commit(); err != nil {
-			return applied, err
-		}
-		applied = append(applied, name)
+	if len(st.Pending) == 0 {
+		return nil, nil
 	}
-	return applied, nil
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, schemaSQL); err != nil {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("migration %s: %w", schemaVersion, err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (name) VALUES (?) ON CONFLICT DO NOTHING`, schemaVersion); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return []string{schemaVersion}, nil
 }

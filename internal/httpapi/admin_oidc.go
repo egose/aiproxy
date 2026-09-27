@@ -366,8 +366,8 @@ func (h *Handler) adminOIDCCallback(deps Dependencies, w http.ResponseWriter, r 
 		}
 		u = *nu
 	}
-	if err := h.ensurePersonalOrg(ctx, deps, u.ID, u.Email); err != nil {
-		fail("cannot provision organization")
+	if err := h.ensurePersonalWorkspace(ctx, deps, u.ID, u.Email); err != nil {
+		fail("cannot provision workspace")
 		return
 	} else {
 		if u.Disabled {

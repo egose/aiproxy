@@ -250,6 +250,12 @@ support beyond what is configured.
 
 ## GitHub Copilot
 
+**Hermetically verified; live GitHub compatibility unverified.** Local fixtures
+verify implementation behavior, not application entitlement, direct-Bearer access,
+required GitHub headers, model availability, or exchange/refresh needs. See
+[mock-only verification](operations.md#mock-only-copilot-verification). Example
+model names are illustrative; live verification remains separately deferred.
+
 `github-copilot` is a chat-only provider backed by a device-flow login. It
 serves `POST /v1/chat/completions` (JSON and SSE); `responses`, `embeddings`,
 `images`, and audio are rejected before upstream I/O. The default origin is
@@ -291,6 +297,16 @@ only on image bodies); inbound auth/cookies/`x-api-key`/caller Copilot
 metadata are stripped. `GET {base}/models` listing shares the same auth
 without changing the static proxy inventory. See `examples/github-copilot.hcl`
 for a complete config.
+
+With multi-tenancy enabled, the web provider form offers Connect GitHub as a
+database alternative to the CLI sidecar above: enter the same explicitly
+supplied public OAuth client ID, approve at the shown URL with the shown code,
+then save the provider to apply. The server stores the result as an
+AES-GCM-encrypted database credential (same database encryption key required
+on every instance); the browser never receives tokens. Unfinished sessions
+expire and are reaped by a bounded per-minute cleanup, and activation applies
+to the receiving instance only. See [Operations](operations.md) for the
+Connect GitHub details and [mock-only verification](operations.md#mock-only-copilot-verification).
 
 ## ZenMux
 

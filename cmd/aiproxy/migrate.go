@@ -63,7 +63,7 @@ func newMigrateUpCommand(cfgPath *string) *cobra.Command {
 			if seeded {
 				fmt.Fprintln(cmd.OutOrStdout(), "seeded admin user from AIPROXY_ADMIN_EMAIL")
 			}
-			if err := st.EnsureSystemOrg(ctx); err != nil {
+			if err := st.EnsureSystemWorkspace(ctx); err != nil {
 				return err
 			}
 			return nil

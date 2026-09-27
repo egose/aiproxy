@@ -167,16 +167,29 @@ func TestInviteAcceptLoginFlow(t *testing.T) {
 }
 
 func TestInviteValidation(t *testing.T) {
-	_, h, access := openUsersTestStore(t)
+	st, h, access := openUsersTestStore(t)
 
 	for name, body := range map[string]map[string]interface{}{
-		"bad email":    {"email": "not-an-email", "role": "user"},
-		"bad role":     {"email": "x@example.com", "role": "superuser"},
-		"missing role": {"email": "x@example.com"},
+		"bad email": {"email": "not-an-email", "role": "user"},
+		"bad role":  {"email": "x@example.com", "role": "superuser"},
 	} {
 		if code, _ := callAdmin(t, h, access, http.MethodPost, "/_internal/admin/invites", body); code != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400", name, code)
 		}
+	}
+	code, body := callAdmin(t, h, access, http.MethodPost, "/_internal/admin/invites", map[string]interface{}{
+		"email": fmt.Sprintf("default-role-%d@example.com", time.Now().UnixNano()),
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("default role: status = %d, want 201", code)
+	}
+	inv, err := st.GetInviteByHash(context.Background(), store.TokenHash(body["token"].(string)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.DeleteInvite(context.Background(), inv.ID) })
+	if inv.IsAdmin || inv.WorkspaceRole != roleMember {
+		t.Errorf("default invite must be an ordinary workspace member: %+v", inv)
 	}
 	if code, _ := callAdmin(t, h, "", http.MethodPost, "/_internal/admin/invites/accept", map[string]interface{}{
 		"token": "nope", "password": "long-enough-password",

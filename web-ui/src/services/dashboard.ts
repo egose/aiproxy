@@ -1,6 +1,8 @@
 import { ZodError } from 'zod';
+import axios from 'axios';
 
-import { adminStore } from '../store';
+import { adminStore, dashboardStore, setDashboardToken } from '../store';
+import { assertAuthGeneration, authLifecycle } from '../auth-lifecycle';
 import { adminClient } from './admin';
 import { dashboardClient } from './client';
 import {
@@ -25,17 +27,27 @@ export interface SnapshotEnvelope {
   [key: string]: unknown;
 }
 
-// When signed in (multi-tenancy), the server accepts the admin JWT on the
-// dashboard APIs, so no dashboard token is needed. Otherwise fall back to
-// the dashboard bearer token.
+// Dashboard APIs accept the dashboard secret or a current system administrator.
 function dataClient() {
-  return adminStore.accessToken ? adminClient : dashboardClient;
+  return dashboardStore.token || !adminStore.accessToken ? dashboardClient : adminClient;
 }
 
 export async function fetchSnapshot(): Promise<Snapshot> {
   const res = await dataClient().get<unknown>(snapshotPath);
   const envelope = res.data as SnapshotEnvelope;
   return snapshotSchema.parse({ ...envelope, last_seq: envelope.last_seq ?? 0 });
+}
+
+export async function connectDashboardToken(token: string) {
+  const generation = authLifecycle.generation;
+  const res = await axios.get<unknown>(snapshotPath, {
+    timeout: 10_000,
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assertAuthGeneration(generation);
+  const envelope = res.data as SnapshotEnvelope;
+  snapshotSchema.parse({ ...envelope, last_seq: envelope.last_seq ?? 0 });
+  setDashboardToken(token);
 }
 
 export async function fetchPayloads(limit = 100, errorsOnly = false): Promise<PayloadList> {
@@ -82,8 +94,15 @@ export function errorMessage(err: unknown): string {
   if (typeof err !== 'object' || err === null) return 'Request failed.';
   if ('response' in err) {
     const resp = (err as { response?: { status?: number; data?: unknown } }).response;
+    if (
+      resp?.status === 403 &&
+      typeof resp.data === 'string' &&
+      resp.data.trim() === 'dashboard operator access required'
+    ) {
+      return 'Operator access required. Global dashboard data and decisions are available only to system administrators or dashboard-token holders.';
+    }
+    if (resp?.status === 401) return 'Authentication failed. Sign in again or check your dashboard token.';
     if (typeof resp?.data === 'string' && resp.data) return resp.data;
-    if (resp?.status === 401) return 'Unauthorized: dashboard token mismatch.';
     if (resp?.status === 404) return 'Dashboard not configured on this server.';
     if (resp?.status === 429) return 'Rate limited, retry shortly.';
     if (resp?.status) return `Request failed with status ${resp.status}.`;

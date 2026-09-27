@@ -60,6 +60,18 @@ func DefaultRetryStatusCodes() []int {
 	return codes
 }
 
+func (rt *Runtime) ApplyProviderDefaults(p Provider) Provider {
+	if p.UpstreamHeaderTimeout == 0 {
+		p.UpstreamHeaderTimeout = rt.UpstreamHeaderTimeout
+	}
+	if p.UserAgent == "" {
+		p.UserAgent = rt.UserAgent
+	}
+	p.ForwardUserAgent = p.ForwardUserAgent || rt.ForwardUserAgent
+	p.ForwardHeaders = unionForwardHeaders(rt.ForwardHeaders, p.ForwardHeaders)
+	return p
+}
+
 func NormalizeAlias(a Alias) Alias {
 	out := a
 	if len(out.RetryStatusCodes) == 0 {
@@ -218,7 +230,7 @@ func validateDynamicCredential(p Provider) error {
 		if p.APIKey != "" || p.APIKeyRef != nil { // pragma: allowlist secret
 			return fmt.Errorf("provider %q: api_key and api_key_ref are not supported by github-copilot; use credential_ref", p.Name)
 		}
-		if p.CopilotCredentialRef == nil || p.CopilotCredentialRef.Name == "" {
+		if p.CopilotToken == "" && (p.CopilotCredentialRef == nil || p.CopilotCredentialRef.Name == "") {
 			if !p.Enabled {
 				return nil
 			}
@@ -226,7 +238,7 @@ func validateDynamicCredential(p Provider) error {
 		}
 		return nil
 	}
-	if p.CopilotCredentialRef != nil {
+	if p.CopilotCredentialRef != nil || p.CopilotToken != "" {
 		return fmt.Errorf("provider %q: credential_ref is only supported by github-copilot", p.Name)
 	}
 	if p.APIKey != "" && p.APIKeyRef != nil { // pragma: allowlist secret

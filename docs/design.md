@@ -19,6 +19,340 @@ identity primitives.
 
 Configuration is written in HCL with an Alloy-like two-label block style.
 
+## Interactive Dashboard Session Lifetime
+
+The CLI owns signal handling and a single snapshot polling worker. Initial attach
+errors return before starting the TUI. After attach, the worker uses a cancelable
+session context and one resettable timer; it never launches overlapping snapshot
+requests. Transient failures retain the last snapshot and back off from 2 to 30
+seconds. Permanent endpoint/auth/config denial suspends automatic retries and gates
+new payload/block RPCs until a successful snapshot probe. Credentials are immutable
+for the attachment; changed credentials require re-attachment. Explicit Ctrl+R
+requests are nonblocking, coalesced, and do not replay pane reads or decisions.
+
+`dashboard.Program.Done()` closes after Bubble Tea returns and terminal cleanup
+finishes. `Wait()` is repeatable and returns its result, including initialization
+and I/O errors. `Close()` cancels and waits; it is idempotent and safe alongside
+refresh/status sends. The CLI cancels and joins its poller on Program completion,
+parent cancellation or signal. `RunWithOptions` supplies configured input/output,
+a nonblocking `Retry` callback and `SignalsHandled` for callers owning OS signals;
+the existing `Run`/`RunWithBlockFetcher` entry points remain available.
+
+The model's `ctx` is the Program-owned child lifetime, canceled on every Program
+exit. Every pane command captures that context and derives a ten-second deadline
+through `fetchContext`; fetchers must honor it and release response bodies. Optional
+parent arguments preserve standalone helper tests, which default to a bounded
+background context. New pane commands must pass `m.ctx`, never start an independent
+background retry loop, and must not mutate the model from worker goroutines.
+`ConnectionStatus` is local session metadata (last successful receipt, reconnect/
+denial state, next retry and sanitized guidance), independent of paused snapshot
+data and the server clock. Generation/selection rules belong to each pane, and a
+denied or canceled mutation is never automatically retried.
+
+## Dashboard Measurement Boundaries
+
+The aggregator keeps global rate counters in a fixed 901-slot second ring, separate
+from both the 200-event recent ring and retained billing keys. At snapshot time,
+`rates.window_end` is the aggregator clock truncated to a whole second. The one- and
+five-minute counters cover `[end-60s,end)` and `[end-300s,end)`. The 15 graph points
+are consecutive 60-second intervals, oldest first, covering `[end-900s,end)`.
+The ongoing second is admitted but becomes visible only when complete (less than
+one second of measurement lag, in addition to polling). Rates divide by the full
+60/300 seconds even just after startup. Zero/future event timestamps use admission
+clock time; late events count only in their retained second. Older events cannot
+overwrite live ring slots. Reading expires idle slots; record and read both remain
+bounded independently of traffic volume or identity cardinality. Errors exclude
+429, which has its own counter. Tokens are recorded `TotalTokens`, not accumulated
+billing tokens. These are completed-request metrics, including unresolved/errors;
+they are not upstream attempt or in-flight counters.
+
+`dashrpc.Snapshot` adds optional `rates` and `billing` objects. `billing` contains
+`as_of`, `retention_seconds`, `bucket_seconds`, public `usage` and attributed
+`upstream` from one locked accounting snapshot. Default billing retention stays at
+24 hours with minute buckets: a bucket is retained while its start is at or after
+`as_of-24h` (inclusive). This preserves the BOUNDARY billing contract, including
+expiry up to almost a minute before an individual event reaches 24 hours.
+The legacy `usage` field carries the same public rows; `provider_stats` and legacy
+`upstream` remain lifetime counters. The TUI's upstream usage toggle instead groups
+retained attributed rows by tenant/client/provider/model/operation/status.
+
+`internal/usagecost` owns billing/TUI estimates at current configured model prices.
+Alias attribution must reconcile every count/token field for the exact public
+model, tenant, client, operation and status. No configured-target, count-weight or
+even-split estimate substitutes for missing attribution. Used target price gaps
+make the alias estimate unavailable; unused targets do not affect it. A provider
+subtotal includes its direct and attributed alias traffic once and is unavailable
+if any of its used models lacks the necessary price. A different provider's price
+gap does not invalidate a fully attributed, fully priced subtotal. Incomplete alias
+attribution conservatively invalidates provider subtotals, since the missing
+provider cannot be inferred. Public billing retains tenant-first filtering, or
+tenantless client-only filtering, before cost calculation; exact attribution
+matching also preserves empty tenant/client dimensions.
+
+Provider requests/errors/429/tokens are labeled global lifetime, including when a
+provider becomes disabled. P95/n is nearest-rank P95 and the provider's positive-
+duration sample count among the received recent completions (global cap 200), with
+no time window. Idle time does not erase this sample. Global rate/provider metrics
+ignore the usage tenant/error filters; usage and its estimates reflect them.
+Absent old-RPC rate/billing fields stay unavailable, not zero; the TUI never falls
+back to recent events for rates or lifetime upstream totals for retained costs.
+Transported measurements are immutable snapshot data; local connection receipt
+time and reconnect status remain independent.
+
+## Dashboard Refresh Identity And Pause
+
+Refresh anchors provider and usage top rows, and both selected and top rows for
+aliases, payloads and blocks. Provider/alias names, request IDs and block IDs are
+stable keys; usage keys include exact tenant/client/model/operation/status, never
+counts or token totals. Anchors resolve against the displayed ordering (including
+oldest-first payloads). Missing rows fall back to the old index clamped to the new
+list. Viewport bounds and keeping selection visible take precedence over the top
+anchor if reordering makes both impossible. Tenant selection retains its name
+across snapshots; removal selects all tenants. Explicit local usage filter changes
+start at the top. Payload order toggles retain selection; existing log order toggles
+re-enable follow, while pinned log sequence IDs survive snapshot arrivals.
+
+Pause is a model-loop data boundary. It freezes snapshot data, health, logs,
+measurement windows, uptime/display time, pane lists, details and decision results.
+Mutable in-process viewers are detached on pause; transported measurements remain
+one immutable received unit. There is at most one pending snapshot, one pending
+result for each of the five pane request classes, and one latest tick timestamp.
+Paused ticks schedule the next tick but do not refresh pane lists. Snapshot polling
+and separately labeled connection receipt/denial/reconnect status remain live.
+Resume applies the newest snapshot, then accepted pane lists/details/acknowledgments,
+and advances display time to the latest tick in one model update. These independent
+RPCs have no server-side cross-endpoint transaction guarantee. Local time never
+recomputes transported rates or billing windows.
+
+Cached navigation, order and local usage/log filters work during pause. Remote list
+refresh/filter, detail fetch and decision keys require resume; they are not queued.
+Opening an unvisited pane while paused starts its list read on resume. Already
+in-flight commands can finish into bounded buffers. Closing a detail discards its
+buffer, cancels its request and invalidates that session, including acknowledgments;
+a consumed take-once block capture is never automatically fetched again or replayed.
+
+`requestSlot` starts cancelable child requests under the Program context, tagging
+results with a monotonically advancing generation. The bounded helper deadline
+still applies. Filter replacement cancels the old read immediately and starts a new
+generation. Only the current generation and matching detail ID/action may apply;
+completion advances the generation to reject duplicate results. Workers capture
+inputs before launch and never read or mutate model state. Following provider/detail
+and Requests/search workflows should reuse `anchoredIndex` and `requestSlot` with
+their own identity and request classes.
+
+## Dashboard Layout And Input Ownership
+
+The supported minimum remains 80x12. `compactLayout` selects a focused-pane body
+below 30 rows; `focusedLayout` also applies to explicit zoom. A normal frame reserves
+one header line, two measurement lines and two footer lines before allocating body
+space. Focused lists keep a one-line bottom-tab strip, including when Providers or
+Usage has focus. Stacked layouts reserve at least twelve stats rows and six bottom
+rows; pane resizing cannot violate these budgets. Detail consumes the body directly.
+List visible-row helpers use the same geometry as rendering, so a selected record
+cannot move outside the rendered rows. Identity reconciliation remains TUI-03's
+boundary; resize/zoom/focus only clamp viewports and retain selection.
+
+`paneFrame` receives total outer dimensions, fits content before Lip Gloss can wrap
+it, and reserves its borders. Lip Gloss v2 `Height` includes borders. ANSI-aware
+cell width/truncation/hard wrapping preserve wide and combining Unicode; fitting
+does not slice UTF-8 or style escapes. Optional overflow hints yield to data rows
+when the pane is full. Footer controls reserve their own width before contextual
+hints, and the second line retains independent connection receipt/retry state.
+Payload/block inspection uses the fixed-chrome wrapped detail workflow below.
+
+`input.go` owns dispatch, with derived modes `inputBrowse`, `inputDetail`,
+`inputHelp`, `inputSearch` and `inputTooSmall`. Ctrl+C always quits and Ctrl+R remains a nonblocking
+connection retry. Help handles only scroll/close/quit plus that reserved retry;
+other keys cannot reach hidden pane handlers. Esc unwinds help → detail → zoom →
+quit. Enter opens/closes provider and bottom details, never zooms; z toggles list zoom
+and is inert inside already-full-body detail. Tab/Shift-Tab changes focus, numbers
+select bottom tabs, and brackets move previous/next in numbered order. These
+navigation actions first call `closeDetail`, which invalidates/cancels remote
+detail/decision slots and clears associated paused buffers. Block decisions have
+only a/s/d bindings; numbers cannot mutate. Usage filters and log/payload order
+keys require the corresponding focused pane. An undersized warning owns input too.
+
+### Captured Text And Selected-Finding Decisions
+
+`inspection.go` renders payload/block details with fixed ID/finding, scope/status
+headers and a wrapped-row/cap footer, leaving at least one content row at 80x12.
+All original within-cap text is reachable by line/page/Home/End navigation. Full
+metadata is repeated in the body when its fixed header needs cell truncation.
+Control bytes and invalid UTF-8 are escaped before wrapping; captured ANSI cannot
+alter terminal state. Payload output keeps the existing 64 KiB byte cap and reports
+pretty-output truncation and the three existing body truncation flags. Block capture
+truncation is explicitly unknown: its existing wire shape has neither flags nor
+original lengths. No completeness claim, reconstructed hash or new RPC is needed.
+
+Block n/N cycles one selected finding. a/s/d sends a one-element hash list, requiring
+an existing lowercase 64-hex SHA. The scope is persistent GLOBAL future matches,
+never replay of the original request. Hash-equivalent findings share the effect.
+While a decision is outstanding the selected finding is locked; duplicate actions
+are suppressed. The request slot captures the ID/action/hash and lifetime context on
+the model loop. Results must match generation, capture, action and hash before they
+can change state or enter the bounded paused-result slot. Closing cancels/invalidates
+and clears captured text, decision results and paused buffers; cancellation does not
+promise rollback of an already committed server mutation.
+
+An open detail retains at most one result per captured hash (bounded by its findings).
+An acknowledgment is successful only for ok=true, the requested action and count=1;
+success suppresses the same action on that hash even after finding navigation. A
+different action deliberately replaces it. Error/invalid acknowledgments leave the
+outcome unknown and permit explicit retry. No automatic mutation replay is introduced.
+The list explains take-once consumption before Enter, and detail keeps consumption,
+pending/error/success, scope and controls visible. Existing operator authorization
+and detail-only body confidentiality remain the server boundaries.
+
+### Input Contract For Requests/Search
+
+`search.go` routes its derived `inputSearch` mode **after** reserved Ctrl+C/Ctrl+R
+handling and **before** q/help/pause/navigation. It retains at most 256 printable
+Unicode characters and one applied query per searchable pane. q/p/h/?/digits/brackets
+are text; Esc cancels without changing the applied query, Enter applies, Ctrl+U
+clears the editor (or the applied query in browse mode). Arrows/Home/End and
+Backspace/Delete edit locally. The first footer row holds a cell-bounded, horizontally
+scrolled prompt and apply/cancel/quit hints; the live connection line stays independent.
+Help is available after leaving the editor; no edit key falls through to pane actions.
+
+Queries AND whitespace-separated case-insensitive substrings. `field:value` limits
+a term to one supported field; unknown fields match nothing. Bare terms search all
+supported fields. Requests support id/client/tenant/model/resolved/provider/status/op,
+Logs support structured id/level, and Payloads support id/model/resolved/provider/
+status/method/path. Local queries combine with existing pane status/level filters,
+use cached bounded lists and work while paused. Applying/clearing resets that list's
+position; refresh anchors the currently displayed ordering. Payload responses still
+use the existing generation/cancellation/pause slots; no search worker is added.
+
+## Dashboard Recent Completions And Correlation
+
+Tab 5 is Requests; tabs 1–4 keep their meanings. The pane reads the existing global
+200-entry completion ring newest-first, independent of disk payload logging and rate
+buckets. `accounting.Event.RequestID` and `PublicModel` are optional additive metadata
+from the HTTP handler's deferred completion boundary. `Model` keeps existing billing
+categories (including rejection sentinels); `PublicModel` preserves a submitted model
+on rejection. Provider/UpstreamModel identify the final result's resolved provider and
+**configured** model name, not an invented attempt or the provider's wire model name.
+Pre-dispatch/transport failures can have no resolved target. Tokens are reported counts;
+zero may mean unreported. HTTP status is the sent status, including for SSE streams.
+Only recognized inference operations enter this ring, after response handling finishes.
+
+The shared `ringBuffer.push` boundary stores a detached diagnostic copy **after**
+full-event billing, rate and lifetime aggregation. Named byte budgets in
+`accounting/recent.go` apply to every string: `RecentIdentityBytes=256` for RequestID,
+Tenant, Client and Provider; `RecentModelBytes=512` for PublicModel, Model and
+UpstreamModel; `RecentOperationBytes=64` for Operation. Thus
+`RecentEntryStringBytes=2624` and the 200-entry ring owns at most 524,800 string
+content bytes, plus fixed event/flag/allocator overhead. Even under-budget strings
+are cloned, so short substrings cannot pin oversized caller backing allocations.
+Over-budget valid UTF-8 retains the longest complete-code-point prefix within its
+budget; no ellipsis is inserted into identity text. Under-budget values stay exact.
+`RecentEntryJSONBytes=6*2624+1024` is a conservative per-event JSON allowance,
+including worst-case string escaping and fixed metadata; the recent array is at
+most `2+200*(RecentEntryJSONBytes+1)` (3,353,802) bytes. This is a bound on newly
+retained diagnostic recent metadata, **not** total process heap, accounting keys,
+catalogs, logs, other snapshot components, old-server data or total RPC size.
+
+Optional capitalized RPC `Truncated` contains boolean field names (RequestID,
+PublicModel, Tenant, Client, Model, Operation, Provider, UpstreamModel); absent/false
+means no reported truncation, and old snapshots retain their existing fallback.
+The fixed boolean struct keeps Event comparable. Optional `RecentSequence` and
+`ProviderID` are uint64 decimal **strings** in JSON, avoiding JavaScript rounding.
+The ring assigns the sequence to distinguish otherwise identical bounded completions;
+it is local to that aggregator, not an external request/correlation ID. ProviderID
+joins the existing exact-name `provider_stats[].ProviderID` for P95 grouping without
+retaining full provider names in the ring. The aggregate registry is append-only;
+snapshot builders read recent before provider summaries so every emitted ID can
+resolve even during concurrent recording. The TUI resolves IDs before grouping;
+legacy events use EventProvider, but truncated provider/model text without a mapping
+is unavailable rather than an exact key. Durations/counts and all full accounting,
+billing/filter/routing identities remain unchanged. MemoryRecorder remains an exact
+event recorder, not the bounded production diagnostic ring.
+
+Requests marks affected list rows `[truncated]` and detail enumerates shortened
+fields; search matches only retained text. A truncated RequestID disables l/v
+correlation and its action hints. Other truncated fields do not disable an exact
+RequestID. Never use a truncated prefix or RecentSequence as an exact external
+correlation key.
+
+At the TUI presentation boundary, `metadataText` escapes data-owned LF/CR/tab/ESC,
+all other Unicode control characters, Unicode line/paragraph separators and invalid
+UTF-8 bytes before row composition or wrapping. Literal backslashes are doubled
+(actual newline displays as `\n`, the two-character backslash-n string as `\\n`);
+double quotes are escaped and printable Unicode/combining text/emoji joiners remain.
+Application-owned row separators and styling are applied independently. Each Requests
+completion occupies one logical summary row, so fitting cannot hide its selected
+marker behind data-owned lines. Detail wraps the escaped text and remains scrollable.
+
+`metadataDisplayBytes=512` limits source bytes processed per presentation value at
+complete code-point boundaries, with at most 2,048 escaped bytes plus the explicit
+`[display clipped at 512 bytes]` suffix when needed. Every newly retained recent
+field fits without further clipping; oversized legacy/sibling values receive that
+separate presentation notice. The helper also covers shared Usage identity detail,
+correlation/filter labels, payload summary fields and payload ID titles. Captured
+payload bodies retain their existing bounded multiline inspection contract. Stored
+events, full grouping identities, raw search values and exact correlation keys never
+use this display encoding; display clipping alone does not disable intact-ID
+correlation or fabricate a retention flag.
+
+Request detail copies one selected completion, so refresh/expiry never substitutes
+another request. List anchors use completion metadata (including ID and timestamp),
+which also distinguishes reused caller IDs; missing rows use the clamped old position.
+No body, credentials, additional history or export joins this feed. Old snapshots use
+available Model metadata and explicitly lack ID correlation. Usage Enter copies the
+top visible exact tenant/client/model/operation/status group; n/N cycles all displayed
+groups, including the final rows. Quoted identity text wraps at compact sizes, within
+the explicit per-value presentation cap above.
+
+Request-detail l/v enters an exact-ID Logs/Payloads list, retaining a single return
+context (request/detail scroll/zoom and target list selection). Target queries and
+status/level filters are temporarily bypassed and filter/order keys suppressed;
+Esc closes target detail, then restores Requests detail. Explicit tab/focus navigation
+abandons the return context. Log IDs come from the logger's pinned structured
+`request_id` attribute through optional log JSON `request_id`, never parsed from
+unescaped Attrs. Caller-reused IDs may correlate multiple entries; old log snapshots
+without the structured field cannot correlate. Payload list reads remain capped at
+100; correlation does not page backward or fetch arbitrary missing records. Missing,
+disabled, expired/out-of-cap and unavailable metadata have distinct explanations where
+the source can distinguish them. Paused correlation browses cached lists only;
+remote reads require resume and use existing lifetime/generation guards.
+
+## Dashboard Provider Diagnostics And Metadata
+
+Provider selection is keyed by catalog name across both enabled and disabled lists.
+The cursor and top-visible row reconcile independently, then selected-row visibility
+wins if their anchors conflict. Detail stores the provider name, resolves against the
+displayed snapshot and reports removal rather than silently inspecting another row.
+It joins `hasDetail`/`closeDetail`, uses full-body wrapped pagination, and needs no
+RPC command or request slot. Pause therefore freezes provider settings, health and
+last-check age with the existing snapshot/display clock. Connection receipt stays live.
+
+Additive dashboard RPC fields are optional: `Provider.diagnostics` contains the
+header timeout and nullable probe configuration; `ModelPrice.details` contains
+display/upstream names, protocol and capabilities; `Alias.session_affinity` contains
+an explicit enabled flag and effective header names. Absent/null metadata means
+unknown for old snapshots. A present diagnostics object with null probe explicitly
+means no configured probe; absent model details do not imply a native protocol.
+The remote snapshot keeps availability maps separate from reconstructed config.
+These maps and transported data are immutable and catalog-bounded.
+
+`HealthcheckStatus.last_checked` survives source serialization and remote conversion
+unchanged. A zero/missing timestamp yields unknown age, and a future timestamp yields
+clock-ahead unknown. Probe healthy/unhealthy describes threshold state; latest HTTP
+status/reason describes the last attempt, so they need not agree during a threshold
+transition. No status record is not proof that a probe is disabled. Provider-wide
+lifetime counters are explicitly distinguished from alias/target counts, including
+when a provider appears multiple times in one alias.
+
+Diagnostic transport is an allowlist without credentials, credential references,
+user-agent values, authorization settings or probe expected bodies. Endpoint/probe
+URL sanitization removes userinfo/query/fragment, rejects invalid/opaque/non-HTTP
+URLs, and preserves only standard API/health path segments; opaque segments become
+`[redacted]`. Error text is reduced to safe status/body-mismatch messages or bounded
+transport/timeout/DNS/refused/TLS categories before serialization. The TUI repeats
+URL/reason sanitization for older servers and in-process snapshots. HOST displays
+the sanitized configured hostname: DNS lookup/cache code was removed entirely, so
+View, keyboard navigation and quit have no resolver dependency.
+
 ## Goals
 
 - Accept OpenAI-compatible client requests.
@@ -154,6 +488,24 @@ deployments.
 The proxy validates the inbound `Authorization: Bearer ...` token against
 statically configured client credentials from HCL.
 
+With multi-tenancy enabled, database inbound keys are also matched by token hash.
+Catalog merge copies each enabled, not-yet-expired key's deadline into the live
+authenticator as a value, alongside its principal. Authentication snapshots own
+their credential maps and expiry values; changing a database row or merge input
+cannot mutate an already-published snapshot. A zero expiry value represents a
+non-expiring key.
+
+Each authentication checks the matching key's deadline against the server clock:
+at or after `expires_at`, it returns the standard invalid-client-token error
+(`401`, `auth_failed`) without database I/O, a timer, or a catalog reload. The
+clock is supplied at construction for deterministic boundary tests and defaults
+to `time.Now`. This gate covers model listing, billing usage, and inference,
+including requests for SSE. Already-authenticated requests and streams may finish
+after expiry. Static HCL clients and database keys without expiry remain valid.
+Rotation, disabling/deletion, and edits to expiry still activate through the
+existing catalog reload path (automatically after admin API mutations or on
+`SIGHUP`); a failed reload preserves the previous snapshot and its deadlines.
+
 Each static client may also define:
 
 - optional `tenant`
@@ -177,7 +529,247 @@ the rolling window, rather than lifetime totals or idle-key eviction.
 
 `GET /v1/billing/usage` exposes those aggregated summaries. In static bearer
 auth mode, responses are scoped to the caller's tenant when present, otherwise
-to the caller's client identity.
+to the caller's tenantless client identity. A same-named client in another tenant
+does not enter that scope.
+
+Billing buckets additionally distinguish the requested public model from the
+resolved provider and configured target model (not its wire `upstream_name`).
+`BillingSummaries` returns public usage and attributed upstream usage from one
+locked, pruned snapshot. Both views therefore have identical retention, including
+under concurrent recording and at the window boundary. Alias cost sums only the
+targets actually recorded for that exact public model, tenant, client, operation,
+and status; direct traffic and other aliases sharing a target cannot contribute.
+Current alias membership is not used to reconstruct historical routing. A removed
+target can still be priced if its provider/model price remains in the current catalog.
+
+The one-minute bucket cutoff is inclusive: a bucket is removed when its start is
+strictly older than `now - 24h`. This can expire an event up to one minute before
+its exact age reaches 24 hours. Recording and billing reads prune the same buckets;
+late expired events do not retain keys and future timestamps are clamped to the
+recorder clock for bucket placement. At most 1,441 minute buckets remain at a time;
+entries scale with distinct identity/public-model/target/operation/status combinations
+within that window, not event count. Idle expired state is reclaimed on the next
+record or billing read. The test-only memory recorder retains all its events.
+Provider and upstream dashboard counters (`ProviderSummaries`/`UpstreamSummaries`)
+remain lifetime counters with their existing aggregation dimensions; the recent
+event ring also retains its independent bounded policy.
+
+`estimated_cost_usd` is an optional estimate using **current catalog prices**, not
+historical price snapshots or an upstream invoice. For aliases, every retained
+request and token counter must reconcile with attributed target usage, and every
+contributing target must have pricing. Otherwise the field is omitted for the
+entire row, never emitted as a partial sum or an even/request-weighted split.
+An unused unpriced alias target does not prevent an estimate. Both direct and alias
+estimates require positive rates for consumed token categories; cache-write and
+explicit cache-read tokens retain the pricing model's input-rate fallback. Generic
+cached tokens require a cached rate. Configuration does not distinguish omitted
+rates from explicit zero rates, so a zero applicable rate is conservatively treated
+as incomplete for this endpoint. Zero recorded usage with an otherwise priced,
+fully attributed target can still produce a zero estimate. This does not establish
+that upstream usage reporting was complete. Dashboard estimation and durable quota
+ledger pricing retain their separate semantics.
+
+### Database Key Spend Lifetime
+
+Multi-tenant quota spend is persisted separately from the rolling in-process
+billing view. Migration `000008_preserve_key_spend.sql` gives each database key a
+durable `spend_key_identities` row containing only its UUID and workspace UUID.
+Existing keys are backfilled; an insert trigger creates future identities in the
+same transaction as the credential. The migration locks key writes while
+backfilling and changing the ledger foreign key, so concurrent key creation or
+deletion cannot leave a gap. Applied migrations are unchanged.
+
+The ledger references `(key_id, workspace_id)` in this identity table instead of the
+live credential. Key deletion therefore preserves both existing entries and the
+ability to insert usage from an already-admitted request, including SSE completion.
+Unknown keys and cross-workspace key references still fail at the database
+boundary. No HTTP-layer fallback, ignored foreign-key error, or join against live
+keys is needed. Existing store insertion and aggregation methods retain their
+contracts, including per-key attribution after deletion. Legacy ledger rows with
+inconsistent key/workspace pairs cause an atomic migration failure rather than
+silent reattribution.
+
+Each entry keeps the workspace and user/team owner captured by authentication;
+sharing a key does not charge its other users or teams. Replacing a deleted key,
+including reuse of its name, creates a new identity without restoring the owner's
+budget. The 30-second spend cache and new tracker/store instances read the same
+durable scope totals. A workspace administrator's explicit `reset_spend` sets
+the quota offset to the sum visible at reset; it deletes no ledger entries or
+identities. Admitted requests recorded after that sum count against the reset
+budget even if their key has since been deleted.
+
+Identity rows live for the workspace's lifetime, including keys with no spend,
+and contain no token hashes or other credentials. Workspace deletion still
+cascades to ledger and identities; user/team deletion retains the existing
+`SET NULL` ownership behavior. This migration cannot recover spend already erased
+by older key deletions. Accounting remains completion-based with the existing
+cache lag and possible concurrent budget overshoot; database failures are logged
+by the caller and are not covered by a durable retry queue.
+
+### Quota Read Availability
+
+Admission reads budget and public-model TPM policy for each database key owner
+before dispatch. Only `sql.ErrNoRows` means absent policy; other read errors
+propagate to a controlled JSON `503 quota_unavailable`, including SSE requests.
+The server logs the underlying cause without returning it to the client.
+Confirmed budget and TPM denials retain `403 budget_exceeded` and
+`429 tpm_exceeded`. Static credentials bypass this database-owned quota gate.
+
+Spend is required for admission only when the budget is positive. Cached spend
+is usable for the existing 30-second TTL; a failed cold/expired read publishes
+no value and never extends the prior cache entry. Policy reads are not cached.
+Admin views aggregate spend independently of whether a budget row exists and
+propagate read failures rather than presenting zero. Admin updates initialize
+absent policy only on `sql.ErrNoRows`; operational errors stop that write.
+Storage errors in admin quota routes are logged and returned as controlled
+`500` messages, explicitly identifying saved edits if only the response-view
+read failed. This does not introduce multi-row quota-update transactions or
+change completion-based accounting, spend-cache lag, or ledger-write retries.
+
+### Administrative Membership Transactions
+
+Workspaces own tenancy: tables `workspaces`, `workspace_members`, and
+`workspace_teams` joined by `workspace_id`, served at
+`/_internal/admin/workspaces` with `X-Workspace-ID` selection. Kinds are
+`personal` and `organization` plus the `system` flag. A `personal` workspace is
+auto-created exactly once per user at registration and rejects teams and extra
+members; `organization` workspaces are created afterwards for collaboration; the
+`system` workspace owns global inventory and cannot be deleted.
+
+`internal/store/membership.go` owns insert-only `AddMembership`/`AddTeamMember`,
+explicit `SetMembershipRole`/`SetTeamMemberRole`, and membership removals.
+`SetMembershipRole` requires the initiating actor ID for the existing workspace
+self-demotion rule; callers authorize the actor before invoking the store.
+Team self-demotion is permitted with a remaining administrator. Duplicate adds
+return `ErrMembershipExists`, never mutate roles, and map to actionable HTTP 409.
+Role/removal guard errors map to HTTP 400; missing rows map to 404. Initialization
+may add members to an adminless workspace/team; an established admin set cannot be
+reduced to zero by a membership transition or user-deletion cascade.
+
+Every membership transaction uses PostgreSQL READ COMMITTED. The shared mutex is
+the containing workspace row, acquired by `lockMembershipWorkspace` with
+`FOR NO KEY UPDATE` and held through commit/rollback. Current role and admin count
+are read **after** the lock; counts from route prechecks are not used. One workspace lock
+also serializes its teams, avoiding team-first lock ordering and allowing atomic
+multi-team offboarding to use the same boundary. `lockTeamMembershipWorkspace` resolves
+the immutable team workspace, takes the workspace lock, then rechecks that the team exists in
+that workspace. No team-reparenting API is supported.
+
+Membership additions first acquire `lockMembershipUser` (`FOR KEY SHARE`), then
+the workspace lock; team additions check current workspace membership inside that critical
+section. `DeleteUser` takes the user's `FOR UPDATE` lock before discovering and
+locking affected workspaces in ascending UUID order. This prevents an addition
+from slipping into its cascade after discovery. All workspace/team administrator checks
+and the user delete share one transaction, so a failed handoff preserves the whole
+account. Do not acquire a user lock after a workspace membership mutex, and do not call a public
+transaction-opening membership method from an existing membership transaction.
+
+Invitation acceptance reads the current scope and takes a KEY SHARE lock on its
+workspace before locking the invite, preventing inversion with workspace
+deletion's parent-to-invite cascade. It rejects an intervening scope change before
+writing and checks expiry using database wall time after the invite lock. The
+parent lock permits the later membership NO KEY UPDATE mutex and does not block
+other membership transactions. Its new user is private to the acceptance transaction;
+existing-user additions retain the user-before-workspace-mutex order.
+Acceptance calls transaction-local `insertMembership`
+after locking the current invite and creating its new user. Registration uses it after inserting
+a new user and new workspace. Neither can change an existing membership role. Bootstrap
+uses `AddMembership` and ignores only the explicit duplicate error, preserving
+its idempotent insert-only semantics; personal-workspace/OIDC initialization uses the
+same add boundary. Whole-workspace/team deletion destroys that scope rather than
+transitioning a surviving membership set.
+
+`DeleteMembership` takes the workspace lock and checks every affected team membership
+with `protectTeamAdmin` before deleting anything. It atomically deletes that user's
+team memberships in the workspace, direct user shares on the workspace's keys, and workspace
+membership. A sole-team-admin refusal requires an explicit handoff and leaves all
+memberships/shares intact; a storage failure rolls back the entire cleanup. Team
+additions, promotions, demotions and removals contend on the same workspace lock. Acquire
+multiple workspace locks in UUID order if needed; no separate team locks are required.
+Raw SQL fixture teardown may bypass these product invariants only in tests.
+
+Non-system callers need current containing-workspace membership at shared key management
+and team-admin gates, key detail visibility, and team quota GET/PUT admission.
+Historical surviving team/share rows alone cannot authorize access. The admission
+check does not retroactively cancel an operation already admitted before removal.
+Offboarding preserves other workspaces, key ownership, team-wide key sharing, quotas and
+historical spend. Ordinary re-add restores no team membership/admin role or direct
+share; preserved personal ownership becomes usable again with current membership.
+API bearer credentials are separate from account management access: offboarding
+does not rotate, revoke or disable keys, including personal keys. Operators must
+explicitly rotate/revoke previously distributed credentials when required.
+
+### Atomic Key Policy Updates
+
+`UpdateInboundKeyPolicy` accepts a field patch plus optional replacement of both
+sharing sets. PUT parses/validates the complete request before invoking it, and
+the store rechecks grant eligibility and the actor's current authority. Missing
+policy fields stay untouched; null has the same omission semantics. Either
+non-null binding list replaces both sets (an omitted counterpart is empty), while
+omitting both preserves sharing. `SetExpiry` distinguishes preserving expiry from
+clearing it. The key's identity, owner, and credential are never policy columns.
+Rotation and revocation write only their credential/enabled columns so stale
+route snapshots cannot overwrite a concurrent policy commit in either order.
+
+The READ COMMITTED transaction locks referenced users plus the actor with KEY
+SHARE in UUID order **before** the containing workspace's NO KEY UPDATE lock. This
+matches user deletion's user-before-workspace order. After the workspace lock it revalidates
+user membership and locks proposed teams with KEY SHARE in UUID order, before
+locking/re-reading the current key with NO KEY UPDATE. Team-before-key avoids
+inverting team deletion's cascade into key ownership/shares. It then checks the
+current active account, system/workspace admin status, personal ownership or team-admin
+membership; non-system actors must still belong to the workspace. Membership role edits
+and offboarding share the workspace lock, so they cannot invalidate a checked grant or
+manager before commit. Standalone `SetKeyBindings` uses the same grant validation
+and lock path, including the creation caller. Raw store callers of that method
+remain responsible for actor authorization.
+
+All policy writes and both sharing deletes/inserts use this transaction; any
+failure rolls back fields and grants together. The HTTP handler activates once
+only after commit, before querying response views. Rejected mutations never
+activate and cannot reappear on a later reload. A valid commit followed by reload
+failure keeps the saved state and returns the existing `saved but activation
+failed` response while the old runtime remains active. Key creation's broader
+multi-step persistence/activation flow is outside this PUT transaction contract.
+
+### Catalog Aggregate Writes And Publication
+
+Provider creation commits metadata and models in one store transaction. Provider
+updates commit metadata and an optional model replacement together; omitted/null
+models preserve the existing model rows, including their identities. Credential
+PUT uses the same provider write boundary without replacing models. Alias parent
+and target writes remain transactional. Failed writes do not publish generated
+IDs/timestamps into caller objects or mutate caller model/target slices.
+
+Provider and alias writes compare the previously read `updated_at` revision in
+their SQL UPDATE. A mismatch or concurrently deleted row returns a conflict rather
+than overwriting newer state. Revisions advance by at least one PostgreSQL
+microsecond. Standalone provider-model replacement updates/locks the parent first
+and advances its revision in the same transaction. Thus a provider's metadata and
+model reads used for validation cannot be committed over a concurrent aggregate
+or credential edit. A conflict requires a fresh read and validation; this also
+preserves omitted fields in alias updates. Direct SQL writers must maintain this
+revision protocol. These locks do not change the LIFE membership/key lock order.
+
+Catalog create/update handlers separate persistence from fallible presentation:
+after commit they request activation exactly once, then query the response view.
+Validation returns 400, concurrent edits return 409, and storage errors return a
+controlled 500 (`could not save catalog edit`); none requests activation. Activation
+failure returns `saved but activation failed`, retaining the complete DB edit and
+old runtime. A subsequent view failure returns `saved but response view unavailable;
+read current state before retrying`. Storage/activation/view causes are logged
+server-side rather than included in public failure responses. Runtime publication
+and database persistence are separate operations, not a distributed transaction:
+dependency edits may still cause activation failure, and later valid reloads load
+the latest saved catalog. A response view may reflect a subsequent committed edit.
+
+Database catalog merging receives the runtime's root defaults on startup, reload
+and CLI database validation. Concrete rows inherit an omitted timeout/user-agent,
+OR root/local user-agent forwarding and union root-first forwarded headers using
+the static provider rules. Derived rows inherit the already-resolved base settings;
+their enabled state and credentials remain local. Defaults are never persisted into
+the database row or its admin response view, so clearing a local override and later
+changing a root setting remain effective without rewriting saved providers.
 
 ### Optional Local Rate Limit
 
@@ -355,6 +947,13 @@ configuration; the proxy performs no runtime catalog sync.
 
 #### `github-copilot`
 
+**Hermetically verified; live GitHub compatibility unverified.** The implemented
+direct-Bearer/path/header contract is exercised against synthetic local fixtures.
+It does not establish application eligibility, GitHub model availability or
+exchange/refresh requirements. [COPILOT-LIVE-01](tasks/20260927-102347-copilot-live-compatibility.md)
+retains those deferred questions. See the [mock-only workflow](../website/docs/operations.md#mock-only-copilot-verification)
+for protocol-unit, composed command/App and real-binary coverage boundaries.
+
 Chat-only device-flow provider (GitHub.com release scope). Defaults to
 `https://api.githubcopilot.com`; `base_url` is an optional transport override
 only (same absolute-URL and loopback rules as other providers) that never
@@ -375,9 +974,37 @@ Providers reference the saved login with `credential_ref { path?, name }`
 (`path` defaults to the shared secrets path). The token resolves at load into
 a dedicated field (never `api_key`), activates on restart/`SIGHUP`, and
 sidecar-only changes leave a running server untouched until reload; failed
-reload candidates keep the old runtime. Upstream `401`/`403` (inference and
-`GET {base}/models`) maps to an explicit re-login hint: re-run `login` with
-the same client ID/name, then reload.
+reload candidates keep the old runtime. Upstream `401`/`403` requires operator
+re-login with the same client ID/name, then reload. Inference preserves upstream
+JSON auth errors; `models --upstream` adds an explicit re-login hint. Listing loads
+the current sidecar each invocation, independently of the running server's runtime.
+
+Database catalogs additionally support an internal structured credential in
+`db_providers.copilot_credential_encrypted` (migration `000009`). Its plaintext
+envelope is `{version: 1, kind: "github-copilot", credential: Credential}`; the
+nested credential has the same fields as the CLI sidecar. Store helpers
+`EncryptCopilotCredential(credential, now)` and
+`DecryptCopilotCredential(ciphertext, now)` use existing `EncryptSecret` /
+`DecryptSecret` AES-GCM and the existing encryption-key/JWT-secret fallback.
+Both validate fixed `github.com` domain, client ID, nonempty printable tokens,
+timestamps and expiry; decryption also rejects unknown envelope fields, unsupported
+versions/kinds, malformed data and incorrect keys. Failures return the controlled
+`store.ErrCopilotCredential`, never payload data or raw crypto/JSON errors.
+The caller supplies the validation time (runtime uses current time; transactional
+callers should use DB time). These helpers do not write rows or consume sessions.
+
+The nullable dedicated column is exclusive with sidecar and API-key sources and
+valid only for `github-copilot`; SQL enforces this for new encrypted credentials,
+and runtime validates source combinations before decrypting. Existing rows remain
+unchanged with NULL in the new column. BuildProvider decrypts and validates even
+disabled stored DB credentials, placing only the access token in `CopilotToken`.
+Disabled providers may still omit credentials; disabled sidecars are not read.
+Derived providers clear all base credential fields before attaching their own
+local DB/file source. Resolved sidecar ref plus token remains legitimate. Root
+defaults and local enabled/display-name behavior are unchanged. Static HCL/JSON
+still accepts only sidecar references, not raw tokens or encrypted blobs. Admin
+views omit secret material. Public device sessions and provisioning handlers are
+subsequent WEB-COPILOT tasks, not part of this storage/runtime foundation.
 
 Inference is `POST {base}/chat/completions` with model rewrite and shared
 JSON/SSE pass-through handling. Upstream headers are an allowlist only:
@@ -638,6 +1265,39 @@ Dispatch never sleeps.
 Direct provider model requests do not fail over to a different provider or
 model, because the client selected a specific target explicitly.
 
+### Bounded Encrypted-Reasoning Inspection
+
+Alias `encrypted_reasoning.on_caller_mismatch = "strip_and_retry"` inspects only
+non-streaming HTTP 400 responses to applicable chat/Responses requests carrying
+opaque reasoning markers. Status, request applicability, configured patterns and
+the single stripped-attempt budget are checked before decoding. Successful small
+mismatches retry the same target with opaque blocks removed and text retained.
+
+Optional inspection supports gzip (including x-gzip), raw deflate, Brotli and zstd,
+decoding Content-Encoding layers in reverse order. Repeated header fields are
+combined in order, with a 256-byte budget including joining commas and at most
+four comma-separated entries (including identity/empty entries). Metadata and
+unsupported encodings are rejected before decoder construction. Each decoded
+layer must fit in 1 MiB. Reader-based codecs read at most limit-plus-one bytes,
+reject overflow and propagate decoder/trailer errors rather than inspecting a
+truncated prefix.
+
+Zstd uses one low-memory decoder, a 1 MiB maximum window, a 1 MiB maximum decoded
+size and `WithDecodeAllCapLimit` with a fixed 1 MiB output buffer. These options
+bound allocation before expansion for advertised sizes, unknown-size frames and
+concatenated frames; post-decode slicing is insufficient. The memory option is
+not a total-heap ceiling: bounded decoder/block bookkeeping adds overhead, and
+each of the at-most-four layers may allocate its own bounded buffer. The fixed
+output reservation also applies to small valid zstd responses. This deliberately
+favors predictable per-inspection allocation over minimizing small-response cost.
+
+Failed inspection returns the original body plus an explicit failure flag, so
+literal mismatch text in rejected compressed bytes cannot trigger a retry. Neither
+successful inspection nor failure mutates the upstream body or headers. A rejected
+inspection skips only this optional mismatch retry; configured alias status-code
+failover and cooldown behavior still apply. Uncompressed response scanning retains
+its existing 64 KiB prefix limit.
+
 ## Provider Adapter Model
 
 The proxy uses provider adapters behind the OpenAI-compatible frontend.
@@ -703,7 +1363,7 @@ Example:
 
 ```hcl
 api_key_ref {
-  path = "/home/user/.config/aiproxy/keys.json"
+  path = "~/.config/aiproxy/keys.json"
   key  = "openai"
 }
 ```
@@ -872,6 +1532,35 @@ alias "chat_fallback" {
 - the upstream header timeout limits only the wait for response headers, not JSON or streaming response bodies after headers arrive
 - aliases reference provider and model names without extra ref prefixes
 
+### Upstream Redirect Policy
+
+Inference client construction and CLI upstream model discovery share
+`internal/upstreamhttp.CheckRedirect`. It compares each redirect with the original
+request's origin: scheme, case-insensitive hostname, and effective port (HTTP 80,
+HTTPS 443 when omitted). It permits at most 10 same-origin follow-up requests;
+cross-origin redirects, including downgrades, fail before destination I/O. This
+boundary protects all headers, including `x-api-key`, `x-goog-api-key`, bearer
+tokens and configured custom forwarded headers, as well as replayable request
+bodies. Go's default sensitive-header stripping does not protect custom headers
+or port-only origin changes.
+
+Provider execution and health probes additionally use `upstreamhttp.Do`, which
+copies the HTTP client before installing this policy, including on fallback and
+injected clients. The transport, connection pool, timeout and cookie jar are
+retained; a caller's stricter redirect callback still runs for permitted origins.
+Shared clients are never mutated. Probe origin means the initial resolved health
+URL, including an explicitly configured absolute health URL.
+
+Policy violations return errors rather than `http.ErrUseLastResponse`, so a
+blocked 3xx cannot enter a translated success handler. Existing transport-error
+handling returns a generic `502 upstream_error` for direct inference, permits
+configured alias failover, and reports a discovery error in the CLI. Operators
+must configure the final `base_url` instead of relying on cross-origin redirects.
+Same-origin redirects retain Go's method/body semantics (301/302/303 can become
+GET; 307/308 preserve replayable bodies). The policy changes neither pooled
+transports nor header timeouts or post-header stream lifetimes. OAuth device
+login retains its separate, stricter refusal of every redirect.
+
 ## Validation Rules
 
 The config loader should validate:
@@ -1016,6 +1705,62 @@ explicit transport design. Repeated invalid dashboard tokens are rate limited
 with `429` and a `Retry-After` header so the bearer surface cannot be
 brute-forced from the listener.
 
+Every dashboard route (snapshot, logs, payload list/detail, block list/take-once
+capture, and exception decision) uses one operator gate before reading data or
+writing decisions. The dashboard secret grants global operator access. With an
+admin store, a verified JWT must resolve to an active stored system administrator;
+workspace membership and the selected workspace do not scope or authorize
+these global surfaces. The shared admin claims boundary resolves the JWT subject
+by user ID and replaces role/email claims with current stored values, so admin
+routes and `/me` agree with dashboard authorization after promotion, demotion,
+disablement, deletion, or email changes. Valid non-operators receive `403`;
+unverifiable identities use the existing throttled authentication-failure path.
+The browser checks `/me` before enabling global queries and navigation, and
+renders an operator-access explanation for direct links or server denials.
+
+### Browser authentication lifetime
+
+The browser has a process-local, monotonically increasing authentication generation.
+Explicit account installation (password login, OIDC callback, or direct replacement),
+session clearing, dashboard-token changes, and workspace selection advance it.
+All sensitive query hooks append this non-secret generation to their existing keys;
+tokens never appear in query keys. The shared query boundary synchronously cancels
+and removes sensitive queries, including inactive cached results, on a transition.
+The public admin status query is independent. Query clients are weakly referenced,
+and obsolete mutation-cache entries are removed as well.
+
+Admin and dashboard HTTP clients capture the generation synchronously with the
+request's credentials and share a generation-scoped abort signal. They reject stale
+successes and errors before parsing or retrying; query completion also checks the
+generation, even for transports that ignore cancellation. The generation-keyed app
+and dialog provider discard local detail views, forms, and one-time credential
+results. Workspace creation callbacks recheck the generation after asynchronous
+dialog/refetch work before selecting a workspace. Account replacement clears
+the persisted workspace selection before the new account's catalog is loaded.
+
+A separate account-session epoch owns refresh work. Concurrent `401` responses share
+one refresh, and late `401`s for an already-replaced access token retry with the
+current token. Only refresh of the still-current session can rotate credentials
+without changing the data generation, preserving its cached data and workspace.
+Refresh failure clears that session; late success/failure from a previous session
+cannot install credentials, clear a replacement account, or retry as that account.
+Login results use the same session-ownership check. The OIDC callback consumes its
+fragment once, including under React Strict Mode.
+
+Logout clears local account/workspace/dashboard credentials immediately and
+revokes the captured refresh token separately; a delayed revocation result cannot
+clear a later login. Dashboard-token validation uses the candidate credential
+without installing it first, committing only a valid response for the current
+generation. Failure never restores an earlier token, and sign-out invalidates
+validation even when the stored token is already empty.
+
+These lifetimes are per loaded browser tab; cross-tab storage-event synchronization
+is not implemented. Cancellation prevents obsolete results from being published in
+the UI; it cannot undo a mutation already admitted by the server. Refresh/login/token
+verification responses remain guarded even when their network work finishes after
+a transition. Browser authorization is presentation logic; server-side stored
+authority remains the access-control boundary.
+
 ## CLI Design
 
 The service is a single binary named `aiproxy`.
@@ -1025,6 +1770,7 @@ Recommended commands:
 - `aiproxy serve --config /etc/aiproxy/config.hcl`
 - `aiproxy validate --config /etc/aiproxy/config.hcl`
 - `aiproxy login github-copilot --client-id <id> --credential <name>`
+- `aiproxy models --provider <name> --upstream`
 - `aiproxy version`
 
 Linux also supports `aiproxy serve -d`, `aiproxy status`, `aiproxy stop`, and
@@ -1035,7 +1781,86 @@ foreground `serve` remains supported but daemon lifecycle commands return
 Optional future commands:
 
 - `aiproxy print-example-config`
-- `aiproxy models --config ...`
+
+### Upstream Model Discovery
+
+`aiproxy models --provider <name> --upstream` retrieves a complete listing before
+printing display names and configured/not-in-config annotations. All provider
+listing readers share these fixed per-invocation limits:
+
+| Budget                     | Inclusive maximum |
+| -------------------------- | ----------------: |
+| Response pages             |               100 |
+| Model entries across pages |            10,000 |
+| Each response body         |             8 MiB |
+| Aggregate response bodies  |            32 MiB |
+| Whole listing duration     |         2 minutes |
+
+The existing 8 MiB page allowance accommodates rich model metadata; 32 MiB bounds
+aggregate metadata processing, and 10,000 entries/100 pages allow substantial
+catalog growth while bounding retained output, cursor history, and network calls.
+Entries count before filtering blank IDs and include duplicates. Body bytes count
+JSON, whitespace, and metadata as delivered by Go's HTTP response reader (after
+automatic HTTP gzip decompression when applicable). These are resource budgets,
+not a process-wide heap limit. Reads stop at the smaller of the page allowance and
+remaining aggregate allowance, plus one byte to distinguish an exact boundary
+from overflow. Oversized success and error bodies fail explicitly.
+
+The two-minute context covers the entire traversal, including body reads; it is
+not reset per page. An earlier caller deadline/cancellation or the existing
+per-request timeout (provider `upstream_header_timeout`, default 30 seconds for CLI
+listing) can stop retrieval sooner. Fixed internal constants avoid adding public
+configuration for malformed or impractically large catalogs. Operators encountering
+a limit should check the provider endpoint/catalog or its pagination implementation.
+
+Anthropic and Gemini cursors are query-escaped opaque values. Any repeated cursor,
+including a multi-page cycle, is an error. Anthropic `has_more = true` requires a
+nonempty page and a nonempty `last_id` matching the final returned entry; a terminal
+page may still contain `last_id`. Gemini permits empty pages with a next-page token,
+which still consume page/byte/time budgets; an absent or empty token is terminal.
+At an exact page/aggregate limit, a terminal page succeeds but further continuation
+fails before another request. Every response body is closed before the next page
+or return. Any failure discards accumulated models and reports incomplete discovery;
+the CLI never prints a partial model list. Provider authentication, User-Agent,
+OpenCode session headers, and the shared same-origin redirect policy still apply
+on every request. These limits do not change the proxy-owned `GET /v1/models`.
+Copilot accepts both a `data` object and a raw model array, including empty
+catalogs, with identical byte and entry limits.
+
+### Configuration Conversion Publication
+
+`aiproxy convert [target-file]` resolves `env()` values into literals, including
+secrets, then validates the converted HCL/JSON before any destination write.
+`-` emits the validated payload to stdout and propagates write errors.
+
+On Linux and macOS, file output uses `internal/filestore` with `Secret: true`, file mode `0600`, and
+parent-directory mode `0700` (subject to umask, existing directories unchanged).
+The shared staging path writes a same-directory temporary regular file, enforces
+the exact file mode, syncs, and closes it before publication. Destination checks
+use `Lstat` to reject live/dangling symlinks and non-regular files. With `--force`,
+`WriteFile` publishes via rename, replacing the old inode instead of truncating
+it. Without force, `CreateFile` publishes via a hard link to the staged inode,
+then removes the temporary name and syncs the directory. The link is the atomic
+create-if-absent boundary: a competing destination created after validation is
+never overwritten. No stat-then-write, placeholder file, process-local lock, or
+non-atomic fallback is used; filesystems without hard-link support return errors.
+
+File conversion on Windows (and other unsupported OS targets) fails before
+staging or creating parent directories. Go's Windows chmod only toggles the
+read-only attribute, not owner-only ACLs, and its rename API does not guarantee
+atomic replacement. The CLI therefore does not claim the POSIX publication
+contract there. Validated stdout conversion remains available on every platform;
+users can save that output through an external tool with suitable permissions.
+
+Validation, staging, and failed rename/link operations preserve the previous
+destination. After successful publication, cleanup or directory-sync errors may
+leave the complete new file present; these are not rollback transactions.
+Cleanup, directory-sync and confirmation-output failures explicitly report that
+publication succeeded.
+Temporary-file cleanup is attempted on failure; a cleanup failure may retain a
+private staged file. As with existing filestore consumers, these operations use
+normal parent-directory traversal and do not establish a filesystem sandbox.
+The existing replacement and multi-file recovery contracts remain unchanged.
 
 ## Deployment Model
 
@@ -1207,6 +2032,39 @@ Reload currently rebuilds and swaps:
 - readiness and startup inventory metrics
 
 Reload does not replace the active listener socket.
+
+Runtime construction and reload separate resource preparation from activation.
+Preparation loads and validates the catalog, opens candidate payload sinks,
+compiles guardrails, loads the exception file, and validates quarantine policy.
+Reload publishes a required dashboard-token file only after these steps succeed,
+as the final fallible preparation step. Until then, the active health catalog,
+probe manager, routing dependencies, and config inventory remain in use. A corrupt
+or unreadable exception file, sink initialization failure, or token persistence
+failure rejects the candidate without starting its probes or stopping live probes.
+
+Each preparation attempt owns only newly acquired resources. Failure cleanup
+closes candidate MongoDB and disk payload sinks and health backends; failed initial
+Build also closes its database store. Cleanup preserves the preparation error and
+joins any close errors. Reused active sinks and health trackers are borrowed, so
+rollback never closes them. Sink constructors retain responsibility for partial
+acquisition (for example, a disk sink opened before MongoDB initialization fails).
+Preparation may create directories or perform sink initialization/retention work;
+these external side effects are not filesystem/database transactions.
+
+After preparation succeeds, activation updates health/probe membership and
+publishes handler dependencies and runtime fields, then closes replaced resources.
+Build starts probes only after construction has no remaining fallible steps.
+Unchanged routing state, health trackers, payload sinks and probe schedules retain
+their existing reuse rules. A canceled probe's result is discarded so a retired
+probe cannot publish its cancellation as a failure over the replacement's health.
+Probe status, metrics and tracker publication hold the manager lock through the
+complete update, serializing replacement with already-started backend writes.
+Consequently replacement and status reads may wait for a health-backend write;
+they cannot overtake it and then be overwritten by the retired probe.
+Successful publication still uses the existing request-snapshot lifecycle; it
+does not drain already-admitted requests or make all shared metrics and probe
+observations switch in one atomic operation. Normal app shutdown owns resources
+transferred by successful construction or reload.
 
 The following config changes still require a full restart:
 

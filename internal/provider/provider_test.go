@@ -1902,26 +1902,26 @@ func TestDecodeBodyForInspection(t *testing.T) {
 		}
 		raw := encodeForInspectionTest(t, enc, plain)
 		header := http.Header{"Content-Encoding": []string{encoding}}
-		if got := DecodeBodyForInspection(header, raw); !bytes.Equal(got, plain) {
+		if got, ok := DecodeBodyForInspection(header, raw); !ok || !bytes.Equal(got, plain) {
 			t.Fatalf("%s: got %q, want %q", encoding, got, plain)
 		}
 	}
 	header := http.Header{"Content-Encoding": []string{"br, gzip"}}
 	gzipped := encodeForInspectionTest(t, "gzip", encodeForInspectionTest(t, "br", plain))
-	if got := DecodeBodyForInspection(header, gzipped); !bytes.Equal(got, plain) {
+	if got, ok := DecodeBodyForInspection(header, gzipped); !ok || !bytes.Equal(got, plain) {
 		t.Fatalf("chained br,gzip: got %q, want %q", got, plain)
 	}
-	if got := DecodeBodyForInspection(nil, plain); !bytes.Equal(got, plain) {
+	if got, ok := DecodeBodyForInspection(nil, plain); !ok || !bytes.Equal(got, plain) {
 		t.Fatalf("no header: got %q, want passthrough", got)
 	}
-	if got := DecodeBodyForInspection(http.Header{"Content-Encoding": []string{"identity"}}, plain); !bytes.Equal(got, plain) {
+	if got, ok := DecodeBodyForInspection(http.Header{"Content-Encoding": []string{"identity"}}, plain); !ok || !bytes.Equal(got, plain) {
 		t.Fatalf("identity: got %q, want passthrough", got)
 	}
 	corrupt := []byte{0x1f, 0x8b, 0x00, 0x01}
-	if got := DecodeBodyForInspection(http.Header{"Content-Encoding": []string{"gzip"}}, corrupt); !bytes.Equal(got, corrupt) {
+	if got, ok := DecodeBodyForInspection(http.Header{"Content-Encoding": []string{"gzip"}}, corrupt); ok || !bytes.Equal(got, corrupt) {
 		t.Fatalf("corrupt gzip: got %q, want original", got)
 	}
-	if got := DecodeBodyForInspection(http.Header{"Content-Encoding": []string{"compress"}}, plain); !bytes.Equal(got, plain) {
+	if got, ok := DecodeBodyForInspection(http.Header{"Content-Encoding": []string{"compress"}}, plain); ok || !bytes.Equal(got, plain) {
 		t.Fatalf("unknown encoding: got %q, want original", got)
 	}
 }

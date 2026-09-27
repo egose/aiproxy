@@ -25,7 +25,7 @@ import { z } from 'zod';
 import { DataTable, type ManagementColumnDef } from '../components/data-table';
 import { useConfirm } from '../components/dialogs';
 import { SourceBadge } from '../components/source-badge';
-import { OrgBadge } from '../components/org-select';
+import { WorkspaceBadge } from '../components/workspace-select';
 import { useAdminAliases, useAdminSession, useAdminStatus, useSnapshot } from '../hooks';
 import { createAdminAlias, deleteAdminAlias, updateAdminAlias } from '../services/admin';
 import { errorMessage } from '../services/dashboard';
@@ -52,31 +52,84 @@ function SnapshotAliases() {
   );
 }
 
+const isNameSegment = (name: string) => /^[a-z0-9][a-z0-9._-]*$/.test(name) && !/\s/.test(name);
+const isProviderName = (name: string) => isNameSegment(name) && name !== 'alias';
+const isModelName = (name: string) => name.split('/').every(isNameSegment);
+const providerNameError =
+  'Provider must start with a lowercase letter or digit and contain only lowercase letters, digits, dots, underscores or hyphens; "alias" is reserved.';
+const modelNameError =
+  'Model must contain nonempty slash-separated segments, each starting with a lowercase letter or digit and containing only lowercase letters, digits, dots, underscores or hyphens. Do not put spaces inside the model name.';
+
 function parseTargetLines(raw: string) {
-  return raw
-    .split('\n')
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .map((t) => {
-      const [provider, model] = t.split('/');
-      return { provider: (provider ?? '').trim(), model: (model ?? '').trim() };
-    });
+  const targets = raw.split('\n').flatMap((line, index) => {
+    const text = line.trim();
+    if (!text) return [];
+    const separator = text.indexOf('/');
+    if (separator < 0) throw new Error(`Line ${index + 1}: Enter provider/model, for example gateway/z-ai/glm-5.2.`);
+    const provider = text.slice(0, separator).trim();
+    const model = text.slice(separator + 1).trim();
+    if (!isProviderName(provider)) throw new Error(`Line ${index + 1}: ${providerNameError}`);
+    if (!isModelName(model)) throw new Error(`Line ${index + 1}: ${modelNameError}`);
+    return [{ provider, model }];
+  });
+  if (!targets.length) throw new Error('Enter at least one target or use providers/model shorthand.');
+  return targets;
 }
 
-const aliasFormSchema = z.object({
-  name: z.string().trim().min(1, 'Enter an alias name.'),
-  algorithm: z.enum(['round_robin', 'least_connections']).optional(),
-  retryCodes: z.string().optional(),
-  targets: z.string().optional(),
-  shorthandProviders: z.string().optional(),
-  shorthandModel: z.string().optional(),
-  useAffinity: z.boolean().optional(),
-  affinityHeaders: z.string().optional(),
-  useReasoning: z.boolean().optional(),
-  reasoningPassthrough: z.boolean().optional(),
-  reasoningMismatch: z.string().optional(),
-  reasoningMessages: z.string().optional(),
-});
+function parseShorthandProviders(raw: string) {
+  if (!raw.trim()) throw new Error('Enter at least one provider, separated by commas.');
+  const providers = raw.split(',').map((provider) => provider.trim());
+  const seen = new Set<string>();
+  providers.forEach((provider, index) => {
+    if (!isProviderName(provider)) throw new Error(`Provider ${index + 1}: ${providerNameError}`);
+    if (seen.has(provider)) throw new Error(`Duplicate provider "${provider}". List each provider only once.`);
+    seen.add(provider);
+  });
+  return providers;
+}
+
+const aliasFormSchema = z
+  .object({
+    name: z.string().trim().min(1, 'Enter an alias name.'),
+    algorithm: z.enum(['round_robin', 'least_connections']).optional(),
+    retryCodes: z.string().optional(),
+    targets: z.string().optional(),
+    shorthandProviders: z.string().optional(),
+    shorthandModel: z.string().optional(),
+    useAffinity: z.boolean().optional(),
+    affinityHeaders: z.string().optional(),
+    useReasoning: z.boolean().optional(),
+    reasoningPassthrough: z.boolean().optional(),
+    reasoningMismatch: z.string().optional(),
+    reasoningMessages: z.string().optional(),
+  })
+  .superRefine((values, ctx) => {
+    const shorthand = (values.shorthandProviders ?? '').trim() !== '' || (values.shorthandModel ?? '').trim() !== '';
+    if (shorthand) {
+      if ((values.targets ?? '').trim()) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['targets'],
+          message:
+            'Use targets or shorthand, not both. Clear targets to use shorthand, or clear both shorthand fields.',
+        });
+      }
+      try {
+        parseShorthandProviders(values.shorthandProviders ?? '');
+      } catch (error) {
+        ctx.addIssue({ code: 'custom', path: ['shorthandProviders'], message: errorMessage(error) });
+      }
+      if (!isModelName((values.shorthandModel ?? '').trim())) {
+        ctx.addIssue({ code: 'custom', path: ['shorthandModel'], message: modelNameError });
+      }
+    } else {
+      try {
+        parseTargetLines(values.targets ?? '');
+      } catch (error) {
+        ctx.addIssue({ code: 'custom', path: ['targets'], message: errorMessage(error) });
+      }
+    }
+  });
 
 type AliasFormValues = z.infer<typeof aliasFormSchema>;
 
@@ -123,12 +176,8 @@ function buildAliasBody(v: AliasFormValues): Record<string, unknown> {
     if (codes.some((c) => !Number.isInteger(c))) throw new Error('retry status codes must be integers');
     body.retry_status_codes = codes;
   }
-  const shorthand = (v.shorthandProviders ?? '')
-    .split(',')
-    .map((p) => p.trim())
-    .filter(Boolean);
-  if (shorthand.length > 0 || (v.shorthandModel ?? '').trim() !== '') {
-    body.providers = shorthand;
+  if ((v.shorthandProviders ?? '').trim() !== '' || (v.shorthandModel ?? '').trim() !== '') {
+    body.providers = parseShorthandProviders(v.shorthandProviders ?? '');
     body.model = (v.shorthandModel ?? '').trim();
   } else {
     body.targets = parseTargetLines(v.targets ?? '');
@@ -183,6 +232,13 @@ function AliasFields({ lockName }: { lockName: boolean }) {
         placeholder={'db-openai/gpt-4o-mini\nbackup/gpt-4o-mini'}
         rows={3}
       />
+      <p className="text-sm text-slate-500">
+        The first slash separates the provider from the full model name: gateway/z-ai/glm-5.2 targets model
+        z-ai/glm-5.2. Blank lines and whitespace around the provider and full model are ignored. Each name segment must
+        start with a lowercase letter or digit; dots, underscores and hyphens are also allowed after the first
+        character. Empty segments and spaces inside names are invalid. The same naming rules apply to shorthand;
+        provider name alias is reserved.
+      </p>
       <div className="grid gap-2">
         <span className="text-sm font-medium">
           ...or shorthand: same model across providers (cannot be combined with targets)
@@ -268,7 +324,7 @@ const CreateAliasDialog = createTypedDialog<object, boolean>(({ open, onClose })
         <DialogTitle>Create alias</DialogTitle>
         <DialogDescription>
           Aliases are virtual models: clients call <span className="font-mono">alias/&lt;name&gt;</span> and the proxy
-          routes each request to one of the targets. The new alias belongs to the currently selected organization.
+          routes each request to one of the targets. The new alias belongs to the currently selected workspace.
         </DialogDescription>
       </DialogHeader>
       <AliasForm
@@ -379,10 +435,12 @@ function ManagedAliases() {
         cell: ({ row }) => <SourceBadge source={row.original.source} />,
       },
       {
-        id: 'org',
-        header: 'Org',
-        accessorFn: (row) => row.org_name || row.org_id,
-        cell: ({ row }) => <OrgBadge orgId={row.original.org_id} orgName={row.original.org_name} />,
+        id: 'workspace',
+        header: 'Workspace',
+        accessorFn: (row) => row.workspace_name || row.workspace_id,
+        cell: ({ row }) => (
+          <WorkspaceBadge workspaceId={row.original.workspace_id} workspaceName={row.original.workspace_name} />
+        ),
       },
       {
         id: 'targets',
@@ -403,6 +461,11 @@ function ManagedAliases() {
           const a = row.original;
           return a.source === 'database' ? (
             <ActionMenu
+              trigger={
+                <Button variant="secondary" appearance="outline-filled" size="sm" aria-label={`Actions for ${a.name}`}>
+                  Actions
+                </Button>
+              }
               items={[
                 { label: 'Edit', onSelect: () => openEdit(a), disabled: busy },
                 { label: 'Delete', onSelect: () => askDelete(a.name), disabled: busy, variant: 'destructive' },

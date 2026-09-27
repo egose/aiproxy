@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/store"
@@ -14,18 +15,19 @@ type Principal struct {
 	Name        string
 	Tenant      string
 	KeyID       uuid.UUID
-	OrgID       uuid.UUID
+	WorkspaceID uuid.UUID
 	OwnerUserID uuid.UUID
 	OwnerTeamID uuid.UUID
 }
 
 type DynamicClient struct {
 	TokenHash     string
+	ExpiresAt     time.Time
 	Name          string
 	Tenant        string
 	AllowedModels []string
 	KeyID         uuid.UUID
-	OrgID         uuid.UUID
+	WorkspaceID   uuid.UUID
 	OwnerUserID   uuid.UUID
 	OwnerTeamID   uuid.UUID
 }
@@ -54,17 +56,27 @@ func NewAuthenticator(cfg config.Auth) Authenticator {
 }
 
 func NewAuthenticatorWithClients(cfg config.Auth, dyn []DynamicClient) Authenticator {
+	return NewAuthenticatorWithClientsAndClock(cfg, dyn, time.Now)
+}
+
+func NewAuthenticatorWithClientsAndClock(cfg config.Auth, dyn []DynamicClient, now func() time.Time) Authenticator {
 	if cfg.Mode == config.AuthModeNone {
 		return nopAuthenticator{}
 	}
-	hashed := make(map[string]Principal, len(dyn))
+	if now == nil {
+		now = time.Now
+	}
+	hashed := make(map[string]dynamicCredential, len(dyn))
 	for _, d := range dyn {
 		if d.TokenHash == "" {
 			continue
 		}
-		hashed[d.TokenHash] = Principal{Name: d.Name, Tenant: d.Tenant, KeyID: d.KeyID, OrgID: d.OrgID, OwnerUserID: d.OwnerUserID, OwnerTeamID: d.OwnerTeamID}
+		hashed[d.TokenHash] = dynamicCredential{
+			principal: Principal{Name: d.Name, Tenant: d.Tenant, KeyID: d.KeyID, WorkspaceID: d.WorkspaceID, OwnerUserID: d.OwnerUserID, OwnerTeamID: d.OwnerTeamID},
+			expiresAt: d.ExpiresAt,
+		}
 	}
-	return &staticAuthenticator{tokens: staticTokens(cfg), hashed: hashed}
+	return &staticAuthenticator{tokens: staticTokens(cfg), hashed: hashed, now: now}
 }
 
 func staticTokens(cfg config.Auth) map[string]Principal {
@@ -120,7 +132,13 @@ func (nopAuthenticator) Authenticate(r *http.Request) (*Principal, error) {
 
 type staticAuthenticator struct {
 	tokens map[string]Principal
-	hashed map[string]Principal
+	hashed map[string]dynamicCredential
+	now    func() time.Time
+}
+
+type dynamicCredential struct {
+	principal Principal
+	expiresAt time.Time
 }
 
 type staticAuthorizer struct {
@@ -147,8 +165,11 @@ func (s *staticAuthenticator) Authenticate(r *http.Request) (*Principal, error) 
 		return &matched, nil
 	}
 	if len(s.hashed) > 0 {
-		if principal, ok := s.hashed[store.TokenHash(token)]; ok {
-			matched := principal
+		if credential, ok := s.hashed[store.TokenHash(token)]; ok {
+			if !credential.expiresAt.IsZero() && !s.now().Before(credential.expiresAt) {
+				return nil, ErrInvalidToken
+			}
+			matched := credential.principal
 			return &matched, nil
 		}
 	}

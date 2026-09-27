@@ -1,12 +1,15 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/filestore"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +28,16 @@ defaults to a file in the current working directory with the converted
 extension. Use "-" as the target to print to stdout.
 
 env("VAR") calls are resolved at conversion time, so the referenced
-variables must be set. The converted output is validated before writing.`,
+variables must be set. Their values, including secrets, are materialized in
+the output (also on stdout). The converted output is validated before writing.
+
+On Linux and macOS, files are published atomically with exact 0600 permissions. Without --force,
+an existing destination is never overwritten, even by concurrent conversions.
+With --force, only regular files may be replaced; symlinks (including dangling
+links) and non-regular destinations are rejected. Missing parent directories
+are created with mode 0700 (subject to umask). Windows file output is unsupported
+because this writer cannot guarantee owner-only permissions and atomic replacement;
+use "-" for stdout and save it through a suitably secured external tool.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runConvert(cmd, cfgPath, compact, force, args)
@@ -33,11 +45,15 @@ variables must be set. The converted output is validated before writing.`,
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", defaultConfigPath(), "path to source config file (overrides $AIPROXY_CONFIG)")
 	cmd.Flags().BoolVar(&compact, "compact", false, "write single-line JSON output (applies to JSON output only)")
-	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite the target file if it exists")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "atomically replace an existing regular target file with permissions 0600")
 	return cmd
 }
 
 func runConvert(cmd *cobra.Command, cfgPath string, compact, force bool, args []string) error {
+	return runConvertForPlatform(cmd, cfgPath, compact, force, args, runtime.GOOS)
+}
+
+func runConvertForPlatform(cmd *cobra.Command, cfgPath string, compact, force bool, args []string, platform string) error {
 	src, srcDesc, srcBase, err := readConvertSource(cmd, cfgPath)
 	if err != nil {
 		return err
@@ -47,8 +63,13 @@ func runConvert(cmd *cobra.Command, cfgPath string, compact, force bool, args []
 		return err
 	}
 	if len(args) > 0 && args[0] == "-" {
-		fmt.Fprint(cmd.OutOrStdout(), string(out))
+		if _, err := fmt.Fprint(cmd.OutOrStdout(), string(out)); err != nil {
+			return fmt.Errorf("write converted config to stdout: %w", err)
+		}
 		return nil
+	}
+	if platform != "linux" && platform != "darwin" {
+		return fmt.Errorf("secure configuration file conversion is unsupported on %s; use target - for stdout and save with a suitably secured external tool", platform)
 	}
 	target := ""
 	if len(args) > 0 {
@@ -60,13 +81,19 @@ func runConvert(cmd *cobra.Command, cfgPath string, compact, force bool, args []
 		}
 		target = filepath.Join(cwd, defaultConvertedName(srcBase, to))
 	}
-	if _, err := os.Stat(target); err == nil && !force {
-		return fmt.Errorf("target %s already exists (use --force to overwrite)", target)
+	write := filestore.CreateFile
+	if force {
+		write = filestore.WriteFile
 	}
-	if err := os.WriteFile(target, out, 0o600); err != nil {
+	if err := write(target, out, 0o600, filestore.Options{DirMode: 0o700, Secret: true}); err != nil {
+		if !force && errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("target %s already exists (use --force to overwrite): %w", target, err)
+		}
 		return err
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "converted %s (%s) -> %s (%s)\n", srcDesc, from, target, to)
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "converted %s (%s) -> %s (%s)\n", srcDesc, from, target, to); err != nil {
+		return fmt.Errorf("configuration published to %s but write confirmation: %w", target, err)
+	}
 	return nil
 }
 

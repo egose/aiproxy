@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -37,19 +38,20 @@ type adminQuotaUpsert struct {
 	TPM          []adminTPMUpsert `json:"tpm"`
 }
 
-func (h *Handler) quotaView(deps Dependencies, ctx context.Context, orgID uuid.UUID, scope quotaScope) (adminQuotaView, error) {
+func (h *Handler) quotaView(deps Dependencies, ctx context.Context, workspaceID uuid.UUID, scope quotaScope) (adminQuotaView, error) {
 	view := adminQuotaView{TPM: []adminTPMView{}}
-	rows, err := deps.AdminStore.ListScopeQuotasByScope(ctx, orgID, scope.typ, scope.id)
+	rows, err := deps.AdminStore.ListScopeQuotasByScope(ctx, workspaceID, scope.typ, scope.id)
 	if err != nil {
 		return view, err
 	}
+	spent, err := deps.AdminStore.SumScopeSpend(ctx, workspaceID, scope.typ, scope.id)
+	if err != nil {
+		return view, err
+	}
+	view.SpendMicros = spent
 	for _, row := range rows {
 		if row.Model == quotaBudgetModel {
 			view.BudgetMicros = row.BudgetMicros
-			spent, err := deps.AdminStore.SumScopeSpend(ctx, orgID, scope.typ, scope.id)
-			if err != nil {
-				return view, err
-			}
 			view.SpendMicros = spent - row.SpentOffsetMicros
 			if view.SpendMicros < 0 {
 				view.SpendMicros = 0
@@ -58,7 +60,7 @@ func (h *Handler) quotaView(deps Dependencies, ctx context.Context, orgID uuid.U
 		}
 		entry := adminTPMView{Model: row.Model, Ceiling: row.TPMCeiling, Effective: row.TPMEffective}
 		if deps.Quota != nil {
-			used, _ := deps.Quota.windowTokens(orgID, scope, row.Model)
+			used, _ := deps.Quota.windowTokens(workspaceID, scope, row.Model)
 			entry.UsedTokens = used
 		}
 		view.TPM = append(view.TPM, entry)
@@ -70,7 +72,7 @@ func errForbiddenAdmin() error {
 	return errQuotaForbidden
 }
 
-var errQuotaForbidden = errors.New("organization admin required")
+var errQuotaForbidden = errors.New("workspace admin required")
 
 type quotaInputError struct{ msg string }
 
@@ -78,16 +80,19 @@ func (e *quotaInputError) Error() string { return e.msg }
 
 func quotaBad(msg string) error { return &quotaInputError{msg: msg} }
 
-func (h *Handler) applyQuotaBudget(deps Dependencies, ctx context.Context, orgID uuid.UUID, scope quotaScope, budget int64, reset bool) error {
-	row, err := deps.AdminStore.GetScopeQuota(ctx, orgID, scope.typ, scope.id, quotaBudgetModel)
+func (h *Handler) applyQuotaBudget(deps Dependencies, ctx context.Context, workspaceID uuid.UUID, scope quotaScope, budget int64, reset bool) error {
+	row, err := deps.AdminStore.GetScopeQuota(ctx, workspaceID, scope.typ, scope.id, quotaBudgetModel)
 	if err != nil {
-		row = store.ScopeQuota{OrgID: orgID, ScopeType: scope.typ, ScopeID: scope.id, Model: quotaBudgetModel}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		row = store.ScopeQuota{WorkspaceID: workspaceID, ScopeType: scope.typ, ScopeID: scope.id, Model: quotaBudgetModel}
 	}
 	if budget >= 0 {
 		row.BudgetMicros = budget
 	}
 	if reset {
-		spent, err := deps.AdminStore.SumScopeSpend(ctx, orgID, scope.typ, scope.id)
+		spent, err := deps.AdminStore.SumScopeSpend(ctx, workspaceID, scope.typ, scope.id)
 		if err != nil {
 			return err
 		}
@@ -96,7 +101,7 @@ func (h *Handler) applyQuotaBudget(deps Dependencies, ctx context.Context, orgID
 	return deps.AdminStore.UpsertScopeQuota(ctx, &row)
 }
 
-func (h *Handler) applyQuotaTPM(deps Dependencies, ctx context.Context, orgID uuid.UUID, scope quotaScope, tpm []adminTPMUpsert, policy bool) error {
+func (h *Handler) applyQuotaTPM(deps Dependencies, ctx context.Context, workspaceID uuid.UUID, scope quotaScope, tpm []adminTPMUpsert, policy bool) error {
 	for _, t := range tpm {
 		model := strings.TrimSpace(t.Model)
 		if model == "" {
@@ -105,9 +110,12 @@ func (h *Handler) applyQuotaTPM(deps Dependencies, ctx context.Context, orgID uu
 		if t.Ceiling != nil && !policy {
 			return errForbiddenAdmin()
 		}
-		row, err := deps.AdminStore.GetScopeQuota(ctx, orgID, scope.typ, scope.id, model)
+		row, err := deps.AdminStore.GetScopeQuota(ctx, workspaceID, scope.typ, scope.id, model)
 		if err != nil {
-			row = store.ScopeQuota{OrgID: orgID, ScopeType: scope.typ, ScopeID: scope.id, Model: model}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			row = store.ScopeQuota{WorkspaceID: workspaceID, ScopeType: scope.typ, ScopeID: scope.id, Model: model}
 		}
 		if t.Ceiling != nil {
 			if *t.Ceiling < 0 {
@@ -141,10 +149,15 @@ func writeQuotaError(deps Dependencies, w http.ResponseWriter, r *http.Request, 
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	http.Error(w, err.Error(), http.StatusInternalServerError)
+	writeQuotaStorageError(deps, w, err, "could not update quota")
 }
 
-func (h *Handler) adminUserQuota(deps Dependencies, w http.ResponseWriter, r *http.Request, orgID, userID uuid.UUID, rest []string) {
+func writeQuotaStorageError(deps Dependencies, w http.ResponseWriter, err error, message string) {
+	deps.Logger.Warn(message, "error", err, "request_id", w.Header().Get("X-Request-Id"))
+	http.Error(w, message, http.StatusInternalServerError)
+}
+
+func (h *Handler) adminUserQuota(deps Dependencies, w http.ResponseWriter, r *http.Request, workspaceID, userID uuid.UUID, rest []string) {
 	if len(rest) != 1 || rest[0] != "quota" {
 		http.Error(w, "unknown admin endpoint", http.StatusNotFound)
 		return
@@ -155,22 +168,22 @@ func (h *Handler) adminUserQuota(deps Dependencies, w http.ResponseWriter, r *ht
 		return
 	}
 	ctx := r.Context()
-	if _, err := deps.AdminStore.GetMembership(ctx, userID, orgID); err != nil {
-		http.Error(w, "user is not an organization member", http.StatusNotFound)
+	if _, err := deps.AdminStore.GetMembership(ctx, userID, workspaceID); err != nil {
+		http.Error(w, "user is not an workspace member", http.StatusNotFound)
 		return
 	}
 	self := mustParseUUID(claims.Subject) == userID
-	orgAdmin := h.canWriteOrg(deps, ctx, claims, orgID)
-	if !self && !orgAdmin {
-		http.Error(w, "organization not found", http.StatusNotFound)
+	workspaceAdmin := h.canWriteWorkspace(deps, ctx, claims, workspaceID)
+	if !self && !workspaceAdmin {
+		http.Error(w, "workspace not found", http.StatusNotFound)
 		return
 	}
 	scope := quotaScope{typ: quotaScopeUser, id: userID}
 	switch r.Method {
 	case http.MethodGet:
-		view, err := h.quotaView(deps, ctx, orgID, scope)
+		view, err := h.quotaView(deps, ctx, workspaceID, scope)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeQuotaStorageError(deps, w, err, "could not load quota")
 			return
 		}
 		writeAdminJSON(w, http.StatusOK, view)
@@ -180,8 +193,8 @@ func (h *Handler) adminUserQuota(deps Dependencies, w http.ResponseWriter, r *ht
 			http.Error(w, "invalid body", http.StatusBadRequest)
 			return
 		}
-		if (req.BudgetMicros != nil || req.ResetSpend) && !orgAdmin {
-			http.Error(w, "organization admin required", http.StatusForbidden)
+		if (req.BudgetMicros != nil || req.ResetSpend) && !workspaceAdmin {
+			http.Error(w, "workspace admin required", http.StatusForbidden)
 			return
 		}
 		if req.BudgetMicros != nil && *req.BudgetMicros < 0 {
@@ -193,21 +206,21 @@ func (h *Handler) adminUserQuota(deps Dependencies, w http.ResponseWriter, r *ht
 			if req.BudgetMicros != nil {
 				budget = *req.BudgetMicros
 			}
-			if err := h.applyQuotaBudget(deps, ctx, orgID, scope, budget, req.ResetSpend); err != nil {
+			if err := h.applyQuotaBudget(deps, ctx, workspaceID, scope, budget, req.ResetSpend); err != nil {
 				writeQuotaError(deps, w, r, err)
 				return
 			}
 		}
-		if err := h.applyQuotaTPM(deps, ctx, orgID, scope, req.TPM, orgAdmin); err != nil {
+		if err := h.applyQuotaTPM(deps, ctx, workspaceID, scope, req.TPM, workspaceAdmin); err != nil {
 			writeQuotaError(deps, w, r, err)
 			return
 		}
 		if deps.Quota != nil {
-			deps.Quota.Invalidate(orgID, scope)
+			deps.Quota.Invalidate(workspaceID, scope)
 		}
-		view, err := h.quotaView(deps, ctx, orgID, scope)
+		view, err := h.quotaView(deps, ctx, workspaceID, scope)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeQuotaStorageError(deps, w, err, "quota saved but could not load updated quota")
 			return
 		}
 		writeAdminJSON(w, http.StatusOK, view)
@@ -216,21 +229,25 @@ func (h *Handler) adminUserQuota(deps Dependencies, w http.ResponseWriter, r *ht
 	}
 }
 
-func (h *Handler) adminTeamQuota(deps Dependencies, w http.ResponseWriter, r *http.Request, orgID, teamID uuid.UUID) {
+func (h *Handler) adminTeamQuota(deps Dependencies, w http.ResponseWriter, r *http.Request, workspaceID, teamID uuid.UUID) {
 	claims, ok := h.adminClaims(deps, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	ctx := r.Context()
-	team, err := deps.AdminStore.GetTeam(ctx, teamID)
-	if err != nil || team.OrgID != orgID {
+	if !h.canAccessWorkspace(deps, ctx, claims, workspaceID) {
 		http.Error(w, "team not found", http.StatusNotFound)
 		return
 	}
-	orgAdmin := h.canWriteOrg(deps, ctx, claims, orgID)
+	team, err := deps.AdminStore.GetTeam(ctx, teamID)
+	if err != nil || team.WorkspaceID != workspaceID {
+		http.Error(w, "team not found", http.StatusNotFound)
+		return
+	}
+	workspaceAdmin := h.canWriteWorkspace(deps, ctx, claims, workspaceID)
 	teamAdmin := h.isTeamAdmin(deps, ctx, claims, teamID)
-	if !orgAdmin && !teamAdmin {
+	if !workspaceAdmin && !teamAdmin {
 		if _, err := deps.AdminStore.GetTeamMember(ctx, mustParseUUID(claims.Subject), teamID); err != nil {
 			http.Error(w, "team not found", http.StatusNotFound)
 			return
@@ -243,9 +260,9 @@ func (h *Handler) adminTeamQuota(deps Dependencies, w http.ResponseWriter, r *ht
 	scope := quotaScope{typ: quotaScopeTeam, id: teamID}
 	switch r.Method {
 	case http.MethodGet:
-		view, err := h.quotaView(deps, ctx, orgID, scope)
+		view, err := h.quotaView(deps, ctx, workspaceID, scope)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeQuotaStorageError(deps, w, err, "could not load quota")
 			return
 		}
 		writeAdminJSON(w, http.StatusOK, view)
@@ -255,8 +272,8 @@ func (h *Handler) adminTeamQuota(deps Dependencies, w http.ResponseWriter, r *ht
 			http.Error(w, "invalid body", http.StatusBadRequest)
 			return
 		}
-		if (req.BudgetMicros != nil || req.ResetSpend) && !orgAdmin {
-			http.Error(w, "organization admin required", http.StatusForbidden)
+		if (req.BudgetMicros != nil || req.ResetSpend) && !workspaceAdmin {
+			http.Error(w, "workspace admin required", http.StatusForbidden)
 			return
 		}
 		if req.BudgetMicros != nil && *req.BudgetMicros < 0 {
@@ -268,21 +285,21 @@ func (h *Handler) adminTeamQuota(deps Dependencies, w http.ResponseWriter, r *ht
 			if req.BudgetMicros != nil {
 				budget = *req.BudgetMicros
 			}
-			if err := h.applyQuotaBudget(deps, ctx, orgID, scope, budget, req.ResetSpend); err != nil {
+			if err := h.applyQuotaBudget(deps, ctx, workspaceID, scope, budget, req.ResetSpend); err != nil {
 				writeQuotaError(deps, w, r, err)
 				return
 			}
 		}
-		if err := h.applyQuotaTPM(deps, ctx, orgID, scope, req.TPM, orgAdmin); err != nil {
+		if err := h.applyQuotaTPM(deps, ctx, workspaceID, scope, req.TPM, workspaceAdmin); err != nil {
 			writeQuotaError(deps, w, r, err)
 			return
 		}
 		if deps.Quota != nil {
-			deps.Quota.Invalidate(orgID, scope)
+			deps.Quota.Invalidate(workspaceID, scope)
 		}
-		view, err := h.quotaView(deps, ctx, orgID, scope)
+		view, err := h.quotaView(deps, ctx, workspaceID, scope)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeQuotaStorageError(deps, w, err, "quota saved but could not load updated quota")
 			return
 		}
 		writeAdminJSON(w, http.StatusOK, view)

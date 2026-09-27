@@ -32,46 +32,46 @@ type adminUserView struct {
 	Source   string `json:"source"`
 }
 
-type adminUserOrgView struct {
+type adminUserWorkspaceView struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Role string `json:"role"`
 }
 
-func (h *Handler) userOrgViews(deps Dependencies, ctx context.Context, userID uuid.UUID) []adminUserOrgView {
+func (h *Handler) userWorkspaceViews(deps Dependencies, ctx context.Context, userID uuid.UUID) []adminUserWorkspaceView {
 	memberships, err := deps.AdminStore.ListMembershipsByUser(ctx, userID)
 	if err != nil {
 		return nil
 	}
-	out := make([]adminUserOrgView, 0, len(memberships))
+	out := make([]adminUserWorkspaceView, 0, len(memberships))
 	for _, m := range memberships {
-		org, err := deps.AdminStore.GetOrganization(ctx, m.OrgID)
+		workspace, err := deps.AdminStore.GetWorkspace(ctx, m.WorkspaceID)
 		if err != nil {
 			continue
 		}
-		out = append(out, adminUserOrgView{ID: org.ID.String(), Name: org.Name, Role: m.Role})
+		out = append(out, adminUserWorkspaceView{ID: workspace.ID.String(), Name: workspace.Name, Role: m.Role})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
 type adminInviteView struct {
-	ID        string `json:"id"`
-	Email     string `json:"email"`
-	Role      string `json:"role"`
-	OrgID     string `json:"org_id,omitempty"`
-	OrgName   string `json:"org_name,omitempty"`
-	OrgRole   string `json:"org_role,omitempty"`
-	ExpiresAt string `json:"expires_at"`
+	ID            string `json:"id"`
+	Email         string `json:"email"`
+	Role          string `json:"role"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceName string `json:"workspace_name,omitempty"`
+	WorkspaceRole string `json:"workspace_role,omitempty"`
+	ExpiresAt     string `json:"expires_at"`
 }
 
 func (h *Handler) inviteView(deps Dependencies, r *http.Request, inv store.Invite) adminInviteView {
 	view := adminInviteView{ID: inv.ID.String(), Email: inv.Email, Role: userRole(inv.IsAdmin), ExpiresAt: inv.ExpiresAt.UTC().Format(time.RFC3339)}
-	if inv.OrgID != nil {
-		view.OrgID = inv.OrgID.String()
-		view.OrgRole = inv.OrgRole
-		if org, err := deps.AdminStore.GetOrganization(r.Context(), *inv.OrgID); err == nil {
-			view.OrgName = org.Name
+	if inv.WorkspaceID != nil {
+		view.WorkspaceID = inv.WorkspaceID.String()
+		view.WorkspaceRole = inv.WorkspaceRole
+		if workspace, err := deps.AdminStore.GetWorkspace(r.Context(), *inv.WorkspaceID); err == nil {
+			view.WorkspaceName = workspace.Name
 		}
 	}
 	return view
@@ -134,7 +134,7 @@ func (h *Handler) adminUsers(deps Dependencies, w http.ResponseWriter, r *http.R
 				views = append(views, map[string]interface{}{
 					"id": u.ID.String(), "email": u.Email, "role": userRole(u.IsAdmin),
 					"is_admin": u.IsAdmin, "disabled": u.Disabled, "source": "database",
-					"orgs": h.userOrgViews(deps, ctx, u.ID),
+					"workspaces": h.userWorkspaceViews(deps, ctx, u.ID),
 				})
 			}
 			sort.Slice(views, func(i, j int) bool {
@@ -292,7 +292,7 @@ func (h *Handler) adminUsers(deps Dependencies, w http.ResponseWriter, r *http.R
 			return
 		}
 		if err := deps.AdminStore.DeleteUser(ctx, target.ID); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeMembershipError(w, err)
 			return
 		}
 		writeAdminJSON(w, http.StatusOK, map[string]bool{"ok": true})
