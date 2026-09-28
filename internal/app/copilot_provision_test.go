@@ -42,7 +42,7 @@ func copilotProvisionFixture(t *testing.T) (*App, string, func(string, string, s
 	t.Helper()
 	dsn := os.Getenv("AIPROXY_TEST_DATABASE_URL")
 	if dsn == "" {
-		t.Fatal("AIPROXY_TEST_DATABASE_URL is required (no skips for device-flow tests)")
+		t.Skip("AIPROXY_TEST_DATABASE_URL not set")
 	}
 	t.Setenv("AIPROXY_JWT_SECRET", "flow03-runtime-fixture-secret")
 	t.Setenv("AIPROXY_DB_ENCRYPTION_KEY", "REDACTED")

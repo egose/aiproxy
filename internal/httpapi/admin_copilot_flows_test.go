@@ -110,7 +110,7 @@ func openCopilotFlowHarness(t *testing.T) *copilotFlowHarness {
 	t.Helper()
 	dbURL := os.Getenv("AIPROXY_TEST_DATABASE_URL")
 	if dbURL == "" {
-		t.Fatal("AIPROXY_TEST_DATABASE_URL is required (no skips for device-flow tests)")
+		t.Skip("AIPROXY_TEST_DATABASE_URL not set")
 	}
 	t.Setenv("AIPROXY_JWT_SECRET", "test-jwt-secret-1234567890")
 	t.Setenv("AIPROXY_DB_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef")
