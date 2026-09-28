@@ -40,7 +40,8 @@ func newLoginCopilotCommand() *cobra.Command {
 		Short: "Authorize with GitHub device flow and save a Copilot credential",
 		Long: "Request GitHub device codes with an explicitly supplied OAuth client ID, wait for user authorization, " +
 			"and persist a structured credential as a sidecar file next to the secrets path. " +
-			"Requires SIGHUP or restart to activate. Re-run on 401/403.",
+			"Requires SIGHUP or restart to activate. Re-run on 401/403. " +
+			"Hermetically verified; live GitHub compatibility unverified.",
 		Example: "aiproxy login github-copilot --client-id Ov23li00000000000000 --credential copilot-main\n" +
 			"aiproxy login github-copilot --client-id Ov23li00000000000000 --credential copilot-main --secrets-path /etc/aiproxy/keys.json --scope read:user",
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -21,6 +21,16 @@ func newModelsCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "models",
 		Short: "List models for a provider from the config file",
+		Long: fmt.Sprintf(`List models for a provider from the config file, or query its model endpoint with --upstream.
+
+Upstream discovery is limited to %d pages, %d model entries, %d MiB per
+response page, %d MiB total response bodies, and %s for the whole listing.
+Earlier caller deadlines and per-request timeouts still apply. Repeated cursors,
+inconsistent continuation metadata, and exceeded limits fail without printing
+partial results. Gemini empty pages with a next-page token continue within these
+limits. Anthropic has_more requires a nonempty page and a matching last_id.`,
+			upstreamModelMaxPages, upstreamModelMaxEntries, upstreamModelMaxPageBytes>>20,
+			upstreamModelMaxTotalBytes>>20, upstreamModelListTimeout),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runModels(cmd.Context(), cfgPath, configFlagExplicit(cmd), providerName, upstream, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},

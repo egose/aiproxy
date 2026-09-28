@@ -1,8 +1,10 @@
 package healthcheck
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -10,6 +12,132 @@ import (
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/providerhealth"
 )
+
+type probeTransportFunc func(*http.Request) (*http.Response, error)
+
+func (f probeTransportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type heldFailureBackend struct {
+	started chan struct{}
+	release chan struct{}
+	healthy atomic.Bool
+}
+
+func (b *heldFailureBackend) MarkSuccess(context.Context, string) error {
+	b.healthy.Store(true)
+	return nil
+}
+
+func (b *heldFailureBackend) MarkFailure(context.Context, string, time.Duration) error {
+	close(b.started)
+	<-b.release
+	b.healthy.Store(false)
+	return nil
+}
+
+func (b *heldFailureBackend) IsHealthy(context.Context, string) (bool, error) {
+	return b.healthy.Load(), nil
+}
+
+func (b *heldFailureBackend) Snapshot(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{"local": b.healthy.Load()}, nil
+}
+
+func (b *heldFailureBackend) Close() error { return nil }
+
+func TestProbePublicationCompletesBeforeReplacement(t *testing.T) {
+	b := &heldFailureBackend{started: make(chan struct{}), release: make(chan struct{})}
+	tracker := providerhealth.NewWithBackend(nil, config.ProviderHealth{}, b)
+	defer tracker.Close()
+	m := New(tracker, nil, "test")
+	defer m.Close()
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(b.release) })
+	m.client = &http.Client{Transport: probeTransportFunc(func(r *http.Request) (*http.Response, error) {
+		code := http.StatusOK
+		if r.URL.Path == "/old" {
+			code = http.StatusServiceUnavailable
+		}
+		return &http.Response{StatusCode: code, Body: http.NoBody, Header: make(http.Header)}, nil
+	})}
+	old := testProvider("local", "http://probe.test", fastCheck("/old"))
+	old.Healthcheck.Interval = time.Hour
+	m.SetProviders(config.NewCatalog([]config.Provider{old}, nil, nil))
+	select {
+	case <-b.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("old health publication did not start")
+	}
+	next := testProvider("local", "http://probe.test", fastCheck("/new"))
+	next.Healthcheck.Interval = time.Hour
+	replaced := make(chan struct{})
+	go func() {
+		m.SetProviders(config.NewCatalog([]config.Provider{next}, nil, nil))
+		close(replaced)
+	}()
+	select {
+	case <-replaced:
+		t.Error("replacement activated while old health publication was outstanding")
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseOnce.Do(func() { close(b.release) })
+	select {
+	case <-replaced:
+	case <-time.After(3 * time.Second):
+		t.Fatal("replacement did not activate after publication completed")
+	}
+	waitForCondition(t, "replacement health publication", func() bool {
+		st, ok := m.StatusFor("local")
+		return ok && st.Path == "/new" && st.Checked && st.Healthy && tracker.IsHealthy("local")
+	})
+}
+
+func TestReplacedProbeCannotOverwriteActiveHealth(t *testing.T) {
+	tracker := providerhealth.New(nil, config.ProviderHealth{})
+	defer tracker.Close()
+	m := New(tracker, nil, "test")
+	defer m.Close()
+	started, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	m.client = &http.Client{Transport: probeTransportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/old" {
+			close(started)
+			<-r.Context().Done()
+			<-release
+			return nil, context.Canceled
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Header: make(http.Header)}, nil
+	})}
+	old := testProvider("local", "http://probe.test", fastCheck("/old"))
+	old.Healthcheck.Interval = time.Hour
+	m.SetProviders(config.NewCatalog([]config.Provider{old}, nil, nil))
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("old probe did not start")
+	}
+	m.mu.Lock()
+	retired := m.probes["local"]
+	m.mu.Unlock()
+	next := testProvider("local", "http://probe.test", fastCheck("/new"))
+	next.Healthcheck.Interval = time.Hour
+	m.SetProviders(config.NewCatalog([]config.Provider{next}, nil, nil))
+	waitForCondition(t, "new probe success", func() bool {
+		st, ok := m.StatusFor("local")
+		return ok && st.Path == "/new" && st.Checked && st.Healthy
+	})
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case <-retired.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("retired probe did not stop")
+	}
+	st, ok := m.StatusFor("local")
+	if !ok || st.Path != "/new" || !st.Healthy || !tracker.IsHealthy("local") {
+		t.Fatalf("retired probe overwrote active health: %+v", st)
+	}
+}
 
 func testProvider(name, baseURL string, hc *config.ProviderHealthcheck) config.Provider {
 	return config.Provider{

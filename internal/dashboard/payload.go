@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -25,23 +24,25 @@ type PayloadFetcher interface {
 }
 
 type payloadListMsg struct {
-	entries []dashrpc.PayloadSummary
-	enabled bool
-	err     string
+	generation uint64
+	entries    []dashrpc.PayloadSummary
+	enabled    bool
+	err        string
 }
 
 type payloadDetailMsg struct {
-	requestID string
-	pretty    string
-	err       string
+	generation uint64
+	requestID  string
+	pretty     string
+	err        string
 }
 
-func fetchPayloadsCmd(f PayloadFetcher, limit int, errorsOnly bool) tea.Cmd {
+func fetchPayloadsCmd(f PayloadFetcher, limit int, errorsOnly bool, parents ...context.Context) tea.Cmd {
 	if f == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := fetchContext(parents)
 		defer cancel()
 		list, err := f.ListPayloads(ctx, limit, errorsOnly)
 		if err != nil {
@@ -54,12 +55,12 @@ func fetchPayloadsCmd(f PayloadFetcher, limit int, errorsOnly bool) tea.Cmd {
 	}
 }
 
-func fetchPayloadDetailCmd(f PayloadFetcher, requestID string) tea.Cmd {
+func fetchPayloadDetailCmd(f PayloadFetcher, requestID string, parents ...context.Context) tea.Cmd {
 	if f == nil || requestID == "" {
 		return nil
 	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := fetchContext(parents)
 		defer cancel()
 		pretty, err := f.GetPayload(ctx, requestID)
 		msg := payloadDetailMsg{requestID: requestID}
@@ -77,14 +78,24 @@ func (m *model) payloadDetailOpen() bool {
 }
 
 func (m *model) requestPayloads() tea.Cmd {
-	if m.payloadFetcher == nil || m.payloadLoading {
+	if m.paused || m.payloadFetcher == nil || m.payloadLoading {
 		return nil
 	}
 	m.payloadLoading = true
-	return fetchPayloadsCmd(m.payloadFetcher, payloadFetchLimit, m.payloadErrorsOnly)
+	return m.payloadListRequest.start(m.ctx, func(ctx context.Context) tea.Cmd {
+		return fetchPayloadsCmd(m.payloadFetcher, payloadFetchLimit, m.payloadErrorsOnly && m.correlation == nil, ctx)
+	})
 }
 
 func (m *model) applyPayloadList(msg payloadListMsg) {
+	if msg.generation != m.payloadListRequest.generation {
+		return
+	}
+	if m.paused {
+		m.pausedResults.payloadList = &msg
+		return
+	}
+	m.payloadListRequest.invalidate()
 	m.payloadLoading = false
 	if msg.err != "" {
 		m.payloadErr = msg.err
@@ -102,15 +113,23 @@ func (m *model) applyPayloadList(msg payloadListMsg) {
 		return
 	}
 	m.payloadKnown = true
-	m.payloads = msg.entries
+	before := m.orderedPayloads()
+	m.payloads = msg.entries[:min(len(msg.entries), payloadFetchLimit)]
+	m.payloadCursor = anchoredIndex(before, m.orderedPayloads(), m.payloadCursor, payloadIdentity)
+	m.payloadOffset = anchoredIndex(before, m.orderedPayloads(), m.payloadOffset, payloadIdentity)
 	m.clampPayloadCursor()
 	m.dirty = true
 }
 
 func (m *model) applyPayloadDetail(msg payloadDetailMsg) {
-	if msg.requestID != m.payloadPendingID {
+	if msg.generation != m.payloadDetailRequest.generation || msg.requestID != m.payloadPendingID {
 		return
 	}
+	if m.paused {
+		m.pausedResults.payloadDetail = &msg
+		return
+	}
+	m.payloadDetailRequest.invalidate()
 	m.payloadPendingID = ""
 	if msg.err != "" {
 		m.payloadDetail = ""
@@ -125,7 +144,7 @@ func (m *model) applyPayloadDetail(msg payloadDetailMsg) {
 }
 
 func (m *model) clampPayloadCursor() {
-	n := len(m.payloads)
+	n := len(m.orderedPayloads())
 	if n == 0 {
 		m.payloadCursor = 0
 		m.payloadOffset = 0
@@ -157,15 +176,16 @@ func (m *model) clampPayloadCursor() {
 }
 
 func (m *model) movePayloadCursor(delta int) bool {
-	if len(m.payloads) == 0 {
+	n := len(m.orderedPayloads())
+	if n == 0 {
 		return false
 	}
 	next := m.payloadCursor + delta
 	if next < 0 {
 		next = 0
 	}
-	if next >= len(m.payloads) {
-		next = len(m.payloads) - 1
+	if next >= n {
+		next = n - 1
 	}
 	if next == m.payloadCursor {
 		return false
@@ -185,7 +205,7 @@ func (m *model) payloadCursorTop() bool {
 }
 
 func (m *model) payloadCursorBottom() bool {
-	n := len(m.payloads)
+	n := len(m.orderedPayloads())
 	if n == 0 || m.payloadCursor == n-1 {
 		return false
 	}
@@ -195,19 +215,32 @@ func (m *model) payloadCursorBottom() bool {
 }
 
 func (m *model) payloadAt(i int) PayloadSummary {
-	if m.payloadOldestFirst {
-		return m.payloads[len(m.payloads)-1-i]
-	}
-	return m.payloads[i]
+	return m.orderedPayloads()[i]
 }
 
 func (m *model) orderedPayloads() []PayloadSummary {
-	if !m.payloadOldestFirst {
-		return m.payloads
+	out := make([]PayloadSummary, 0, len(m.payloads))
+	for _, p := range m.payloads {
+		if m.correlation != nil && m.bottomTab == bottomTabPayload {
+			if p.RequestID == m.correlation.event.RequestID {
+				out = append(out, p)
+			}
+			continue
+		}
+		if m.payloadErrorsOnly && !p.IsError() {
+			continue
+		}
+		if metadataMatch(m.queries[bottomTabPayload], map[string]string{
+			"id": p.RequestID, "model": p.PublicModel, "resolved": p.UpstreamModel, "provider": p.Provider,
+			"status": fmt.Sprint(p.Status), "method": p.Method, "path": p.Path,
+		}) {
+			out = append(out, p)
+		}
 	}
-	out := make([]PayloadSummary, len(m.payloads))
-	for i, j := 0, len(m.payloads)-1; i < len(m.payloads); i, j = i+1, j-1 {
-		out[i] = m.payloads[j]
+	if m.payloadOldestFirst {
+		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+			out[i], out[j] = out[j], out[i]
+		}
 	}
 	return out
 }
@@ -215,9 +248,17 @@ func (m *model) orderedPayloads() []PayloadSummary {
 func (m *model) handlePayloadKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	switch msg.String() {
 	case "s", "e":
+		if m.correlation != nil || m.paused || m.payloadDetailOpen() || m.payloadPendingID != "" {
+			return true, nil
+		}
+		before := m.orderedPayloads()
 		m.payloadErrorsOnly = !m.payloadErrorsOnly
-		m.payloadCursor = 0
-		m.payloadOffset = 0
+		after := m.orderedPayloads()
+		m.payloadCursor = anchoredIndex(before, after, m.payloadCursor, payloadIdentity)
+		m.payloadOffset = anchoredIndex(before, after, m.payloadOffset, payloadIdentity)
+		m.clampPayloadCursor()
+		m.payloadListRequest.invalidate()
+		m.payloadLoading = false
 		m.payloadKnown = false
 		return true, m.requestPayloads()
 	case "o":
@@ -267,13 +308,16 @@ func (m *model) handlePayloadKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		}
 		return m.payloadCursorBottom(), nil
 	case "enter":
+		if m.paused || !m.payloadKnown {
+			return true, nil
+		}
 		if m.payloadDetailOpen() {
 			return true, nil
 		}
 		if m.payloadPendingID != "" {
 			return true, nil
 		}
-		if len(m.payloads) == 0 || m.payloadFetcher == nil {
+		if len(m.orderedPayloads()) == 0 || m.payloadFetcher == nil {
 			return false, nil
 		}
 		id := m.payloadAt(m.payloadCursor).RequestID
@@ -285,9 +329,11 @@ func (m *model) handlePayloadKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.payloadDetailErr = ""
 		m.payloadDetailID = ""
 		m.payloadDetailScroll = 0
-		return true, fetchPayloadDetailCmd(m.payloadFetcher, id)
+		return true, m.payloadDetailRequest.start(m.ctx, func(ctx context.Context) tea.Cmd {
+			return fetchPayloadDetailCmd(m.payloadFetcher, id, ctx)
+		})
 	case "r":
-		if m.payloadDetailOpen() {
+		if m.paused || m.payloadDetailOpen() {
 			return false, nil
 		}
 		m.payloadKnown = false
@@ -318,12 +364,12 @@ func payloadRow(s dashrpc.PayloadSummary, methodW, modelW, pathW int) string {
 	}
 	ms := fmt.Sprintf("%dms", s.DurationMs)
 	return dataRow([]string{
-		truncate(ts, 8),
-		truncate(s.Method, methodW),
+		truncate(metadataText(ts), 8),
+		truncate(metadataText(s.Method), methodW),
 		payloadStatusCell(s.Status),
 		fmt.Sprintf("%8s", truncate(ms, 8)),
-		truncate(model, modelW),
-		truncate(s.Path, pathW),
+		truncate(metadataText(model), modelW),
+		truncate(metadataText(s.Path), pathW),
 	}, []int{8, methodW, 4, 8, modelW, pathW})
 }
 
@@ -333,11 +379,14 @@ func renderPayloads(m *model, width, height int) string {
 	if m.payloadErrorsOnly {
 		filter = "errs-only"
 	}
+	if m.correlation != nil && m.bottomTab == bottomTabPayload {
+		filter = "ID-only"
+	}
 	order := "newest-first"
 	if m.payloadOldestFirst {
 		order = "oldest-first"
 	}
-	title := fmt.Sprintf("PAYLOADS %s (%s) [o]rder", order, filter)
+	title := fmt.Sprintf("PAYLOADS %s (%s) %s", order, filter, m.searchLabel(bottomTabPayload))
 	rows := []string{title}
 	if m.payloadFetcher == nil {
 		rows = append(rows, "payload viewer unavailable")
@@ -355,8 +404,8 @@ func renderPayloads(m *model, width, height int) string {
 		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("loading…"))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
-	if len(m.payloads) == 0 {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("no payload entries yet"))
+	if len(m.orderedPayloads()) == 0 {
+		rows = append(rows, m.emptySearchText(bottomTabPayload, "no payload entries yet"))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	modelContent, pathContent := len("MODEL"), len("PATH")
@@ -365,8 +414,8 @@ func renderPayloads(m *model, width, height int) string {
 		if model == "" {
 			model = p.Provider + "/" + p.UpstreamModel
 		}
-		modelContent = max(modelContent, runeLen(model))
-		pathContent = max(pathContent, runeLen(p.Path))
+		modelContent = max(modelContent, runeLen(metadataText(model)))
+		pathContent = max(pathContent, runeLen(metadataText(p.Path)))
 	}
 	got := flexWidths([]flexCol{
 		{content: 8, min: 8, max: 8},
@@ -402,51 +451,29 @@ func renderPayloads(m *model, width, height int) string {
 }
 
 func renderPayloadDetail(m *model, width, height int) string {
-	borderStyle, inner := paneBox(width, height, true)
-	title := "PAYLOAD " + m.payloadDetailID
+	title := "PAYLOAD " + metadataText(m.payloadDetailID)
 	if m.payloadPendingID != "" {
-		title = "PAYLOAD " + m.payloadPendingID + " (loading…)"
+		title = "PAYLOAD " + metadataText(m.payloadPendingID) + " (loading…)"
 	}
-	lines := []string{title}
+	body, capped := boundedPayloadText(m.payloadDetail)
+	notice := payloadCaptureNotice(body)
+	if capped || strings.HasSuffix(body, "\n…[truncated]") {
+		notice = "TRUNCATED pretty output (64 KiB); capture status may be unknown"
+	}
+	headers := []string{title, notice}
 	if m.payloadPendingID != "" {
-		lines = append(lines, "loading…")
-		return borderStyle.Render(strings.Join(lines, "\n"))
+		body = "loading…"
 	}
 	if m.payloadDetailErr != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Render("fetch failed: "+m.payloadDetailErr))
-		lines = append(lines, "[esc] back")
-		return borderStyle.Render(strings.Join(lines, "\n"))
+		body = "fetch failed: " + m.payloadDetailErr
+		if m.correlation != nil {
+			body += "\nPayload unavailable; it may have expired since the list was read."
+		}
 	}
-	body := m.payloadDetail
 	if body == "" {
 		body = "(empty)"
 	}
-	raw := strings.Split(body, "\n")
-	visible := height - 5
-	if visible < 1 {
-		visible = 1
-	}
-	start := m.payloadDetailScroll
-	if start > len(raw)-1 {
-		start = len(raw) - 1
-	}
-	if start < 0 {
-		start = 0
-	}
-	m.payloadDetailScroll = start
-	end := start + visible
-	if end > len(raw) {
-		end = len(raw)
-	}
-	for _, l := range raw[start:end] {
-		lines = append(lines, truncate(l, inner))
-	}
-	if end < len(raw) {
-		lines = append(lines, fmt.Sprintf("… %d more lines (j/k scroll, esc back)", len(raw)-end))
-	} else {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Render("[j/k] scroll [esc] back"))
-	}
-	return borderStyle.Render(strings.Join(lines, "\n"))
+	return renderInspection(width, height, headers, title+"\n"+body, "j/k · PgUp/PgDn · Home/End", &m.payloadDetailScroll)
 }
 
 func prettyPayload(raw []byte) string {

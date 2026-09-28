@@ -397,3 +397,34 @@ func TestExamplesSystemdCommandPrintsSystemdExample(t *testing.T) {
 		t.Fatalf("systemd examples output unexpectedly included other sections:\n%s", out)
 	}
 }
+
+func TestValidateCheckDBSkippedWithoutMultiTenancy(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	if err := os.WriteFile(configPath, []byte(`
+listener "http" "public" { address = ":0" }
+auth "main" { mode = "none" }
+provider "openai" "openai" {
+  api_key = "sk-test"
+  model "gpt-4o-mini" {}
+}
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cmd := newRootCommand()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"validate", "--config", configPath, "--check-db"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute(): %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "config is valid") {
+		t.Fatalf("output missing file verdict: %q", out)
+	}
+	if !strings.Contains(out, "multi_tenancy disabled") {
+		t.Fatalf("output missing db skip note: %q", out)
+	}
+}

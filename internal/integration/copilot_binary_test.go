@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -19,6 +22,7 @@ import (
 )
 
 type copilotCall struct {
+	Method        string
 	Path          string
 	Authorization string
 	UserAgent     string
@@ -32,9 +36,10 @@ type copilotCall struct {
 }
 
 type copilotStub struct {
-	server *httptest.Server
-	mu     sync.Mutex
-	calls  []copilotCall
+	server        *httptest.Server
+	mu            sync.Mutex
+	calls         []copilotCall
+	revokedStatus atomic.Int32
 }
 
 func newCopilotStub(t *testing.T) *copilotStub {
@@ -49,6 +54,7 @@ func newCopilotStub(t *testing.T) *copilotStub {
 		}
 		s.mu.Lock()
 		s.calls = append(s.calls, copilotCall{
+			Method:        r.Method,
 			Path:          r.URL.Path,
 			Authorization: r.Header.Get("Authorization"),
 			UserAgent:     r.Header.Get("User-Agent"),
@@ -61,6 +67,17 @@ func newCopilotStub(t *testing.T) *copilotStub {
 			Body:          string(raw),
 		})
 		s.mu.Unlock()
+		if status := s.revokedStatus.Load(); status != 0 && r.Header.Get("Authorization") == "Bearer synthetic-original" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(int(status))
+			_, _ = io.WriteString(w, `{"error":"synthetic-revoked"}`)
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/models" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"data":[{"id":"upstream-chat"},{"id":"discovered-only"}]}`)
+			return
+		}
 		if r.URL.Path != "/chat/completions" {
 			http.NotFound(w, r)
 			return
@@ -225,5 +242,119 @@ func TestBinaryGitHubCopilotLoginHasNoEndpointOverrides(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "--client-id") {
 		t.Fatalf("login without --client-id error missing flag hint: %s", out)
+	}
+}
+
+func TestBinaryGitHubCopilotDiscoveryAndRecovery(t *testing.T) {
+	guard := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("binary attempted unexpected non-loopback HTTP request: %s %s", r.Method, r.Host)
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	t.Cleanup(guard.Close)
+	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"} {
+		t.Setenv(key, guard.URL)
+	}
+	for _, key := range []string{"NO_PROXY", "no_proxy"} {
+		t.Setenv(key, "127.0.0.1,::1")
+	}
+	t.Setenv("AIPROXY_CONFIG", "")
+	for _, failure := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(fmt.Sprint(failure), func(t *testing.T) {
+			stub := newCopilotStub(t)
+			dir := t.TempDir()
+			secrets := filepath.Join(dir, "keys.json")
+			writeCopilotSidecar(t, secrets, "binarytest", "synthetic-original")
+			addr := freeAddr(t)
+			text := strings.Replace(copilotServeConfig(addr, stub.server.URL, secrets), `display_name = "Binary Test Chat"`, `upstream_name = "upstream-chat"`, 1)
+			configPath := writeConfig(t, text)
+			srv := startBinaryServer(t, configPath, addr)
+			checkCall := func(before int, method, path, token string) {
+				t.Helper()
+				calls := stub.Calls()
+				if len(calls) != before+1 {
+					t.Fatalf("calls=%d want=%d (no silent retries)", len(calls), before+1)
+				}
+				call := calls[before]
+				if call.Method != method || call.Path != path || call.Authorization != "Bearer "+token || !strings.HasPrefix(call.UserAgent, "aiproxy/") || call.APIVersion != copilotlogin.APIVersion {
+					t.Fatal("incorrect method/path or shared credential headers")
+				}
+				if method == http.MethodPost && !strings.Contains(call.Body, `"model":"upstream-chat"`) {
+					t.Fatal("incorrect model rewrite")
+				}
+			}
+			models := func(token string, wantStatus int) {
+				t.Helper()
+				before := len(stub.Calls())
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, aiproxyBinary(t), "models", "--config", configPath, "--provider", "copilot", "--upstream")
+				cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+dir)
+				out, err := cmd.CombinedOutput()
+				if wantStatus == 200 {
+					if err != nil || !strings.Contains(string(out), "upstream-chat (configured as copilot/test-chat)") || !strings.Contains(string(out), "discovered-only (not in config)") {
+						t.Fatalf("models: %v %s", err, out)
+					}
+				} else if err == nil || !strings.Contains(string(out), fmt.Sprint(wantStatus)) || !strings.Contains(string(out), "login") {
+					t.Fatalf("missing model discovery re-login guidance: %v %s", err, out)
+				}
+				if strings.Contains(string(out), token) {
+					t.Fatal("models exposed synthetic credential")
+				}
+				checkCall(before, http.MethodGet, "/models", token)
+			}
+			chat := func(token string, wantStatus int) {
+				t.Helper()
+				for _, stream := range []bool{false, true} {
+					before := len(stub.Calls())
+					status, body := postChat(t, srv, "", fmt.Sprintf(`{"model":"copilot/test-chat","stream":%t,"messages":[{"role":"user","content":"hi"}]}`, stream))
+					if status != wantStatus {
+						t.Fatalf("chat stream=%t: %d %s", stream, status, body)
+					}
+					if wantStatus == 200 {
+						if !strings.Contains(body, "from-copilot") || (stream && !strings.Contains(body, "[DONE]")) {
+							t.Fatal("incomplete JSON/SSE response")
+						}
+					} else if body != `{"error":"synthetic-revoked"}` {
+						t.Fatal("auth error not passed through verbatim")
+					}
+					checkCall(before, http.MethodPost, "/chat/completions", token)
+				}
+			}
+			models("synthetic-original", 200)
+			chat("synthetic-original", 200)
+			stub.revokedStatus.Store(int32(failure))
+			models("synthetic-original", failure)
+			chat("synthetic-original", failure)
+			writeCopilotSidecar(t, secrets, "binarytest", "synthetic-rotated")
+			models("synthetic-rotated", 200)
+			chat("synthetic-original", failure)
+			sidecar, err := copilotlogin.SidecarPath(secrets, "binarytest")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(sidecar, []byte(`{invalid`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := srv.cmd.Process.Signal(syscall.SIGHUP); err != nil {
+				t.Fatal(err)
+			}
+			srv.WaitLogContains(t, "config reload failed")
+			chat("synthetic-original", failure)
+			writeCopilotSidecar(t, secrets, "binarytest", "synthetic-rotated")
+			if err := srv.cmd.Process.Signal(syscall.SIGHUP); err != nil {
+				t.Fatal(err)
+			}
+			srv.WaitLogContains(t, "config reloaded")
+			chat("synthetic-rotated", 200)
+			models("synthetic-rotated", 200)
+			before := len(stub.Calls())
+			if status, body := httpGet(t, srv, "/v1/models", ""); status != 200 || !strings.Contains(body, "copilot/test-chat") || strings.Contains(body, "discovered-only") {
+				t.Fatalf("static inventory changed: %d %s", status, body)
+			}
+			if len(stub.Calls()) != before {
+				t.Fatal("proxy model listing queried upstream")
+			}
+			srv.Stop(t)
+		})
 	}
 }

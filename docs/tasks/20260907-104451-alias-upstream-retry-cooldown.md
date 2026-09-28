@@ -272,7 +272,7 @@ files]` without the tag, as before).
 - `make test-race` — all packages ok with `-race`.
 - `make integration` — ok (`2.062s`), including the new
   `TestBinaryAliasCooldownExclusionAndSynthetic` (also run standalone:
-  `AIPROXY_BINARY="$(pwd)/dist/aiproxy" go test -tags=integration
+  `AIPROXY_BINARY="<repo-root>/dist/aiproxy" go test -tags=integration
 ./internal/integration/ -run TestBinaryAliasCooldownExclusionAndSynthetic -v`
   — PASS `0.24s`).
 - `make docs-contract` — `documentation contract matrices match`.

@@ -24,6 +24,7 @@ type hookSet struct {
 	afterWrite   func(string) error
 	afterSync    func(string) error
 	beforeRename func(string, string) error
+	beforeLink   func(string, string) error
 	beforeRemove func(string) error
 	afterDirSync func(string) error
 }
@@ -36,11 +37,23 @@ func WriteFile(path string, data []byte, mode os.FileMode, opts Options) error {
 	return writer{}.WriteFile(path, data, mode, opts)
 }
 
+func CreateFile(path string, data []byte, mode os.FileMode, opts Options) error {
+	return writer{}.CreateFile(path, data, mode, opts)
+}
+
 func ReplaceFiles(files []File, opts Options) error {
 	return writer{}.ReplaceFiles(files, opts)
 }
 
 func (w writer) WriteFile(path string, data []byte, mode os.FileMode, opts Options) error {
+	return w.writeFile(path, data, mode, opts, false)
+}
+
+func (w writer) CreateFile(path string, data []byte, mode os.FileMode, opts Options) error {
+	return w.writeFile(path, data, mode, opts, true)
+}
+
+func (w writer) writeFile(path string, data []byte, mode os.FileMode, opts Options, exclusive bool) error {
 	prepared, err := w.prepare(path, data, mode, opts)
 	if err != nil {
 		return err
@@ -53,11 +66,23 @@ func (w writer) WriteFile(path string, data []byte, mode os.FileMode, opts Optio
 	if err := safeDestination(path, opts.Secret); err != nil {
 		return err
 	}
-	if err := w.rename(prepared.temp, path); err != nil {
-		return fmt.Errorf("rename %s: %w", path, err)
+	if exclusive {
+		if err := w.link(prepared.temp, path); err != nil {
+			return fmt.Errorf("create %s: %w", path, err)
+		}
+		if err := w.remove(prepared.temp); err != nil {
+			return fmt.Errorf("published %s but remove temporary file: %w", path, err)
+		}
+	} else {
+		if err := w.rename(prepared.temp, path); err != nil {
+			return fmt.Errorf("rename %s: %w", path, err)
+		}
 	}
 	prepared.temp = ""
-	return syncDir(filepath.Dir(path))
+	if err := w.syncDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("published %s but sync directory: %w", path, err)
+	}
+	return nil
 }
 
 type RecoveryFailure struct {
@@ -249,6 +274,15 @@ func (w writer) rename(oldPath, newPath string) error {
 		}
 	}
 	return os.Rename(oldPath, newPath)
+}
+
+func (w writer) link(oldPath, newPath string) error {
+	if w.hooks.beforeLink != nil {
+		if err := w.hooks.beforeLink(oldPath, newPath); err != nil {
+			return err
+		}
+	}
+	return os.Link(oldPath, newPath)
 }
 
 func (w writer) remove(path string) error {

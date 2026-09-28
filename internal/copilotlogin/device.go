@@ -27,9 +27,10 @@ const (
 )
 
 var (
-	ErrAccessDenied = errors.New("authorization denied by user")
-	ErrExpired      = errors.New("device codes expired; request new codes and try again")
-	ErrRedirect     = errors.New("refused redirect from authorization server")
+	ErrAccessDenied        = errors.New("authorization denied by user")
+	ErrExpired             = errors.New("device codes expired; request new codes and try again")
+	ErrRedirect            = errors.New("refused redirect from authorization server")
+	errPollStepUnreachable = errors.New("unreachable poll step state")
 )
 
 type DeviceCode struct {
@@ -224,16 +225,18 @@ func (c *Client) Poll(ctx context.Context, clientID, deviceCode string, interval
 		if !deadline.IsZero() && !c.now().Before(deadline) {
 			return TokenResult{}, ErrExpired
 		}
-		result, action, nextInterval, err := c.pollOnce(ctx, clientID, deviceCode, interval)
+		result, err := c.PollOneStep(ctx, clientID, deviceCode, interval)
 		if err != nil {
 			return TokenResult{}, err
 		}
-		switch action {
-		case pollDone:
-			return result, nil
-		case pollContinue:
-			interval = nextInterval
+		switch result.State {
+		case PollStepReady:
+			return result.Token, nil
+		case PollStepPending:
+			interval = result.Interval
 			continue
+		default:
+			return TokenResult{}, errPollStepUnreachable
 		}
 	}
 }
@@ -244,6 +247,43 @@ const (
 	pollDone pollAction = iota
 	pollContinue
 )
+
+type PollStepState string
+
+const (
+	PollStepPending PollStepState = "pending"
+	PollStepReady   PollStepState = "ready"
+	PollStepDenied  PollStepState = "denied"
+	PollStepExpired PollStepState = "expired"
+	PollStepFailed  PollStepState = "failed"
+)
+
+type PollStepResult struct {
+	State    PollStepState
+	Interval time.Duration
+	Token    TokenResult
+}
+
+func (c *Client) PollOneStep(ctx context.Context, clientID, deviceCode string, interval time.Duration) (PollStepResult, error) {
+	if interval <= 0 {
+		interval = DefaultInterval
+	}
+	result, action, nextInterval, err := c.pollOnce(ctx, clientID, deviceCode, interval)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrAccessDenied):
+			return PollStepResult{State: PollStepDenied, Interval: interval}, err
+		case errors.Is(err, ErrExpired):
+			return PollStepResult{State: PollStepExpired, Interval: interval}, err
+		default:
+			return PollStepResult{State: PollStepFailed, Interval: interval}, err
+		}
+	}
+	if action == pollDone {
+		return PollStepResult{State: PollStepReady, Interval: nextInterval, Token: result}, nil
+	}
+	return PollStepResult{State: PollStepPending, Interval: nextInterval}, nil
+}
 
 func (c *Client) pollOnce(ctx context.Context, clientID, deviceCode string, interval time.Duration) (TokenResult, pollAction, time.Duration, error) {
 	form := url.Values{}

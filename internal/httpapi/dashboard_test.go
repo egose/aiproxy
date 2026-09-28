@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/egose/aiproxy/internal/accounting"
+	"github.com/egose/aiproxy/internal/adminauth"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/dashrpc"
@@ -249,5 +250,28 @@ func TestDashboardAuthFailureRateLimitsRepeatedBadTokens(t *testing.T) {
 				t.Fatalf("after cooldown status = %d, want 200, body=%s", w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+func TestDashboardRejectsAdminJWTWithoutStore(t *testing.T) {
+	t.Setenv("AIPROXY_JWT_SECRET", "test-jwt-secret-1234567890")
+	rt := newRT()
+	rt.Listener = config.Listener{Address: ":8080"}
+	usage := accounting.NewAggregator()
+	health := providerhealth.New(nil, config.ProviderHealth{})
+	health.SetProviders(rt.Catalog)
+	logs := observability.NewLogBuffer(10)
+	h := NewHandler(newDashboardDeps(rt, time.Now(), usage, health, logs))
+
+	access, _, err := adminauth.IssueAccess("user-1", "admin@example.com", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, dashrpc.SnapshotPath, nil)
+	req.Header.Set("Authorization", "Bearer "+access)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 for admin JWT without multi-tenancy store", w.Code)
 	}
 }

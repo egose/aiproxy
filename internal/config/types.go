@@ -12,6 +12,8 @@ type Runtime struct {
 	Metrics               Metrics
 	Dashboard             Dashboard
 	WebUI                 WebUI
+	Database              Database
+	MultiTenancy          MultiTenancy
 	IngressGuardrails     IngressGuardrails
 	UpstreamHeaderTimeout time.Duration
 	UserAgent             string
@@ -35,6 +37,31 @@ type Dashboard struct {
 
 type WebUI struct {
 	Enabled bool
+}
+
+type Database struct {
+	URL string
+}
+
+type MultiTenancy struct {
+	Enabled                 bool
+	AllowPublicRegistration bool
+}
+
+func (r Runtime) MultiTenancyEnabled() bool {
+	return r.MultiTenancy.Enabled
+}
+
+func (r Runtime) AdminAPIEnabled() bool {
+	return r.MultiTenancy.Enabled
+}
+
+func (r Runtime) RequiresDB() bool {
+	return r.MultiTenancy.Enabled
+}
+
+func (r Runtime) DashboardOnly() bool {
+	return r.WebUI.Enabled && !r.MultiTenancy.Enabled
 }
 
 type GuardrailMode string

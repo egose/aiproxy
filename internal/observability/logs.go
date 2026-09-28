@@ -11,21 +11,23 @@ import (
 )
 
 type LogEntry struct {
-	Time    time.Time
-	Level   slog.Level
-	Message string
-	Attrs   string
+	RequestID string
+	Time      time.Time
+	Level     slog.Level
+	Message   string
+	Attrs     string
 
 	Seq uint64 `json:"seq"`
 }
 
 func (e LogEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(logEntryJSON{
-		Time:    e.Time.Format(time.RFC3339Nano),
-		Level:   e.Level.String(),
-		Message: e.Message,
-		Attrs:   e.Attrs,
-		Seq:     e.Seq,
+		RequestID: e.RequestID,
+		Time:      e.Time.Format(time.RFC3339Nano),
+		Level:     e.Level.String(),
+		Message:   e.Message,
+		Attrs:     e.Attrs,
+		Seq:       e.Seq,
 	})
 }
 
@@ -43,6 +45,7 @@ func (e *LogEntry) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	e.Time = tm
+	e.RequestID = v.RequestID
 	e.Level = level
 	e.Message = v.Message
 	e.Attrs = v.Attrs
@@ -51,11 +54,12 @@ func (e *LogEntry) UnmarshalJSON(data []byte) error {
 }
 
 type logEntryJSON struct {
-	Time    string `json:"time"`
-	Level   string `json:"level"`
-	Message string `json:"message"`
-	Attrs   string `json:"attrs,omitempty"`
-	Seq     uint64 `json:"seq,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
+	Time      string `json:"time"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
+	Attrs     string `json:"attrs,omitempty"`
+	Seq       uint64 `json:"seq,omitempty"`
 }
 
 type LogBuffer struct {
@@ -182,11 +186,19 @@ func (h *bufferingHandler) WithGroup(name string) slog.Handler {
 }
 
 func (h *bufferingHandler) Handle(ctx context.Context, r slog.Record) error {
+	requestID := ""
+	for _, a := range h.attrs {
+		if a.Key == "request_id" && a.Value.Kind() == slog.KindString {
+			requestID = a.Value.String()
+			break
+		}
+	}
 	h.buffer.Add(LogEntry{
-		Time:    r.Time,
-		Level:   r.Level,
-		Message: r.Message,
-		Attrs:   formatAttrs(r, h.attrs, h.groups),
+		RequestID: requestID,
+		Time:      r.Time,
+		Level:     r.Level,
+		Message:   r.Message,
+		Attrs:     formatAttrs(r, h.attrs, h.groups),
 	})
 	return h.Handler.Handle(ctx, r)
 }

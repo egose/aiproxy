@@ -18,9 +18,15 @@ func testFS() fstest.MapFS {
 	}
 }
 
+func htmlRequest(method, target string) *http.Request {
+	req := httptest.NewRequest(method, target, nil)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	return req
+}
+
 func TestFileHandlerServesIndexAtRoot(t *testing.T) {
 	h := fileHandler(testFS())
-	req := httptest.NewRequest(http.MethodGet, "/dashboard/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -34,9 +40,9 @@ func TestFileHandlerServesIndexAtRoot(t *testing.T) {
 	}
 }
 
-func TestFileHandlerSPAFallback(t *testing.T) {
+func TestFileHandlerSPAFallbackForBrowserNavigation(t *testing.T) {
 	h := fileHandler(testFS())
-	req := httptest.NewRequest(http.MethodGet, "/dashboard/providers", nil)
+	req := htmlRequest(http.MethodGet, "/providers")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -47,9 +53,19 @@ func TestFileHandlerSPAFallback(t *testing.T) {
 	}
 }
 
+func TestFileHandlerNoFallbackForAPIClients(t *testing.T) {
+	h := fileHandler(testFS())
+	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for non-HTML client", rec.Code)
+	}
+}
+
 func TestFileHandlerMissingAssetIsNotFound(t *testing.T) {
 	h := fileHandler(testFS())
-	req := httptest.NewRequest(http.MethodGet, "/dashboard/assets/stale-bundle.js", nil)
+	req := httptest.NewRequest(http.MethodGet, "/assets/stale-bundle.js", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -61,21 +77,41 @@ func TestFileHandlerMissingAssetIsNotFound(t *testing.T) {
 }
 
 func TestMatches(t *testing.T) {
-	for _, path := range []string{"/dashboard", "/dashboard/", "/dashboard/providers"} {
+	for _, path := range []string{"/", "/assets/app.js", "/providers", "/admin/keys", "/favicon.svg", "/dashboardx"} {
 		if !Matches(path) {
 			t.Fatalf("Matches(%q) = false, want true", path)
 		}
 	}
-	for _, path := range []string{"/", "/dashboardx", "/v1/models", "/_internal/dashboard/snapshot"} {
+	for _, path := range []string{
+		"/v1/models", "/v1/chat/completions", "/healthz", "/readyz", "/metrics",
+		"/_internal/dashboard/snapshot", "/_internal/admin/status",
+		"/dashboard", "/dashboard/", "/dashboard/providers",
+	} {
 		if Matches(path) {
 			t.Fatalf("Matches(%q) = true, want false", path)
 		}
 	}
 }
 
+func TestWantsHTML(t *testing.T) {
+	browser := htmlRequest(http.MethodGet, "/")
+	if !WantsHTML(browser) {
+		t.Fatalf("WantsHTML(browser) = false, want true")
+	}
+	plain := httptest.NewRequest(http.MethodGet, "/", nil)
+	if WantsHTML(plain) {
+		t.Fatalf("WantsHTML(no accept) = true, want false")
+	}
+	jsonReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	jsonReq.Header.Set("Accept", "application/json")
+	if WantsHTML(jsonReq) {
+		t.Fatalf("WantsHTML(json) = true, want false")
+	}
+}
+
 func TestFileHandlerAssetCaching(t *testing.T) {
 	h := fileHandler(testFS())
-	req := httptest.NewRequest(http.MethodGet, "/dashboard/assets/app-abc123.js", nil)
+	req := httptest.NewRequest(http.MethodGet, "/assets/app-abc123.js", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -86,22 +122,19 @@ func TestFileHandlerAssetCaching(t *testing.T) {
 	}
 }
 
-func TestFileHandlerRedirectBarePrefix(t *testing.T) {
+func TestFileHandlerServesFavicon(t *testing.T) {
 	h := fileHandler(testFS())
-	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	req := httptest.NewRequest(http.MethodGet, "/favicon.svg", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusFound {
-		t.Fatalf("status = %d, want 302", rec.Code)
-	}
-	if loc := rec.Header().Get("Location"); loc != "/dashboard/" {
-		t.Fatalf("Location = %q, want /dashboard/", loc)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 }
 
 func TestFileHandlerMethodNotAllowed(t *testing.T) {
 	h := fileHandler(testFS())
-	req := httptest.NewRequest(http.MethodPost, "/dashboard/", nil)
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusMethodNotAllowed {
@@ -113,7 +146,7 @@ func TestNotBuiltWithoutIndex(t *testing.T) {
 	if Built() {
 		t.Skip("web UI is built in this checkout; stub assertion only applies pre-build")
 	}
-	req := httptest.NewRequest(http.MethodGet, "/dashboard/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -127,7 +160,7 @@ func TestDirHandlerServesFromDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := DirHandler(root)
-	req := httptest.NewRequest(http.MethodGet, "/dashboard/anything", nil)
+	req := htmlRequest(http.MethodGet, "/anything")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

@@ -38,7 +38,7 @@ It lets the proxy own:
 - `gemini`
 - `opencode-zen`
 - `opencode-go`
-- `github-copilot` (chat-only, device-flow login)
+- `github-copilot` (chat-only, device-flow login; hermetically verified; live GitHub compatibility unverified)
 - `zenmux` (defaults to `https://zenmux.ai/api/v1`)
 
 ## Supported Public API

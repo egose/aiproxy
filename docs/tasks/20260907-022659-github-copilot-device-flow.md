@@ -8,6 +8,57 @@ Add explicit GitHub.com device authorization and a `github-copilot` provider sup
 
 Non-goals: Enterprise domains, Responses/Messages translation, generic OAuth infrastructure, automatic model synchronization, browser callback servers, importing another application's credentials, or bundling OpenCode's OAuth client ID. Do not add token refresh or token exchange unless the verified upstream contract requires it.
 
+## Current Acceptance Decision — 2026-09-27
+
+The user explicitly approved mock-based acceptance instead of supplying a real
+OAuth application/account. This plan now closes **hermetically verified
+implementation**, not live GitHub compatibility or entitlement. No real client ID,
+login or authenticated external traffic is required for its remaining tasks.
+
+Live verification is a separate deferred task in
+`20260927-102347-copilot-live-compatibility.md` (COPILOT-LIVE-01). Its unknowns remain
+real: mock fixtures cannot establish direct-Bearer acceptance, model availability,
+required headers or exchange/refresh needs on GitHub. Public docs must say
+"hermetically verified; live GitHub compatibility unverified" without claiming
+production compatibility. Normal production login still requires an explicitly
+supplied client ID; no public mock mode or endpoint-override flags will be added.
+
+Historical 2026-09-07 findings/evidence below remain unchanged as historical records.
+Their live-release gating language is superseded for **this implementation plan**
+by this approved decision; live compatibility claims still require COPILOT-LIVE-01.
+COPILOT-01–04 remain completed. COPILOT-05 was reopened for the scoped mock coverage
+and documentation work below; COPILOT-06 independently audited that work. Both
+are now completed with actual verification evidence recorded in their sections.
+No task may be completed solely by changing this acceptance decision.
+
+Final disposition (2026-09-27, after independent COPILOT-06 verification):
+COPILOT-01–06 are completed for hermetic implementation acceptance. The reopening
+instructions above record the start of this review cycle; execution evidence and
+final checks are below. COPILOT-LIVE-01 remains deferred and live GitHub
+compatibility remains explicitly unverified.
+
+Execution: COPILOT-05 then COPILOT-06, each in a fresh sequential sub-agent session,
+with no nested agents/commits or `CHANGELOG.md` edits. Preserve extensive incoming
+uncommitted BOUNDARY/SAFE/LIFE/FLOW/TUI/EDGE work. Follow AGENTS.md and
+`task-as-you-go skill`; use apply_patch.
+Set only the owned task in_progress; append actual Completion evidence before
+completed. COPILOT-06 must be independent of the implementer. The unrelated pending
+SECRET-04 remains outside this user-approved Copilot scope.
+
+Current coverage analysis (source inspection, no new baseline suite):
+
+- `internal/copilotlogin/device_test.go`, `credential_test.go`, and command
+  `login_test.go` already exercise polling, errors, persistence and injected local
+  issuer behavior. Reuse this coverage rather than duplicating protocol unit cases.
+- `internal/integration/copilot_binary_test.go` covers JSON/SSE chat against a stub
+  and CLI flag constraints, but writes the sidecar directly through Save. It does
+  not exercise a composed mocked login→configure→listing→serve→re-login recovery.
+- `internal/app/copilot_reload_test.go` verifies direct sidecar rotation/invalid
+  candidates, not a failed inference followed by the real login orchestration.
+- The missing outcome is cross-component recovery/provisioning coverage plus a
+  truthful documented local-verification entry point. Record exact test commands,
+  layers and gaps rather than presenting separate unit tests as a live smoke test.
+
 ## Analysis and Constraints
 
 Read-only analysis covered provider/config registries, adapters, CLI configuration, credential persistence, load/reload behavior, routing, and relevant tests. No baseline tests, builds, or authenticated upstream requests were run. The worktree was clean at analysis time. Implementation and all verification remain pending.
@@ -308,38 +359,76 @@ Commands/results (2026-09-07, hermetic, no GitHub credentials):
 
 Follow-ups for COPILOT-05 (not implemented): public matrices/docs/examples untouched; exact chat POST path `{base}/chat/completions` still presumed pending live verification; whether `X-GitHub-Api-Version`/`Openai-Intent` are mandatory for chat unverified; no binary-level login/config/serve coverage added; release still gated on authorized live device-login + `GET /models` + chat JSON/SSE + 401 re-login path.
 
-### COPILOT-05: Document and Independently Verify the Release
+### COPILOT-05: Complete Mocked Copilot Workflow Coverage And Documentation
 
-Status: blocked (prerequisite: maintainer-authorized live verification — eligible OAuth client ID + Copilot-subscribed account for device login, `GET /models`, chat JSON/SSE, and 401 re-login path; no real GitHub calls performed)
+Status: completed
+
+Execution note (2026-09-27): fresh isolated sequential implementation session;
+COPILOT-02–04 dependencies confirmed completed. Mock-only acceptance approved.
+Incoming dirty work inspected; required checks will run serially.
 
 Kind: improvement
 
-Priority: P2, mandatory release closure and independent verification.
+Priority: P2, complete the user-approved hermetic implementation deliverable.
 
-Suggested agent: independent integration reviewer, not the main implementer
+Suggested agent: isolated hermetic workflow implementer
 
 Dependencies: COPILOT-02, COPILOT-03, COPILOT-04
 
-Primary ownership: `README.md`, `AGENTS.md`, `docs/design.md`, affected `website/docs/` provider/configuration/operations/API pages, `examples/`, `scripts/check-doc-contracts.sh`, and binary integration tests.
+Primary ownership: `cmd/aiproxy` composed workflow tests, focused
+`internal/integration/copilot_binary_test.go` coverage, README/design and public
+Copilot docs/examples, this task record. Existing injection seams may be refined
+narrowly only if needed for meaningful tests; no production issuer override flags.
 
-Finding: Public support matrices and operator documentation currently have no Copilot/device-login contract; mocks alone cannot establish real application entitlement.
+Finding: Historical documentation/binary work below was delivered, but closure
+remained blocked on live eligibility. Under the revised acceptance decision, add
+composed mock provisioning/recovery evidence and explicitly distinguish simulated
+protocol behavior from unknown live application entitlement.
 
 References: `scripts/check-doc-contracts.sh`; `internal/integration/binary_test.go`; `internal/e2e/opencode_test.go` as an existing provider integration test precedent.
 
 Requirements:
 
-1. Update public matrices and executable examples together: chat JSON/SSE only, proxy-owned inventory/accounting, configurable client ID, credential location, headless provisioning, re-login, and reload behavior. Examples contain no real secrets or another application's client ID.
-2. Add hermetic binary-level login/config/serve coverage where feasible, keeping test-only issuer transport seams inaccessible as insecure production defaults.
-3. Independently review every acceptance criterion, alternate credential consumers, redirect/header isolation, concurrency, routing, cancellation, and docs/implementation agreement. Record findings as actionable follow-ups or fix them before closure.
-4. Run shared checks serially where they rebuild common outputs. Separately verify authorized real-provider device login plus JSON and SSE chat with an eligible model/client/account. Do not perform paid or authenticated calls without authorization.
+1. Reuse existing mocked protocol tests and add a composed test through real CLI
+   login orchestration (existing injected local issuer/time seam), persisted sidecar,
+   scripted configuration, upstream model listing and real App/server chat JSON/SSE.
+   Use only synthetic identities and local fixtures. Assert exact configured versus
+   upstream model behavior and one shared persisted credential across consumers.
+2. Exercise simulated 401/403/revocation followed by actual mocked re-login: failure
+   does not silently retry/re-authorize, failed login preserves the old sidecar,
+   successful re-login writes the new value but serving changes only on explicit
+   reload/restart. Failed reload candidates keep the old runtime. Cover JSON/SSE
+   before/after recovery and controlled cancellation/persistence outcomes using
+   existing tests where sufficient, new composition where necessary.
+3. Extend real-binary coverage for model discovery and credential reload/recovery
+   where absent. Keep test issuer injection in-process: explicitly distinguish
+   composed command tests from binary tests that provision synthetic sidecars.
+   Reject unexpected non-loopback networking in new fixtures; no actual GitHub calls.
+4. Publish a repeatable mock-only verification command/workflow requiring no real
+   client ID/account; map the protocol, command/App and binary coverage clearly.
+   Add the hermetic/live-unverified qualification to README and relevant public
+   provider/operation/configuration docs and example guidance. Preserve capability
+   matrices as implemented behavior and production login semantics.
+5. Run focused tests and default sanity checks; record gaps honestly. Update the
+   separate deferred task's links if needed but do not mark live verification done.
 
 Acceptance criteria:
 
-- All shared checks pass and independent review findings affecting this scope are resolved.
-- Real-provider evidence establishes client acceptance without publishing secrets; if credentials/authorization are unavailable, record delivered work and keep this task blocked for release verification.
-- Deferrals state rationale and residual risk, and the task document records actual commands/results rather than inferred success.
+- Mock workflow passes provisioning, listing, JSON/SSE and 401/403 re-login/reload
+  recovery using real production orchestration and temporary files/local servers;
+  all required existing protocol/persistence/cancellation/redirect tests pass.
+- Binary tests exercise real server/models/reload behavior without production test
+  backdoors; generated test files/config/credentials and processes clean up.
+- Public docs consistently distinguish hermetic verification from unverified live
+  access. Users can run the documented local checks with no registered client ID.
+- Completion evidence maps each required outcome to actual tests/commands and
+  states whether coverage is unit, composed in-process, or binary.
 
-Verification: shared checks below, independent code review, and separately authorized real-provider smoke tests.
+Verification: focused `go test -race ./internal/copilotlogin ./cmd/aiproxy ./internal/config ./internal/app ./internal/provider`,
+`make vet test`, `make integration`, `make docs-contract`, `git diff --check`;
+COPILOT-06 owns the independent final full gates. Commands run from repo root,
+UI builds finish before Go checks read embedded assets. Copilot scenarios require
+no PostgreSQL; unrelated optional DB skips must be recorded, not claimed verified.
 
 Completion evidence (added 2026-09-07, COPILOT-05 only; no COPILOT-01/02/03/04 changes; no CHANGELOG.md):
 
@@ -381,6 +470,269 @@ Commands/results (2026-09-07, serial, hermetic, no GitHub credentials):
 - `make build` → pass (`built dist/aiproxy`).
 - Spot: `go run ./cmd/aiproxy validate --config examples/github-copilot.hcl` → fails as designed pre-login (`credential "copilot-main" not found; run login first`); `... --config examples/opencode-zen.hcl` → `config is valid`.
 
+Completion evidence (added 2026-09-27, revised COPILOT-05; mock-only implementation acceptance):
+
+Scope and changed paths:
+
+- Added `cmd/aiproxy/copilot_workflow_test.go`; extended
+  `internal/integration/copilot_binary_test.go`. Existing injected issuer/time
+  seams suffice; no production test seam, mock mode, endpoint override, exchange
+  or refresh implementation was added. `cmd/aiproxy/login.go` changes only help
+  text to qualify the verification scope.
+- Updated `README.md`, `AGENTS.md`, `docs/design.md`,
+  `website/docs/{providers-and-routing,configuration,operations,api-reference,config-examples,intro}.md`
+  and `examples/github-copilot.hcl`. These now say **hermetically verified; live
+  GitHub compatibility unverified**, identify model names as illustrative, and
+  link to the repeatable local workflow in
+  `website/docs/operations.md#mock-only-copilot-verification`.
+- Corrected current design/operator guidance: inference preserves upstream JSON
+  authentication errors; `models --upstream` adds the re-login hint and loads the
+  current sidecar on each invocation. A running server keeps its loaded credential
+  until explicit activation. Capability matrices retain implemented behavior.
+- This original task record retains all historical evidence. The linked live task
+  already has reciprocal references and actionable prerequisites; no change needed.
+
+Layer-by-layer coverage and actual outcomes:
+
+| Layer                                    | Tests / outcomes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Existing protocol units                  | `internal/copilotlogin/device_test.go`: code request/defaults/client-ID constraints; pending then success; repeated slowdown and server interval; denial; expiry variants/deadline; cancellation before/during sleep; malformed/oversized responses; redirect refusal; network failure; production HTTPS and non-loopback HTTP rejection. All executed in the uncached focused race command below.                                                                                                                                                                                                                                                                                                                                                                                               |
+| Existing persistence/auth units          | `credential_test.go`: round trip, flat-map preservation, permissions, unsafe names/symlink rejection, concurrent independent credentials, cancel preservation and persistence failure; `auth*_test.go`: inference/listing header sharing, inbound stripping, vision and streaming metadata. Existing command `login_test.go` covers orchestration errors/output/permissions/no-config-required and concurrent login/configure writes. Focused race suite passed; configedit/filestore packages also passed the default repository gate.                                                                                                                                                                                                                                                          |
+| New composed in-process workflow         | `TestCopilotMockProvisioningAndRecovery/401` and `/403`: calls the real production `runLoginCopilot` orchestration with injected local issuer and virtual polling time; it does not replace persistence, config loading, model listing or dispatch. Scripted configure/validate/models execute through root commands, then a real `app.Build` handler serves over local HTTP. Initial and recovered JSON/SSE succeed. Issuer requests assert explicit synthetic client ID, scope, device grant, no client secret or bearer; consumers assert the same persisted credential, shared version/UA headers, exact model rewrite and derived/stripped chat metadata.                                                                                                                                   |
+| Composed model boundaries                | Discovery returns `upstream-chat (configured as copilot/public-chat)` and `discovered-only (not in config)`; public `/v1/models` retains the configured model without the discovered-only entry and makes zero upstream calls. Configure/validate make zero issuer/inference calls and preserve the sidecar. Login leaves the initial HCL unchanged and writes a 0600 sidecar.                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Composed recovery / failure preservation | Both auth statuses pass through exactly once for JSON and streaming requests, with no implicit OAuth. Denied and cancelled re-login preserve the old sidecar byte-for-byte. A successful mocked authorization followed by an actual symlink-destination persistence refusal preserves the previous credential; the fixture restores the destination afterward. Successful re-login writes the new credential; a fresh listing uses it immediately but serving still sends the old one. A corrupt candidate fails `App.Reload` and preserves the old runtime. Explicit successful reload activates the rotated credential; JSON/SSE and listing recover. Exact issuer call totals exclude silent reauthorization. Command output/errors are checked for synthetic token/device-secret disclosure. |
+| Existing App/config/provider coverage    | `internal/app/copilot_reload_test.go` additionally verifies expired candidate rollback, derived-account isolation and offline missing-credential behavior. Existing config/provider tests retain chat-only capability gates, credential type/isolation, headers, JSON/SSE usage/tools, direct/alias failure policy and cancellation coverage. All five prescribed focused packages passed with race detection and cache disabled.                                                                                                                                                                                                                                                                                                                                                                |
+| Existing binary coverage                 | `TestBinaryGitHubCopilotChatServe` covers real server JSON/SSE, upstream path/auth/metadata/model rewrite, unsupported responses before upstream I/O and proxy-owned models. `TestBinaryGitHubCopilotLoginHasNoEndpointOverrides` covers required client-ID failure and help/flag constraints without login networking.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| New binary recovery                      | `TestBinaryGitHubCopilotDiscoveryAndRecovery/401` and `/403` execute the real binary's `models --upstream`, `serve` and OS SIGHUP lifecycle. Exact method/path/auth/version/UA/model assertions and single-call counts cover discovery and chat; both JSON/SSE run before failure and after recovery. Sidecar rotation is inert for serving but visible to newly executed listing; rejected SIGHUP candidates preserve the old credential; successful SIGHUP recovers; static inventory stays unchanged. Synthetic sidecars are provisioned through `Save`, **not** child-process OAuth login.                                                                                                                                                                                                   |
+
+Commands/results (repo root, serial; UI build completed before Go consumers;
+2026-09-27, no real client/account or authenticated external traffic):
+
+1. `gofmt -w cmd/aiproxy/copilot_workflow_test.go internal/integration/copilot_binary_test.go`
+   → formatted the two scoped test files.
+2. `make web-build` → pass (TypeScript check and Vite build, 8,757 modules).
+3. `go test ./cmd/aiproxy -run '^TestCopilotMockProvisioningAndRecovery$' -count=1 -v`
+   → initial fixture failure: auth-error fixture omitted JSON Content-Type, so the
+   existing response normalization did not preserve that body verbatim. Corrected
+   the fixture Content-Type in both new recovery fixtures; no runtime change.
+4. `go test ./cmd/aiproxy -run '^TestCopilotMockProvisioningAndRecovery$' -count=1`
+   → pass (0.462s). Subsequently added actual persistence-refusal composition;
+   the final version is covered by the next uncached race gate.
+5. `go test -race ./internal/copilotlogin ./cmd/aiproxy ./internal/config ./internal/app ./internal/provider -count=1`
+   → all five packages pass (1.400s / 79.690s / 1.909s / 24.995s / 20.160s).
+6. `make vet test` → pass (`go vet ./...` clean; all testable packages pass,
+   with unchanged-package cache hits reported by Go).
+7. `make integration` → pass (serial UI typecheck/build, CGO-disabled
+   `dist/aiproxy` build, integration package 2.602s).
+8. `AIPROXY_BINARY="<repo-root>/dist/aiproxy" go test -tags=integration ./internal/integration -run GitHubCopilot -count=1 -v`
+   → all three Copilot top-level binary tests pass, including both 401/403
+   discovery/recovery subtests (1.094s total). This also executes the documented
+   uncached local binary-verification entry point.
+9. `make docs-contract` → pass (`documentation contract matrices match`).
+10. `git diff --check` → pass, no whitespace errors.
+11. `test -z "${AIPROXY_TEST_DATABASE_URL:-}" && go test ./internal/app -run '^TestKeyPolicyRuntimeAtomicity$' -count=1 -v`
+    → environment confirmed unset; test explicitly **SKIP** with
+    `AIPROXY_TEST_DATABASE_URL not set`. Database-backed optional cases in the
+    broader gates are not claimed verified. Copilot scenarios require no DB.
+
+Fixture cleanup and limitations:
+
+- New scenarios use only synthetic identities and temporary config/credential
+  files. The composed fixture disables environment proxying and rejects any
+  non-loopback dial before resolution/networking, including accidental default
+  GitHub URLs. Its displayed example.invalid verification URI is never opened.
+  The binary recovery fixture sets HTTP(S) proxy variables to a rejecting local
+  server, with loopback-only bypass. Unexpected outbound HTTP(S) fails the test;
+  this is a test-level transport guard, not an OS-wide network sandbox.
+- All fixture HTTP response bodies close; issuer/inference/App HTTP servers close
+  through test cleanup. `App.Close` releases application resources; the temporary
+  default transport and environment are restored. Binary tests stop/reap servers
+  with the existing bounded cleanup helper and use bounded model-command contexts.
+  `t.TempDir` removes sidecars, configs and the temporary symlink/backup on exit.
+  All cleanup completed without errors in the passing gates; no operator login
+  was written. Build outputs remain in the repository's normal `dist/` and
+  embedded UI locations; preexisting embedded assets were rebuilt by prescribed
+  Make targets, not manually removed.
+- Login orchestration is composed **in process**, while configure/models use
+  command dispatch and chat uses the real App. Binary tests independently cover
+  server/listing/signal activation using synthetic saved credentials. Neither
+  layer is live GitHub verification or child-process device authorization.
+- Actual entitlement, direct-Bearer acceptance, live model/path/header contracts,
+  token lifetime and exchange/refresh requirements remain unverified in
+  COPILOT-LIVE-01 (deferred). Full final `make test-race` / independent review and
+  final standalone build remain COPILOT-06 responsibilities; this session ran
+  COPILOT-05's prescribed focused race and default gates plus the integration build.
+- Incoming BOUNDARY/SAFE/LIFE/FLOW/TUI/EDGE dirty work and historical evidence were
+  preserved with scoped apply_patch edits. No commits, CHANGELOG edits or nested
+  agents. COPILOT-06 remains pending; COPILOT-LIVE-01 remains deferred. No blocker
+  to revised COPILOT-05 acceptance remains.
+
+### COPILOT-06: Independently Verify Hermetic Closure And Live Deferral
+
+Status: completed
+
+Execution note (2026-09-27): fresh independent reviewer session, not the
+COPILOT-05 implementer. Read the full original record, current acceptance decision,
+new evidence, deferred live task, AGENTS.md and referenced task-as-you-go skill.
+COPILOT-05 dependency is completed. Incoming extensive dirty work inspected;
+source/docs audit and all prescribed gates will run with builds/tests serialized.
+
+Kind: improvement
+
+Priority: P2 — ensure the revised acceptance is backed by real mock workflow coverage.
+
+Suggested agent: independent final reviewer, not COPILOT-05 implementer
+
+Dependencies: COPILOT-05
+
+Primary ownership: review scoped tests/source/docs and both task records; narrow
+corrections only if needed to fulfill defined acceptance, with regressions.
+
+Finding: Mock success must not be presented as verified upstream compatibility;
+historical live-gate language and newer docs must have an unambiguous current scope.
+
+References: Current Acceptance Decision, COPILOT-05 requirements/evidence,
+`20260927-102347-copilot-live-compatibility.md` and actual workflow tests.
+
+Requirements:
+
+1. Audit existing and new tests against every required outcome, including forbidden
+   external networking, issuer isolation, exact auth/header/model flow, persistence,
+   cancel/failure preservation, explicit activation and JSON/SSE recovery.
+2. Run shared final gates serially. Confirm focused Copilot tests really execute,
+   no real client/account is required, no insecure production mock flag was added,
+   and local fixtures/processes clean up. Correct scoped gaps with regressions.
+3. Audit README/website/examples/design/CLI guidance and task scopes for truthful
+   qualification. COPILOT-05/06 completion means hermetic implementation only;
+   COPILOT-LIVE-01 stays deferred with actionable prerequisites and residual unknowns.
+4. Preserve all incoming work and CHANGELOG; record actual checks, a coverage matrix,
+   status/acceptance audit and limitations. No live-provider request is authorized.
+
+Acceptance criteria:
+
+- All revised Copilot implementation tasks completed with meaningful evidence;
+  documented local verification works and final gates pass.
+- Deferred live task is explicit, separately owned and never reported tested or
+  completed. Production login still requires an explicit user-supplied client ID.
+- No dropped/overwritten prior work, CHANGELOG edit or unresolved acceptance blocker.
+
+Verification: `make vet test`, `make test-race`, `make integration`,
+`make docs-contract`, `make build`, `git diff --check`, focused uncached Copilot tests
+and source/docs audit. Serialize all builds. Unrelated optional DB tests may skip
+without a fixture; record those limits rather than claiming database verification.
+
+Completion evidence (2026-09-27, independent COPILOT-06 reviewer):
+
+**Decision: revised hermetic acceptance passes.** No scoped source, test or public
+documentation correction was necessary. This session edited only this original
+task file via apply_patch; prescribed builds regenerated normal build outputs.
+The review used actual source and assertions, not just COPILOT-05's report.
+
+### Independent Coverage Matrix
+
+| Required outcome                              | Actual evidence and coverage boundary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Explicit issuer/client contract               | `cmd/aiproxy/login.go` (`newLoginCopilotCommand`, `runLoginCopilot`) supplies no default client ID and passes a nil factory in production. Only the existing internal factory seam replaces issuer/time in tests. `internal/copilotlogin/device.go` defaults to the fixed HTTPS GitHub device/token URLs, 15s HTTP timeout, 256 KiB response limit and refusal of every redirect. Login does not load config, edit HCL, signal serving or invoke inference. Binary `TestBinaryGitHubCopilotLoginHasNoEndpointOverrides` verifies missing-ID failure and the flag/help boundary. No public mock flag, OAuth endpoint override, client secret, exchange or refresh was added.                                         |
+| Polling and error preservation                | Full uncached race execution of `internal/copilotlogin/device_test.go`: request/defaults/invalid client ID, pending-success, cumulative slowdown and larger server interval, denial, both expiry codes, already-expired deadline, cancellation before/during sleep, malformed and oversized responses, device/token redirect refusal and closed-loopback network failure. These are protocol units; they do not establish live issuer eligibility or every timing interleaving.                                                                                                                                                                                                                                     |
+| Persistence, output and independent writers   | `credential_test.go` verifies structured round trip, untouched flat map, 0600 file/0700 new directory, unsafe names, symlink-target preservation and concurrent independent sidecars. `login_test.go` verifies command output, actual issuer orchestration, denial preservation, cancellation/expiry without saving, no-config requirement and concurrent login/flat-map writers. `configedit/locked_test.go` checks distinct concurrent keys and mixed configure/secrets writers; `WriteProviderFiles`/`WriteSecretsUpdate` lock the read-modify-write boundary. These packages pass repository gates; login and credential cases also pass uncached race execution.                                               |
+| Full provisioning composition                 | `TestCopilotMockProvisioningAndRecovery/401` and `/403` run real `runLoginCopilot` with only issuer/time injected, save the sidecar, execute root-command scripted configure/validate/models, build the real App, and serve its handler over local HTTP. Login preserves initial HCL; sidecar is 0600; configure/validate preserve its bytes and cause no issuer/inference requests. Issuer asserts POST paths, explicit synthetic client ID/scope/device grant, no client secret and no bearer. This is in-process command/App composition, not child-process OAuth.                                                                                                                                               |
+| Shared credential, headers and models         | The composed issuer result is consumed by both discovery and chat. The fixture checks exact bearer, shared API version/default proxy UA, no Cookie/X-Api-Key/X-Interaction-Id, derived initiator/vision, and `copilot/public-chat` rewritten to `upstream-chat`. Discovery annotates `upstream-chat (configured as copilot/public-chat)` and `discovered-only (not in config)`. Public `/v1/models` lists only the static configured model and makes zero upstream calls. `auth*_test.go`, provider tests and existing e2e tests separately cover exact header construction, image-derived vision, streaming Accept, JSON tools/usage and SSE usage.                                                                |
+| 401/403 and actual re-login                   | Both composed status subtests exercise initial JSON/SSE success, then single-call verbatim JSON auth errors for both ordinary and streaming requests, plus a listing re-login hint. Issuer call counts exclude implicit reauthorization. Denied and cancelled re-login leave original sidecar bytes; a successful authorization followed by an actual symlink-destination persistence refusal also preserves the original credential. Subsequent actual mocked re-login writes a different persisted token.                                                                                                                                                                                                         |
+| Activation and rejected candidates            | After composed re-login, a fresh listing uses the new token immediately while running JSON/SSE requests still send the old token and fail. Corrupt sidecar makes `App.Reload` fail with old runtime intact; restoring the candidate and explicitly reloading recovers JSON/SSE and listing. `copilot_reload_test.go` additionally tests expired-candidate rollback, base/derived account isolation and offline missing-credential failure without file creation. `config/helpers.go` resolves expiry/token only at load; `App.Reload` validates before dependency publication. No claim of automatic expiry refresh or immediate file-watch activation.                                                             |
+| Real binary coverage                          | `TestBinaryGitHubCopilotChatServe` starts the compiled server, tests JSON/SSE, upstream auth/path/model, unsupported Responses with zero upstream calls, and proxy-owned models. `TestBinaryGitHubCopilotDiscoveryAndRecovery/401` and `/403` execute compiled `models --upstream` and `serve`, enforce method/path/auth/version/model/single-call assertions, prove sidecar rotation is inert for serving but immediate for newly launched listing, and exercise rejected then successful OS SIGHUP with JSON/SSE recovery. Credentials are provisioned by `Save`, not binary login. Recovery by process restart is supported by load-time source semantics but is not a separate Copilot binary restart scenario. |
+| Capability, routing and credential boundaries | `config/copilot_test.go` covers chat-only defaults/rejections, missing/unknown/expired refs, disabled providers, credential type misuse, protocol rejection, local derived credentials and base URL validation. `provider/githubcopilot.go` rejects unsupported operations/missing token before I/O. `httpapi/copilot_test.go` covers all five non-chat operations, dedicated-token plumbing, direct single-call 401 and alias 502 failover versus default-policy non-retry on 401. Existing e2e tests cover JSON/SSE, three unsupported operations and missing-credential build failure. Config/provider tests ran uncached with race detection; HTTP/e2e Copilot tests additionally ran uncached by name.         |
+| Cancellation and stream ownership             | Protocol/command tests cover cancellation; provider `TestGitHubCopilotCancellation` and `TestGitHubCopilotSlowUpstreamCanceled` verify cancelled/deadline requests. `doGitHubCopilot` carries the context into the shared executor and JSON/SSE handlers; the executor handles HTTP errors before streaming. New recovery tests request streaming but receive JSON on auth failures; they do not simulate an auth failure after SSE has already started. No login or post-stream replay path was introduced.                                                                                                                                                                                                        |
+| Configure alternate paths                     | `configure_copilot_test.go` checks line-oriented/scripted reference creation, equivalence, missing/API-key rejection, reference preservation and derived-local compact rendering; configedit rendering tests cover default/custom paths. The real composed test adds validation with the saved login. Interactive Huh credential prompts were source-audited for the same reference-only fields/validation and absence of OAuth/token display; no interactive terminal session was performed or claimed as binary coverage.                                                                                                                                                                                         |
+| Documentation and scope                       | Audited current Copilot sections in README, AGENTS, design, website providers/routing, configuration, operations, API reference, examples and intro, plus CLI login help and `examples/github-copilot.hcl`. The explicit hermetic/live-unverified qualification, illustrative models, separate live task, production client-ID requirement, sidecar activation and model-listing distinction agree with tested behavior. The exact documented four-command local workflow was executed successfully. Capability matrices pass `make docs-contract`; they describe implemented surfaces, not live entitlement.                                                                                                       |
+
+Evidence precision / historical reconciliation:
+
+- The 2026-09-07 statements about rejecting Copilot `user_agent` and relying on
+  Go's default redirect policy are historical. Current config explicitly accepts
+  `user_agent` (`TestLoadGitHubCopilotRejectsProtocolButAcceptsUserAgent`), and shared
+  execution honors existing configured UA/forwarding settings. Default-path mock
+  header assertions do not claim to disable those operator opt-ins.
+- Current inference and discovery use `internal/upstreamhttp` same-origin redirect
+  checks (scheme/host/effective port; bounded hops), including injected inference
+  clients. OAuth retains its separate all-redirect refusal. These incoming shared
+  changes were preserved; the historical redirect residual is not the current
+  implementation. Shared redirect tests passed repository gates.
+- `credential_test.go`'s `TestCancelPreservesExisting` actually rejects an invalid
+  save name, and command `TestLoginCopilotPersistenceFailure` rejects an empty
+  path before authorization. Neither alone proves cancellation or post-authorization
+  persistence failure. The new composed scenario supplies both meaningful outcomes,
+  including actual filesystem refusal after successful authorization.
+- Preservation claims concern the exercised denial/cancellation/pre-publication
+  refusal paths. `filestore.WriteFile` may report directory-sync failure after a
+  complete file has already been published; it explicitly reports publication.
+  No crash-atomic transaction, every possible I/O failure rollback, or live token
+  lifetime/exchange guarantee is inferred from the mocks.
+
+### Commands And Outcomes
+
+All builds and test commands ran serially from `<repo-root>` on
+Linux, with the existing repository toolchain/dependencies. No live provider call,
+real client ID/account, or browser authorization was used.
+
+1. `make web-build` — PASS; TypeScript check and Vite build, 8,757 modules. Finished
+   before Go consumers read embedded UI assets.
+2. `go test -race ./internal/copilotlogin ./cmd/aiproxy ./internal/config ./internal/app ./internal/provider -count=1`
+   — PASS, all five packages uncached (1.448s / 84.016s / 2.062s / 25.154s /
+   19.211s). This is the documented full focused protocol/command/config/App/provider
+   race command, not a pattern that could omit protocol tests.
+3. `make vet test` — PASS; vet clean; all testable packages pass (Go reported
+   cached test results). Integration package has no tests without its build tag.
+4. `make test-race` — PASS; command/App/dbmerge/httpapi/store executed (75.891s /
+   24.500s / 1.062s / 18.696s / 1.052s); other testable packages reported cache hits.
+5. `make integration` — PASS; UI typecheck/build, CGO-disabled binary build and
+   tagged integration package (2.278s).
+6. `AIPROXY_BINARY="<repo-root>/dist/aiproxy" go test -tags=integration ./internal/integration -run GitHubCopilot -count=1 -v`
+   — PASS; all three top-level Copilot binary tests explicitly executed, including
+   both 401/403 recovery subtests (0.992s total).
+7. `make docs-contract` — PASS, `documentation contract matrices match`.
+8. `make build` — PASS; standalone UI typecheck/build then CGO-disabled
+   `dist/aiproxy`, version `v0.26.0-67-gbe907db-dirty`.
+9. `go test ./cmd/aiproxy ./internal/httpapi ./internal/e2e -run Copilot -count=1 -v`
+   — PASS (0.788s / 0.219s / 0.234s). Named output confirms both composed recovery
+   subtests, login/configure/listing cases, all four HTTP handler Copilot tests and
+   all four e2e Copilot tests. This additionally forces the HTTP/e2e cases outside
+   the five-package focused race command to execute uncached.
+10. `test -z "${AIPROXY_TEST_DATABASE_URL:-}" && go test ./internal/app -run '^TestKeyPolicyRuntimeAtomicity$' -count=1 -v`
+    — PASS with explicit **SKIP**, `AIPROXY_TEST_DATABASE_URL not set`. Unrelated
+    optional database-backed cases are not claimed verified; Copilot requires no DB.
+11. `git diff --check` — PASS; repeated after final task evidence/status edits.
+
+### Fixture Cleanup, Preservation And Final Status Audit
+
+- New composed transport disables environment proxying and rejects non-loopback
+  IP dials before networking. App client-pool clones retain that dial guard; issuer
+  and discovery use the guarded default transport. The example.invalid display
+  URI is never opened. Binary recovery children inherit rejecting local HTTP(S)
+  proxies with loopback bypass. No unexpected-network assertion fired. This is
+  fixture-level protection, not an OS-wide network sandbox or packet capture.
+- Source audit confirms new fixture response-body closes, server cleanup, App.Close,
+  transport/environment restoration and temporary credential/config/symlink cleanup.
+  Binary server cleanup interrupts and waits for children with bounded shutdown;
+  listing commands have bounded contexts. Passing tests reported no cleanup errors.
+  Post-run `pgrep -af '<repo-root>/dist/aiproxy'` found no matching
+  child process; a `Test*Copilot*` glob under the system temp directory found no
+  matching files. These checks supplement test cleanup, not a claim of a
+  system-wide resource-leak audit.
+- Startup and final `git status --short` path/status inventories agree. All incoming
+  BOUNDARY/SAFE/LIFE/FLOW/TUI/EDGE work, untracked tests/tasks and existing embedded
+  UI outputs remain. The tracked diff excluding this task file has identical
+  before/after SHA-256 `8cfdf070e5601d5d992b887ac60a9e4728394002da6f56ce947dc988f826d6a5`
+  (`git diff -- . ':!docs/tasks/20260907-022659-github-copilot-device-flow.md' | sha256sum`).
+  No source/test edits, commits, CHANGELOG edits, nested agents or operator login
+  writes occurred. Normal build outputs remain in dist and internal/webui/dist.
+- COPILOT-01–04 remain completed; COPILOT-05's revised acceptance independently
+  passes; COPILOT-06 is completed only after these gates and audit. Historical
+  evidence remains intact. The unrelated SECRET-04 stays outside this review.
+- COPILOT-LIVE-01 remains **deferred**, unchanged, with its maintainer-authorized
+  owner/prerequisites and reciprocal task links. Actual entitlement, direct-Bearer
+  acceptance, live paths/models/required headers and lifetime/exchange/refresh needs
+  remain **unverified**. No revised hermetic acceptance blocker remains.
+
 ## Shared Verification and Definition of Done
 
 Use repository-provided Go/toolchain dependencies; hermetic tests must not require GitHub credentials. Final commands:
@@ -393,8 +745,23 @@ make docs-contract
 make build
 ```
 
-Current results (2026-09-07, COPILOT-05, hermetic, no GitHub credentials): `make vet test` pass; `make test-race` pass; `make integration` pass (incl. 2 new Copilot binary tests); `make docs-contract` pass; `make build` pass. Release verification stays blocked on maintainer-authorized live device-login + models + chat JSON/SSE + 401 re-login.
+Historical results (2026-09-07, superseded by the acceptance decision and verification above): `make vet test` pass; `make test-race` pass; `make integration` pass (incl. 2 new Copilot binary tests); `make docs-contract` pass; `make build` pass. At that time release verification remained blocked on maintainer-authorized live device-login + models + chat JSON/SSE + 401 re-login.
 
 Mark a task `in_progress` only once dependencies are satisfied. Mark it `completed` only after its acceptance criteria and required verification pass; append changed files, commands/results, and follow-ups. Use `blocked` with a named prerequisite when verification or the application contract cannot be established. Update this document as discoveries change scope rather than silently adding refresh infrastructure or claiming supported access.
 
-The objective is complete only when all five tasks are completed, public contracts agree with runtime behavior, credential boundaries are independently reviewed, and the configured application's real Copilot access is verified. Until then, distinguish implemented mock-tested behavior from release-ready support.
+Under the approved 2026-09-27 acceptance decision, this implementation objective is
+complete when COPILOT-01–06 are completed, public contracts agree with the tested
+implementation, credential boundaries are independently reviewed, and the composed
+hermetic workflow is verified. Live GitHub access remains unverified and separately
+deferred in COPILOT-LIVE-01; implementation completion must not imply otherwise.
+
+## Coordinator Final Closure — 2026-09-27
+
+- Confirmed COPILOT-01–06 completed with evidence, reviewed the new composed/binary
+  coverage and independent acceptance audit, and verified COPILOT-LIVE-01 remains
+  deferred in its separate timestamped record. No revised implementation blocker.
+- COPILOT-05 ran in fresh session `ses_f1c18ec3fffeDNMe5pZlAhS6nK`, followed by
+  independent COPILOT-06 session `ses_f1c106917ffe1PfUCgqBSvS7kK`; no overlap.
+- Rechecked `git diff --check` and `git diff --exit-code HEAD -- CHANGELOG.md`:
+  passed. Existing work preserved, no commits. Completion is mock-based only;
+  live entitlement/protocol compatibility remains unverified as requested.

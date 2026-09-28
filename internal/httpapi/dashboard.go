@@ -80,8 +80,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return true
 		}
-		if !dashboardAuthorized(deps.Dashboard, r) {
-			h.respondDashboardAuthFailure(w, r)
+		if !h.requireDashboardOperator(deps, w, r) {
 			return true
 		}
 		h.writeDashboardSnapshot(deps, w, r)
@@ -93,8 +92,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return true
 		}
-		if !dashboardAuthorized(deps.Dashboard, r) {
-			h.respondDashboardAuthFailure(w, r)
+		if !h.requireDashboardOperator(deps, w, r) {
 			return true
 		}
 		h.writeDashboardLogs(deps, w, r)
@@ -106,8 +104,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return true
 		}
-		if !dashboardAuthorized(deps.Dashboard, r) {
-			h.respondDashboardAuthFailure(w, r)
+		if !h.requireDashboardOperator(deps, w, r) {
 			return true
 		}
 		h.writeDashboardPayloads(deps, w, r)
@@ -119,8 +116,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return true
 		}
-		if !dashboardAuthorized(deps.Dashboard, r) {
-			h.respondDashboardAuthFailure(w, r)
+		if !h.requireDashboardOperator(deps, w, r) {
 			return true
 		}
 		h.writeDashboardPayload(deps, w, r)
@@ -132,8 +128,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return true
 		}
-		if !dashboardAuthorized(deps.Dashboard, r) {
-			h.respondDashboardAuthFailure(w, r)
+		if !h.requireDashboardOperator(deps, w, r) {
 			return true
 		}
 		h.writeDashboardBlocks(deps, w, r)
@@ -146,8 +141,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return true
 			}
-			if !dashboardAuthorized(deps.Dashboard, r) {
-				h.respondDashboardAuthFailure(w, r)
+			if !h.requireDashboardOperator(deps, w, r) {
 				return true
 			}
 			h.writeDashboardBlockDecision(deps, w, r)
@@ -158,8 +152,7 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return true
 		}
-		if !dashboardAuthorized(deps.Dashboard, r) {
-			h.respondDashboardAuthFailure(w, r)
+		if !h.requireDashboardOperator(deps, w, r) {
 			return true
 		}
 		h.writeDashboardBlock(deps, w, r)
@@ -169,14 +162,16 @@ func (h *Handler) handleDashboard(deps Dependencies, w http.ResponseWriter, r *h
 }
 
 func (h *Handler) handleWebUI(deps Dependencies, w http.ResponseWriter, r *http.Request) bool {
-	if !webui.Matches(r.URL.Path) {
-		return false
-	}
 	if !deps.WebUI.Enabled {
 		return false
 	}
-	webui.Handler().ServeHTTP(w, r)
-	return true
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if !webui.Matches(r.URL.Path) {
+		return false
+	}
+	return webui.TryServe(w, r)
 }
 
 func (h *Handler) respondDashboardAuthFailure(w http.ResponseWriter, r *http.Request) {
@@ -191,6 +186,23 @@ func (h *Handler) respondDashboardAuthFailure(w http.ResponseWriter, r *http.Req
 	}
 	w.Header().Set("WWW-Authenticate", `Bearer realm="aiproxy dashboard"`)
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
+}
+
+func (h *Handler) requireDashboardOperator(deps Dependencies, w http.ResponseWriter, r *http.Request) bool {
+	if dashboardAuthorized(deps.Dashboard, r) {
+		return true
+	}
+	if deps.AdminStore != nil {
+		if claims, ok := h.adminClaims(deps, r); ok {
+			if claims.IsAdmin {
+				return true
+			}
+			http.Error(w, "dashboard operator access required", http.StatusForbidden)
+			return false
+		}
+	}
+	h.respondDashboardAuthFailure(w, r)
+	return false
 }
 
 func dashboardAuthorized(source dashrpc.Source, r *http.Request) bool {

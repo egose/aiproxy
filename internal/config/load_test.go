@@ -2023,3 +2023,76 @@ provider "openai" "openai" {
 		t.Fatalf("WebUI.Enabled = true, want false without web_ui block")
 	}
 }
+
+func TestLoadMultiTenancyRequiresDatabase(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+multi_tenancy {
+  enabled = true
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	if _, err := Load([]byte(cfg), "test.hcl"); err == nil {
+		t.Fatalf("load succeeded without database url, want error")
+	}
+}
+
+func TestLoadMultiTenancyWithDatabase(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+database {
+  url = "postgres://localhost/aiproxy"
+}
+multi_tenancy {
+  enabled = true
+}
+web_ui {
+  enabled = true
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !rt.MultiTenancyEnabled() {
+		t.Fatalf("MultiTenancyEnabled = false, want true")
+	}
+	if !rt.RequiresDB() || !rt.AdminAPIEnabled() {
+		t.Fatalf("RequiresDB/AdminAPIEnabled = false, want true")
+	}
+	if rt.DashboardOnly() {
+		t.Fatalf("DashboardOnly = true, want false when multi_tenancy enabled")
+	}
+}
+
+func TestDashboardOnlyWhenWebUIWithoutMultiTenancy(t *testing.T) {
+	cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+web_ui {
+}
+provider "openai" "openai" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}
+`
+	rt, err := Load([]byte(cfg), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !rt.DashboardOnly() {
+		t.Fatalf("DashboardOnly = false, want true")
+	}
+	if rt.RequiresDB() || rt.AdminAPIEnabled() {
+		t.Fatalf("RequiresDB/AdminAPIEnabled = true, want false")
+	}
+}

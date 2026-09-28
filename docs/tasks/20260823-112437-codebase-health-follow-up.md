@@ -456,9 +456,9 @@ Completion evidence:
 - Verification: `ASDF_GOLANG_VERSION=1.26.6 go test ./cmd/aiproxy
 ./internal/app`; `ASDF_GOLANG_VERSION=1.26.6 make build-all`;
   `ASDF_GOLANG_VERSION=1.26.6 GOOS=darwin GOARCH=amd64 go test -c
-./cmd/aiproxy -o /tmp/opencode/aiproxy-darwin-amd64.test`;
+./cmd/aiproxy -o <repo-root>/tmp/aiproxy-darwin-amd64.test`;
   `ASDF_GOLANG_VERSION=1.26.6 GOOS=windows GOARCH=amd64 go test -c
-./cmd/aiproxy -o /tmp/opencode/aiproxy-windows-amd64.test.exe`;
+./cmd/aiproxy -o <repo-root>/tmp/aiproxy-windows-amd64.test.exe`;
   `ASDF_GOLANG_VERSION=1.26.6 make build-archive validate-archives`;
   `ASDF_GOLANG_VERSION=1.26.6 make vet test`;
   `ASDF_GOLANG_VERSION=1.26.6 make test-race`;

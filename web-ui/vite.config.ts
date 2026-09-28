@@ -5,12 +5,16 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/dashboard/',
+  base: '/',
   server: {
     host: '0.0.0.0',
     port: 5173,
     proxy: {
       '/_internal/dashboard': {
+        target: process.env.AIPROXY_UPSTREAM ?? 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/_internal/admin': {
         target: process.env.AIPROXY_UPSTREAM ?? 'http://localhost:8080',
         changeOrigin: true,
       },

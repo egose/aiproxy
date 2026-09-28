@@ -239,6 +239,11 @@ intentionally disable a provider, declare `enabled = false`; disabled
 providers are still validated for structure, URL, models, and capabilities,
 but they do not require a usable credential.
 
+GitHub Copilot is **hermetically verified; live GitHub compatibility unverified**.
+Config validation resolves local credentials; it does not prove GitHub entitlement
+or model availability. See [mock-only verification](operations.md#mock-only-copilot-verification)
+for checks requiring no real client ID/account.
+
 `github-copilot` never uses `api_key`/`api_key_ref`. Provision with
 `aiproxy login github-copilot --client-id <id> --credential <name>` (your own
 public OAuth client ID, no secret), then reference the saved login:
@@ -481,6 +486,26 @@ aiproxy convert ./config.json --config /etc/aiproxy/config.hcl
 aiproxy convert --compact - --config /etc/aiproxy/config.hcl
 ```
 
+Conversion materializes environment values, including secrets, in the output;
+this also applies to stdout (`-`). On Linux and macOS, file output is staged in the destination
+directory and published atomically with exact `0600` permissions. Without
+`--force`, publication refuses an existing destination even if another process
+creates it during conversion. `--force` atomically replaces an existing regular
+file and resets its permissions to `0600`. Symlinks (live or dangling) and
+non-regular destinations are rejected. Missing parent directories are created
+with mode `0700` (subject to umask).
+
+Failed validation, staging, or publication leaves any old destination intact.
+Non-force publication requires filesystem hard-link support and fails if it is
+unavailable. A failure after publication (temporary-file cleanup, directory
+sync, or writing the confirmation) can leave the complete new file in place;
+stdout write failures also return an error.
+
+Windows file conversion is unsupported and fails before creating files or
+directories, because this writer cannot guarantee owner-only permissions and
+atomic replacement there. Stdout conversion still works; save its output through
+a suitably secured external tool.
+
 For local runs, if your config depends on variables in `.env`, load them first:
 
 ```sh
@@ -616,14 +641,20 @@ web_ui {
 }
 ```
 
-Serves the embedded React dashboard at `GET /dashboard/` (with client-side
-routes such as `/dashboard/providers` and hashed assets under
-`/dashboard/assets/`). The block is optional and a bare `web_ui {}` enables
-it; `enabled = false` keeps the UI closed. This gate is independent of the
+Serves the embedded React dashboard at `GET /` (with client-side
+routes such as `/providers` and hashed assets under
+`/assets/`). The block is optional and a bare `web_ui {}` enables
+it; `enabled = false` keeps the UI closed. The UI never claims API
+surfaces (`/v1/*`, `/healthz`, `/readyz`, `/metrics`, `/_internal/*`)
+or the reserved `/dashboard` path, and extensionless client-side routes
+fall back to the app shell only for browser (`text/html`) navigations,
+so API clients keep receiving JSON 404s. This gate is independent of the
 `dashboard` block above: the static UI loads without it, but the live
 snapshot/logs/payloads/blocks views still call the bearer-gated
-`/_internal/dashboard/*` APIs, so paste the dashboard token on the UI's Token
-page. Toggling `web_ui` applies on `SIGHUP` without restart.
+`/_internal/dashboard/*` APIs. When `multi_tenancy` is disabled, paste the
+dashboard token on the UI's Token page; when it is enabled, signing in with
+user credentials is enough and no dashboard token is required. Toggling
+`web_ui` applies on `SIGHUP` without restart.
 
 ### `ingress_guardrails`
 

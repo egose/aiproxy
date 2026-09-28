@@ -1,0 +1,86 @@
+x-common-props: &common-props
+  networks: [aiproxy]
+
+services:
+  postgres:
+    <<: *common-props
+    container_name: aiproxy_postgres
+    image: postgres:18.3-alpine3.23
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres # pragma: allowlist secret
+      POSTGRES_DB: aiproxy
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+    - 55432:5432
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres -d aiproxy]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+    - aiproxy_postgres_data:/var/lib/postgresql/data
+    - ./initdb:/docker-entrypoint-initdb.d
+
+  keycloak:
+    <<: *common-props
+    container_name: aiproxy_keycloak
+    image: ghcr.io/egose/keycloak-local:26.5.5-20260716-200223
+    profiles: [keycloak]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_URL_PORT: 5432
+      KC_DB_PASSWORD: postgres # pragma: allowlist secret
+      KC_DB_USERNAME: postgres
+      KC_HOSTNAME_STRICT: 'false'
+      KC_HEALTH_ENABLED: 'true'
+      KC_HTTP_MANAGEMENT_SCHEME: http
+      KC_METRICS_ENABLED: 'true'
+      KC_HOSTNAME_STRICT_HTTPS: 'false'
+      KC_HTTP_ENABLED: 'true'
+      KC_HTTP_PORT: 8080
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: password # pragma: allowlist secret
+    ports:
+    - 18081:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, /bin/bash, -ec, exec 3<>/dev/tcp/127.0.0.1/9000; printf "GET /health/ready HTTP/1.0\r\n\r\n" >&3; grep -q "200 OK" <&3]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  keycloak-provision:
+    <<: *common-props
+    container_name: aiproxy_keycloak_provision
+    restart: no
+    profiles: [keycloak]
+    build: ./keycloak-provision
+    command: []
+    environment:
+      KEYCLOAK_URL: http://keycloak:8080
+      MASTER_ADMIN: admin
+      MASTER_ADMIN_PASSWORD: password # pragma: allowlist secret
+      AUTH_REALM_NAME: aiproxy
+      AUTH_CLIENT_ID: aiproxy-web
+      AUTH_CLIENT_SECRET: testsecret # pragma: allowlist secret
+      BACKEND_CALLBACK_URI: http://localhost:8080/_internal/admin/oidc/callback
+      FRONTEND_WEB_ORIGIN: http://localhost:5173
+      POST_LOGOUT_REDIRECT_URI: http://localhost:5173/
+      BACKCHANNEL_LOGOUT_URI: http://localhost:8080/_internal/admin/oidc/backchannel-logout
+      KEYCLOAK_READINESS_TIMEOUT_MS: 120000
+      KEYCLOAK_READINESS_INTERVAL_MS: 2000
+    depends_on:
+      keycloak:
+        condition: service_healthy
+
+volumes:
+  aiproxy_postgres_data:
+
+networks:
+  aiproxy:
+    driver: bridge

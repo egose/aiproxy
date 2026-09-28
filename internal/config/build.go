@@ -89,6 +89,27 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 			rt.WebUI.Enabled = *raw.WebUI[0].Enabled
 		}
 	}
+	if len(raw.Database) > 0 {
+		if len(raw.Database) > 1 {
+			return nil, fmt.Errorf("only one database block is supported")
+		}
+		rt.Database = Database{URL: strings.TrimSpace(raw.Database[0].URL)}
+	}
+	if len(raw.MultiTenancy) > 0 {
+		if len(raw.MultiTenancy) > 1 {
+			return nil, fmt.Errorf("only one multi_tenancy block is supported")
+		}
+		rt.MultiTenancy = MultiTenancy{Enabled: true, AllowPublicRegistration: true}
+		if raw.MultiTenancy[0].Enabled != nil {
+			rt.MultiTenancy.Enabled = *raw.MultiTenancy[0].Enabled
+		}
+		if raw.MultiTenancy[0].AllowPublicRegistration != nil {
+			rt.MultiTenancy.AllowPublicRegistration = *raw.MultiTenancy[0].AllowPublicRegistration
+		}
+	}
+	if rt.MultiTenancy.Enabled && rt.Database.URL == "" {
+		return nil, fmt.Errorf("multi_tenancy requires database { url }")
+	}
 	if len(raw.IngressGuardrails) > 0 {
 		if len(raw.IngressGuardrails) > 1 {
 			return nil, fmt.Errorf("only one ingress_guardrails block is supported")
@@ -146,7 +167,7 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 			return nil, fmt.Errorf("duplicate alias %q", al.Name)
 		}
 		aliasByName[al.Name] = true
-		retryCodes, err := parseRetryStatusCodes(al.RetryStatusCodes)
+		retryCodes, err := ParseRetryStatusCodes(al.RetryStatusCodes)
 		if err != nil {
 			return nil, fmt.Errorf("alias %q: %w", al.Name, err)
 		}
@@ -679,7 +700,7 @@ func buildHealthcheck(raw *rawHealthcheck) (*ProviderHealthcheck, error) {
 	return out, nil
 }
 
-func parseRetryStatusCodes(raw []string) ([]int, error) {
+func ParseRetryStatusCodes(raw []string) ([]int, error) {
 	if len(raw) == 0 {
 		codes := make([]int, len(defaultRetryStatusCodes))
 		copy(codes, defaultRetryStatusCodes)

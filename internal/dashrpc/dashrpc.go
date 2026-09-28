@@ -42,24 +42,26 @@ const (
 )
 
 type Snapshot struct {
-	Version           string                   `json:"version"`
-	Address           string                   `json:"address"`
-	AuthMode          string                   `json:"auth_mode"`
-	StartTime         time.Time                `json:"start_time"`
-	Now               time.Time                `json:"now"`
-	Providers         []Provider               `json:"providers"`
-	DisabledProviders []Provider               `json:"disabled_providers"`
-	Aliases           []Alias                  `json:"aliases"`
-	Health            map[string]bool          `json:"health"`
-	Cooldowns         []CooldownInfo           `json:"cooldowns,omitempty"`
-	Healthchecks      []HealthcheckStatus      `json:"healthchecks,omitempty"`
-	Usage             []Usage                  `json:"usage"`
-	ProviderStats     []ProviderStat           `json:"provider_stats,omitempty"`
-	Upstream          []UpstreamUsage          `json:"upstream,omitempty"`
-	Recent            []Recent                 `json:"recent"`
-	Logs              []observability.LogEntry `json:"logs"`
-	LastSeq           uint64                   `json:"last_seq"`
-	PayloadEnabled    bool                     `json:"payload_enabled,omitempty"`
+	Version           string                      `json:"version"`
+	Address           string                      `json:"address"`
+	AuthMode          string                      `json:"auth_mode"`
+	StartTime         time.Time                   `json:"start_time"`
+	Now               time.Time                   `json:"now"`
+	Providers         []Provider                  `json:"providers"`
+	DisabledProviders []Provider                  `json:"disabled_providers"`
+	Aliases           []Alias                     `json:"aliases"`
+	Health            map[string]bool             `json:"health"`
+	Cooldowns         []CooldownInfo              `json:"cooldowns,omitempty"`
+	Healthchecks      []HealthcheckStatus         `json:"healthchecks,omitempty"`
+	Usage             []Usage                     `json:"usage"`
+	ProviderStats     []ProviderStat              `json:"provider_stats,omitempty"`
+	Upstream          []UpstreamUsage             `json:"upstream,omitempty"`
+	Recent            []Recent                    `json:"recent"`
+	Logs              []observability.LogEntry    `json:"logs"`
+	LastSeq           uint64                      `json:"last_seq"`
+	PayloadEnabled    bool                        `json:"payload_enabled,omitempty"`
+	Rates             *accounting.RateSnapshot    `json:"rates,omitempty"`
+	Billing           *accounting.BillingSnapshot `json:"billing,omitempty"`
 }
 
 type CooldownInfo struct {
@@ -81,19 +83,21 @@ type HealthcheckStatus struct {
 }
 
 type Provider struct {
-	Type        string       `json:"type"`
-	Name        string       `json:"name"`
-	DisplayName string       `json:"display_name,omitempty"`
-	BaseURL     string       `json:"base_url,omitempty"`
-	Models      []ModelPrice `json:"models"`
+	Type        string               `json:"type"`
+	Name        string               `json:"name"`
+	DisplayName string               `json:"display_name,omitempty"`
+	BaseURL     string               `json:"base_url,omitempty"`
+	Models      []ModelPrice         `json:"models"`
+	Diagnostics *ProviderDiagnostics `json:"diagnostics,omitempty"`
 }
 
 type ModelPrice struct {
-	Name                 string   `json:"name"`
-	InputPerMillion      *float64 `json:"input_per_million,omitempty"`
-	OutputPerMillion     *float64 `json:"output_per_million,omitempty"`
-	CachedPerMillion     *float64 `json:"cached_per_million,omitempty"`
-	CacheWritePerMillion *float64 `json:"cache_write_per_million,omitempty"`
+	Name                 string        `json:"name"`
+	Details              *ModelDetails `json:"details,omitempty"`
+	InputPerMillion      *float64      `json:"input_per_million,omitempty"`
+	OutputPerMillion     *float64      `json:"output_per_million,omitempty"`
+	CachedPerMillion     *float64      `json:"cached_per_million,omitempty"`
+	CacheWritePerMillion *float64      `json:"cache_write_per_million,omitempty"`
 }
 
 type Alias struct {
@@ -101,6 +105,7 @@ type Alias struct {
 	Algorithm        string        `json:"algorithm"`
 	RetryStatusCodes []int         `json:"retry_status_codes,omitempty"`
 	Targets          []AliasTarget `json:"targets"`
+	SessionAffinity  *Affinity     `json:"session_affinity,omitempty"`
 }
 
 type AliasTarget struct {
@@ -296,11 +301,11 @@ func (s *RuntimeSource) Snapshot(ctx context.Context, recentN int) Snapshot {
 		snap.Cooldowns = s.cooldowns()
 	}
 	if s.healthchecks != nil {
-		snap.Healthchecks = s.healthchecks()
-	}
-	if s.usage != nil {
-		snap.ProviderStats = s.usage.ProviderSummaries()
-		snap.Upstream = s.usage.UpstreamSummaries()
+		snap.Healthchecks = append([]HealthcheckStatus(nil), s.healthchecks()...)
+		for i := range snap.Healthchecks {
+			snap.Healthchecks[i].Path = DiagnosticURL(snap.Healthchecks[i].Path)
+			snap.Healthchecks[i].Message = DiagnosticReason(snap.Healthchecks[i].Message)
+		}
 	}
 	snap.PayloadEnabled = s.PayloadEnabled()
 	return snap
@@ -343,8 +348,12 @@ func BuildContext(ctx context.Context, version, address, authMode string, startT
 		snap.Health = health.SnapshotContext(ctx)
 	}
 	if usage != nil {
-		snap.Usage = usage.Summaries()
+		snap.Billing = usage.BillingSnapshot()
+		snap.Usage = snap.Billing.Usage
+		snap.Rates = usage.RateSnapshot()
 		snap.Recent = usage.Recent(recentN)
+		snap.ProviderStats = usage.ProviderSummaries()
+		snap.Upstream = usage.UpstreamSummaries()
 	}
 	if logs != nil {
 		entries, lastSeq := logs.SinceSeq(0)
@@ -362,7 +371,10 @@ func toProviders(in []config.Provider) []Provider {
 	for i, p := range in {
 		models := make([]ModelPrice, 0, len(p.Models))
 		for _, m := range p.Models {
-			mp := ModelPrice{Name: m.Name}
+			mp := ModelPrice{Name: m.Name, Details: &ModelDetails{
+				DisplayName: m.DisplayName, UpstreamName: m.UpstreamName,
+				Protocol: string(m.Protocol), Capabilities: append([]config.Capability{}, m.Capabilities...),
+			}}
 			if m.Pricing != nil && m.Pricing.HasRates() {
 				inRate := m.Pricing.InputPerMillion
 				outRate := m.Pricing.OutputPerMillion
@@ -379,8 +391,9 @@ func toProviders(in []config.Provider) []Provider {
 			Type:        string(p.Type),
 			Name:        p.Name,
 			DisplayName: p.DisplayName,
-			BaseURL:     provider.EffectiveBaseURL(p.Type, p.BaseURL),
+			BaseURL:     DiagnosticURL(provider.EffectiveBaseURL(p.Type, p.BaseURL)),
 			Models:      models,
+			Diagnostics: ProviderMetadata(p),
 		}
 	}
 	return out
@@ -401,6 +414,7 @@ func toAliases(in []config.Alias) []Alias {
 			Algorithm:        string(a.Algorithm),
 			RetryStatusCodes: a.RetryStatusCodes,
 			Targets:          targets,
+			SessionAffinity:  &Affinity{Enabled: a.SessionAffinity != nil, Headers: config.SessionAffinityHeaders(a)},
 		}
 	}
 	return out

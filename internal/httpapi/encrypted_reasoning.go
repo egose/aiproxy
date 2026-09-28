@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 
 	"github.com/egose/aiproxy/internal/config"
@@ -62,6 +63,15 @@ func requestHadOpaqueBlocks(body []byte) bool {
 		strings.Contains(lowered, "redacted_thinking") ||
 		strings.Contains(lowered, "redacted_content") ||
 		strings.Contains(lowered, "\"signature\"")
+}
+
+func isEncodedCallerMismatch(result *provider.Result, requestBody []byte, patterns []string) bool {
+	if result == nil || result.Streaming || result.StatusCode != http.StatusBadRequest ||
+		len(result.Body) == 0 || len(patterns) == 0 || !requestHadOpaqueBlocks(requestBody) {
+		return false
+	}
+	decoded, ok := provider.DecodeBodyForInspection(result.Header, result.Body)
+	return ok && isCallerMismatch(result.StatusCode, decoded, patterns)
 }
 
 func isCallerMismatch(status int, respBody []byte, patterns []string) bool {

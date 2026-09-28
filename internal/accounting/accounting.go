@@ -13,12 +13,17 @@ const (
 )
 
 type Event struct {
-	Timestamp  time.Time
-	Tenant     string
-	Client     string
-	Model      string
-	Operation  string
-	StatusCode int
+	Truncated      RecentTruncation `json:",omitzero"`
+	RecentSequence uint64           `json:",string,omitempty"`
+	ProviderID     uint64           `json:",string,omitempty"`
+	RequestID      string           `json:",omitempty"`
+	PublicModel    string           `json:",omitempty"`
+	Timestamp      time.Time
+	Tenant         string
+	Client         string
+	Model          string
+	Operation      string
+	StatusCode     int
 
 	Provider      string
 	UpstreamModel string
@@ -66,6 +71,7 @@ type Recorder interface {
 type Reader interface {
 	Summaries() []Summary
 	UpstreamSummaries() []UpstreamSummary
+	BillingSummaries() ([]Summary, []UpstreamSummary)
 }
 
 type Snapshotter interface {
@@ -89,6 +95,7 @@ type Summary struct {
 }
 
 type ProviderSummary struct {
+	ProviderID          uint64 `json:",string,omitempty"`
 	Provider            string
 	Requests            int64
 	Errors              int64
@@ -102,13 +109,14 @@ type ProviderSummary struct {
 }
 
 type UpstreamSummary struct {
-	Tenant     string
-	Client     string
-	Provider   string
-	Model      string
-	Operation  string
-	StatusCode int
-	Count      int64
+	PublicModel string `json:",omitempty"`
+	Tenant      string
+	Client      string
+	Provider    string
+	Model       string
+	Operation   string
+	StatusCode  int
+	Count       int64
 
 	PromptTokens        int64
 	CompletionTokens    int64
@@ -224,7 +232,19 @@ func (r *MemoryRecorder) UpstreamSummaries() []UpstreamSummary {
 	return nil
 }
 
+func (r *MemoryRecorder) BillingSummaries() ([]Summary, []UpstreamSummary) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	counts := make(map[billingKey]aggregateEntry)
+	for _, event := range r.events {
+		key := eventBillingKey(event)
+		counts[key] = counts[key].add(eventAggregate(event))
+	}
+	return summarizeBilling(counts)
+}
+
 type providerEntry struct {
+	id                  uint64
 	requests            int64
 	errors              int64
 	throttled           int64
@@ -247,7 +267,7 @@ type upstreamKey struct {
 
 type Aggregator struct {
 	mu             sync.Mutex
-	buckets        map[time.Time]map[summaryKey]aggregateEntry
+	buckets        map[time.Time]map[billingKey]aggregateEntry
 	bucketOrder    []time.Time
 	bucketDuration time.Duration
 	recent         *ringBuffer
@@ -255,6 +275,7 @@ type Aggregator struct {
 	now            func() time.Time
 	providers      map[string]*providerEntry
 	upstream       map[upstreamKey]*providerEntry
+	rates          [rateSeconds + 1]rateBucket
 }
 
 type aggregateEntry struct {
@@ -275,56 +296,80 @@ type summaryKey struct {
 	statusCode int
 }
 
+type billingKey struct {
+	summaryKey
+	provider      string
+	upstreamModel string
+}
+
+func eventBillingKey(e Event) billingKey {
+	return billingKey{
+		summaryKey: summaryKey{tenant: e.Tenant, client: e.Client, model: e.Model, operation: e.Operation, statusCode: e.StatusCode},
+		provider:   e.Provider, upstreamModel: e.UpstreamModel,
+	}
+}
+
+func eventAggregate(e Event) aggregateEntry {
+	return aggregateEntry{count: 1, promptTokens: e.PromptTokens, completionTokens: e.CompletionTokens,
+		totalTokens: e.TotalTokens, cachedTokens: e.CachedTokens, cacheCreationTokens: e.CacheCreationTokens, cacheReadTokens: e.CacheReadTokens}
+}
+
+func (e aggregateEntry) add(other aggregateEntry) aggregateEntry {
+	e.count += other.count
+	e.promptTokens += other.promptTokens
+	e.completionTokens += other.completionTokens
+	e.totalTokens += other.totalTokens
+	e.cachedTokens += other.cachedTokens
+	e.cacheCreationTokens += other.cacheCreationTokens
+	e.cacheReadTokens += other.cacheReadTokens
+	return e
+}
+
 func NewAggregator() *Aggregator {
+	return NewAggregatorWithClock(time.Now)
+}
+
+func NewAggregatorWithClock(now func() time.Time) *Aggregator {
 	return &Aggregator{
-		buckets:        make(map[time.Time]map[summaryKey]aggregateEntry),
+		buckets:        make(map[time.Time]map[billingKey]aggregateEntry),
 		bucketDuration: time.Minute,
 		recent:         newRingBuffer(defaultRecentN),
 		retention:      defaultRetention,
-		now:            time.Now,
+		now:            now,
 	}
 }
 
 func (a *Aggregator) Record(event Event) {
 	a.mu.Lock()
 	if a.buckets == nil {
-		a.buckets = make(map[time.Time]map[summaryKey]aggregateEntry)
+		a.buckets = make(map[time.Time]map[billingKey]aggregateEntry)
 	}
 	if a.recent == nil {
 		a.recent = newRingBuffer(defaultRecentN)
 	}
-	now := a.nowTime(event.Timestamp)
-	a.pruneLocked(a.nowTime(time.Time{}))
-	key := summaryKey{
-		tenant:     event.Tenant,
-		client:     event.Client,
-		model:      event.Model,
-		operation:  event.Operation,
-		statusCode: event.StatusCode,
+	clockNow := a.nowTime(time.Time{})
+	now := event.Timestamp
+	if now.IsZero() || now.After(clockNow) {
+		now = clockNow
 	}
+	a.recordRateLocked(event, now, clockNow)
+	key := eventBillingKey(event)
 	bucketStart := a.bucketStart(now)
 	bucket := a.buckets[bucketStart]
 	if bucket == nil {
-		bucket = make(map[summaryKey]aggregateEntry)
+		bucket = make(map[billingKey]aggregateEntry)
 		a.buckets[bucketStart] = bucket
 		a.bucketOrder = append(a.bucketOrder, bucketStart)
 	}
-	entry := bucket[key]
-	entry.count++
-	entry.promptTokens += event.PromptTokens
-	entry.completionTokens += event.CompletionTokens
-	entry.totalTokens += event.TotalTokens
-	entry.cachedTokens += event.CachedTokens
-	entry.cacheCreationTokens += event.CacheCreationTokens
-	entry.cacheReadTokens += event.CacheReadTokens
-	bucket[key] = entry
+	bucket[key] = bucket[key].add(eventAggregate(event))
+	a.pruneLocked(clockNow)
 	if a.providers == nil {
 		a.providers = make(map[string]*providerEntry)
 	}
 	provName := EventProvider(event)
 	prov := a.providers[provName]
 	if prov == nil {
-		prov = &providerEntry{}
+		prov = &providerEntry{id: uint64(len(a.providers)) + 1}
 		a.providers[provName] = prov
 	}
 	prov.requests++
@@ -369,6 +414,7 @@ func (a *Aggregator) Record(event Event) {
 		uent.cacheReadTokens += event.CacheReadTokens
 	}
 	ringEntry := event
+	ringEntry.ProviderID = prov.id
 	if ringEntry.Timestamp.IsZero() {
 		ringEntry.Timestamp = now
 	}
@@ -377,22 +423,30 @@ func (a *Aggregator) Record(event Event) {
 }
 
 func (a *Aggregator) Summaries() []Summary {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.pruneLocked(a.nowTime(time.Time{}))
+	summaries, _ := a.BillingSummaries()
+	return summaries
+}
+
+func (a *Aggregator) BillingSummaries() ([]Summary, []UpstreamSummary) {
+	snapshot := a.BillingSnapshot()
+	return snapshot.Usage, snapshot.Upstream
+}
+
+func summarizeBilling(retained map[billingKey]aggregateEntry) ([]Summary, []UpstreamSummary) {
 	counts := make(map[summaryKey]aggregateEntry)
-	for _, bucket := range a.buckets {
-		for key, entry := range bucket {
-			total := counts[key]
-			total.count += entry.count
-			total.promptTokens += entry.promptTokens
-			total.completionTokens += entry.completionTokens
-			total.totalTokens += entry.totalTokens
-			total.cachedTokens += entry.cachedTokens
-			total.cacheCreationTokens += entry.cacheCreationTokens
-			total.cacheReadTokens += entry.cacheReadTokens
-			counts[key] = total
+	upstream := make([]UpstreamSummary, 0, len(retained))
+	for key, entry := range retained {
+		counts[key.summaryKey] = counts[key.summaryKey].add(entry)
+		if key.provider == "" || key.upstreamModel == "" {
+			continue
 		}
+		upstream = append(upstream, UpstreamSummary{
+			PublicModel: key.model, Tenant: key.tenant, Client: key.client,
+			Provider: key.provider, Model: key.upstreamModel, Operation: key.operation, StatusCode: key.statusCode,
+			Count: entry.count, PromptTokens: entry.promptTokens, CompletionTokens: entry.completionTokens,
+			TotalTokens: entry.totalTokens, CachedTokens: entry.cachedTokens,
+			CacheCreationTokens: entry.cacheCreationTokens, CacheReadTokens: entry.cacheReadTokens,
+		})
 	}
 	out := make([]Summary, 0, len(counts))
 	for key, entry := range counts {
@@ -426,7 +480,29 @@ func (a *Aggregator) Summaries() []Summary {
 		}
 		return out[i].StatusCode < out[j].StatusCode
 	})
-	return out
+	sort.Slice(upstream, func(i, j int) bool {
+		a, b := upstream[i], upstream[j]
+		if a.Tenant != b.Tenant {
+			return a.Tenant < b.Tenant
+		}
+		if a.Client != b.Client {
+			return a.Client < b.Client
+		}
+		if a.PublicModel != b.PublicModel {
+			return a.PublicModel < b.PublicModel
+		}
+		if a.Operation != b.Operation {
+			return a.Operation < b.Operation
+		}
+		if a.StatusCode != b.StatusCode {
+			return a.StatusCode < b.StatusCode
+		}
+		if a.Provider != b.Provider {
+			return a.Provider < b.Provider
+		}
+		return a.Model < b.Model
+	})
+	return out, upstream
 }
 
 func (a *Aggregator) Recent(n int) []Event {
@@ -537,6 +613,7 @@ func (a *Aggregator) ProviderSummaries() []ProviderSummary {
 	out := make([]ProviderSummary, 0, len(a.providers))
 	for name, entry := range a.providers {
 		out = append(out, ProviderSummary{
+			ProviderID:          entry.id,
 			Provider:            name,
 			Requests:            entry.requests,
 			Errors:              entry.errors,
@@ -605,7 +682,7 @@ func FilterSummaries(summaries []Summary, tenant, client string) []Summary {
 			}
 			continue
 		}
-		if summary.Client == client {
+		if summary.Tenant == "" && summary.Client == client {
 			out = append(out, summary)
 		}
 	}
@@ -613,6 +690,7 @@ func FilterSummaries(summaries []Summary, tenant, client string) []Summary {
 }
 
 type ringBuffer struct {
+	sequence uint64
 	items    []Event
 	head     int
 	filled   bool
@@ -627,7 +705,9 @@ func newRingBuffer(capacity int) *ringBuffer {
 }
 
 func (r *ringBuffer) push(event Event) {
-	r.items[r.head] = event
+	r.sequence++
+	event.RecentSequence = r.sequence
+	r.items[r.head] = boundedRecent(event)
 	r.head = (r.head + 1) % r.capacity
 	if !r.filled && r.head == 0 {
 		r.filled = true

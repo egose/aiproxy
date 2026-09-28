@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -21,30 +20,34 @@ type BlockFetcher interface {
 }
 
 type blockListMsg struct {
-	entries []dashrpc.BlockSummary
-	enabled bool
-	err     string
+	generation uint64
+	entries    []dashrpc.BlockSummary
+	enabled    bool
+	err        string
 }
 
 type blockDetailMsg struct {
-	blockID string
-	capture dashrpc.BlockCapture
-	err     string
+	generation uint64
+	blockID    string
+	capture    dashrpc.BlockCapture
+	err        string
 }
 
 type blockDecisionMsg struct {
-	blockID string
-	action  string
-	count   int
-	err     string
+	generation uint64
+	blockID    string
+	action     string
+	sha        string
+	count      int
+	err        string
 }
 
-func fetchBlocksCmd(f BlockFetcher) tea.Cmd {
+func fetchBlocksCmd(f BlockFetcher, parents ...context.Context) tea.Cmd {
 	if f == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := fetchContext(parents)
 		defer cancel()
 		list, err := f.ListBlocks(ctx)
 		if err != nil {
@@ -57,12 +60,12 @@ func fetchBlocksCmd(f BlockFetcher) tea.Cmd {
 	}
 }
 
-func fetchBlockDetailCmd(f BlockFetcher, blockID string) tea.Cmd {
+func fetchBlockDetailCmd(f BlockFetcher, blockID string, parents ...context.Context) tea.Cmd {
 	if f == nil || blockID == "" {
 		return nil
 	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := fetchContext(parents)
 		defer cancel()
 		capture, err := f.GetBlock(ctx, blockID)
 		msg := blockDetailMsg{blockID: blockID}
@@ -75,17 +78,21 @@ func fetchBlockDetailCmd(f BlockFetcher, blockID string) tea.Cmd {
 	}
 }
 
-func fetchBlockDecisionCmd(f BlockFetcher, blockID, action string, shas []string) tea.Cmd {
+func fetchBlockDecisionCmd(f BlockFetcher, blockID, action string, shas []string, parents ...context.Context) tea.Cmd {
 	if f == nil || blockID == "" || action == "" || len(shas) == 0 {
 		return nil
 	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := fetchContext(parents)
 		defer cancel()
 		res, err := f.DecideBlock(ctx, blockID, action, shas)
-		msg := blockDecisionMsg{blockID: blockID, action: action}
+		msg := blockDecisionMsg{blockID: blockID, action: action, sha: shas[0]}
 		if err != nil {
 			msg.err = err.Error()
+			return msg
+		}
+		if !res.Ok || res.Action != action || res.Count != 1 {
+			msg.err = "unexpected acknowledgment; outcome unknown"
 			return msg
 		}
 		msg.count = res.Count
@@ -93,35 +100,39 @@ func fetchBlockDecisionCmd(f BlockFetcher, blockID, action string, shas []string
 	}
 }
 
-func blockFindingSHAs(c dashrpc.BlockCapture) []string {
-	var out []string
-	seen := map[string]struct{}{}
-	for _, f := range c.Findings {
-		if f.SecretSHA == "" {
-			continue
-		}
-		if _, dup := seen[f.SecretSHA]; dup {
-			continue
-		}
-		seen[f.SecretSHA] = struct{}{} // pragma: allowlist secret
-		out = append(out, f.SecretSHA)
-	}
-	return out
-}
-
 func (m *model) blockDetailOpen() bool {
 	return m.blockDetailID != ""
 }
 
+func (m *model) blockListVisible() bool {
+	if m.blockFetcher == nil {
+		return false
+	}
+	if !m.blockKnown || m.blockErr != "" {
+		return false
+	}
+	return len(m.blocks) > 0
+}
+
 func (m *model) requestBlocks() tea.Cmd {
-	if m.blockFetcher == nil || m.blockLoading {
+	if m.paused || m.blockFetcher == nil || m.blockLoading {
 		return nil
 	}
 	m.blockLoading = true
-	return fetchBlocksCmd(m.blockFetcher)
+	return m.blockListRequest.start(m.ctx, func(ctx context.Context) tea.Cmd {
+		return fetchBlocksCmd(m.blockFetcher, ctx)
+	})
 }
 
 func (m *model) applyBlockList(msg blockListMsg) {
+	if msg.generation != m.blockListRequest.generation {
+		return
+	}
+	if m.paused {
+		m.pausedResults.blockList = &msg
+		return
+	}
+	m.blockListRequest.invalidate()
 	m.blockLoading = false
 	if msg.err != "" {
 		m.blockErr = msg.err
@@ -139,15 +150,23 @@ func (m *model) applyBlockList(msg blockListMsg) {
 		return
 	}
 	m.blockKnown = true
+	before := m.blocks
 	m.blocks = msg.entries
+	m.blockCursor = anchoredIndex(before, m.blocks, m.blockCursor, blockIdentity)
+	m.blockOffset = anchoredIndex(before, m.blocks, m.blockOffset, blockIdentity)
 	m.clampBlockCursor()
 	m.dirty = true
 }
 
 func (m *model) applyBlockDetail(msg blockDetailMsg) {
-	if msg.blockID != m.blockPendingID {
+	if msg.generation != m.blockDetailRequest.generation || msg.blockID != m.blockPendingID {
 		return
 	}
+	if m.paused {
+		m.pausedResults.blockDetail = &msg
+		return
+	}
+	m.blockDetailRequest.invalidate()
 	m.blockPendingID = ""
 	if msg.err != "" {
 		m.blockDetail = dashrpc.BlockCapture{}
@@ -158,6 +177,9 @@ func (m *model) applyBlockDetail(msg blockDetailMsg) {
 	}
 	m.blockDetailID = msg.blockID
 	m.blockDetailScroll = 0
+	m.blockFindingCursor = 0
+	m.blockDecisionResults = nil
+	m.blockDecisionSHA = ""
 	m.blockDecisionPending = ""
 	m.blockDecisionMsg = ""
 	m.blockDecisionErr = ""
@@ -201,6 +223,9 @@ func (m *model) blockAt(i int) BlockSummary {
 }
 
 func (m *model) moveBlockCursor(delta int) bool {
+	if !m.blockListVisible() {
+		return false
+	}
 	if len(m.blocks) == 0 {
 		return false
 	}
@@ -220,6 +245,9 @@ func (m *model) moveBlockCursor(delta int) bool {
 }
 
 func (m *model) blockCursorTop() bool {
+	if !m.blockListVisible() {
+		return false
+	}
 	if m.blockCursor == 0 && m.blockOffset == 0 {
 		return false
 	}
@@ -229,6 +257,9 @@ func (m *model) blockCursorTop() bool {
 }
 
 func (m *model) blockCursorBottom() bool {
+	if !m.blockListVisible() {
+		return false
+	}
 	n := len(m.blocks)
 	if n == 0 || m.blockCursor == n-1 {
 		return false
@@ -240,6 +271,18 @@ func (m *model) blockCursorBottom() bool {
 
 func (m *model) handleBlockKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	switch msg.String() {
+	case "n", "N":
+		if !m.blockDetailOpen() || m.blockDecisionPending != "" || len(m.blockDetail.Findings) == 0 {
+			return false, nil
+		}
+		delta := 1
+		if msg.String() == "N" {
+			delta = -1
+		}
+		m.blockFindingCursor = (m.blockFindingCursor + delta + len(m.blockDetail.Findings)) % len(m.blockDetail.Findings)
+		m.blockDetailScroll = 0
+		m.selectedDecisionStatus()
+		return true, nil
 	case "j", "down":
 		if m.blockDetailOpen() {
 			m.blockDetailScroll++
@@ -281,10 +324,16 @@ func (m *model) handleBlockKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		}
 		return m.blockCursorBottom(), nil
 	case "enter":
+		if m.paused {
+			return true, nil
+		}
 		if m.blockDetailOpen() {
 			return true, nil
 		}
 		if m.blockPendingID != "" {
+			return true, nil
+		}
+		if !m.blockListVisible() {
 			return true, nil
 		}
 		if len(m.blocks) == 0 || m.blockFetcher == nil {
@@ -302,50 +351,66 @@ func (m *model) handleBlockKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.blockDecisionPending = ""
 		m.blockDecisionMsg = ""
 		m.blockDecisionErr = ""
-		return true, fetchBlockDetailCmd(m.blockFetcher, id)
+		return true, m.blockDetailRequest.start(m.ctx, func(ctx context.Context) tea.Cmd {
+			return fetchBlockDetailCmd(m.blockFetcher, id, ctx)
+		})
 	case "r":
-		if m.blockDetailOpen() {
+		if m.paused || m.blockDetailOpen() {
 			return false, nil
 		}
 		m.blockKnown = false
 		return true, m.requestBlocks()
-	case "a", "1":
+	case "a":
 		return m.requestBlockDecision("allow")
-	case "s", "2":
+	case "s":
 		return m.requestBlockDecision("redact")
-	case "d", "3":
+	case "d":
 		return m.requestBlockDecision("deny")
 	}
 	return false, nil
 }
 
 func (m *model) requestBlockDecision(action string) (bool, tea.Cmd) {
-	if !m.blockDetailOpen() || m.blockDetailErr != "" || m.blockDecisionPending != "" {
+	if m.paused || !m.blockDetailOpen() || m.blockDetailErr != "" || m.blockDecisionPending != "" {
 		return false, nil
 	}
-	shas := blockFindingSHAs(m.blockDetail)
-	if len(shas) == 0 || m.blockFetcher == nil {
+	f, ok := m.selectedBlockFinding()
+	if !ok || !validFindingSHA(f.SecretSHA) || m.blockFetcher == nil {
 		return false, nil
 	}
+	if action != "allow" && action != "redact" && action != "deny" {
+		return false, nil
+	}
+	if previous, ok := m.blockDecisionResults[f.SecretSHA]; ok && previous.err == "" && previous.action == action {
+		return false, nil
+	}
+	shas := []string{f.SecretSHA}
 	m.blockDecisionPending = action
+	m.blockDecisionSHA = f.SecretSHA
 	m.blockDecisionMsg = ""
 	m.blockDecisionErr = ""
 	m.dirty = true
-	return true, fetchBlockDecisionCmd(m.blockFetcher, m.blockDetailID, action, shas)
+	return true, m.blockDecisionRequest.start(m.ctx, func(ctx context.Context) tea.Cmd {
+		return fetchBlockDecisionCmd(m.blockFetcher, m.blockDetailID, action, shas, ctx)
+	})
 }
 
 func (m *model) applyBlockDecision(msg blockDecisionMsg) {
-	if msg.blockID != m.blockDetailID {
+	if msg.generation != m.blockDecisionRequest.generation || msg.blockID != m.blockDetailID || msg.action != m.blockDecisionPending || msg.sha != m.blockDecisionSHA {
 		return
 	}
-	m.blockDecisionPending = ""
-	if msg.err != "" {
-		m.blockDecisionErr = msg.err
-		m.blockDecisionMsg = ""
-	} else {
-		m.blockDecisionErr = ""
-		m.blockDecisionMsg = fmt.Sprintf("%s recorded for %d secret(s)", msg.action, msg.count)
+	if m.paused {
+		m.pausedResults.blockDecision = &msg
+		return
 	}
+	m.blockDecisionRequest.invalidate()
+	m.blockDecisionPending = ""
+	m.blockDecisionSHA = ""
+	if m.blockDecisionResults == nil {
+		m.blockDecisionResults = make(map[string]blockDecisionMsg)
+	}
+	m.blockDecisionResults[msg.sha] = msg
+	m.selectedDecisionStatus()
 	m.dirty = true
 }
 
@@ -369,14 +434,15 @@ func blockRow(s dashrpc.BlockSummary, idW, rulesW, modelW int) string {
 
 func renderBlocks(m *model, width, height int) string {
 	borderStyle, inner := paneBox(width, height, m.focus == focusBottom && m.bottomTab == bottomTabBlocks)
-	title := "BLOCKS newest-first (take-once detail) [r]efresh"
+	title := "BLOCKS · Enter consumes take-once capture; re-open unavailable · [r]efresh"
 	rows := []string{title}
 	if m.blockFetcher == nil {
 		rows = append(rows, "block viewer unavailable")
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if m.blockErr != "" {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Render("fetch failed: "+truncate(m.blockErr, inner)))
+		hint := " · [r] retry"
+		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Render("fetch failed: "+truncate(m.blockErr, max(0, inner-len(hint)))+hint))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if !m.blockKnown && !m.blockEnabled && len(m.blocks) == 0 {
@@ -384,7 +450,7 @@ func renderBlocks(m *model, width, height int) string {
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if !m.blockKnown {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("loading…"))
+		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("loading… · [r] retry"))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if len(m.blocks) == 0 {
@@ -429,72 +495,32 @@ func renderBlocks(m *model, width, height int) string {
 }
 
 func renderBlockDetail(m *model, width, height int) string {
-	borderStyle, inner := paneBox(width, height, true)
 	title := "BLOCK " + m.blockDetailID
 	if m.blockPendingID != "" {
 		title = "BLOCK " + m.blockPendingID + " (loading…)"
 	}
-	lines := []string{title}
-	if m.blockPendingID != "" {
-		lines = append(lines, "loading…")
-		return borderStyle.Render(strings.Join(lines, "\n"))
-	}
-	if m.blockDetailErr != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Render("fetch failed: "+m.blockDetailErr))
-		lines = append(lines, "[esc] back")
-		return borderStyle.Render(strings.Join(lines, "\n"))
-	}
 	c := m.blockDetail
-	lines = append(lines, fmt.Sprintf("op=%s model=%s rules=%s", c.Operation, c.PublicModel, strings.Join(c.RuleIDs, ",")))
-	lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#FBBF24")).Render("consumed: re-open returns 404 (take-once)"))
-	decisionHint := "[a]llow non-secret  [s]anitize with placeholder  [d]eny (keep blocking)"
-	if m.blockDecisionPending != "" {
-		decisionHint = "recording " + m.blockDecisionPending + "…"
-	} else if m.blockDecisionErr != "" {
-		decisionHint = lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Render("decision failed: " + m.blockDecisionErr)
-	} else if m.blockDecisionMsg != "" {
-		decisionHint = lipgloss.NewStyle().Foreground(lipgloss.Color("#34D399")).Render(m.blockDecisionMsg)
+	number := 0
+	if len(c.Findings) > 0 {
+		number = m.blockFindingCursor + 1
 	}
-	lines = append(lines, decisionHint)
-	for i, f := range c.Findings {
-		lines = append(lines, fmt.Sprintf("--- finding %d rule=%s", i+1, f.RuleID))
-		if f.Description != "" {
-			lines = append(lines, "desc: "+f.Description)
+	headers := []string{
+		fmt.Sprintf("Finding %d/%d · %s", number, len(c.Findings), title),
+		"SELECTED hash only · persistent GLOBAL future matches · no replay",
+		m.blockInspectionStatus(),
+	}
+	lines := []string{title, fmt.Sprintf("at=%s op=%s model=%s rules=%s", c.Timestamp, c.Operation, c.PublicModel, strings.Join(c.RuleIDs, ","))}
+	if m.blockDetailErr != "" {
+		lines = append(lines, "fetch failed: "+m.blockDetailErr)
+	} else if f, ok := m.selectedBlockFinding(); ok {
+		lines = append(lines, "rule: "+f.RuleID, "SHA: "+f.SecretSHA, "desc: "+f.Description,
+			"secret: "+f.Secret, "match: "+f.Match, "line: "+f.Line)
+		if m.blockDecisionErr != "" {
+			lines = append(lines, "decision error: "+m.blockDecisionErr)
 		}
-		lines = append(lines, "secret: "+f.Secret)
-		if f.Match != "" && f.Match != f.Secret {
-			lines = append(lines, "match: "+f.Match)
-		}
-		if f.Line != "" && f.Line != f.Match && f.Line != f.Secret {
-			lines = append(lines, "line: "+f.Line)
-		}
-	}
-	raw := strings.Join(lines, "\n")
-	parts := strings.Split(raw, "\n")
-	visible := height - 4
-	if visible < 1 {
-		visible = 1
-	}
-	start := m.blockDetailScroll
-	if start > len(parts)-1 {
-		start = len(parts) - 1
-	}
-	if start < 0 {
-		start = 0
-	}
-	m.blockDetailScroll = start
-	end := start + visible
-	if end > len(parts) {
-		end = len(parts)
-	}
-	out := make([]string, 0, end-start+1)
-	for _, l := range parts[start:end] {
-		out = append(out, truncate(l, inner))
-	}
-	if end < len(parts) {
-		out = append(out, fmt.Sprintf("… %d more lines (j/k scroll, esc back)", len(parts)-end))
 	} else {
-		out = append(out, lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Render("[j/k] scroll [a/s/d] flag [esc] back"))
+		lines = append(lines, "no captured findings")
 	}
-	return borderStyle.Render(strings.Join(out, "\n"))
+	return renderInspection(width, height, headers, strings.Join(lines, "\n"),
+		"server-capped snippets; truncation unknown", &m.blockDetailScroll)
 }

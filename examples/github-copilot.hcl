@@ -1,8 +1,15 @@
 # GitHub Copilot chat-only setup backed by a device-flow login.
+# Hermetically verified; live GitHub compatibility unverified.
+# Model names are illustrative, not confirmed available on GitHub.
+# Mock-only checks (no real client/account):
+# website/docs/operations.md#mock-only-copilot-verification
+# The production login below contacts GitHub; it is not a mock command.
 # Provision first with your own public OAuth client ID (no secret):
 #   aiproxy login github-copilot --client-id YOUR_GITHUB_OAUTH_CLIENT_ID --credential copilot-main
 # Never reuse another application's client ID. The login writes
 # <secrets-dir>/copilot-<name>.json (0600) without editing this file.
+# With multi-tenancy enabled, the web provider form offers Connect GitHub as a
+# database-encrypted alternative to this sidecar (same explicit client ID).
 # Restart or SIGHUP after login; this config validates only after the sidecar exists.
 # Re-run login + reload on upstream 401/403, revocation, or expiry.
 listener "http" "public" {

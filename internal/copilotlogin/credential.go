@@ -139,3 +139,27 @@ func validateStoredCredential(cred Credential) error {
 	}
 	return nil
 }
+
+func ValidateDatabaseCredential(cred Credential, now time.Time) error {
+	if err := validateStoredCredential(cred); err != nil {
+		return errors.New("invalid Copilot credential")
+	}
+	if validateClientID(cred.ClientID) != nil || cred.Domain != CredentialDomain ||
+		!validCredentialToken(cred.AccessToken) || !validCredentialToken(cred.RefreshToken) ||
+		cred.ObtainedAt == 0 {
+		return errors.New("invalid Copilot credential")
+	}
+	if cred.ExpiresAt != 0 && cred.ExpiresAt <= now.Unix() {
+		return errors.New("Copilot credential is expired; authorize again")
+	}
+	return nil
+}
+
+func validCredentialToken(token string) bool {
+	for _, ch := range token {
+		if ch < 33 || ch > 126 {
+			return false
+		}
+	}
+	return token != ""
+}

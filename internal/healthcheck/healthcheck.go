@@ -13,6 +13,7 @@ import (
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/provider"
 	"github.com/egose/aiproxy/internal/providerhealth"
+	"github.com/egose/aiproxy/internal/upstreamhttp"
 )
 
 const maxBodyBytes = 256 << 10
@@ -187,6 +188,10 @@ func (m *Manager) check(ctx context.Context, p config.Provider) {
 	latency := time.Since(start)
 	healthy, message := evaluate(hc, code, body, err)
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
 	st := m.status[p.Name]
 	st.Configured = true
 	st.Provider = p.Name
@@ -219,7 +224,6 @@ func (m *Manager) check(ctx context.Context, p config.Provider) {
 	m.status[p.Name] = st
 	tracker := m.tracker
 	metrics := m.metrics
-	m.mu.Unlock()
 	if metrics != nil {
 		metrics.RecordHealthcheck(p.Name, healthy, latency)
 		if transitioned || (st.Checked && ((healthy && st.ConsecutiveSuccesses == hc.SuccessThreshold) || (!healthy && st.ConsecutiveFailures == hc.FailureThreshold))) {
@@ -289,7 +293,7 @@ func (m *Manager) probeURL(ctx context.Context, p config.Provider, target string
 	if hc.SendAuthorization && p.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+p.APIKey)
 	}
-	resp, err := m.client.Do(req)
+	resp, err := upstreamhttp.Do(m.client, req)
 	if err != nil {
 		return 0, "", err
 	}
