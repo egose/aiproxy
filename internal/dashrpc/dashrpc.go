@@ -305,6 +305,9 @@ func (s *RuntimeSource) Snapshot(ctx context.Context, recentN int) Snapshot {
 		for i := range snap.Healthchecks {
 			snap.Healthchecks[i].Path = DiagnosticURL(snap.Healthchecks[i].Path)
 			snap.Healthchecks[i].Message = DiagnosticReason(snap.Healthchecks[i].Message)
+			if snap.Healthchecks[i].LastChecked.After(snap.Now) {
+				snap.Now = snap.Healthchecks[i].LastChecked
+			}
 		}
 	}
 	snap.PayloadEnabled = s.PayloadEnabled()
