@@ -4,7 +4,7 @@ runs:
   using: composite
   steps:
   - name: Setup Tools
-    uses: egose/actions/pnpm-packages@8921fa8a9af6c3b7c7d8ed2b2137527991681dec
+    uses: egose/actions/pnpm-packages@71efad841d4b7bb6a479984abacf7111ebd44a16
     with:
       frozen: 'true'
       ignore-scripts: 'true'
