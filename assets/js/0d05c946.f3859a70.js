@@ -80,6 +80,7 @@ const toc = [{
 }];
 function _createMdxContent(props) {
   const _components = {
+    a: "a",
     code: "code",
     h1: "h1",
     h2: "h2",
@@ -87,6 +88,7 @@ function _createMdxContent(props) {
     li: "li",
     p: "p",
     pre: "pre",
+    strong: "strong",
     ul: "ul",
     ...(0,lib/* useMDXComponents */.R)(),
     ...props.components
@@ -190,6 +192,13 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "github-copilot-chat",
       children: "GitHub Copilot Chat"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.strong, {
+        children: "Hermetically verified; live GitHub compatibility unverified."
+      }), " Model names below\nare illustrative, not confirmed GitHub availability. Use the\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#mock-only-copilot-verification",
+        children: "mock-only verification workflow"
+      }), "\nto test locally without an OAuth application/account; the production login below\ncontacts GitHub and requires your own explicit client ID."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "This setup exposes a chat-only Copilot model backed by a device-flow login.\nProvision first (your own public OAuth client ID, no secret), then serve; the\nconfig validates only after the sidecar exists."
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
@@ -223,7 +232,7 @@ function _createMdxContent(props) {
         children: "401"
       }), "/", (0,jsx_runtime.jsx)(_components.code, {
         children: "403"
-      }), ", revocation, or expiry. The complete validated\nversion of this block lives in ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ", revocation, or expiry. The complete example\nversion of this block lives in ", (0,jsx_runtime.jsx)(_components.code, {
         children: "examples/github-copilot.hcl"
       }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {

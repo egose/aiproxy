@@ -5,8 +5,8 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">API Reference | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/api-reference/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="API Reference | aiproxy"><meta data-rh="true" name="description" content="aiproxy exposes an OpenAI-compatible HTTP API."><meta data-rh="true" property="og:description" content="aiproxy exposes an OpenAI-compatible HTTP API."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/api-reference/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/api-reference/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/api-reference/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"API Reference","item":"https://aiproxy.pages.dev/docs/api-reference"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
-<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.0700b446.css">
-<script src="/assets/js/runtime~main.b446a0c2.js" defer="defer"></script>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.55e2a745.css">
+<script src="/assets/js/runtime~main.e52ad310.js" defer="defer"></script>
 <script src="/assets/js/main.8b8c49ad.js" defer="defer"></script>
 </head>
 <body>
@@ -39,15 +39,138 @@ to <code>chat</code> and <code>responses</code>.</p>
 <div class="language-http mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-http codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">Authorization: Bearer &lt;token&gt;</span><br></div></code></pre></div></div>
 <p>When <code>none</code> auth is enabled, no inbound authentication is performed.</p>
 <p>In <code>bearer_static</code> mode, individual clients may also be restricted with <code>allowed_models</code>.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="invitation-onboarding">Invitation Onboarding<a href="#invitation-onboarding" class="hash-link" aria-label="Direct link to Invitation Onboarding" title="Direct link to Invitation Onboarding" translate="no">​</a></h3>
+<p>With multi-tenancy enabled, <code>POST /_internal/admin/invites/accept</code> accepts a JSON
+body with <code>token</code> and <code>password</code> (at least eight characters). A successful <code>201</code>
+creates the account, adds the invitation&#x27;s workspace membership when present,
+and consumes the invitation in one database transaction. Email, system-admin
+authority, workspace, and workspace role come from the current stored
+invitation; an omitted or unrecognized workspace role defaults to <code>member</code>.</p>
+<p>Acceptance is complete-or-no-change. Revocation, expiry, and prior acceptance are
+checked again at consumption, including after waiting for another acceptance.
+Only one competing request can consume an eligible invitation. Missing, revoked,
+or replaced tokens return <code>404</code>; expired/already accepted invitations and an
+already registered email return <code>400</code>. Database failures return a controlled
+<code>500</code> without database details. An account or membership write failure rolls back
+the whole acceptance, leaving an otherwise eligible invitation available to retry
+after the cause is resolved. Successful onboarding supports the normal login flow.
+Acceptance also serializes with workspace deletion. If the stored invitation&#x27;s
+workspace changes while acceptance is acquiring locks, it returns <code>400</code> with
+retry guidance and saves nothing; retry uses the current invitation scope.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="workspace-model">Workspace Model<a href="#workspace-model" class="hash-link" aria-label="Direct link to Workspace Model" title="Direct link to Workspace Model" translate="no">​</a></h3>
+<p>Tenancy is built on workspaces. Tables are <code>workspaces</code>, <code>workspace_members</code>,
+and <code>workspace_teams</code>; owning rows carry <code>workspace_id</code>. Admin routes live under
+<code>/_internal/admin/workspaces</code>, resource selection accepts <code>workspace_id</code> or the
+<code>X-Workspace-ID</code> header, and mutable fields use <code>workspace_id</code>, <code>workspace_role</code>,
+and <code>workspace_name</code>.</p>
+<p>Kinds are <code>personal</code> and <code>organization</code>, plus a <code>system</code> flag:</p>
+<ul>
+<li class=""><code>personal</code>: exactly one per user, auto-created at registration. It holds only
+its owner, so teams and additional members are rejected.</li>
+<li class=""><code>organization</code> (kind): created afterwards via <code>POST /_internal/admin/workspaces</code>
+for collaboration with members and teams.</li>
+<li class=""><code>system</code>: the built-in workspace (<code>is_system</code>) that owns global config-backed
+inventory. It is hidden from membership listings and cannot be deleted.</li>
+</ul>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="workspace-and-team-membership-changes">Workspace And Team Membership Changes<a href="#workspace-and-team-membership-changes" class="hash-link" aria-label="Direct link to Workspace And Team Membership Changes" title="Direct link to Workspace And Team Membership Changes" translate="no">​</a></h3>
+<p>With multi-tenancy enabled, Add member is insert-only on both
+<code>POST /_internal/admin/workspaces/{workspace_id}/members</code> and
+<code>POST /_internal/admin/workspaces/{workspace_id}/teams/{team_id}/members</code>. Supply <code>user_id</code>
+or <code>email</code>, plus optional <code>role</code> (<code>admin</code> or <code>member</code>, default <code>member</code>). A new
+membership returns <code>201</code>; an existing membership returns <code>409</code> and keeps its role,
+even if a different role was supplied. In the web UI, use the existing member&#x27;s
+role control; API clients should use <code>PUT</code> on the same path with <code>/{user_id}</code>
+appended and an explicit <code>role</code>.</p>
+<p>Role changes and removals check the current administrator set in a serialized
+database transaction. Once a workspace or team has an administrator, these
+operations cannot remove or demote its last one, including competing requests.
+Assign another administrator before retrying a rejected handoff (<code>400</code>). A
+workspace administrator cannot demote their own workspace role; another
+administrator must make that edit. Team administrators may demote themselves
+when another team administrator remains. These guards also apply when deleting
+a user account would cascade away their administrator memberships. New teams
+can still start without a team administrator and receive their first one later.</p>
+<p>Team additions require current membership in the containing workspace. A
+successful role edit or removal returns <code>200</code>; a missing membership returns
+<code>404</code>. Unexpected storage failures return a controlled <code>500</code> with no committed
+membership change. The UI displays the server&#x27;s conflict/handoff guidance.</p>
+<p>Workspace offboarding (<code>DELETE /_internal/admin/workspaces/{workspace_id}/members/{user_id}</code>)
+also removes that user&#x27;s team memberships and direct key-sharing grants in the
+workspace, in the same transaction. If they are the sole admin of any affected
+team, the request returns <code>400</code> with handoff guidance and changes nothing. Assign
+another team administrator, then retry. Other workspaces, key ownership,
+team-wide key shares, quota records and historical spend are preserved. Re-adding
+an ordinary member does not restore prior team roles or direct sharing grants.</p>
+<p>Current workspace membership is required for non-system key owners/team admins
+to read or manage keys and for team quota access, even with a known resource ID or
+an existing login token. After removal, key detail and team quota GET/PUT return
+<code>404</code>; key update/rotate/revoke/delete return <code>403</code>. System administrators retain
+access. Personal ownership is preserved and becomes usable again if the owner is
+re-added to the workspace. Already-admitted operations are not retroactively
+canceled.</p>
+<p><strong>API bearer credentials are separate:</strong> removing management access does not
+automatically revoke, rotate or disable any key, including a personal key. To stop
+use of previously distributed API tokens, explicitly rotate or revoke the key.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="key-policy-and-sharing-updates">Key Policy And Sharing Updates<a href="#key-policy-and-sharing-updates" class="hash-link" aria-label="Direct link to Key Policy And Sharing Updates" title="Direct link to Key Policy And Sharing Updates" translate="no">​</a></h3>
+<p><code>PUT /_internal/admin/keys/{key_id}</code> accepts <code>description</code>, <code>tenant</code>,
+<code>allowed_models</code>, <code>expires_at</code>, <code>user_ids</code>, and <code>team_ids</code>. Policy fields and an
+optional sharing replacement commit in one database transaction. The update keeps
+the key&#x27;s name, workspace, ownership, bearer credential, and enabled state.</p>
+<ul>
+<li class="">Omitted or <code>null</code> fields preserve their current values. An empty <code>description</code>
+or <code>tenant</code> clears it; <code>allowed_models: []</code> removes the model restriction.</li>
+<li class=""><code>expires_at</code> accepts RFC3339; an empty string clears expiry. A past timestamp
+is valid and makes the key stop authenticating after successful activation.</li>
+<li class="">Supplying either non-null binding list replaces <strong>both</strong> user and team shares.
+The other omitted list is treated as empty. Supplying <code>user_ids: []</code> alone,
+for example, clears both sets. Omitting both lists preserves both sets.</li>
+</ul>
+<p>Malformed UUIDs, nonmember users, and teams from another workspace return
+<code>400</code>; missing keys/teams return <code>404</code>. Current manager authority and grant
+eligibility are rechecked inside the transaction, serialized with workspace
+offboarding and membership role changes. Lost manager authority returns <code>403</code>.
+Rejected validation and binding-storage failures leave all fields and both sharing
+sets unchanged and do not request runtime activation. Storage failures return
+<code>500</code> (<code>could not update key</code>) without database details. A later reload cannot
+activate a rejected edit.</p>
+<p>After a valid commit the server requests runtime activation once, before building
+the success response. Successful activation applies authentication expiry, tenant,
+and allowed-model policy to subsequent requests. If activation fails, the response
+is <code>500</code> with <code>saved but activation failed: ...</code>: <strong>the complete edit is saved</strong>,
+the previous runtime remains active, and a later successful reload applies it.
+Resolve the reported activation problem and reload; this differs from a mutation
+failure that saved nothing.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="usage-and-scope">Usage And Scope<a href="#usage-and-scope" class="hash-link" aria-label="Direct link to Usage And Scope" title="Direct link to Usage And Scope" translate="no">​</a></h2>
 <p><code>GET /v1/billing/usage</code> returns aggregated in-process usage summaries over the
 proxy&#x27;s rolling 24-hour accounting window.</p>
 <ul>
 <li class="">When the authenticated client has a <code>tenant</code>, results are scoped to that tenant</li>
-<li class="">Otherwise, results are scoped to the caller&#x27;s client identity</li>
+<li class="">Otherwise, results are scoped to the caller&#x27;s tenantless client identity; a
+same-named client in another tenant is excluded</li>
 <li class="">This endpoint is local accounting only; it is not an external billing,
 invoicing, or quota system</li>
 </ul>
+<p>Rows are grouped by tenant, client, requested public model, operation, and HTTP
+status. The optional <code>estimated_cost_usd</code> uses current configured model prices.
+For an alias, it sums the recorded token usage of the targets actually used for
+that alias&#x27;s row. Traffic through another alias or a direct model sharing those
+targets is excluded. Changing alias membership does not redistribute past traffic;
+changing model prices reprices the retained estimate.</p>
+<p>The estimate is <strong>omitted</strong>, rather than returned as a partial sum, when any
+contributing target lacks pricing or when target attribution does not account for
+all the row&#x27;s recorded requests and tokens. There is no even-split or request-count
+fallback. Unused targets with missing prices do not affect the estimate. Direct and
+alias estimates also require positive rates for the token categories consumed:
+input, output, and generic cached tokens. Explicit cache-read and cache-write usage
+can use the configured input-rate fallback. An omitted rate and an explicit zero
+rate cannot be distinguished, so either makes the estimate unavailable when needed.
+A numeric zero means the fully priced recorded usage costs zero; it does not prove
+that the upstream reported every billable token.</p>
+<p>Usage and cost share one rolling snapshot, using one-minute buckets retained while
+their start is at or after <code>now - 24h</code>. Consequently, events can expire up to one
+minute before their exact 24-hour age. Data is process-local and resets on restart.
+The dashboard&#x27;s lifetime provider/upstream counters and the durable quota spend
+ledger have separate lifetimes and pricing semantics.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="error-behavior">Error Behavior<a href="#error-behavior" class="hash-link" aria-label="Direct link to Error Behavior" title="Direct link to Error Behavior" translate="no">​</a></h2>
 <ul>
 <li class="">Direct requests never fail over to another provider</li>
@@ -58,6 +181,13 @@ codes listed in <code>retry_status_codes</code></li>
 <code>4xx</code> statuses do not mark providers unhealthy</li>
 <li class="">Other upstream <code>4xx</code> responses are returned verbatim</li>
 <li class="">Unsupported operations return client-visible proxy errors</li>
+<li class="">For database-owned user/team keys, unavailable required quota policy or spend
+data returns JSON <code>503</code>
+(<code>{&quot;error&quot;:{&quot;type&quot;:&quot;quota_unavailable&quot;,&quot;message&quot;:&quot;quota data temporarily unavailable&quot;}}</code>)
+before upstream dispatch, including direct/alias and streaming requests. This
+is a temporary failure that can be retried after storage recovers. Confirmed
+budget exhaustion instead returns <code>403</code> <code>budget_exceeded</code>; confirmed TPM
+exhaustion returns <code>429</code> <code>tpm_exceeded</code> with <code>Retry-After</code>.</li>
 <li class="">Alias targets carrying valid upstream retry advice (<code>retry-after-ms</code>, else
 <code>Retry-After</code>, else exhausted Meta quota headers) cool down across requests:
 later alias requests skip cooling
@@ -69,6 +199,81 @@ milliseconds, min 1) from the same earliest remaining delay, without upstream
 calls. Direct requests never consult or populate this state.</li>
 </ul>
 <p>This behavior is deliberate: direct model requests are explicit, while alias requests are the only place where the proxy is allowed to choose another target.</p>
+<h2 class="anchor anchorTargetStickyNavbar_T7vg" id="administrative-provider-and-alias-saves">Administrative Provider And Alias Saves<a href="#administrative-provider-and-alias-saves" class="hash-link" aria-label="Direct link to Administrative Provider And Alias Saves" title="Direct link to Administrative Provider And Alias Saves" translate="no">​</a></h2>
+<p><code>POST /_internal/admin/providers</code> and <code>PUT /_internal/admin/providers/{name}</code>
+save provider metadata and supplied models atomically. A rejected model write
+leaves no new provider on POST and preserves the exact previous provider and models
+on PUT. Omitting <code>models</code> (or sending null) preserves models; a supplied array is a
+replacement subject to normal provider validation. Omitted fields and write-only
+credentials are preserved on update. Credential-only PUT uses the same concurrency
+protection and preserves models. Alias POST/PUT likewise save metadata and targets
+in one transaction, preserving omitted update fields.</p>
+<p>Provider PUT supports explicit <code>true</code>/<code>false</code> for <code>enabled</code> and
+<code>forward_user_agent</code>, <code>[]</code> to clear local <code>forward_headers</code>, and <code>&quot;&quot;</code> to clear
+<code>display_name</code>, <code>base_url</code>, <code>upstream_header_timeout</code>, <code>user_agent</code> or <code>extends</code>,
+subject to normal validation. Clearing an override restores applicable defaults;
+it does not disable root-level forwarding. Omit untouched <code>api_key</code>, <code>api_key_ref</code>
+and <code>credential_ref</code> fields to retain them. Supplied reference objects replace
+their path and key/name together; an empty path selects the default secrets path.</p>
+<p>Within an existing <code>healthcheck</code>, omitted scalar fields are preserved and
+<code>send_authorization: false</code> disables probe authorization. Empty <code>method</code>,
+<code>expected_body</code>, <code>interval</code> and <code>timeout</code> reset to <code>GET</code>, <code>*</code>, <code>30s</code> and <code>5s</code>;
+zero <code>expected_status</code>, <code>failure_threshold</code> and <code>success_threshold</code> reset to
+<code>200</code>, <code>2</code> and <code>1</code>. A nonempty <code>path</code> replaces the path. <strong>Removing the entire
+healthcheck block is unsupported</strong>: omission, null, an empty object or an empty
+path does not delete it.</p>
+<p>Catalog POST/PUT outcomes:</p>
+<table><thead><tr><th>Status</th><th>Meaning and next step</th></tr></thead><tbody><tr><td><code>400</code></td><td>Validation rejected the edit; correct the input.</td></tr><tr><td><code>409</code></td><td>The edited aggregate changed concurrently; read current state and retry.</td></tr><tr><td><code>500</code>, <code>could not save catalog edit</code></td><td>Storage failed before a successful commit; activation was not requested.</td></tr><tr><td><code>500</code>, <code>saved but activation failed</code></td><td>The complete edit is saved; the previous runtime remains active. Consult server logs, correct the activation problem, then reload.</td></tr><tr><td><code>500</code>, <code>saved but response view unavailable; read current state before retrying</code></td><td>The edit is saved and activation was requested successfully, but its response view could not be read. Read current state rather than blindly repeating POST.</td></tr><tr><td><code>201</code> (POST), <code>200</code> (PUT)</td><td>Saved, activation requested successfully, and the response view is available.</td></tr></tbody></table>
+<p>After each valid commit, activation is requested once before response-view reads.
+Operational failure responses omit storage and credential details. Persistence and
+runtime activation are separate: later reloads can activate a complete saved edit
+after an activation failure. The concurrency check protects the edited aggregate,
+not an atomic snapshot of every catalog dependency or another proxy&#x27;s runtime.
+Successful provider POST/PUT and credential PUT responses carry
+<code>X-Aiproxy-Catalog-Saved: true</code> once the database commit is durable, including
+when activation itself fails.</p>
+<h2 class="anchor anchorTargetStickyNavbar_T7vg" id="github-copilot-device-authorization">GitHub Copilot Device Authorization<a href="#github-copilot-device-authorization" class="hash-link" aria-label="Direct link to GitHub Copilot Device Authorization" title="Direct link to GitHub Copilot Device Authorization" translate="no">​</a></h2>
+<p><code>github-copilot</code> providers can be authorized from the admin API without handling
+OAuth tokens in the browser. The server performs the GitHub device challenge over
+a fixed issuer (<code>https://github.com/login/device/code</code>,
+<code>https://github.com/login/oauth/access_token</code>), fixed <code>read:user</code> scope, and the
+fixed device-verification page, then stores the result as an encrypted database
+credential. Saving the provider consumes the ready authorization exactly once and
+activates it through the normal catalog reload path. The CLI sidecar login remains
+available as an alternative.</p>
+<ul>
+<li class=""><code>POST /_internal/admin/copilot-device-flows</code> starts a flow with
+<code>{client_id, workspace_id?, provider_name?}</code>. The workspace is resolved with the
+normal provider write-workspace policy; <code>provider_name</code> pins an edit target and must
+belong to the same workspace. Responses are <code>201</code> flow-status bodies.</li>
+<li class=""><code>GET /_internal/admin/copilot-device-flows/{id}</code> returns the sanitized flow
+status without any upstream calls.</li>
+<li class=""><code>POST /_internal/admin/copilot-device-flows/{id}/poll</code> performs at most one
+upstream token request when the stored schedule and lease permit; early or
+competing calls return the pending status and delay with no extra upstream call.</li>
+<li class=""><code>DELETE /_internal/admin/copilot-device-flows/{id}</code> cancels a live flow and is
+idempotent for terminal flows.</li>
+</ul>
+<p>Flow-status bodies carry <code>id</code>, <code>workspace_id</code>, <code>status</code>
+(<code>starting</code>, <code>pending</code>, <code>ready</code>, <code>consumed</code>, <code>denied</code>, <code>expired</code>, <code>failed</code>,
+<code>cancelled</code>), pending <code>user_code</code>/<code>verification_uri</code>/<code>expires_at</code>/<code>poll_after_ms</code>,
+<code>ready_expires_at</code>, bound/consumed provider references, and a safe <code>error_code</code>.
+Device codes, access tokens, refresh tokens, and ciphertext are never returned,
+and responses use <code>Cache-Control: no-store</code>. Every operation requires a current
+app-user JWT with workspace or system administrator authority, plus
+initiating-user ownership; another administrator cannot adopt a flow. Unknown or
+foreign IDs return <code>404</code>, invalid logins <code>401</code>, insufficient rights <code>403</code>.</p>
+<p>Provider <code>POST</code>/<code>PUT</code> accepts <code>copilot_device_flow_id</code> (flow ID only, never a raw
+credential) instead of a credential reference. Edit saves that consume a flow
+require <code>expected_updated_at</code>, the opaque revision from the provider view
+(<code>updated_at</code>). A stale revision returns <code>409</code> and preserves the ready flow for
+an explicit reread and retry. Provider views expose
+<code>copilot_credential_source</code> (<code>database</code>, <code>sidecar</code>, or <code>none</code> alongside the
+existing <code>has_credential</code>), and <code>GET /_internal/admin/provider-types</code> advertises
+<code>supports_device_authorization</code> for <code>github-copilot</code>. The legacy credential
+endpoint switches sources the same way (a nonempty sidecar reference clears the
+database ciphertext) but never consumes flows. <strong>Hermetically verified; live
+GitHub compatibility unverified.</strong></p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="provider-coverage-notes">Provider Coverage Notes<a href="#provider-coverage-notes" class="hash-link" aria-label="Direct link to Provider Coverage Notes" title="Direct link to Provider Coverage Notes" translate="no">​</a></h2>
 <ul>
 <li class=""><code>openai</code>, <code>openai-compatible</code>, and <code>zenmux</code> are close to pass-through adapters (<code>zenmux</code> defaults to <code>https://zenmux.ai/api/v1</code>)</li>
@@ -85,7 +290,9 @@ contract.</li>
 serves JSON and SSE, and every other operation (including <code>responses</code>,
 <code>embeddings</code>, <code>images</code>, and audio) is rejected before upstream I/O.
 <code>GET /v1/models</code> and <code>GET /v1/billing/usage</code> stay proxy-owned with no
-upstream calls.</li>
-</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/request-examples/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Request Examples</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/operations/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Operations</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_sbaK thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#endpoint-and-provider-support-matrix" class="table-of-contents__link toc-highlight">Endpoint And Provider Support Matrix</a></li><li><a href="#provider-capability-defaults" class="table-of-contents__link toc-highlight">Provider Capability Defaults</a></li><li><a href="#streaming" class="table-of-contents__link toc-highlight">Streaming</a></li><li><a href="#authentication" class="table-of-contents__link toc-highlight">Authentication</a></li><li><a href="#usage-and-scope" class="table-of-contents__link toc-highlight">Usage And Scope</a></li><li><a href="#error-behavior" class="table-of-contents__link toc-highlight">Error Behavior</a></li><li><a href="#provider-coverage-notes" class="table-of-contents__link toc-highlight">Provider Coverage Notes</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Introduction</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/quickstart/">Quickstart</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/configuration/">Configuration</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/config-examples/">Config Examples</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Reference</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/api-reference/">API Reference</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/operations/">Operations</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/deployment/">Deployment</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/egose/aiproxy" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_hMXl"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 aiproxy. Built with Docusaurus.</div></div></div></footer></div>
+upstream calls. <strong>Hermetically verified; live GitHub compatibility unverified.</strong>
+These capability matrices describe implemented behavior, not verified GitHub
+access. See <a class="" href="/docs/operations/#mock-only-copilot-verification">mock-only verification</a>.</li>
+</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/request-examples/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Request Examples</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/operations/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Operations</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_sbaK thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#endpoint-and-provider-support-matrix" class="table-of-contents__link toc-highlight">Endpoint And Provider Support Matrix</a></li><li><a href="#provider-capability-defaults" class="table-of-contents__link toc-highlight">Provider Capability Defaults</a></li><li><a href="#streaming" class="table-of-contents__link toc-highlight">Streaming</a></li><li><a href="#authentication" class="table-of-contents__link toc-highlight">Authentication</a><ul><li><a href="#invitation-onboarding" class="table-of-contents__link toc-highlight">Invitation Onboarding</a></li><li><a href="#workspace-model" class="table-of-contents__link toc-highlight">Workspace Model</a></li><li><a href="#workspace-and-team-membership-changes" class="table-of-contents__link toc-highlight">Workspace And Team Membership Changes</a></li><li><a href="#key-policy-and-sharing-updates" class="table-of-contents__link toc-highlight">Key Policy And Sharing Updates</a></li></ul></li><li><a href="#usage-and-scope" class="table-of-contents__link toc-highlight">Usage And Scope</a></li><li><a href="#error-behavior" class="table-of-contents__link toc-highlight">Error Behavior</a></li><li><a href="#administrative-provider-and-alias-saves" class="table-of-contents__link toc-highlight">Administrative Provider And Alias Saves</a></li><li><a href="#github-copilot-device-authorization" class="table-of-contents__link toc-highlight">GitHub Copilot Device Authorization</a></li><li><a href="#provider-coverage-notes" class="table-of-contents__link toc-highlight">Provider Coverage Notes</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Introduction</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/quickstart/">Quickstart</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/configuration/">Configuration</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/config-examples/">Config Examples</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Reference</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/api-reference/">API Reference</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/operations/">Operations</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/deployment/">Deployment</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/egose/aiproxy" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_hMXl"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 aiproxy. Built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>

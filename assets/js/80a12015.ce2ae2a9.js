@@ -100,6 +100,7 @@ const toc = [{
 }];
 function _createMdxContent(props) {
   const _components = {
+    a: "a",
     code: "code",
     em: "em",
     h1: "h1",
@@ -109,6 +110,7 @@ function _createMdxContent(props) {
     li: "li",
     p: "p",
     pre: "pre",
+    strong: "strong",
     table: "table",
     tbody: "tbody",
     td: "td",
@@ -757,6 +759,13 @@ function _createMdxContent(props) {
       id: "github-copilot",
       children: "GitHub Copilot"
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.strong, {
+        children: "Hermetically verified; live GitHub compatibility unverified."
+      }), " Local fixtures\nverify implementation behavior, not application entitlement, direct-Bearer access,\nrequired GitHub headers, model availability, or exchange/refresh needs. See\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#mock-only-copilot-verification",
+        children: "mock-only verification"
+      }), ". Example\nmodel names are illustrative; live verification remains separately deferred."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.code, {
         children: "github-copilot"
       }), " is a chat-only provider backed by a device-flow login. It\nserves ", (0,jsx_runtime.jsx)(_components.code, {
@@ -822,6 +831,14 @@ function _createMdxContent(props) {
       }), " listing shares the same auth\nwithout changing the static proxy inventory. See ", (0,jsx_runtime.jsx)(_components.code, {
         children: "examples/github-copilot.hcl"
       }), "\nfor a complete config."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["With multi-tenancy enabled, the web provider form offers Connect GitHub as a\ndatabase alternative to the CLI sidecar above: enter the same explicitly\nsupplied public OAuth client ID, approve at the shown URL with the shown code,\nthen save the provider to apply. The server stores the result as an\nAES-GCM-encrypted database credential (same database encryption key required\non every instance); the browser never receives tokens. Unfinished sessions\nexpire and are reaped by a bounded per-minute cleanup, and activation applies\nto the receiving instance only. See ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations",
+        children: "Operations"
+      }), " for the\nConnect GitHub details and ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#mock-only-copilot-verification",
+        children: "mock-only verification"
+      }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "zenmux",
       children: "ZenMux"

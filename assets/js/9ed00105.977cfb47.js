@@ -134,6 +134,7 @@ function _createMdxContent(props) {
     ol: "ol",
     p: "p",
     pre: "pre",
+    strong: "strong",
     ul: "ul",
     ...(0,lib/* useMDXComponents */.R)(),
     ...props.components
@@ -523,6 +524,13 @@ function _createMdxContent(props) {
       }), "\nheader. To\nintentionally disable a provider, declare ", (0,jsx_runtime.jsx)(_components.code, {
         children: "enabled = false"
       }), "; disabled\nproviders are still validated for structure, URL, models, and capabilities,\nbut they do not require a usable credential."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["GitHub Copilot is ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "hermetically verified; live GitHub compatibility unverified"
+      }), ".\nConfig validation resolves local credentials; it does not prove GitHub entitlement\nor model availability. See ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#mock-only-copilot-verification",
+        children: "mock-only verification"
+      }), "\nfor checks requiring no real client ID/account."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.code, {
         children: "github-copilot"
@@ -929,6 +937,24 @@ function _createMdxContent(props) {
         children: "aiproxy convert ./config.json --config /etc/aiproxy/config.hcl\naiproxy convert --compact - --config /etc/aiproxy/config.hcl\n"
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Conversion materializes environment values, including secrets, in the output;\nthis also applies to stdout (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "-"
+      }), "). On Linux and macOS, file output is staged in the destination\ndirectory and published atomically with exact ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "0600"
+      }), " permissions. Without\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--force"
+      }), ", publication refuses an existing destination even if another process\ncreates it during conversion. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--force"
+      }), " atomically replaces an existing regular\nfile and resets its permissions to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "0600"
+      }), ". Symlinks (live or dangling) and\nnon-regular destinations are rejected. Missing parent directories are created\nwith mode ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "0700"
+      }), " (subject to umask)."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Failed validation, staging, or publication leaves any old destination intact.\nNon-force publication requires filesystem hard-link support and fails if it is\nunavailable. A failure after publication (temporary-file cleanup, directory\nsync, or writing the confirmation) can leave the complete new file in place;\nstdout write failures also return an error."
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Windows file conversion is unsupported and fails before creating files or\ndirectories, because this writer cannot guarantee owner-only permissions and\natomic replacement there. Stdout conversion still works; save its output through\na suitably secured external tool."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["For local runs, if your config depends on variables in ", (0,jsx_runtime.jsx)(_components.code, {
         children: ".env"
       }), ", load them first:"]
@@ -1201,20 +1227,36 @@ function _createMdxContent(props) {
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Serves the embedded React dashboard at ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "GET /dashboard/"
+        children: "GET /"
       }), " (with client-side\nroutes such as ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "/dashboard/providers"
+        children: "/providers"
       }), " and hashed assets under\n", (0,jsx_runtime.jsx)(_components.code, {
-        children: "/dashboard/assets/"
+        children: "/assets/"
       }), "). The block is optional and a bare ", (0,jsx_runtime.jsx)(_components.code, {
         children: "web_ui {}"
       }), " enables\nit; ", (0,jsx_runtime.jsx)(_components.code, {
         children: "enabled = false"
-      }), " keeps the UI closed. This gate is independent of the\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), " keeps the UI closed. The UI never claims API\nsurfaces (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/v1/*"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/healthz"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/readyz"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/metrics"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/_internal/*"
+      }), ")\nor the reserved ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/dashboard"
+      }), " path, and extensionless client-side routes\nfall back to the app shell only for browser (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "text/html"
+      }), ") navigations,\nso API clients keep receiving JSON 404s. This gate is independent of the\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "dashboard"
       }), " block above: the static UI loads without it, but the live\nsnapshot/logs/payloads/blocks views still call the bearer-gated\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "/_internal/dashboard/*"
-      }), " APIs, so paste the dashboard token on the UI's Token\npage. Toggling ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " APIs. When ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "multi_tenancy"
+      }), " is disabled, paste the\ndashboard token on the UI's Token page; when it is enabled, signing in with\nuser credentials is enough and no dashboard token is required. Toggling\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "web_ui"
       }), " applies on ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"

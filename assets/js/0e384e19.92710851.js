@@ -165,7 +165,7 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "github-copilot"
-        }), " (chat-only, device-flow login)"]
+        }), " (chat-only, device-flow login; hermetically verified; live GitHub compatibility unverified)"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "zenmux"

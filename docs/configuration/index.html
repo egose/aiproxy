@@ -5,8 +5,8 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Configuration | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/configuration/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Configuration | aiproxy"><meta data-rh="true" name="description" content="aiproxy uses labeled HCL blocks. The core building blocks are:"><meta data-rh="true" property="og:description" content="aiproxy uses labeled HCL blocks. The core building blocks are:"><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/configuration/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/configuration/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/configuration/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Configuration","item":"https://aiproxy.pages.dev/docs/configuration"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
-<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.0700b446.css">
-<script src="/assets/js/runtime~main.b446a0c2.js" defer="defer"></script>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.55e2a745.css">
+<script src="/assets/js/runtime~main.e52ad310.js" defer="defer"></script>
 <script src="/assets/js/main.8b8c49ad.js" defer="defer"></script>
 </head>
 <body>
@@ -134,6 +134,10 @@ header. To
 intentionally disable a provider, declare <code>enabled = false</code>; disabled
 providers are still validated for structure, URL, models, and capabilities,
 but they do not require a usable credential.</p>
+<p>GitHub Copilot is <strong>hermetically verified; live GitHub compatibility unverified</strong>.
+Config validation resolves local credentials; it does not prove GitHub entitlement
+or model availability. See <a class="" href="/docs/operations/#mock-only-copilot-verification">mock-only verification</a>
+for checks requiring no real client ID/account.</p>
 <p><code>github-copilot</code> never uses <code>api_key</code>/<code>api_key_ref</code>. Provision with
 <code>aiproxy login github-copilot --client-id &lt;id&gt; --credential &lt;name&gt;</code> (your own
 public OAuth client ID, no secret), then reference the saved login:</p>
@@ -237,6 +241,23 @@ path), and the target defaults to a file in the current working directory.
 <code>env(&quot;VAR&quot;)</code> calls are resolved at conversion time, so the referenced
 variables must be set, and the output is validated before writing:</p>
 <div class="language-sh mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-sh codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy convert ./config.json --config /etc/aiproxy/config.hcl</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy convert --compact - --config /etc/aiproxy/config.hcl</span><br></div></code></pre></div></div>
+<p>Conversion materializes environment values, including secrets, in the output;
+this also applies to stdout (<code>-</code>). On Linux and macOS, file output is staged in the destination
+directory and published atomically with exact <code>0600</code> permissions. Without
+<code>--force</code>, publication refuses an existing destination even if another process
+creates it during conversion. <code>--force</code> atomically replaces an existing regular
+file and resets its permissions to <code>0600</code>. Symlinks (live or dangling) and
+non-regular destinations are rejected. Missing parent directories are created
+with mode <code>0700</code> (subject to umask).</p>
+<p>Failed validation, staging, or publication leaves any old destination intact.
+Non-force publication requires filesystem hard-link support and fails if it is
+unavailable. A failure after publication (temporary-file cleanup, directory
+sync, or writing the confirmation) can leave the complete new file in place;
+stdout write failures also return an error.</p>
+<p>Windows file conversion is unsupported and fails before creating files or
+directories, because this writer cannot guarantee owner-only permissions and
+atomic replacement there. Stdout conversion still works; save its output through
+a suitably secured external tool.</p>
 <p>For local runs, if your config depends on variables in <code>.env</code>, load them first:</p>
 <div class="language-sh mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-sh codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">set -a; . ./.env; set +a</span><br></div></code></pre></div></div>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="api_key_ref"><code>api_key_ref</code><a href="#api_key_ref" class="hash-link" aria-label="Direct link to api_key_ref" title="Direct link to api_key_ref" translate="no">​</a></h2>
@@ -319,14 +340,20 @@ hosts. HTTPS and remote dashboard URLs are not supported by the current
 configuration model.</p>
 <h3 class="anchor anchorTargetStickyNavbar_T7vg" id="web_ui"><code>web_ui</code><a href="#web_ui" class="hash-link" aria-label="Direct link to web_ui" title="Direct link to web_ui" translate="no">​</a></h3>
 <div class="language-hcl mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-hcl codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">web_ui {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  enabled = true</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">}</span><br></div></code></pre></div></div>
-<p>Serves the embedded React dashboard at <code>GET /dashboard/</code> (with client-side
-routes such as <code>/dashboard/providers</code> and hashed assets under
-<code>/dashboard/assets/</code>). The block is optional and a bare <code>web_ui {}</code> enables
-it; <code>enabled = false</code> keeps the UI closed. This gate is independent of the
+<p>Serves the embedded React dashboard at <code>GET /</code> (with client-side
+routes such as <code>/providers</code> and hashed assets under
+<code>/assets/</code>). The block is optional and a bare <code>web_ui {}</code> enables
+it; <code>enabled = false</code> keeps the UI closed. The UI never claims API
+surfaces (<code>/v1/*</code>, <code>/healthz</code>, <code>/readyz</code>, <code>/metrics</code>, <code>/_internal/*</code>)
+or the reserved <code>/dashboard</code> path, and extensionless client-side routes
+fall back to the app shell only for browser (<code>text/html</code>) navigations,
+so API clients keep receiving JSON 404s. This gate is independent of the
 <code>dashboard</code> block above: the static UI loads without it, but the live
 snapshot/logs/payloads/blocks views still call the bearer-gated
-<code>/_internal/dashboard/*</code> APIs, so paste the dashboard token on the UI&#x27;s Token
-page. Toggling <code>web_ui</code> applies on <code>SIGHUP</code> without restart.</p>
+<code>/_internal/dashboard/*</code> APIs. When <code>multi_tenancy</code> is disabled, paste the
+dashboard token on the UI&#x27;s Token page; when it is enabled, signing in with
+user credentials is enough and no dashboard token is required. Toggling
+<code>web_ui</code> applies on <code>SIGHUP</code> without restart.</p>
 <h3 class="anchor anchorTargetStickyNavbar_T7vg" id="ingress_guardrails"><code>ingress_guardrails</code><a href="#ingress_guardrails" class="hash-link" aria-label="Direct link to ingress_guardrails" title="Direct link to ingress_guardrails" translate="no">​</a></h3>
 <div class="language-hcl mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-hcl codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">ingress_guardrails {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  enabled        = true</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  mode           = &quot;block&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  max_text_bytes = 65536</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  max_strings    = 512</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  exceptions_file    = &quot;/etc/aiproxy/guardrail-exceptions.json&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  redact_placeholder = &quot;REDACTED&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  quarantine {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    enabled           = true</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    max_entries       = 128</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    ttl               = &quot;15m&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    max_snippet_bytes = 512</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  }</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">}</span><br></div></code></pre></div></div>
 <p>Opt-in secret scanning of inbound <code>POST /v1/chat/completions</code> and

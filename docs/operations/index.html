@@ -5,8 +5,8 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Operations | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/operations/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Operations | aiproxy"><meta data-rh="true" name="description" content="This page covers the commands and operational behavior that matter most for local development and production deployment."><meta data-rh="true" property="og:description" content="This page covers the commands and operational behavior that matter most for local development and production deployment."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/operations/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/operations/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/operations/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Operations","item":"https://aiproxy.pages.dev/docs/operations"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
-<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.0700b446.css">
-<script src="/assets/js/runtime~main.b446a0c2.js" defer="defer"></script>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.55e2a745.css">
+<script src="/assets/js/runtime~main.e52ad310.js" defer="defer"></script>
 <script src="/assets/js/main.8b8c49ad.js" defer="defer"></script>
 </head>
 <body>
@@ -51,14 +51,39 @@ subcommands can also be used directly.</p>
 omitted to use the service defaults; <code>--base-url</code> remains available as a
 transport-only override.</p>
 <div class="language-sh mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-sh codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure provider \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --config /etc/aiproxy/config.hcl \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --non-interactive \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --name zen \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --type opencode-zen \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --api-key-env OPENCODE_ZEN_API_KEY \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --model glm-5.3 \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --model-protocol glm-5.3=chat</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure provider \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --config /etc/aiproxy/config.hcl \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --non-interactive \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --name go \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --type opencode-go \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --api-key-env OPENCODE_GO_API_KEY \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --model minimax-m3 \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --model-protocol minimax-m3=messages</span><br></div></code></pre></div></div>
-<p>GitHub Copilot providers reference a saved device-flow login (no API-key
-flags, no OAuth networking here, no token display):</p>
+<p>GitHub Copilot is <strong>hermetically verified; live GitHub compatibility unverified</strong>.
+See <a href="#mock-only-copilot-verification" class="">mock-only verification</a> for local checks
+requiring no real client ID/account. Production <code>login</code> below contacts GitHub;
+<code>configure provider</code> only references its saved credential (no API-key flags,
+OAuth networking or token display in configure). The model name is illustrative:</p>
 <div class="language-sh mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-sh codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy login github-copilot --client-id YOUR_GITHUB_OAUTH_CLIENT_ID --credential copilot-main</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure provider \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --config /etc/aiproxy/config.hcl \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --non-interactive \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --name copilot \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --type github-copilot \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --credential copilot-main \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --model gpt-5.4-nano</span><br></div></code></pre></div></div>
 <p><code>login</code> prints the verification URI and user code, then writes
 <code>&lt;secrets-dir&gt;/copilot-&lt;name&gt;.json</code> (<code>0600</code>). It never edits HCL or signals a
 server: restart or <code>SIGHUP</code> to activate, and re-run the same <code>login</code> + reload
 on upstream <code>401</code>/<code>403</code>, revocation, or expiry. Use your own public OAuth
 client ID; never reuse another application&#x27;s client ID.</p>
+<p>The web provider form offers the same authorization as Connect GitHub: enter
+the public OAuth client ID, approve at the shown URL with the shown code, then
+save the provider to apply. The browser never receives tokens; the server
+stores the credential encrypted in the database. CLI sidecar and Connect GitHub
+are alternatives; Copilot Rotate in the web UI opens reauthorization.</p>
+<p>Connect GitHub details: the server performs the device challenge over the
+fixed GitHub issuer, fixed <code>read:user</code> scope, and the fixed verification page,
+then stores the result as an AES-GCM-encrypted database credential (never a
+sidecar, never a raw-token API input). The same database encryption key must
+be configured on every instance or the saved credential fails to decrypt.
+Unfinished device sessions expire (pending is bounded by the issuer expiry and
+15 minutes, ready lasts 10 minutes) and are reaped by a bounded per-minute
+cleanup (100 rows per batch); provider saves set
+<code>X-Aiproxy-Catalog-Saved: true</code> once the database commit is durable, including
+saved-but-activation-failed outcomes where the old runtime stays active.
+Activation applies to the receiving instance only; there is no cluster
+broadcast, so reload or mutate each instance (or let its next mutation pick
+the catalog up). Hermetically verified; live GitHub compatibility unverified
+(see below).</p>
+<p>Inference preserves upstream JSON <code>401</code>/<code>403</code> errors without implicit re-login;
+<code>models --upstream</code> adds a re-login hint. A new listing invocation reads the new
+sidecar immediately after login, while the running server still requires reload.</p>
 <p>Root upstream timeout example:</p>
 <div class="language-sh mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-sh codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure upstream \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --config /etc/aiproxy/config.hcl \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --non-interactive \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --upstream-header-timeout 120s</span><br></div></code></pre></div></div>
 <p>Alias example:</p>
@@ -95,6 +120,24 @@ Changing rate-limit settings creates a fresh limiter and resets bucket state.</p
 <p>Alias cooldown deadlines survive reload only for fingerprint-unchanged targets
 (resolved <code>base_url</code>, credential, upstream model, protocol); removed or changed
 targets are dropped, and failed reloads leave state untouched.</p>
+<p>When multi-tenancy is enabled, database-backed providers, aliases, and
+inbound keys merge into the serving catalog on the same reload path (and
+automatically after admin API mutations). An invalid row — for example a
+provider whose encrypted credential no longer decrypts under the current
+encryption key, or an alias pointing at a removed target — fails the reload
+with the old runtime intact, and blocks server startup the same way an
+invalid config file does. Use <code>aiproxy validate --check-db</code> to identify the
+offending row without running the server, then fix it (rotate the credential,
+retarget or disable the entry) or delete it via the admin UI/CLI; the next
+mutation or <code>SIGHUP</code> picks the catalog back up.</p>
+<p>Database inbound keys with <code>expires_at</code> stop authenticating at that timestamp,
+using the server clock, even if no reload occurs. Model listing, billing usage,
+and new inference requests (including SSE) return the standard JSON <code>401</code>
+<code>auth_failed</code> error (<code>invalid client token</code>) at or after expiry, before upstream
+I/O. Requests and streams already authenticated may finish. Static HCL clients
+and database keys without expiry do not expire. Changing a key&#x27;s expiry,
+rotating it, or disabling/deleting it still uses the catalog reload path above;
+the stored deadline in an active runtime requires no database access per request.</p>
 <p>These changes still require a restart:</p>
 <ul>
 <li class="">listener address changes</li>
@@ -102,7 +145,92 @@ targets are dropped, and failed reloads leave state untouched.</p>
 <li class="">logging level changes</li>
 <li class="">enabling the dashboard after startup</li>
 </ul>
+<p>Provider and alias administrative POST/PUT requests commit their complete aggregate
+before requesting runtime activation, then read the response view. Provider model
+write failures roll back metadata too. A concurrent edit returns <code>409</code>; read the
+current provider/alias and retry. <code>500 could not save catalog edit</code> means no
+activation was requested. <code>500 saved but activation failed</code> means the complete
+edit is in the database while the old runtime remains active: inspect server logs,
+resolve the failure and reload. <code>500 saved but response view unavailable</code> means the
+edit was saved and activation succeeded, but the response view failed; read current
+state before retrying, especially before repeating a create. These outcomes do not
+promise a distributed transaction between the database and running proxies.</p>
 <p>Use reload for routing and auth changes, not for socket-level listener changes.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="editing-database-providers-in-the-web-ui">Editing Database Providers In The Web UI<a href="#editing-database-providers-in-the-web-ui" class="hash-link" aria-label="Direct link to Editing Database Providers In The Web UI" title="Direct link to Editing Database Providers In The Web UI" translate="no">​</a></h3>
+<p>The provider editor sends changed fields as a partial update. Both enabled
+transitions, unchecked forwarding/healthcheck authorization, cleared strings and
+cleared local header lists are saved explicitly. Unchanged models and credential
+references are omitted. Leave the write-only API-key field blank to keep its stored
+secret; entering a new value replaces it. Changing a reference path retains the
+displayed key/name, and clearing the path selects the default secrets file.</p>
+<p>Blank URL, user-agent and header-timeout overrides restore the applicable provider
+or root defaults; provider types without a default URL still require one. Turning
+off local user-agent forwarding or clearing local forwarded headers cannot opt out
+of independently enabled root forwarding. The form displays local database values,
+not the merged effective root settings.
+These defaults apply to database providers on startup and every successful reload;
+changing a root setting does not rewrite the saved local fields.</p>
+<p>For inherited database providers, the editor uses the base provider&#x27;s models,
+transport and healthcheck rather than asking for local model rows. Type must match
+the static base; display name and credentials remain local, with a blank display
+name falling back to the base. The database provider&#x27;s Enabled flag remains local.
+Clearing Extends requires valid local settings and models before saving.</p>
+<p>An existing custom healthcheck remains selected because the current API cannot
+remove its block. Its path must stay nonempty. Clearing other scalar fields resets
+them to the defaults shown in the form (GET, status 200, body <code>*</code>, interval 30s,
+timeout 5s, failure threshold 2, success threshold 1); unchecking authorization
+explicitly saves false. Saving and reopening shows the API-normalized values.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="editing-database-aliases-in-the-web-ui">Editing Database Aliases In The Web UI<a href="#editing-database-aliases-in-the-web-ui" class="hash-link" aria-label="Direct link to Editing Database Aliases In The Web UI" title="Direct link to Editing Database Aliases In The Web UI" translate="no">​</a></h3>
+<p>Enter one <code>provider/model</code> target per line. Only the first slash separates the
+provider from the model: <code>gateway/z-ai/glm-5.2</code> keeps the complete model name
+<code>z-ai/glm-5.2</code> when creating, saving or reopening an alias. Deeper names such as
+<code>gateway/group/family/model</code> are supported too. Blank lines and surrounding provider/
+model whitespace are ignored; whitespace inside a name is invalid.</p>
+<p>Each provider name and slash-separated model segment must start with a lowercase
+letter or digit, followed by lowercase letters, digits, dots, underscores or
+hyphens. Provider name <code>alias</code> is reserved. Missing names, empty segments, repeated
+or trailing slashes and other separators produce a field error before submission.
+Target errors identify the input line to correct.</p>
+<p>Alternatively, supply comma-separated provider names and one full model name in
+the shorthand fields. The same naming rules apply; list each provider once with
+no empty comma entries. Clear explicit targets before using shorthand, and supply
+both shorthand fields. Saved shorthand reopens as the equivalent full target list.</p>
+<h2 class="anchor anchorTargetStickyNavbar_T7vg" id="database-key-spend-and-quota-resets">Database Key Spend And Quota Resets<a href="#database-key-spend-and-quota-resets" class="hash-link" aria-label="Direct link to Database Key Spend And Quota Resets" title="Direct link to Database Key Spend And Quota Resets" translate="no">​</a></h2>
+<p>With multi-tenancy enabled, deleting an inbound key preserves its recorded spend
+and user/team owner attribution. Requests already admitted with that key still
+record their usage when they finish, including streamed responses. Creating a
+replacement key, even with the same name, does not restore the owner&#x27;s budget;
+scope totals survive spend-cache refresh and server restart. Sharing a key does
+not transfer its spend to the other users or teams with access.</p>
+<p>A workspace administrator can explicitly reset a user/team budget&#x27;s spend
+with <code>reset_spend: true</code> on its quota endpoint. Resetting records an offset against
+the current total; it does not delete historical usage. A request whose usage is
+recorded after the reset counts against the new budget, even if it started before
+the reset or its key has been deleted. Budget checks retain their existing
+30-second cache and completion-based accounting; already-admitted requests may
+exceed the budget.</p>
+<p>Quota policy reads distinguish missing rows (unlimited) from storage errors.
+When required budget/TPM rows cannot be read, or spend cannot be read for a
+positive budget with a cold or expired cache, new inference requests return JSON
+<code>503</code> <code>quota_unavailable</code> before any upstream call. This also applies to SSE
+requests, which receive JSON rather than a started stream. Storage causes are
+logged server-side; the response contains no database details. Retry after
+storage recovers. Actual budget exhaustion remains <code>403</code> <code>budget_exceeded</code>, and
+actual TPM exhaustion remains <code>429</code> <code>tpm_exceeded</code> with <code>Retry-After</code>.</p>
+<p>A fresh spend-cache entry remains usable within its existing 30-second TTL,
+including for budget denial. Failed refreshes neither cache zero nor extend an
+expired entry. Policy rows are still read on each request, even with fresh
+cached spend. A genuinely missing or zero budget needs no spend read for
+admission; static HCL credentials do not acquire database quota dependencies.
+Admin quota views read current spend even without a budget and fail with a
+controlled <code>500</code> if the data is unavailable. Admin edits stop on failed policy
+reads; if an edit saves successfully but its response view cannot be read, the
+error explicitly says the quota was saved. Inspect the view after recovery
+before repeating that edit.</p>
+<p>The forward database migration retains key and workspace UUIDs for accounting,
+without retaining deleted credentials. These identities and the ledger remain
+until the workspace is deleted. Previously erased spend cannot be recovered
+by the migration.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="metrics-and-health">Metrics And Health<a href="#metrics-and-health" class="hash-link" aria-label="Direct link to Metrics And Health" title="Direct link to Metrics And Health" translate="no">​</a></h2>
 <p>The proxy exposes Prometheus metrics at <code>GET /metrics</code>.</p>
 <p>Coverage includes:</p>
@@ -142,6 +270,225 @@ back to the bounded in-process cache and fail open only when no fresh cache
 entry exists; both the backend error and the fallback reason are recorded as
 Prometheus metrics so degraded mode is observable.</p>
 <p>Without Redis-backed sharing, each instance tracks transient health independently.</p>
+<h2 class="anchor anchorTargetStickyNavbar_T7vg" id="interactive-dashboard-lifecycle">Interactive Dashboard Lifecycle<a href="#interactive-dashboard-lifecycle" class="hash-link" aria-label="Direct link to Interactive Dashboard Lifecycle" title="Direct link to Interactive Dashboard Lifecycle" translate="no">​</a></h2>
+<p><code>aiproxy dashboard</code> attaches to a running local server. <code>q</code> (outside search) or <code>Ctrl+C</code> exits the
+command and stops its polling and in-flight requests. <code>Esc</code> closes help, then a
+detail, then a zoomed pane; at the main view it exits. Terminal initialization/I/O errors
+are returned by the command, and the TUI uses the command&#x27;s configured input/output.</p>
+<p>Initial attachment still fails clearly for an unreachable server, missing dashboard
+configuration, or invalid token. After successful attachment, transient transport,
+timeout, malformed-snapshot, HTTP 408/429 and server errors preserve the last view.
+The connection line shows <strong>RECONNECTING</strong>, the local time of the last successful
+snapshot, and the next retry time. Retries wait 2, 4, 8, 16, then at most 30 seconds
+after failed attempts; successful snapshots resume the normal two-second interval.
+Each snapshot request has a two-second timeout. Connection state remains live while
+display updates are paused.</p>
+<p><code>Ctrl+R</code> requests a retry now in any pane; repeated presses during an active snapshot
+request coalesce into that request. Existing pane-local <code>r</code> refresh actions remain
+available. HTTP 401/403/404, redirects and other permanent endpoint denials show
+<strong>DENIED</strong> and stop automatic snapshot retries and new pane RPCs. Fix the server and
+press <code>Ctrl+R</code> to probe again. The token/config are read only at attachment: quit and
+re-run <code>aiproxy dashboard</code> after changing local credentials or listener configuration.
+A successful probe reopens pane access; use pane-local refresh to retry a failed
+pane list. Block decisions and take-once detail reads are never automatically replayed.</p>
+<h2 class="anchor anchorTargetStickyNavbar_T7vg" id="dashboard-layout-and-keyboard-controls">Dashboard Layout And Keyboard Controls<a href="#dashboard-layout-and-keyboard-controls" class="hash-link" aria-label="Direct link to Dashboard Layout And Keyboard Controls" title="Direct link to Dashboard Layout And Keyboard Controls" translate="no">​</a></h2>
+<p>The minimum supported terminal is <strong>80 columns × 12 rows</strong>. Below 30 rows (including
+80×24), a compact layout shows only the focused pane. At 30 rows and above, providers,
+usage and the active bottom tab are stacked. <strong>Tab / Shift-Tab</strong> cycles forward/back
+through Providers → Usage → bottom pane, even in compact or zoomed layouts. Headers,
+rows and errors are fitted in terminal cells, including wide Unicode characters.
+The footer keeps help/back/quit controls visible (apply/cancel/quit while editing), with a separate live
+connection line. Narrow views abbreviate measurement legends; help explains them.</p>
+<table><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody><tr><td><code>1</code> / <code>2</code> / <code>3</code> / <code>4</code> / <code>5</code></td><td>Select Aliases / Logs / Payloads / Blocks / Requests and focus it</td></tr><tr><td><code>[</code> / <code>]</code></td><td>Previous / next bottom tab in that order, wrapping at either end</td></tr><tr><td><code>Enter</code></td><td>Open selected provider/bottom-row or Usage top-group detail; close an open detail</td></tr><tr><td><code>z</code></td><td>Toggle focused-pane zoom from a list; details already occupy the body</td></tr><tr><td><code>Esc</code></td><td>Close help, else detail, else zoom; otherwise quit</td></tr><tr><td><code>q</code> / <code>Ctrl+C</code></td><td>Quit, including from help/detail (<code>q</code> is text in search)</td></tr><tr><td><code>?</code> / <code>h</code></td><td>Open help; <code>?</code>, <code>h</code>, <code>Esc</code> or <code>Enter</code> closes it</td></tr><tr><td><code>j/k</code>, arrows, <code>PgUp/PgDn</code>, <code>Home/End</code> (<code>g/G</code>)</td><td>Move/scroll the focused view; scroll help while help is open</td></tr><tr><td><code>+/-</code>, <code>J/K</code></td><td>Resize the bottom pane in stacked layout</td></tr><tr><td><code>t/e/u</code></td><td>Tenant / errors-only / public-upstream filters in focused Usage</td></tr><tr><td><code>l</code>, <code>o</code></td><td>Level filter / order in focused Logs</td></tr><tr><td><code>s</code> (or <code>e</code>), <code>o</code>, <code>r</code></td><td>Status filter / order / refresh in focused Payloads list</td></tr><tr><td><code>r</code></td><td>Refresh focused Blocks list</td></tr><tr><td><code>p</code></td><td>Pause/resume data in a pane or detail</td></tr><tr><td><code>Ctrl+R</code></td><td>Retry the connection, including from help</td></tr><tr><td><code>/</code>, <code>Ctrl+U</code></td><td>Search Requests/Logs/Payloads metadata / clear applied search</td></tr><tr><td><code>l</code> / <code>v</code> in Request detail</td><td>Exact-ID Logs / Payloads; Esc returns to Requests</td></tr><tr><td><code>n</code> / <code>N</code> in Usage detail</td><td>Next / previous exact identity group</td></tr></tbody></table>
+<p>Changing focus or tabs closes an open detail first and preserves list selection.
+For remote details this cancels the read and discards late replies, including paused
+results. Resizing and opening/closing help preserve the detail and selected record.
+Enter on Usage shows the top group&#x27;s full tenant/client/model/operation/status;
+<code>n/N</code> cycles every group, including the final rows. <code>z</code> zooms its list.
+Help owns input: pane filters, pause, tab navigation and decisions cannot run behind
+it. An undersized-terminal warning also suppresses pane actions until resized.</p>
+<p>Block-detail <strong>n/N</strong> selects the next/previous finding. <strong>a/s/d</strong> records allow
+(non-secret), redact (placeholder), or deny (keep blocking) for <strong>only that finding&#x27;s
+exact hash</strong>. The selected index, scope and status stay visible while scrolling.
+Numbered keys 1–5 always navigate tabs outside search and never record a decision.</p>
+<h2 class="anchor anchorTargetStickyNavbar_T7vg" id="dashboard-payload-and-block-inspection">Dashboard Payload And Block Inspection<a href="#dashboard-payload-and-block-inspection" class="hash-link" aria-label="Direct link to Dashboard Payload And Block Inspection" title="Direct link to Dashboard Payload And Block Inspection" translate="no">​</a></h2>
+<p>Payload and block text wraps to terminal cells, including long JSON strings, CJK,
+combining characters and emoji. Use <strong>j/k</strong>, <strong>PgUp/PgDn</strong>, <strong>Home/End</strong> to inspect
+all retained text. The fixed header identifies the record and selected finding;
+wrapped row position and cap notice stay visible. Full IDs, hashes and metadata also
+appear in the scrollable body. Control bytes and invalid UTF-8 appear as escapes
+instead of being interpreted as terminal commands. Resizing rewraps/clamps the
+position without changing the selected record or finding.</p>
+<p>Payload pretty output retains the existing <strong>64 KiB</strong> cap. The view explicitly
+labels pretty-output truncation and server request/upstream-request/response body
+truncation flags. An unavailable flag is not proof of completeness. Block snippets
+are already server-capped (scanner default 512 bytes, further limited by configured
+quarantine snippet size); the existing response does not carry original lengths or
+truncation flags, so its fixed notice says <strong>truncation unknown</strong>. Wrapping cannot
+recover uncaptured text.</p>
+<p>The Blocks list warns before Enter: a successful detail read <strong>consumes the
+take-once capture</strong>; closing it does not make it available again. Another operator,
+expiry, or a canceled/failed read may also leave it unavailable. A decision persists
+<strong>global future-match behavior for that hash</strong>, including identical hashes in other
+findings/requests. It <strong>never replays or resumes the blocked request</strong>. There is no
+bulk decision shortcut.</p>
+<p>While recording, finding selection is locked and further decisions are ignored;
+scroll/help/back/quit remain available. A successful acknowledgment suppresses the
+same action for that hash during the open detail; another action may deliberately
+replace it. Failures show that the outcome may be unknown (the server could have
+persisted before a connection failure); pressing a/s/d again deliberately retries.
+Missing/invalid hashes disable decisions; the TUI never hashes a possibly truncated
+snippet as a substitute. Pause defers acknowledgments and prevents new decisions.
+Closing/navigation cancels outstanding work and discards late results; it cannot
+undo a decision already persisted by the server. No read or decision is automatically
+replayed on reconnect/resume. Full text remains confined to authenticated operator
+detail fetches, outside Requests metadata and search indexes.</p>
+<h2 class="anchor anchorTargetStickyNavbar_T7vg" id="dashboard-requests-and-search">Dashboard Requests And Search<a href="#dashboard-requests-and-search" class="hash-link" aria-label="Direct link to Dashboard Requests And Search" title="Direct link to Dashboard Requests And Search" translate="no">​</a></h2>
+<p><strong>5<!-- -->:Requests</strong> shows the last <strong>up to 200 completed inference operations</strong>, newest
+first, even with disk payload logging disabled. This is a process-local count cap,
+not a time window or complete request history. It contains no prompts or credentials,
+and does not claim attempt or in-flight statistics. Enter inspects request ID,
+tenant/client, submitted public model, resolved provider/configured model, operation,
+sent HTTP status, duration and reported input/output/cache tokens. A zero token count
+may mean unreported usage; unresolved targets and old-snapshot IDs are unavailable.
+Detail remains on the selected completion even if its list entry expires.</p>
+<p>Recent diagnostic text is bounded before storage: request ID, tenant, client and
+provider each retain up to <strong>256 bytes</strong>; submitted/accounting/resolved model fields
+each up to <strong>512 bytes</strong>; operation up to <strong>64 bytes</strong>. UTF-8 truncation preserves
+complete characters. The detached strings total at most <strong>2,624 bytes per entry</strong>
+(524,800 for 200 entries, excluding fixed overhead). This does not bound total
+process memory or the rest of the dashboard snapshot. Full routing, billing,
+rate and provider/P95 grouping retain their original semantics.</p>
+<p>Affected Requests rows show <strong>[truncated]</strong>; detail lists the shortened fields.
+Search covers their retained prefixes only. If the <strong>request ID</strong> was truncated,
+exact log/payload correlation is unavailable: <strong>l/v</strong> stay in detail with an
+explanation. Other shortened fields do not prevent correlation by an intact ID.
+Old snapshots without truncation metadata keep their existing behavior.</p>
+<p>Request metadata is displayed literally: actual newlines, carriage returns, tabs
+and terminal controls appear as escapes such as <code>\n</code>, <code>\r</code>, <code>\t</code> and <code>\x1b</code>.
+Literal backslashes are doubled, so a submitted backslash-n displays as <code>\\n</code>.
+Printable Unicode is retained. Each completion stays on one summary row; Enter
+opens that selected completion, with wrapped, scrollable escaped detail.
+Request/Usage identity detail, correlation labels and payload summary/ID labels
+use a <strong>512-source-byte per-value display cap</strong>. This preserves every newly retained
+recent field; larger legacy/sibling values explicitly show
+<code>[display clipped at 512 bytes]</code>. This is separate from server <strong>[truncated]</strong> flags.
+Search and exact-ID correlation still use original retained values, not the display
+escapes: typing <code>\n</code> searches for a literal backslash-n, not an actual newline.</p>
+<p>Press <strong>/</strong> in Requests, Logs or Payloads. Search ANDs space-separated, case-insensitive
+substrings; use <code>field:value</code> for one metadata field. Examples:
+<code>client:ci tenant:team-a status:500</code> or <code>id:request-123</code>. Supported fields:</p>
+<ul>
+<li class="">Requests: <code>id</code>, <code>client</code>, <code>tenant</code>, <code>model</code>, <code>resolved</code>, <code>provider</code>, <code>status</code>, <code>op</code>.</li>
+<li class="">Logs: <code>id</code>, <code>level</code> (structured metadata, not flattened attributes or body text).</li>
+<li class="">Payloads: <code>id</code>, <code>model</code>, <code>resolved</code>, <code>provider</code>, <code>status</code>, <code>method</code>, <code>path</code>.</li>
+</ul>
+<p>Bare terms search all supported fields. Unknown fields match nothing. Search combines
+with Requests <code>e</code> errors-only, Logs level, and Payloads status filters. The applied
+filter and no-match state are visible; <strong>Ctrl+U</strong> clears search in the focused list.
+Payload status changes preserve a matching selected identity or clamp to the nearest
+remaining row immediately. While the replacement list is loading, Enter waits for
+the visible list before opening detail.
+The editor holds at most <strong>256 printable characters</strong>. Arrows, Home/End,
+Backspace/Delete edit; <strong>Enter</strong> applies, <strong>Esc</strong> cancels to the prior filter,
+and <strong>Ctrl+U</strong> clears the edit. q/p/h/?/numbers/brackets are text while editing;
+Ctrl+C still quits and Ctrl+R retries. Leave the editor to open help or pause.
+Search only filters already bounded metadata; it never searches payload bodies or
+fetches more history. Cached search and request/usage detail work while paused.</p>
+<p>From Request detail, <strong>l</strong> opens exact-ID logs and <strong>v</strong> opens exact-ID payloads.
+Target filters are temporarily bypassed; their settings and selected row return
+afterward. Enter inspects a matching row; Esc closes it, then another Esc restores
+Request detail/scroll/zoom. Ordinary tab/focus navigation exits this return workflow.
+Logs may be disabled, expired or missing structured IDs on older servers. Payloads
+may be disabled, never captured, expired or outside the latest <strong>100</strong> entries;
+the pane explains what is known, without expanding retention. Duplicate caller IDs
+can match several records. Resume before a remote payload read; late replies after
+closing correlation are discarded.</p>
+<h2 class="anchor anchorTargetStickyNavbar_T7vg" id="dashboard-provider-diagnostics">Dashboard Provider Diagnostics<a href="#dashboard-provider-diagnostics" class="hash-link" aria-label="Direct link to Dashboard Provider Diagnostics" title="Direct link to Dashboard Provider Diagnostics" translate="no">​</a></h2>
+<p>Focus <strong>Providers</strong>, move with arrows or <code>j/k</code> (<code>PgUp/PgDn</code>, <code>Home/End</code> also work),
+and press <strong>Enter</strong>. The <code>&gt;</code> cursor follows the provider name across refreshes and
+enabled/disabled group changes. If a provider disappears, its open detail reports
+removal; returning to the list selects the nearest surviving row. <code>z</code> still zooms
+the list. Details wrap and scroll even at 80×12; pause freezes their data and clock.</p>
+<p>Provider detail includes name/display/type, sanitized effective endpoint, enabled
+and routing-health state, upstream header timeout, configured probe method/path,
+expected HTTP status, interval/timeout and failure/success thresholds. Probe state
+is the stored threshold state; the last HTTP status and reason describe the latest
+check and can differ while a threshold is being reached. Last-check age comes from
+the stored check timestamp, never snapshot receipt time. Pending, absent probe,
+disabled provider and unavailable old-server metadata are distinguished. No aliases
+are needed to inspect a provider. Models show public-to-upstream mappings, protocol
+and capabilities from the active catalog; an empty native-provider protocol means
+it is not separately configured.</p>
+<p>The list&#x27;s <strong>HOST</strong> is the configured hostname, with no DNS/network work in rendering
+or navigation. Endpoint/probe URLs omit userinfo, query strings and fragments. Only
+standard API/health path segments are retained; other segments show URL-encoded
+<code>[redacted]</code> to avoid exposing path credentials. Invalid URLs are redacted wholesale.
+Raw probe error text becomes a bounded category (timeout, DNS, connection refused,
+TLS, transport error) or a safe status/body-mismatch reason. Credentials, credential
+references, probe expected bodies and authorization settings are not diagnostic
+transport fields.</p>
+<p>Alias detail carries the actual session-affinity configuration and effective header
+names, including defaults; absent old-server metadata is <strong>unknown</strong>, not disabled.
+Its counters remain <strong>provider-wide lifetime</strong>, repeated when targets share a
+provider; they are not target-specific or alias-specific counts.</p>
+<h2 class="anchor anchorTargetStickyNavbar_T7vg" id="dashboard-stable-inspection-and-pause">Dashboard Stable Inspection And Pause<a href="#dashboard-stable-inspection-and-pause" class="hash-link" aria-label="Direct link to Dashboard Stable Inspection And Pause" title="Direct link to Dashboard Stable Inspection And Pause" translate="no">​</a></h2>
+<p>Refresh keeps the top provider/usage row and selected alias/payload/block by identity.
+It also keeps the top cursor-list row when that row and the selection can still fit
+in the viewport. If a row disappears, its old position is clamped to the remaining
+list; selection visibility takes priority. Usage identity includes tenant, client,
+model, operation and status. A selected tenant remains selected when other tenants
+arrive or reorder; if it disappears, the filter returns to <strong>all tenants</strong>.
+Payload order changes preserve the selected request. Logs follow new arrivals until
+you move away; pinned logs stay selected by sequence ID. Changing log order resumes
+follow in that order.</p>
+<p>Press <strong>p</strong> in a pane or detail to freeze incoming data and the display clock,
+including uptime, health, logs, measurement windows, payload/block rows, details and
+decision acknowledgments. Connection status remains live and separately labeled.
+Only the latest snapshot and latest accepted result per pane request type are held;
+resume applies them together in one UI update and advances the clock to the latest
+tick. Independent pane RPCs do not promise the same server measurement instant.</p>
+<p>While paused, browse cached rows and use local usage/log filters or ordering. Resume
+before requesting a remote refresh, payload status filter, new payload/block detail,
+or block decision; these keys do not queue work while paused. A previously unvisited
+pane begins loading on resume. In-flight results wait for resume, and closing a
+detail discards its buffered result. Closing/reopening an ID or changing a remote
+filter rejects obsolete replies. Take-once block reads and decisions are never
+automatically repeated; an already consumed capture can return unavailable on a
+deliberate reopen.</p>
+<h2 class="anchor anchorTargetStickyNavbar_T7vg" id="dashboard-metrics-and-cost-estimates">Dashboard Metrics And Cost Estimates<a href="#dashboard-metrics-and-cost-estimates" class="hash-link" aria-label="Direct link to Dashboard Metrics And Cost Estimates" title="Direct link to Dashboard Metrics And Cost Estimates" translate="no">​</a></h2>
+<ul>
+<li class=""><strong>GLOBAL rates:</strong> requests/second over the last 60 and 300 complete seconds,
+plus one-minute error, 429 and token totals. The 15-minute graph contains 15
+consecutive one-minute request totals, oldest on the left. Counters use one-second
+buckets, include completed requests (including failures/unresolved models), and
+do not depend on the 200 recent-request cap. The ongoing second appears when it
+completes; normal snapshot polling adds up to approximately two seconds. Idle
+minute tokens become zero. Errors exclude 429; throttling is shown separately.</li>
+<li class=""><strong>Provider counters:</strong> global process-lifetime requests/errors/429/tokens. The
+same provider-wide lifetime scope applies to counters shown under alias targets.
+These do not reconcile to rolling usage/cost after old billing buckets expire.</li>
+<li class=""><strong>P95/n:</strong> nearest-rank P95 latency and the number of positive-duration samples
+for that provider among up to 200 received recent completions across all providers.
+This is a capped sample with <strong>no time window</strong>, not a minute percentile or a
+lifetime percentile. <code>n/a/0</code> means no positive-duration sample; idle samples remain.</li>
+<li class=""><strong>USAGE and EST$:</strong> retained rolling 24-hour usage and estimated USD at current
+configured prices. Retention uses minute buckets: a bucket remains while its
+start is at or after <code>snapshot time - 24h</code>. Individual events can therefore expire
+almost a minute early. <code>t</code>/<code>e</code> select tenant/error usage; global rates and provider
+counters ignore those filters. <code>u</code> switches between public and resolved upstream
+usage over the same retention window, preserving tenant/client dimensions.</li>
+<li class="">Alias estimates use the actual retained public-model/tenant/client/operation/status
+attribution. Direct traffic and other aliases sharing a target are not charged
+again. Unused targets do not affect the estimate. <code>-</code> means unavailable (missing
+attribution, a needed price, or no retained usage), not free. A provider estimate
+is its complete retained subtotal, not a sum of only priced models; another
+provider&#x27;s price gap does not hide its own fully attributed/priced subtotal.</li>
+</ul>
+<p>Older servers without the additive rate/billing snapshot data display unavailable
+measurements. The TUI does not estimate rates from recent requests or costs from
+lifetime totals. Paused/stale views retain the received measurement window; the
+connection line separately reports local refresh/reconnect activity.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="dashboard-transport-security">Dashboard Transport Security<a href="#dashboard-transport-security" class="hash-link" aria-label="Direct link to Dashboard Transport Security" title="Direct link to Dashboard Transport Security" translate="no">​</a></h2>
 <p>The <code>aiproxy dashboard</code> command and the <code>/_internal/dashboard/*</code> HTTP endpoints
 share the proxy listener.</p>
@@ -154,11 +501,23 @@ model. Remote dashboard access requires a future explicit transport design.</li>
 <li class="">Repeated invalid dashboard tokens are rate limited with <code>429</code> and a
 <code>Retry-After</code> header.</li>
 </ul>
-<p>The embedded web dashboard is served at <code>/dashboard/</code> when a <code>web_ui</code> block
+<p>The embedded web dashboard is served at <code>/</code> when a <code>web_ui</code> block
 is present. Use <code>aiproxy webui</code> to print that URL after probing that a
 running server answers with the UI (<code>--open</code> also launches the default
 browser). The UI&#x27;s live views authenticate against the same
-<code>dashboard</code>-gated <code>/_internal/dashboard/*</code> APIs with the dashboard token.</p>
+<code>dashboard</code>-gated <code>/_internal/dashboard/*</code> APIs with the dashboard token or an
+active stored system-administrator account. Ordinary accounts and workspace
+administrators cannot access these global operator surfaces.</p>
+<p>Within a loaded browser tab, changing accounts, changing/removing the dashboard
+token, or selecting another workspace clears sensitive cached data and open
+detail/dialog state. Delayed responses from the previous context are discarded.
+Account replacement also resets the selected workspace. A successful normal
+token refresh preserves the current account&#x27;s cache and workspace; a failed
+refresh clears the account session. Sign out clears the local account, workspace
+selection, and dashboard token immediately, even if server-side session revocation
+is delayed or fails. Dashboard tokens are installed only after successful validation.
+These transitions are local to the current tab; other already-open tabs do not
+automatically synchronize their in-memory sessions.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="security-defaults">Security Defaults<a href="#security-defaults" class="hash-link" aria-label="Direct link to Security Defaults" title="Direct link to Security Defaults" translate="no">​</a></h2>
 <ul>
 <li class="">API keys and client bearer tokens are never logged</li>
@@ -212,6 +571,28 @@ sidecars (<code>0600</code>, restrictive parent directory). <code>credential_ref
 defaults to the same secrets path; mount the secrets directory (not just
 <code>keys.json</code>) when Copilot providers are configured, and reload with <code>SIGHUP</code>
 or a restart after every <code>login</code> or sidecar rotation.</p>
+<h2 class="anchor anchorTargetStickyNavbar_T7vg" id="mock-only-copilot-verification">Mock-only Copilot Verification<a href="#mock-only-copilot-verification" class="hash-link" aria-label="Direct link to Mock-only Copilot Verification" title="Direct link to Mock-only Copilot Verification" translate="no">​</a></h2>
+<p><strong>Hermetically verified; live GitHub compatibility unverified.</strong> From the repo
+root, with the repository Go/pnpm toolchain and dependencies installed, run these
+commands serially. Finish the UI build before Go checks read embedded assets:</p>
+<div class="language-sh mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-sh codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">make web-build</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">go test -race ./internal/copilotlogin ./cmd/aiproxy ./internal/config ./internal/app ./internal/provider -count=1</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">make integration</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">AIPROXY_BINARY=&quot;$PWD/dist/aiproxy&quot; go test -tags=integration ./internal/integration -run GitHubCopilot -count=1 -v</span><br></div></code></pre></div></div>
+<p>No real client ID, account, browser authorization, or PostgreSQL fixture is needed
+for Copilot scenarios. Binary integration runs on Linux. The final command forces
+the Copilot binary cases to execute uncached and shows their names. Optional
+database-backed tests in broader suites may skip without their separate fixture.</p>
+<table><thead><tr><th>Layer</th><th>What the checks establish</th></tr></thead><tbody><tr><td>Protocol/persistence unit tests (<code>internal/copilotlogin</code>; command <code>login_test.go</code>)</td><td>Success, pending/slowdown, denial/expiry, cancellation, malformed/oversized responses, redirect/network errors, secret redaction, file permissions, unsafe destinations and independent writers.</td></tr><tr><td>Composed in-process (<code>cmd/aiproxy</code>, <code>TestCopilotMockProvisioningAndRecovery</code>)</td><td>Real <code>runLoginCopilot</code> command orchestration with injected local issuer/time, persisted sidecar, scripted configure/validate and models commands, real App handler over a local HTTP server, configured/upstream model distinction, JSON/SSE, simulated 401/403 revocation, failed/cancelled re-login preservation, successful re-login, failed-reload rollback and explicit reload recovery.</td></tr><tr><td>Real binary (<code>internal/integration</code>, <code>TestBinaryGitHubCopilot*</code>)</td><td>CLI flag constraints, real <code>serve</code>, <code>models --upstream</code>, static inventory, JSON/SSE, unsupported-operation rejection, 401/403 and sidecar rotation, rejected/successful SIGHUP reloads. Binary tests provision synthetic sidecars directly through <code>Save</code>; they do <strong>not</strong> run device authorization in the child process.</td></tr></tbody></table>
+<p>The composed test uses the existing in-process issuer seam, not a public mock
+flag. Its transport refuses non-loopback dials. The new binary recovery fixture
+routes unexpected non-loopback HTTP(S) through a rejecting local proxy; all
+intended service URLs are loopback. Tests close local servers, application
+resources, response bodies and child processes, and use automatically removed
+temporary config/credential directories. They do not modify your saved login.</p>
+<p>These checks simulate the upstream contract. They cannot establish direct-Bearer
+acceptance for your application, entitlement, actual model availability, required
+GitHub headers, token lifetime, or exchange/refresh needs. Live compatibility is
+deferred separately in repository task <strong>COPILOT-LIVE-01</strong>
+(<code>docs/tasks/20260927-102347-copilot-live-compatibility.md</code>). Production login still
+requires an explicitly supplied client ID and uses GitHub&#x27;s fixed issuer URLs.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="production-checklist">Production Checklist<a href="#production-checklist" class="hash-link" aria-label="Direct link to Production Checklist" title="Direct link to Production Checklist" translate="no">​</a></h2>
 <ul>
 <li class="">enable <code>bearer_static</code> auth unless the deployment is fully trusted</li>
@@ -224,6 +605,6 @@ unsupported until an explicit transport design is added</li>
 <li class="">explicitly <code>enabled = false</code> any provider you want to keep defined but
 inactive; missing credentials on enabled providers fail validation</li>
 <li class="">use aliases for controlled failover instead of relying on direct model requests</li>
-</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/api-reference/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">API Reference</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/deployment/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Deployment</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_sbaK thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#build-and-run" class="table-of-contents__link toc-highlight">Build And Run</a></li><li><a href="#configure-wizard" class="table-of-contents__link toc-highlight">Configure Wizard</a></li><li><a href="#docker" class="table-of-contents__link toc-highlight">Docker</a></li><li><a href="#tests" class="table-of-contents__link toc-highlight">Tests</a></li><li><a href="#reload-behavior" class="table-of-contents__link toc-highlight">Reload Behavior</a></li><li><a href="#metrics-and-health" class="table-of-contents__link toc-highlight">Metrics And Health</a></li><li><a href="#shared-provider-health" class="table-of-contents__link toc-highlight">Shared Provider Health</a></li><li><a href="#dashboard-transport-security" class="table-of-contents__link toc-highlight">Dashboard Transport Security</a></li><li><a href="#security-defaults" class="table-of-contents__link toc-highlight">Security Defaults</a></li><li><a href="#logging" class="table-of-contents__link toc-highlight">Logging</a><ul><li><a href="#payload-logging" class="table-of-contents__link toc-highlight">Payload logging</a></li></ul></li><li><a href="#secret-handling" class="table-of-contents__link toc-highlight">Secret Handling</a></li><li><a href="#production-checklist" class="table-of-contents__link toc-highlight">Production Checklist</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Introduction</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/quickstart/">Quickstart</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/configuration/">Configuration</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/config-examples/">Config Examples</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Reference</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/api-reference/">API Reference</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/operations/">Operations</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/deployment/">Deployment</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/egose/aiproxy" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_hMXl"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 aiproxy. Built with Docusaurus.</div></div></div></footer></div>
+</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/api-reference/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">API Reference</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/deployment/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Deployment</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_sbaK thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#build-and-run" class="table-of-contents__link toc-highlight">Build And Run</a></li><li><a href="#configure-wizard" class="table-of-contents__link toc-highlight">Configure Wizard</a></li><li><a href="#docker" class="table-of-contents__link toc-highlight">Docker</a></li><li><a href="#tests" class="table-of-contents__link toc-highlight">Tests</a></li><li><a href="#reload-behavior" class="table-of-contents__link toc-highlight">Reload Behavior</a><ul><li><a href="#editing-database-providers-in-the-web-ui" class="table-of-contents__link toc-highlight">Editing Database Providers In The Web UI</a></li><li><a href="#editing-database-aliases-in-the-web-ui" class="table-of-contents__link toc-highlight">Editing Database Aliases In The Web UI</a></li></ul></li><li><a href="#database-key-spend-and-quota-resets" class="table-of-contents__link toc-highlight">Database Key Spend And Quota Resets</a></li><li><a href="#metrics-and-health" class="table-of-contents__link toc-highlight">Metrics And Health</a></li><li><a href="#shared-provider-health" class="table-of-contents__link toc-highlight">Shared Provider Health</a></li><li><a href="#interactive-dashboard-lifecycle" class="table-of-contents__link toc-highlight">Interactive Dashboard Lifecycle</a></li><li><a href="#dashboard-layout-and-keyboard-controls" class="table-of-contents__link toc-highlight">Dashboard Layout And Keyboard Controls</a></li><li><a href="#dashboard-payload-and-block-inspection" class="table-of-contents__link toc-highlight">Dashboard Payload And Block Inspection</a></li><li><a href="#dashboard-requests-and-search" class="table-of-contents__link toc-highlight">Dashboard Requests And Search</a></li><li><a href="#dashboard-provider-diagnostics" class="table-of-contents__link toc-highlight">Dashboard Provider Diagnostics</a></li><li><a href="#dashboard-stable-inspection-and-pause" class="table-of-contents__link toc-highlight">Dashboard Stable Inspection And Pause</a></li><li><a href="#dashboard-metrics-and-cost-estimates" class="table-of-contents__link toc-highlight">Dashboard Metrics And Cost Estimates</a></li><li><a href="#dashboard-transport-security" class="table-of-contents__link toc-highlight">Dashboard Transport Security</a></li><li><a href="#security-defaults" class="table-of-contents__link toc-highlight">Security Defaults</a></li><li><a href="#logging" class="table-of-contents__link toc-highlight">Logging</a><ul><li><a href="#payload-logging" class="table-of-contents__link toc-highlight">Payload logging</a></li></ul></li><li><a href="#secret-handling" class="table-of-contents__link toc-highlight">Secret Handling</a></li><li><a href="#mock-only-copilot-verification" class="table-of-contents__link toc-highlight">Mock-only Copilot Verification</a></li><li><a href="#production-checklist" class="table-of-contents__link toc-highlight">Production Checklist</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Introduction</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/quickstart/">Quickstart</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/configuration/">Configuration</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/config-examples/">Config Examples</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Reference</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/api-reference/">API Reference</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/operations/">Operations</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/deployment/">Deployment</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/egose/aiproxy" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_hMXl"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 aiproxy. Built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>

@@ -5,8 +5,8 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Config Examples | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/config-examples/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Config Examples | aiproxy"><meta data-rh="true" name="description" content="This page collects complete configuration examples for common aiproxy setups."><meta data-rh="true" property="og:description" content="This page collects complete configuration examples for common aiproxy setups."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/config-examples/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/config-examples/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/config-examples/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Config Examples","item":"https://aiproxy.pages.dev/docs/config-examples"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
-<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.0700b446.css">
-<script src="/assets/js/runtime~main.b446a0c2.js" defer="defer"></script>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.55e2a745.css">
+<script src="/assets/js/runtime~main.e52ad310.js" defer="defer"></script>
 <script src="/assets/js/main.8b8c49ad.js" defer="defer"></script>
 </head>
 <body>
@@ -54,6 +54,11 @@ these blocks live in <code>examples/opencode-zen.hcl</code> and
 <li class="">you want explicit alias failover without implicit cross-service rerouting</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="github-copilot-chat">GitHub Copilot Chat<a href="#github-copilot-chat" class="hash-link" aria-label="Direct link to GitHub Copilot Chat" title="Direct link to GitHub Copilot Chat" translate="no">​</a></h2>
+<p><strong>Hermetically verified; live GitHub compatibility unverified.</strong> Model names below
+are illustrative, not confirmed GitHub availability. Use the
+<a class="" href="/docs/operations/#mock-only-copilot-verification">mock-only verification workflow</a>
+to test locally without an OAuth application/account; the production login below
+contacts GitHub and requires your own explicit client ID.</p>
 <p>This setup exposes a chat-only Copilot model backed by a device-flow login.
 Provision first (your own public OAuth client ID, no secret), then serve; the
 config validates only after the sidecar exists.</p>
@@ -63,7 +68,7 @@ config validates only after the sidecar exists.</p>
 <code>POST /v1/chat/completions</code> (JSON and SSE) is served; every other operation is
 rejected before upstream I/O. <code>GET /v1/models</code> and <code>GET /v1/billing/usage</code>
 stay proxy-owned. Restart or <code>SIGHUP</code> after <code>login</code>; re-run <code>login</code> + reload
-on upstream <code>401</code>/<code>403</code>, revocation, or expiry. The complete validated
+on upstream <code>401</code>/<code>403</code>, revocation, or expiry. The complete example
 version of this block lives in <code>examples/github-copilot.hcl</code>.</p>
 <p>Use this when:</p>
 <ul>
