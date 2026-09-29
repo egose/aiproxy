@@ -82,12 +82,20 @@ const toc = [{
   "id": "quota-errors-failover-and-static-catalogs",
   "level": 3
 }, {
+  "value": "OpenCode Client Image Input",
+  "id": "opencode-client-image-input",
+  "level": 3
+}, {
   "value": "GitHub Copilot",
   "id": "github-copilot",
   "level": 2
 }, {
   "value": "ZenMux",
   "id": "zenmux",
+  "level": 2
+}, {
+  "value": "OpenRouter",
+  "id": "openrouter",
   "level": 2
 }, {
   "value": "Model Capabilities",
@@ -458,9 +466,9 @@ function _createMdxContent(props) {
               children: "anthropic"
             })
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Translated provider-native adapter"
+            children: "Translated + native messages"
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Supports chat and responses"
+            children: "Supports chat, responses and native messages"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -520,6 +528,18 @@ function _createMdxContent(props) {
               children: "https://zenmux.ai/api/v1"
             })]
           })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "openrouter"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Pass-through OpenAI adapter"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "https://openrouter.ai/api/v1"
+            })]
+          })]
         })]
       })]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
@@ -527,8 +547,10 @@ function _createMdxContent(props) {
         children: "openai"
       }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "openai-compatible"
-      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "zenmux"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "openrouter"
       }), ", the proxy stays close to pass-through behavior. For translated providers, the proxy maps between the public OpenAI-style contract and the provider-native request and response shape."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Pass-through providers preserve request JSON values and unknown extension fields, rewriting only the top-level ", (0,jsx_runtime.jsx)(_components.code, {
@@ -675,12 +697,14 @@ function _createMdxContent(props) {
           }), (0,jsx_runtime.jsxs)(_components.td, {
             children: [(0,jsx_runtime.jsx)(_components.code, {
               children: "POST <base>/messages"
-            }), ", existing Messages translation subset"]
+            }), ", model rewrite, JSON/SSE native passthrough (plus Messages translation subset for chat/responses)"]
           }), (0,jsx_runtime.jsxs)(_components.td, {
             children: [(0,jsx_runtime.jsx)(_components.code, {
               children: "chat"
-            }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
               children: "responses"
+            }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "messages"
             })]
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
@@ -755,6 +779,50 @@ function _createMdxContent(props) {
       }), " and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "go"
       }), " targets. The upstream console setting that spends Zen\nbalance past Go limits is an account setting, not permission for the proxy to\nreroute requests. Model catalogs are static configuration validated at load;\nthe proxy performs no runtime catalog sync and advertises no universal model\nsupport beyond what is configured."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "opencode-client-image-input",
+      children: "OpenCode Client Image Input"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["When OpenCode uses the proxy as a custom OpenAI-compatible provider, image\nhandling is decided client-side before any proxy I/O. If the OpenCode model\nentry lacks image input, OpenCode replaces the attachment with\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "ERROR: Cannot read \"image.png\" (this model does not support image input). Inform the user."
+      }), ",\nwhich the model then paraphrases as ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "I can't read image.png ..."
+      }), ". This text is\nneither a proxy error nor an upstream refusal; no image bytes leave the client."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Declare vision explicitly in ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode.json"
+      }), " for each proxied vision model:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-json",
+        children: "\"provider\": {\n  \"aiproxy\": {\n    \"npm\": \"@ai-sdk/openai-compatible\",\n    \"api\": \"http://localhost:8080/v1\",\n    \"models\": {\n      \"zen/muse-spark-1.3-contributor-free\": {\n        \"modalities\": { \"input\": [\"text\", \"image\"], \"output\": [\"text\"] }\n      }\n    }\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Proxy notes: ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), " protocols are native pass-through and\npreserve ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "image_url"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "input_image"
+      }), " bodies with only the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), " field\nrewritten. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "messages"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gemini"
+      }), " protocols use the conservative text-only\ntranslation subset and reject image parts with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "400 invalid_request"
+      }), "\n(", (0,jsx_runtime.jsx)(_components.code, {
+        children: "unsupported content part type"
+      }), ") before upstream I/O. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "GET /v1/models"
+      }), "\nadvertises proxy operations (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), "), never client vision\nmodalities, so the OpenCode side must be configured as above."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "github-copilot",
       children: "GitHub Copilot"
@@ -856,6 +924,25 @@ function _createMdxContent(props) {
       }), ". See\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "examples/zenmux.hcl"
       }), " for a complete config."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "openrouter",
+      children: "OpenRouter"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "openrouter"
+      }), " is an OpenAI pass-through gateway defaulting to\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https://openrouter.ai/api/v1"
+      }), ". ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " is an optional transport override\nonly. It serves chat, responses, embeddings, images, and audio with the same\nmodel-rewrite and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Authorization: Bearer"
+      }), " behavior as ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "openai"
+      }), ", and\nadditionally sends OpenRouter attribution headers (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "HTTP-Referer: https://opencode.ai/"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Title: opencode"
+      }), ") on upstream inference requests."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "model-capabilities",
       children: "Model Capabilities"
@@ -959,6 +1046,8 @@ function _createMdxContent(props) {
               children: "chat"
             }), ", ", (0,jsx_runtime.jsx)(_components.code, {
               children: "responses"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "messages"
             })]
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "None"
@@ -989,7 +1078,9 @@ function _createMdxContent(props) {
               children: "chat"
             }), ", ", (0,jsx_runtime.jsx)(_components.code, {
               children: "responses"
-            }), ", or both (by protocol)"]
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "messages"
+            }), ", or more (by protocol)"]
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "None"
           })]
@@ -1003,7 +1094,9 @@ function _createMdxContent(props) {
               children: "chat"
             }), ", ", (0,jsx_runtime.jsx)(_components.code, {
               children: "responses"
-            }), ", or both (by protocol)"]
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "messages"
+            }), ", or more (by protocol)"]
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "None"
           })]
@@ -1041,6 +1134,28 @@ function _createMdxContent(props) {
               children: "audio_speech"
             })]
           })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "openrouter"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "embeddings"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "images"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_transcriptions"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_speech"
+            })]
+          })]
         })]
       })]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
@@ -1058,9 +1173,25 @@ function _createMdxContent(props) {
         children: "responses"
       }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "messages"
+      }), " serves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
       }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "messages"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "gemini"
-      }), " serve both), and capabilities outside the protocol-served set fail validation."]
+      }), " serves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), "), and capabilities outside the protocol-served set fail validation. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/messages"
+      }), " is native Anthropic passthrough served only by provider type ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "anthropic"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "messages"
+      }), "-protocol Zen/Go models; every other provider type rejects it before upstream I/O."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.h2, {
       id: "get-v1models-metadata",
       children: [(0,jsx_runtime.jsx)(_components.code, {

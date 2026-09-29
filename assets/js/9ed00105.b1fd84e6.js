@@ -456,10 +456,14 @@ function _createMdxContent(props) {
           children: "opencode-go"
         }), ", ", (0,jsx_runtime.jsx)(_components.code, {
           children: "github-copilot"
-        }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
           children: "zenmux"
-        }), "\n(defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+        }), ", and\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "openrouter"
+        }), " (each defaults to its service prefix, e.g.\n", (0,jsx_runtime.jsx)(_components.code, {
           children: "https://zenmux.ai/api/v1"
+        }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "https://openrouter.ai/api/v1"
         }), ")"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
@@ -606,7 +610,11 @@ function _createMdxContent(props) {
         children: "zenmux"
       }), " defaults to\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "https://zenmux.ai/api/v1"
-      }), " with the same transport-override-only rule."]
+      }), " with the same transport-override-only rule.\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "openrouter"
+      }), " defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https://openrouter.ai/api/v1"
+      }), " with the same\ntransport-override-only rule."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Provider names are part of the public model string, so keep them stable and machine-friendly."
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
@@ -646,11 +654,17 @@ function _createMdxContent(props) {
         children: "responses"
       }), " protocols are native pass-through serving one public operation\neach; ", (0,jsx_runtime.jsx)(_components.code, {
         children: "messages"
-      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "gemini"
-      }), " serve ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " is native Anthropic passthrough for ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/messages"
+      }), " (plus\nconservative translation for ", (0,jsx_runtime.jsx)(_components.code, {
         children: "chat"
       }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), ") and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gemini"
+      }), " serves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), "\nand ", (0,jsx_runtime.jsx)(_components.code, {
         children: "responses"
       }), " through the\nexisting conservative translation subsets. Anything else, including\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "embeddings"
@@ -845,6 +859,10 @@ function _createMdxContent(props) {
         })
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: (0,jsx_runtime.jsx)(_components.code, {
+          children: "messages"
+        })
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: (0,jsx_runtime.jsx)(_components.code, {
           children: "embeddings"
         })
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
@@ -873,9 +891,19 @@ function _createMdxContent(props) {
         children: "responses"
       }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "messages"
-      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " serves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "messages"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "gemini"
-      }), " serve both)."]
+      }), " serves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), ")."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "secrets-and-environment-variables",
       children: "Secrets And Environment Variables"
@@ -1274,8 +1302,10 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Opt-in secret scanning of inbound ", (0,jsx_runtime.jsx)(_components.code, {
         children: "POST /v1/chat/completions"
-      }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "POST /v1/responses"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/messages"
       }), " requests using the embedded Gitleaks rule set. Absent or\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "enabled = false"
       }), " preserves existing behavior. ", (0,jsx_runtime.jsx)(_components.code, {
@@ -1292,7 +1322,7 @@ function _createMdxContent(props) {
         children: "aiproxy_guardrail_scans_total{operation,mode,outcome}"
       }), "). A blocked flagged\nrequest carries ", (0,jsx_runtime.jsx)(_components.code, {
         children: "block_id"
-      }), " in the error body. Scanned text is the\nJSON-decoded message content, tool arguments (plus one JSON-decoded level),\ntool results, and responses instructions/input; images, audio, embeddings,\nattachments, encoded blobs, and response/SSE output are out of scope and\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), " in the error body. Scanned text is the\nJSON-decoded message content, tool arguments (plus one JSON-decoded level),\ntool results, responses instructions/input, and messages system/content/tool\npayloads; images, audio, embeddings,\nattachments, encoded blobs, and response/SSE output are out of scope and\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "gitleaks:allow"
       }), " cannot suppress scans. Bounds are 1024..32MiB text bytes\nand 1..16384 strings and default to 65536 text bytes\nand 512 strings (zeros select defaults); over-limit or canceled scans are\nvisible ", (0,jsx_runtime.jsx)(_components.code, {
         children: "incomplete"

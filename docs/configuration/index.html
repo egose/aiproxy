@@ -6,7 +6,7 @@
 <title data-rh="true">Configuration | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/configuration/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Configuration | aiproxy"><meta data-rh="true" name="description" content="aiproxy uses labeled HCL blocks. The core building blocks are:"><meta data-rh="true" property="og:description" content="aiproxy uses labeled HCL blocks. The core building blocks are:"><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/configuration/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/configuration/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/configuration/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Configuration","item":"https://aiproxy.pages.dev/docs/configuration"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
 <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.55e2a745.css">
-<script src="/assets/js/runtime~main.e52ad310.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.f54a3114.js" defer="defer"></script>
 <script src="/assets/js/main.8b8c49ad.js" defer="defer"></script>
 </head>
 <body>
@@ -112,8 +112,9 @@ encoded.</li>
 <ul>
 <li class=""><code>display_name</code></li>
 <li class=""><code>base_url</code> for <code>openai-compatible</code> (required), and as an optional transport
-override for <code>opencode-zen</code>, <code>opencode-go</code>, <code>github-copilot</code>, and <code>zenmux</code>
-(defaults to <code>https://zenmux.ai/api/v1</code>)</li>
+override for <code>opencode-zen</code>, <code>opencode-go</code>, <code>github-copilot</code>, <code>zenmux</code>, and
+<code>openrouter</code> (each defaults to its service prefix, e.g.
+<code>https://zenmux.ai/api/v1</code> and <code>https://openrouter.ai/api/v1</code>)</li>
 <li class=""><code>user_agent</code> as an optional upstream <code>User-Agent</code> override for any provider
 type (defaults to <code>aiproxy/&lt;version&gt;</code>)</li>
 <li class=""><code>forward_user_agent</code> to forward the inbound caller <code>User-Agent</code> upstream on
@@ -157,7 +158,9 @@ Plain <code>http</code> is accepted only for loopback development endpoints such
 override never changes service selection, auth, or header behavior.
 <code>github-copilot</code> defaults to <code>https://api.githubcopilot.com</code> with the same
 transport-override-only <code>base_url</code> rule. <code>zenmux</code> defaults to
-<code>https://zenmux.ai/api/v1</code> with the same transport-override-only rule.</p>
+<code>https://zenmux.ai/api/v1</code> with the same transport-override-only rule.
+<code>openrouter</code> defaults to <code>https://openrouter.ai/api/v1</code> with the same
+transport-override-only rule.</p>
 <p>Provider names are part of the public model string, so keep them stable and machine-friendly.</p>
 <h3 class="anchor anchorTargetStickyNavbar_T7vg" id="opencode-zen-and-go">OpenCode Zen And Go<a href="#opencode-zen-and-go" class="hash-link" aria-label="Direct link to OpenCode Zen And Go" title="Direct link to OpenCode Zen And Go" translate="no">​</a></h3>
 <p><code>opencode-zen</code> and <code>opencode-go</code> share one adapter behind two explicit types;
@@ -167,7 +170,9 @@ declares a required <code>protocol</code> (<code>chat</code>, <code>responses</c
 <div class="language-hcl mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-hcl codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">provider &quot;opencode-zen&quot; &quot;zen&quot; {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  api_key = env(&quot;OPENCODE_ZEN_API_KEY&quot;)</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  model &quot;glm-5.3&quot; {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    protocol     = &quot;chat&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    capabilities = [&quot;chat&quot;]</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  }</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  model &quot;claude-sonnet-5&quot; {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    protocol = &quot;messages&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  }</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">}</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">provider &quot;opencode-go&quot; &quot;go&quot; {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  api_key = env(&quot;OPENCODE_GO_API_KEY&quot;)</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  model &quot;minimax-m3&quot; {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    protocol = &quot;messages&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  }</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  model &quot;glm-5.3&quot; {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    protocol = &quot;chat&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  }</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">}</span><br></div></code></pre></div></div>
 <p>Public model names are <code>zen/glm-5.3</code> and <code>go/minimax-m3</code>. <code>chat</code> and
 <code>responses</code> protocols are native pass-through serving one public operation
-each; <code>messages</code> and <code>gemini</code> serve <code>chat</code> and <code>responses</code> through the
+each; <code>messages</code> is native Anthropic passthrough for <code>POST /v1/messages</code> (plus
+conservative translation for <code>chat</code> and <code>responses</code>) and <code>gemini</code> serves <code>chat</code>
+and <code>responses</code> through the
 existing conservative translation subsets. Anything else, including
 <code>embeddings</code>, <code>images</code>, and audio on both OpenCode types, is rejected before
 upstream I/O. <code>opencode-zen</code> and <code>opencode-go</code> send <code>x-opencode-session</code> on every upstream
@@ -211,6 +216,7 @@ other provider types</li>
 <ul>
 <li class=""><code>chat</code></li>
 <li class=""><code>responses</code></li>
+<li class=""><code>messages</code></li>
 <li class=""><code>embeddings</code></li>
 <li class=""><code>images</code></li>
 <li class=""><code>audio_transcriptions</code></li>
@@ -218,7 +224,8 @@ other provider types</li>
 </ul>
 <p>Omitted <code>capabilities</code> default to the provider-type defaults, except on
 OpenCode providers where the default is protocol-aware (<code>chat</code> serves <code>chat</code>,
-<code>responses</code> serves <code>responses</code>, <code>messages</code> and <code>gemini</code> serve both).</p>
+<code>responses</code> serves <code>responses</code>, <code>messages</code> serves <code>chat</code>, <code>responses</code> and
+<code>messages</code>, <code>gemini</code> serves <code>chat</code> and <code>responses</code>).</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="secrets-and-environment-variables">Secrets And Environment Variables<a href="#secrets-and-environment-variables" class="hash-link" aria-label="Direct link to Secrets And Environment Variables" title="Direct link to Secrets And Environment Variables" translate="no">​</a></h2>
 <p>Use <code>env(&quot;VAR&quot;)</code> anywhere a string is allowed. Values are inlined before HCL parsing.</p>
 <p>That makes it suitable for API keys, bearer tokens, URLs, and other deployment-specific values.</p>
@@ -356,15 +363,16 @@ user credentials is enough and no dashboard token is required. Toggling
 <code>web_ui</code> applies on <code>SIGHUP</code> without restart.</p>
 <h3 class="anchor anchorTargetStickyNavbar_T7vg" id="ingress_guardrails"><code>ingress_guardrails</code><a href="#ingress_guardrails" class="hash-link" aria-label="Direct link to ingress_guardrails" title="Direct link to ingress_guardrails" translate="no">​</a></h3>
 <div class="language-hcl mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-hcl codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">ingress_guardrails {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  enabled        = true</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  mode           = &quot;block&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  max_text_bytes = 65536</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  max_strings    = 512</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  exceptions_file    = &quot;/etc/aiproxy/guardrail-exceptions.json&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  redact_placeholder = &quot;REDACTED&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  quarantine {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    enabled           = true</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    max_entries       = 128</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    ttl               = &quot;15m&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    max_snippet_bytes = 512</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  }</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">}</span><br></div></code></pre></div></div>
-<p>Opt-in secret scanning of inbound <code>POST /v1/chat/completions</code> and
-<code>POST /v1/responses</code> requests using the embedded Gitleaks rule set. Absent or
+<p>Opt-in secret scanning of inbound <code>POST /v1/chat/completions</code>,
+<code>POST /v1/responses</code> and <code>POST /v1/messages</code> requests using the embedded Gitleaks rule set. Absent or
 <code>enabled = false</code> preserves existing behavior. <code>mode</code> is <code>block</code> (default,
 rejects with <code>400 secret_blocked</code> / <code>400 scan_incomplete</code> and zero upstream
 I/O) or <code>audit</code> (forwards and records
 <code>aiproxy_guardrail_scans_total{operation,mode,outcome}</code>). A blocked flagged
 request carries <code>block_id</code> in the error body. Scanned text is the
 JSON-decoded message content, tool arguments (plus one JSON-decoded level),
-tool results, and responses instructions/input; images, audio, embeddings,
+tool results, responses instructions/input, and messages system/content/tool
+payloads; images, audio, embeddings,
 attachments, encoded blobs, and response/SSE output are out of scope and
 <code>gitleaks:allow</code> cannot suppress scans. Bounds are 1024..32MiB text bytes
 and 1..16384 strings and default to 65536 text bytes

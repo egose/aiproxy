@@ -172,6 +172,12 @@ function _createMdxContent(props) {
         }), " (defaults to ", (0,jsx_runtime.jsx)(_components.code, {
           children: "https://zenmux.ai/api/v1"
         }), ")"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "openrouter"
+        }), " (defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "https://openrouter.ai/api/v1"
+        }), ")"]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "supported-public-api",

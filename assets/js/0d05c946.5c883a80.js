@@ -58,6 +58,10 @@ const toc = [{
   "id": "zenmux-gateway",
   "level": 2
 }, {
+  "value": "OpenRouter Gateway",
+  "id": "openrouter-gateway",
+  "level": 2
+}, {
   "value": "Multi-Provider Chat Pool With Tenant-Aware Auth",
   "id": "multi-provider-chat-pool-with-tenant-aware-auth",
   "level": 2
@@ -166,11 +170,21 @@ function _createMdxContent(props) {
         children: "chat"
       }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "responses"
-      }), " protocols are native pass-through for one public operation each,\nwhile ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " protocols are native pass-through for one public operation each,\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "messages"
-      }), " (and ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " is native Anthropic passthrough for ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/messages"
+      }), " (plus\nconservative translation for ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), "), and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "gemini"
-      }), ", Zen only) serve both through the conservative\ntranslation subsets. Direct requests never cross services; only the explicit\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), " (Zen only)\nserves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "responses"
+      }), " through the conservative\ntranslation subsets. Direct requests never cross services; only the explicit\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "chat_fallback"
       }), " alias above may retry across them. Both services send\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "x-opencode-session"
@@ -270,6 +284,38 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
       children: ["\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "you serve ZenMux models through the proxy with static, reviewable routing"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "you want OpenAI pass-through without per-model protocols"
+      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "openrouter-gateway",
+      children: "OpenRouter Gateway"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["This setup exposes OpenRouter models through OpenAI pass-through. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), "\nis omitted so the type uses its ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https://openrouter.ai/api/v1"
+      }), " default."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "provider \"openrouter\" \"openrouter\" {\n  api_key = env(\"OPENROUTER_API_KEY\")\n\n  model \"gpt-4o-mini\" {\n    upstream_name = \"openai/gpt-4o-mini\"\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Public model names look like ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "openrouter/gpt-4o-mini"
+      }), ". Chat, responses,\nembeddings, images, and audio are served; inventory and usage stay\nproxy-owned. Every upstream request additionally sends OpenRouter attribution\nheaders (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "HTTP-Referer"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Title"
+      }), "). The complete validated version lives\nin ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "examples/openrouter.hcl"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Use this when:"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "you serve OpenRouter models through the proxy with static, reviewable routing"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "you want OpenAI pass-through without per-model protocols"
       }), "\n"]
