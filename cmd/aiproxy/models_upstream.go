@@ -55,7 +55,7 @@ func listUpstreamModels(ctx context.Context, provider config.Provider) ([]upstre
 
 func (d *upstreamModelDiscovery) list(ctx context.Context, provider config.Provider) ([]upstreamModel, error) {
 	switch provider.Type {
-	case config.ProviderTypeOpenAI, config.ProviderTypeOpenAICompatible, config.ProviderTypeZenMux:
+	case config.ProviderTypeOpenAI, config.ProviderTypeOpenAICompatible, config.ProviderTypeZenMux, config.ProviderTypeOpenRouter:
 		return d.listOpenAIStyleModels(ctx, provider, false)
 	case config.ProviderTypeOpenCodeZen, config.ProviderTypeOpenCodeGo:
 		return d.listOpenAIStyleModels(ctx, provider, true)
@@ -142,6 +142,8 @@ func upstreamBaseURL(provider config.Provider) string {
 		return "https://api.openai.com"
 	case config.ProviderTypeZenMux:
 		return "https://zenmux.ai/api/v1"
+	case config.ProviderTypeOpenRouter:
+		return "https://openrouter.ai/api/v1"
 	case config.ProviderTypeAnthropic:
 		return "https://api.anthropic.com"
 	case config.ProviderTypeGemini:

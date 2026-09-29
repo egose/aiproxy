@@ -34,6 +34,7 @@ type Entry struct {
 	Tenant          string    `json:"tenant,omitempty"`
 	Provider        string    `json:"provider,omitempty"`
 	UpstreamModel   string    `json:"upstream_model,omitempty"`
+	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
 	Status          int       `json:"status"`
 	DurationMs      int64     `json:"duration_ms"`
 	Streaming       bool      `json:"streaming,omitempty"`

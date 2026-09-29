@@ -323,6 +323,114 @@ func TestConfigureProviderNonInteractiveKeylessZen(t *testing.T) {
 	}
 }
 
+func TestConfigureProviderNonInteractiveOpenRouter(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := "listener \"http\" \"public\" { address = \":8080\" }\nauth \"main\" { mode = \"none\" }\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+
+	stdout, stderr, err := executeRootCommand(
+		"",
+		"configure", "provider",
+		"--config", configPath,
+		"--non-interactive",
+		"--type", "openrouter",
+		"--name", "router",
+		"--api-key", "sk-test",
+		"--model", "openai/gpt-4o-mini",
+	)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	for _, check := range []string{
+		`provider "openrouter" "router" {`,
+		`model "openai/gpt-4o-mini" {`,
+	} {
+		if !strings.Contains(configText, check) {
+			t.Fatalf("config output missing %q:\n%s", check, configText)
+		}
+	}
+	if strings.Contains(configText, "base_url") {
+		t.Fatalf("openrouter config must not contain base_url:\n%s", configText)
+	}
+	if _, err := config.LoadFile(configPath); err != nil {
+		t.Fatalf("generated config does not validate: %v", err)
+	}
+}
+
+func TestConfigureProviderNonInteractiveCreatesDerivedOpenRouterProvider(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.hcl")
+	seed := strings.TrimSpace(`listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openrouter" "base" {
+  api_key = "sk-base"
+  model "openai/gpt-4o-mini" {}
+}`) + "\n"
+	if err := os.WriteFile(configPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed): %v", err)
+	}
+
+	stdout, stderr, err := executeRootCommand(
+		"",
+		"configure", "provider",
+		"--config", configPath,
+		"--non-interactive",
+		"--type", "openrouter",
+		"--name", "derived",
+		"--extends", "base",
+		"--api-key", "sk-derived",
+	)
+	if err != nil {
+		t.Fatalf("Execute(): %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config): %v", err)
+	}
+	configText := string(configData)
+	for _, want := range []string{`provider "openrouter" "derived"`, `extends = "base"`} {
+		if !strings.Contains(configText, want) {
+			t.Fatalf("config output missing %q:\n%s", want, configText)
+		}
+	}
+	derivedStart := strings.Index(configText, `provider "openrouter" "derived"`)
+	if derivedStart < 0 {
+		t.Fatalf("derived provider missing:\n%s", configText)
+	}
+	derivedText := configText[derivedStart:]
+	if strings.Contains(derivedText, "base_url") || strings.Contains(derivedText, "model ") {
+		t.Fatalf("derived provider rendered inherited fields:\n%s", derivedText)
+	}
+	if _, err := config.LoadFile(configPath); err != nil {
+		t.Fatalf("generated config does not validate: %v", err)
+	}
+}
+
+func TestConfigureOpenRouterCapabilityAndEnvMirror(t *testing.T) {
+	if got := defaultProviderEnvExpression("openrouter"); got != `env("OPENROUTER_API_KEY")` {
+		t.Fatalf("openrouter env expression = %q", got)
+	}
+	wantSupported := "chat,responses,embeddings,images,audio_transcriptions,audio_speech"
+	if got := strings.Join(supportedCapabilities("openrouter"), ","); got != wantSupported {
+		t.Fatalf("supportedCapabilities(openrouter) = %q, want %q", got, wantSupported)
+	}
+	if got := strings.Join(supportedCapabilities("zenmux"), ","); got != wantSupported {
+		t.Fatalf("supportedCapabilities(zenmux) = %q, want %q", got, wantSupported)
+	}
+	if got := strings.Join(defaultCapabilities("openrouter"), ","); got != "chat,responses" {
+		t.Fatalf("defaultCapabilities(openrouter) = %q", got)
+	}
+}
+
 func TestConfigureProviderNonInteractiveUserAgent(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.hcl")
@@ -1407,6 +1515,28 @@ func TestSupportedCapabilitiesIncludeOpenAIExtendedOptions(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("got[%d] = %q, want %q (%v)", i, got[i], want[i], got)
 		}
+	}
+}
+
+func TestSupportedCapabilitiesIncludeMessages(t *testing.T) {
+	for _, providerType := range []string{"anthropic", "opencode-zen", "opencode-go"} {
+		got := supportedCapabilities(providerType)
+		found := false
+		for _, c := range got {
+			if c == "messages" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("%s supportedCapabilities = %v, want messages included", providerType, got)
+		}
+	}
+	if got := protocolDefaultCapabilities("opencode-zen", "messages"); len(got) != 3 || got[2] != "messages" {
+		t.Fatalf("zen messages protocol defaults = %v, want [chat responses messages]", got)
+	}
+	if got := defaultCapabilities("anthropic"); len(got) != 3 {
+		t.Fatalf("anthropic defaults = %v, want 3 capabilities", got)
 	}
 }
 

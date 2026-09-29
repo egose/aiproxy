@@ -201,6 +201,7 @@ const (
 	ProviderTypeOpenCodeGo       ProviderType = "opencode-go"
 	ProviderTypeGitHubCopilot    ProviderType = "github-copilot"
 	ProviderTypeZenMux           ProviderType = "zenmux"
+	ProviderTypeOpenRouter       ProviderType = "openrouter"
 )
 
 type ModelProtocol string
@@ -217,6 +218,7 @@ type Capability string
 const (
 	CapabilityChat                Capability = "chat"
 	CapabilityResponses           Capability = "responses"
+	CapabilityMessages            Capability = "messages"
 	CapabilityEmbeddings          Capability = "embeddings"
 	CapabilityImages              Capability = "images"
 	CapabilityAudioTranscriptions Capability = "audio_transcriptions"

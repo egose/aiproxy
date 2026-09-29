@@ -462,6 +462,185 @@ func TestHandlerLogsDirectRequestLifecycle(t *testing.T) {
 	}
 }
 
+func TestHandlerMessagesDirectPassthrough(t *testing.T) {
+	rt := &config.Runtime{
+		Catalog: config.NewCatalog([]config.Provider{
+			{
+				Type:    config.ProviderTypeAnthropic,
+				Name:    "anthropic",
+				APIKey:  "sk-ant",
+				BaseURL: "https://api.anthropic.com",
+				Models:  []config.Model{{Name: "claude", UpstreamName: "claude-sonnet-4-20250514"}},
+			},
+		}, nil, nil),
+	}
+	stub := &stubAdapter{}
+	h, logs := newLoggedHandler(t, rt, stub)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader([]byte(`{"model":"anthropic/claude","messages":[{"role":"user","content":"hi"}],"max_tokens":64,"output_config":{"effort":"high"}}`)))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if stub.got.Operation != provider.OpMessages {
+		t.Fatalf("operation = %v, want messages", stub.got.Operation)
+	}
+	entries := parseLogEntries(t, logs)
+	requestReceived := findLogEntry(entries, "request received")
+	if requestReceived == nil {
+		t.Fatal("missing request received log")
+	}
+	if requestReceived["public_model"] != "anthropic/claude" {
+		t.Fatalf("public_model = %#v", requestReceived["public_model"])
+	}
+	if requestReceived["operation"] != "messages" {
+		t.Fatalf("operation = %#v", requestReceived["operation"])
+	}
+	if requestReceived["reasoning_effort"] != "high" {
+		t.Fatalf("reasoning_effort = %#v", requestReceived["reasoning_effort"])
+	}
+}
+
+func TestHandlerMessagesRejectedForOpenAIProvider(t *testing.T) {
+	stub := &stubAdapter{}
+	h := newHandler(t, newRT(), stub)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader([]byte(`{"model":"openai/gpt-4o-mini","messages":[]}`)))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body=%s; want 400", w.Code, w.Body.String())
+	}
+}
+
+func TestHandlerMessagesAliasRoutesAnthropicTargets(t *testing.T) {
+	rt := &config.Runtime{
+		Catalog: config.NewCatalog([]config.Provider{
+			{
+				Type:    config.ProviderTypeAnthropic,
+				Name:    "a1",
+				APIKey:  "k1",
+				BaseURL: "https://api.anthropic.com",
+				Models:  []config.Model{{Name: "claude", UpstreamName: "claude-sonnet-4-20250514"}},
+			},
+			{
+				Type:    config.ProviderTypeAnthropic,
+				Name:    "a2",
+				APIKey:  "k2",
+				BaseURL: "https://api.anthropic.com",
+				Models:  []config.Model{{Name: "claude", UpstreamName: "claude-sonnet-4-20250514"}},
+			},
+		}, nil, []config.Alias{{
+			Name:      "m",
+			Algorithm: config.AlgorithmRoundRobin,
+			Targets:   []config.AliasTarget{{Provider: "a1", Model: "claude"}, {Provider: "a2", Model: "claude"}},
+		}}),
+	}
+	stub := &stubAdapter{}
+	h := newHandler(t, rt, stub)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader([]byte(`{"model":"alias/m","messages":[{"role":"user","content":"hi"}],"max_tokens":16}`)))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if stub.got.Operation != provider.OpMessages {
+		t.Fatalf("operation = %v, want messages", stub.got.Operation)
+	}
+	if stub.got.PublicModel != "alias/m" {
+		t.Fatalf("public model = %q", stub.got.PublicModel)
+	}
+}
+
+func TestHandlerMessagesAliasRejectsMixedCapabilities(t *testing.T) {
+	rt := &config.Runtime{
+		Catalog: config.NewCatalog([]config.Provider{
+			{
+				Type:    config.ProviderTypeOpenAI,
+				Name:    "o",
+				APIKey:  "k",
+				BaseURL: "https://api.openai.com/v1",
+				Models:  []config.Model{{Name: "gpt", UpstreamName: "gpt-4o-mini"}},
+			},
+			{
+				Type:    config.ProviderTypeAnthropic,
+				Name:    "a",
+				APIKey:  "k",
+				BaseURL: "https://api.anthropic.com",
+				Models:  []config.Model{{Name: "claude", UpstreamName: "claude-sonnet-4-20250514"}},
+			},
+		}, nil, []config.Alias{{
+			Name:      "mixed",
+			Algorithm: config.AlgorithmRoundRobin,
+			Targets:   []config.AliasTarget{{Provider: "o", Model: "gpt"}, {Provider: "a", Model: "claude"}},
+		}}),
+	}
+	stub := &stubAdapter{got: provider.Request{Operation: provider.Operation(99)}}
+	h := newHandler(t, rt, stub)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader([]byte(`{"model":"alias/mixed","messages":[{"role":"user","content":"hi"}],"max_tokens":16}`)))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body=%s; want 400", w.Code, w.Body.String())
+	}
+	if stub.got.Operation == provider.OpMessages {
+		t.Fatal("adapter must not be called when alias lacks messages capability")
+	}
+}
+
+func TestHandlerMessagesStreamingPassthrough(t *testing.T) {
+	stream := provider.NewStreamCompletion()
+	stream.SetUsage(provider.Usage{PromptTokens: 12, CompletionTokens: 7, TotalTokens: 19})
+	sse := "event: message_start\n" + `data: {"message":{"id":"msg_stream"}}` + "\n\n" +
+		"event: message_stop\n" + "data: {}\n\n"
+	stub := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		StreamBody: io.NopCloser(strings.NewReader(sse)),
+		Streaming:  true,
+		Stream:     stream,
+	}}
+	var got accounting.Event
+	rt := &config.Runtime{
+		Catalog: config.NewCatalog([]config.Provider{
+			{
+				Type:    config.ProviderTypeAnthropic,
+				Name:    "anthropic",
+				APIKey:  "sk-ant",
+				BaseURL: "https://api.anthropic.com",
+				Models:  []config.Model{{Name: "claude", UpstreamName: "claude-sonnet-4-20250514"}},
+			},
+		}, nil, nil),
+	}
+	h := NewHandler(Dependencies{
+		Resolver:     modelresolver.New(rt),
+		Adapter:      stub,
+		Auth:         auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:      rt.Catalog,
+		Metrics:      observability.NewMetrics(),
+		Accounting:   accounting.RecorderFunc(func(event accounting.Event) { got = event }),
+		AccessLog:    false,
+		HasAccessLog: true,
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader([]byte(`{"model":"anthropic/claude","stream":true,"messages":[{"role":"user","content":"hi"}],"max_tokens":64,"output_config":{"effort":"low"}}`)))
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if body := w.Body.String(); !strings.Contains(body, "event: message_start") || strings.Contains(body, "[DONE]") {
+		t.Fatalf("expected native SSE passthrough, got %q", body)
+	}
+	if got.Operation != "messages" {
+		t.Fatalf("operation = %q, want messages", got.Operation)
+	}
+	if got.ReasoningEffort != "low" {
+		t.Fatalf("effort = %q, want low", got.ReasoningEffort)
+	}
+	if got.PromptTokens != 12 || got.CompletionTokens != 7 {
+		t.Fatalf("usage = %+v", got)
+	}
+}
+
 func TestHandlerRewritesModelToUpstream(t *testing.T) {
 	rt := newRT()
 	providers := rt.Catalog.Providers()
@@ -992,6 +1171,7 @@ func TestMetricsPathLabelUsesClosedRouteSet(t *testing.T) {
 		{http.MethodGet, "/_internal/dashboard/logs", "/_internal/dashboard/logs"},
 		{http.MethodGet, "/_internal/dashboard/anything/user-controlled", metricsDashboardUnknownPath},
 		{http.MethodPost, "/v1/chat/completions", "/v1/chat/completions"},
+		{http.MethodPost, "/v1/messages", "/v1/messages"},
 		{http.MethodPost, "/v1/embeddings", "/v1/embeddings"},
 		{http.MethodPost, "/v1/responses", "/v1/responses"},
 		{http.MethodPost, "/v1/images/generations", "/v1/images/generations"},

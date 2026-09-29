@@ -7,7 +7,7 @@ import { useSnapshot } from '../hooks';
 import { errorMessage } from '../services/dashboard';
 import type { Recent } from '../types';
 
-type RequestSortKey = 'Model' | 'Operation' | 'StatusCode' | 'Provider' | 'TotalTokens' | 'Client';
+type RequestSortKey = 'Model' | 'Operation' | 'StatusCode' | 'Provider' | 'TotalTokens' | 'Client' | 'ReasoningEffort';
 type RequestSort = { key: RequestSortKey; desc: boolean };
 
 const requestHeaders: Array<{ key: RequestSortKey; label: string }> = [
@@ -17,6 +17,7 @@ const requestHeaders: Array<{ key: RequestSortKey; label: string }> = [
   { key: 'Provider', label: 'Provider' },
   { key: 'TotalTokens', label: 'Tokens' },
   { key: 'Client', label: 'Client' },
+  { key: 'ReasoningEffort', label: 'Effort' },
 ];
 
 function cellValue(row: Recent, key: RequestSortKey): string {
@@ -33,6 +34,8 @@ function cellValue(row: Recent, key: RequestSortKey): string {
       return String(row.TotalTokens ?? '');
     case 'Client':
       return row.Client ?? '';
+    case 'ReasoningEffort':
+      return row.ReasoningEffort ?? '';
   }
 }
 

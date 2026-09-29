@@ -74,6 +74,8 @@ func (a *adapter) doAnthropic(ctx context.Context, r Request) (*Result, error) {
 		return a.doAnthropicChat(ctx, r)
 	case OpResponses:
 		return a.doAnthropicResponses(ctx, r)
+	case OpMessages:
+		return a.doAnthropicMessages(ctx, r)
 	default:
 		return nil, ErrUnsupportedOperation{ProviderType: config.ProviderTypeAnthropic, Operation: r.Operation}
 	}
@@ -164,6 +166,44 @@ func (a *adapter) doAnthropicResponses(ctx context.Context, r Request) (*Result,
 			}
 			usage := usageFromAnthropicBody(body)
 			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody, Usage: usage}, nil
+		},
+	})
+}
+
+func (a *adapter) doAnthropicMessages(ctx context.Context, r Request) (*Result, error) {
+	body, err := requestBody(r)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	rewritten, err := rewriteModel(body, r.UpstreamModel)
+	if err != nil {
+		return nil, ErrInvalidRequest{Message: fmt.Sprintf("rewrite model: %v", err)}
+	}
+	streaming := isStream(body)
+	target := strings.TrimRight(r.BaseURL, "/") + "/v1/messages"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(rewritten))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("x-api-key", r.APIKey)
+	req.Header.Set("anthropic-version", anthropicVersion)
+	req.Header.Set("Content-Type", "application/json")
+	if streaming {
+		req.Header.Set("Accept", "text/event-stream")
+	}
+	return executeUpstream(r, req, upstreamResponseHandlers{
+		IsStreaming: func(resp *http.Response) bool {
+			return streaming || strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream")
+		},
+		OnStream: func(resp *http.Response) (*Result, error) {
+			stream := NewStreamCompletion()
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: newAnthropicMessagesStreamUsageReadCloser(resp.Body, stream), Streaming: true, Stream: stream}, nil
+		},
+		OnError: func(resp *http.Response, body []byte) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body}, nil
+		},
+		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body, Usage: usageFromAnthropicBody(body)}, nil
 		},
 	})
 }
@@ -608,4 +648,49 @@ func mapAnthropicStopReason(reason string) string {
 	default:
 		return reason
 	}
+}
+
+type anthropicMessagesStreamUsageReadCloser struct {
+	io.ReadCloser
+	observer *sseObserver
+}
+
+func newAnthropicMessagesStreamUsageReadCloser(src io.ReadCloser, stream *StreamCompletion) io.ReadCloser {
+	return &anthropicMessagesStreamUsageReadCloser{ReadCloser: src, observer: newSSEObserver(func(event sseEvent) {
+		observeAnthropicMessagesStreamEvent(stream, event)
+	})}
+}
+
+func (r *anthropicMessagesStreamUsageReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if n > 0 {
+		_ = r.observer.Observe(p[:n])
+	}
+	if err == io.EOF {
+		_ = r.observer.ObserveEOF()
+	}
+	return n, err
+}
+
+func observeAnthropicMessagesStreamEvent(stream *StreamCompletion, event sseEvent) {
+	if event.Data == "" {
+		return
+	}
+	if err := anthropicStreamError(event.Type, event.Data); err != nil {
+		stream.Complete(err, false)
+		return
+	}
+	var probe struct {
+		Message *struct {
+			Usage anthropicUsage `json:"usage"`
+		} `json:"message"`
+		Usage anthropicUsage `json:"usage"`
+	}
+	if json.Unmarshal([]byte(event.Data), &probe) != nil {
+		return
+	}
+	if probe.Message != nil {
+		stream.SetUsage(anthropicUsageToInternal(probe.Message.Usage))
+	}
+	stream.SetUsage(anthropicUsageToInternal(probe.Usage))
 }

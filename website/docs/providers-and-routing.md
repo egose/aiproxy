@@ -172,14 +172,15 @@ Alias targets additionally honor upstream retry advice as a cross-request cooldo
 | ------------------- | ---------------------------------- | ------------------------------------------------------- |
 | `openai`            | Pass-through OpenAI adapter        | Sends OpenAI-style requests upstream                    |
 | `openai-compatible` | Pass-through compatible adapter    | Requires `base_url`                                     |
-| `anthropic`         | Translated provider-native adapter | Supports chat and responses                             |
+| `anthropic`         | Translated + native messages       | Supports chat, responses and native messages            |
 | `gemini`            | Translated provider-native adapter | Supports chat, responses, and embeddings                |
 | `opencode-zen`      | Native or translated, per protocol | Requires per-model `protocol`; Zen service              |
 | `opencode-go`       | Native or translated, per protocol | Requires per-model `protocol`; Go service               |
 | `github-copilot`    | Pass-through chat-only adapter     | Device-flow login; `credential_ref`; chat JSON/SSE only |
 | `zenmux`            | Pass-through OpenAI adapter        | Defaults to `https://zenmux.ai/api/v1`                  |
+| `openrouter`        | Pass-through OpenAI adapter        | Defaults to `https://openrouter.ai/api/v1`              |
 
-For `openai`, `openai-compatible`, and `zenmux`, the proxy stays close to pass-through behavior. For translated providers, the proxy maps between the public OpenAI-style contract and the provider-native request and response shape.
+For `openai`, `openai-compatible`, `zenmux`, and `openrouter`, the proxy stays close to pass-through behavior. For translated providers, the proxy maps between the public OpenAI-style contract and the provider-native request and response shape.
 
 Pass-through providers preserve request JSON values and unknown extension fields, rewriting only the top-level `model` value before forwarding. Malformed JSON, non-object JSON bodies, and duplicate top-level `model` keys are rejected.
 
@@ -205,12 +206,12 @@ service: auth, header, and protocol behavior stay type-driven.
 
 Every model declares a required `protocol`:
 
-| `protocol`  | Upstream request                                                                                          | Serves public operations |
-| ----------- | --------------------------------------------------------------------------------------------------------- | ------------------------ |
-| `chat`      | `POST <base>/chat/completions`, model rewrite, JSON/SSE pass-through                                      | `chat` only              |
-| `responses` | `POST <base>/responses`, model rewrite, JSON/SSE pass-through                                             | `responses` only         |
-| `messages`  | `POST <base>/messages`, existing Messages translation subset                                              | `chat` and `responses`   |
-| `gemini`    | `POST <base>/models/<upstream>:generateContent` (JSON) / `:streamGenerateContent?alt=sse` (SSE); Zen only | `chat` and `responses`   |
+| `protocol`  | Upstream request                                                                                                         | Serves public operations           |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| `chat`      | `POST <base>/chat/completions`, model rewrite, JSON/SSE pass-through                                                     | `chat` only                        |
+| `responses` | `POST <base>/responses`, model rewrite, JSON/SSE pass-through                                                            | `responses` only                   |
+| `messages`  | `POST <base>/messages`, model rewrite, JSON/SSE native passthrough (plus Messages translation subset for chat/responses) | `chat`, `responses` and `messages` |
+| `gemini`    | `POST <base>/models/<upstream>:generateContent` (JSON) / `:streamGenerateContent?alt=sse` (SSE); Zen only                | `chat` and `responses`             |
 
 A public operation the model's protocol does not serve is rejected before any
 upstream I/O, as are `embeddings`, `images`, and audio operations on both
@@ -247,6 +248,39 @@ balance past Go limits is an account setting, not permission for the proxy to
 reroute requests. Model catalogs are static configuration validated at load;
 the proxy performs no runtime catalog sync and advertises no universal model
 support beyond what is configured.
+
+### OpenCode Client Image Input
+
+When OpenCode uses the proxy as a custom OpenAI-compatible provider, image
+handling is decided client-side before any proxy I/O. If the OpenCode model
+entry lacks image input, OpenCode replaces the attachment with
+`ERROR: Cannot read "image.png" (this model does not support image input). Inform the user.`,
+which the model then paraphrases as `I can't read image.png ...`. This text is
+neither a proxy error nor an upstream refusal; no image bytes leave the client.
+
+Declare vision explicitly in `opencode.json` for each proxied vision model:
+
+```json
+"provider": {
+  "aiproxy": {
+    "npm": "@ai-sdk/openai-compatible",
+    "api": "http://localhost:8080/v1",
+    "models": {
+      "zen/muse-spark-1.3-contributor-free": {
+        "modalities": { "input": ["text", "image"], "output": ["text"] }
+      }
+    }
+  }
+}
+```
+
+Proxy notes: `chat` and `responses` protocols are native pass-through and
+preserve `image_url`/`input_image` bodies with only the `model` field
+rewritten. `messages` and `gemini` protocols use the conservative text-only
+translation subset and reject image parts with `400 invalid_request`
+(`unsupported content part type`) before upstream I/O. `GET /v1/models`
+advertises proxy operations (`chat`, `responses`), never client vision
+modalities, so the OpenCode side must be configured as above.
 
 ## GitHub Copilot
 
@@ -316,6 +350,15 @@ It serves chat, responses, embeddings, images, and audio with the same
 model-rewrite and `Authorization: Bearer` behavior as `openai`. See
 `examples/zenmux.hcl` for a complete config.
 
+## OpenRouter
+
+`openrouter` is an OpenAI pass-through gateway defaulting to
+`https://openrouter.ai/api/v1`. `base_url` is an optional transport override
+only. It serves chat, responses, embeddings, images, and audio with the same
+model-rewrite and `Authorization: Bearer` behavior as `openai`, and
+additionally sends OpenRouter attribution headers (`HTTP-Referer:
+https://opencode.ai/`, `X-Title: opencode`) on upstream inference requests.
+
 ## Model Capabilities
 
 Capabilities describe which proxy operations a model may serve.
@@ -333,20 +376,21 @@ If `capabilities` is omitted, the proxy derives defaults from the provider type 
 
 <!-- docs-contract:capability-matrix:start -->
 
-| Provider type       | Default capabilities when omitted          | Additional supported capabilities                |
-| ------------------- | ------------------------------------------ | ------------------------------------------------ |
-| `openai`            | `chat`, `responses`, `embeddings`          | `images`, `audio_transcriptions`, `audio_speech` |
-| `openai-compatible` | `chat`, `responses`, `embeddings`          | `images`, `audio_transcriptions`, `audio_speech` |
-| `anthropic`         | `chat`, `responses`                        | None                                             |
-| `gemini`            | `chat`, `responses`                        | `embeddings`                                     |
-| `opencode-zen`      | `chat`, `responses`, or both (by protocol) | None                                             |
-| `opencode-go`       | `chat`, `responses`, or both (by protocol) | None                                             |
-| `github-copilot`    | `chat`                                     | None                                             |
-| `zenmux`            | `chat`, `responses`, `embeddings`          | `images`, `audio_transcriptions`, `audio_speech` |
+| Provider type       | Default capabilities when omitted                      | Additional supported capabilities                |
+| ------------------- | ------------------------------------------------------ | ------------------------------------------------ |
+| `openai`            | `chat`, `responses`, `embeddings`                      | `images`, `audio_transcriptions`, `audio_speech` |
+| `openai-compatible` | `chat`, `responses`, `embeddings`                      | `images`, `audio_transcriptions`, `audio_speech` |
+| `anthropic`         | `chat`, `responses`, `messages`                        | None                                             |
+| `gemini`            | `chat`, `responses`                                    | `embeddings`                                     |
+| `opencode-zen`      | `chat`, `responses`, `messages`, or more (by protocol) | None                                             |
+| `opencode-go`       | `chat`, `responses`, `messages`, or more (by protocol) | None                                             |
+| `github-copilot`    | `chat`                                                 | None                                             |
+| `zenmux`            | `chat`, `responses`, `embeddings`                      | `images`, `audio_transcriptions`, `audio_speech` |
+| `openrouter`        | `chat`, `responses`, `embeddings`                      | `images`, `audio_transcriptions`, `audio_speech` |
 
 <!-- docs-contract:capability-matrix:end -->
 
-Set explicit capabilities when you want the public catalog to reflect a narrower contract than the provider's default behavior, or to opt into one of the additional supported capabilities for that provider type. On `opencode-zen` and `opencode-go` the omitted default is protocol-aware (`chat` serves `chat`, `responses` serves `responses`, `messages` and `gemini` serve both), and capabilities outside the protocol-served set fail validation.
+Set explicit capabilities when you want the public catalog to reflect a narrower contract than the provider's default behavior, or to opt into one of the additional supported capabilities for that provider type. On `opencode-zen` and `opencode-go` the omitted default is protocol-aware (`chat` serves `chat`, `responses` serves `responses`, `messages` serves `chat`, `responses` and `messages`, `gemini` serves `chat` and `responses`), and capabilities outside the protocol-served set fail validation. `POST /v1/messages` is native Anthropic passthrough served only by provider type `anthropic` and `messages`-protocol Zen/Go models; every other provider type rejects it before upstream I/O.
 
 ## `GET /v1/models` Metadata
 

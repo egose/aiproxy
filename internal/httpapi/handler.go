@@ -166,6 +166,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	accountingProvider := ""
 	accountingUpstream := ""
 	var publicModel string
+	var reasoningEffort string
 	var op provider.Operation
 	opKnown := false
 	responseStreaming := false
@@ -188,6 +189,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				StatusCode:          rw.statusCode,
 				Provider:            accountingProvider,
 				UpstreamModel:       accountingUpstream,
+				ReasoningEffort:     reasoningEffort,
 				PromptTokens:        usage.PromptTokens,
 				CompletionTokens:    usage.CompletionTokens,
 				TotalTokens:         usage.TotalTokens,
@@ -317,14 +319,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		defer func() {
 			entry := payloadlog.Entry{
-				RequestID:   requestID,
-				Method:      r.Method,
-				Path:        r.URL.Path,
-				Status:      rw.statusCode,
-				DurationMs:  time.Since(start).Milliseconds(),
-				Streaming:   responseStreaming,
-				PublicModel: publicModel,
-				Provider:    accountingProvider,
+				RequestID:       requestID,
+				Method:          r.Method,
+				Path:            r.URL.Path,
+				Status:          rw.statusCode,
+				DurationMs:      time.Since(start).Milliseconds(),
+				Streaming:       responseStreaming,
+				PublicModel:     publicModel,
+				Provider:        accountingProvider,
+				ReasoningEffort: reasoningEffort,
 				Request: payloadlog.EntrySide{
 					Headers: reqHeaders,
 					Body:    payloadlog.EncodeBodyWithContentType(reqBody, deps.PayloadLog.MaxBodyBytes(), reqContentType),
@@ -372,6 +375,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logger = logger.With("public_model", publicModel)
+	if effort := extractReasoningEffort(body); effort != "" {
+		reasoningEffort = effort
+		logger = logger.With("reasoning_effort", effort)
+	} else if op == provider.OpMessages {
+		if effort := extractMessagesEffort(body); effort != "" {
+			reasoningEffort = effort
+			logger = logger.With("reasoning_effort", effort)
+		}
+	}
 	if principal != nil {
 		logger = logger.With("client", principalName(principal), "tenant", principalTenant(principal))
 	}
@@ -740,6 +752,58 @@ func extractModel(body []byte) string {
 	}
 	_ = json.Unmarshal(body, &probe)
 	return probe.Model
+}
+
+func extractReasoningEffort(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var probe struct {
+		Effort      *string `json:"reasoning_effort"`
+		EffortCamel *string `json:"reasoningEffort"`
+		Reasoning   *struct {
+			Effort *string `json:"effort"`
+		} `json:"reasoning"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return ""
+	}
+	if probe.Effort != nil {
+		if v := strings.TrimSpace(*probe.Effort); v != "" {
+			return v
+		}
+	}
+	if probe.EffortCamel != nil {
+		if v := strings.TrimSpace(*probe.EffortCamel); v != "" {
+			return v
+		}
+	}
+	if probe.Reasoning != nil && probe.Reasoning.Effort != nil {
+		if v := strings.TrimSpace(*probe.Reasoning.Effort); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func extractMessagesEffort(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var probe struct {
+		OutputConfig *struct {
+			Effort *string `json:"effort"`
+		} `json:"output_config"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return ""
+	}
+	if probe.OutputConfig != nil && probe.OutputConfig.Effort != nil {
+		if v := strings.TrimSpace(*probe.OutputConfig.Effort); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func filterModelCatalog(catalog []ModelCard, authorizer auth.Authorizer, principal *auth.Principal) []ModelCard {

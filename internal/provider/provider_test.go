@@ -56,6 +56,7 @@ func TestOperationDescriptorsDriveHTTPPathNameAndCapability(t *testing.T) {
 		{operation: OpImagesGenerations, name: "images_generations", path: "/v1/images/generations", capability: config.CapabilityImages},
 		{operation: OpAudioTranscriptions, name: "audio_transcriptions", path: "/v1/audio/transcriptions", capability: config.CapabilityAudioTranscriptions},
 		{operation: OpAudioSpeech, name: "audio_speech", path: "/v1/audio/speech", capability: config.CapabilityAudioSpeech},
+		{operation: OpMessages, name: "messages", path: "/v1/messages", capability: config.CapabilityMessages},
 	}
 
 	if len(operationDescriptors) != len(tests) {
@@ -74,6 +75,12 @@ func TestOperationDescriptorsDriveHTTPPathNameAndCapability(t *testing.T) {
 			t.Fatalf("RequiredCapability(%v) = %q, %v; want %q, true", tt.operation, capability, ok, tt.capability)
 		}
 		path, err := openAIPathForOperation(tt.operation)
+		if tt.operation == OpMessages {
+			if err == nil {
+				t.Fatalf("openAIPathForOperation(messages) = %q, want error", path)
+			}
+			continue
+		}
 		if err != nil || path != tt.path {
 			t.Fatalf("openAIPathForOperation(%v) = %q, %v; want %q, nil", tt.operation, path, err, tt.path)
 		}
@@ -1923,5 +1930,138 @@ func TestDecodeBodyForInspection(t *testing.T) {
 	}
 	if got, ok := DecodeBodyForInspection(http.Header{"Content-Encoding": []string{"compress"}}, plain); ok || !bytes.Equal(got, plain) {
 		t.Fatalf("unknown encoding: got %q, want original", got)
+	}
+}
+
+func TestAnthropicMessagesPassthroughPreservesBody(t *testing.T) {
+	var seenBody []byte
+	var seenPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPath = r.URL.Path
+		var err error
+		seenBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":9,"output_tokens":6}}`))
+	}))
+	defer upstream.Close()
+	a := New()
+	inbound := httptest.NewRequest(http.MethodPost, "/v1/messages",
+		io.NopCloser(strings.NewReader(`{"model":"anthropic/claude","messages":[{"role":"user","content":"hi"}],"max_tokens":64,"thinking":{"type":"enabled","budget_tokens":1024}}`)))
+	res, err := a.Do(context.Background(), Request{
+		Operation:     OpMessages,
+		ProviderType:  config.ProviderTypeAnthropic,
+		PublicModel:   "anthropic/claude",
+		BaseURL:       upstream.URL,
+		APIKey:        "sk-ant-test",
+		UpstreamModel: "claude-sonnet-4-20250514",
+		Inbound:       inbound,
+		Client:        upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", res.StatusCode)
+	}
+	if seenPath != "/v1/messages" {
+		t.Fatalf("path = %q", seenPath)
+	}
+	var got struct {
+		Model    string `json:"model"`
+		Thinking struct {
+			BudgetTokens int `json:"budget_tokens"`
+		} `json:"thinking"`
+	}
+	if err := json.Unmarshal(seenBody, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Model != "claude-sonnet-4-20250514" {
+		t.Fatalf("model = %q", got.Model)
+	}
+	if got.Thinking.BudgetTokens != 1024 {
+		t.Fatalf("thinking budget = %d", got.Thinking.BudgetTokens)
+	}
+	if res.Usage.PromptTokens == 0 || res.Usage.CompletionTokens == 0 {
+		t.Fatalf("usage = %+v", res.Usage)
+	}
+	var out struct {
+		ID   string `json:"id"`
+		Role string `json:"role"`
+	}
+	if err := json.Unmarshal(res.Body, &out); err != nil || out.ID != "msg_1" {
+		t.Fatalf("body passthrough = %s, err = %v", res.Body, err)
+	}
+}
+
+func TestAnthropicMessagesStreamingPassthrough(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: message_start\n")
+		_, _ = io.WriteString(w, `data: {"message":{"id":"msg_stream","usage":{"input_tokens":12,"output_tokens":0}}}`+"\n\n")
+		_, _ = io.WriteString(w, "event: content_block_delta\n")
+		_, _ = io.WriteString(w, `data: {"delta":{"type":"text_delta","text":"Hello"}}`+"\n\n")
+		_, _ = io.WriteString(w, "event: message_delta\n")
+		_, _ = io.WriteString(w, `data: {"delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}`+"\n\n")
+		_, _ = io.WriteString(w, "event: message_stop\n")
+		_, _ = io.WriteString(w, "data: {}\n\n")
+	}))
+	defer upstream.Close()
+	a := New()
+	inbound := httptest.NewRequest(http.MethodPost, "/v1/messages",
+		io.NopCloser(strings.NewReader(`{"model":"anthropic/claude","stream":true,"messages":[{"role":"user","content":"Hi"}],"max_tokens":64}`)))
+	res, err := a.Do(context.Background(), Request{
+		Operation:     OpMessages,
+		ProviderType:  config.ProviderTypeAnthropic,
+		PublicModel:   "anthropic/claude",
+		BaseURL:       upstream.URL,
+		APIKey:        "sk-ant-test",
+		UpstreamModel: "claude-sonnet-4-20250514",
+		Inbound:       inbound,
+		Client:        upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	if !res.Streaming || res.StreamBody == nil || res.Stream == nil {
+		t.Fatalf("expected streaming result with body and stream")
+	}
+	defer res.StreamBody.Close()
+	body, err := io.ReadAll(res.StreamBody)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: message_start") || !strings.Contains(text, "event: message_stop") {
+		t.Fatalf("expected native anthropic SSE passthrough, got %q", text)
+	}
+	if strings.Contains(text, "chatcmpl") || strings.Contains(text, "[DONE]") {
+		t.Fatalf("must not translate to OpenAI chunks, got %q", text)
+	}
+	res.Stream.Complete(nil, false)
+	outcome := res.Stream.Wait()
+	if outcome.Usage.PromptTokens != 12 || outcome.Usage.CompletionTokens != 7 {
+		t.Fatalf("usage = %+v, want prompt 12 completion 7", outcome.Usage)
+	}
+}
+
+func TestOpenAIRejectsMessagesOperation(t *testing.T) {
+	a := New()
+	inbound := httptest.NewRequest(http.MethodPost, "/v1/messages",
+		io.NopCloser(strings.NewReader(`{"model":"openai/gpt","messages":[]}`)))
+	_, err := a.Do(context.Background(), Request{
+		Operation:     OpMessages,
+		ProviderType:  config.ProviderTypeOpenAI,
+		PublicModel:   "openai/gpt",
+		BaseURL:       "http://127.0.0.1:1",
+		APIKey:        "sk-test",
+		UpstreamModel: "gpt-4o-mini",
+		Inbound:       inbound,
+	})
+	var unsupported ErrUnsupportedOperation
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("err = %v, want ErrUnsupportedOperation", err)
 	}
 }

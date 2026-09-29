@@ -113,6 +113,7 @@ export const recentSchema = z.object({
       Operation: z.boolean().optional(),
       Provider: z.boolean().optional(),
       UpstreamModel: z.boolean().optional(),
+      ReasoningEffort: z.boolean().optional(),
     })
     .optional(),
   RecentSequence: z.string().optional(),
@@ -127,6 +128,7 @@ export const recentSchema = z.object({
   StatusCode: z.number().optional(),
   Provider: z.string().optional(),
   UpstreamModel: z.string().optional(),
+  ReasoningEffort: z.string().optional(),
   PromptTokens: z.number().optional(),
   CompletionTokens: z.number().optional(),
   TotalTokens: z.number().optional(),
@@ -192,6 +194,7 @@ export const payloadSummarySchema = z.object({
   status: z.number().optional(),
   public_model: z.string().optional(),
   provider: z.string().optional(),
+  reasoning_effort: z.string().optional(),
   error: z.string().optional(),
 });
 

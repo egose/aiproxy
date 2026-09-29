@@ -32,6 +32,7 @@ func (m *model) recentRequests() []accounting.Event {
 		if metadataMatch(m.queries[bottomTabRequests], map[string]string{
 			"id": e.RequestID, "tenant": e.Tenant, "client": e.Client, "model": requestPublicModel(e),
 			"resolved": e.UpstreamModel, "provider": e.Provider, "status": fmt.Sprint(e.StatusCode), "op": e.Operation,
+			"effort": e.ReasoningEffort,
 		}) {
 			rows = append(rows, e)
 		}
@@ -149,6 +150,7 @@ func (m *model) metadataLines() (string, []string) {
 			"request ID: " + id, "tenant: \"" + metadataText(e.Tenant) + "\"", "client: \"" + metadataText(e.Client) + "\"",
 			"public model: " + metadataText(orDash(requestPublicModel(*e))), "resolved provider: " + metadataText(orDash(e.Provider)), "resolved model: " + metadataText(orDash(e.UpstreamModel)),
 			fmt.Sprintf("operation: %s · HTTP status: %d", metadataText(e.Operation), e.StatusCode),
+			"reasoning effort: " + metadataText(orDash(e.ReasoningEffort)),
 			fmt.Sprintf("completed: %s · duration: %s", e.Timestamp.Format(time.RFC3339Nano), e.Duration),
 			fmt.Sprintf("tokens input/output/total: %d / %d / %d", e.PromptTokens, e.CompletionTokens, e.TotalTokens),
 			fmt.Sprintf("tokens cached/create/read: %d / %d / %d", e.CachedTokens, e.CacheCreationTokens, e.CacheReadTokens),

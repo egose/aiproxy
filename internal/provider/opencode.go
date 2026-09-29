@@ -40,6 +40,8 @@ func (a *adapter) doOpenCode(ctx context.Context, r Request) (*Result, error) {
 			return a.doOpenCodeMessagesChat(ctx, r)
 		case OpResponses:
 			return a.doOpenCodeMessagesResponses(ctx, r)
+		case OpMessages:
+			return a.doOpenCodeMessagesPassthrough(ctx, r)
 		default:
 			return nil, ErrUnsupportedOperation{ProviderType: r.ProviderType, Operation: r.Operation}
 		}
@@ -163,6 +165,44 @@ func (a *adapter) doOpenCodeMessagesResponses(ctx context.Context, r Request) (*
 			}
 			usage := usageFromAnthropicBody(body)
 			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translatedBody, Usage: usage}, nil
+		},
+	})
+}
+
+func (a *adapter) doOpenCodeMessagesPassthrough(ctx context.Context, r Request) (*Result, error) {
+	body, err := requestBody(r)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	rewritten, err := rewriteModel(body, r.UpstreamModel)
+	if err != nil {
+		return nil, ErrInvalidRequest{Message: fmt.Sprintf("rewrite model: %v", err)}
+	}
+	streaming := isStream(body)
+	target := strings.TrimRight(r.BaseURL, "/") + "/messages"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(rewritten))
+	if err != nil {
+		return nil, err
+	}
+	if err := applyOpenCodeHeaders(req, r); err != nil {
+		return nil, err
+	}
+	if streaming {
+		req.Header.Set("Accept", "text/event-stream")
+	}
+	return executeUpstream(r, req, upstreamResponseHandlers{
+		IsStreaming: func(resp *http.Response) bool {
+			return streaming || strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream")
+		},
+		OnStream: func(resp *http.Response) (*Result, error) {
+			stream := NewStreamCompletion()
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: newAnthropicMessagesStreamUsageReadCloser(resp.Body, stream), Streaming: true, Stream: stream}, nil
+		},
+		OnError: func(resp *http.Response, body []byte) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body}, nil
+		},
+		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body, Usage: usageFromAnthropicBody(body)}, nil
 		},
 	})
 }

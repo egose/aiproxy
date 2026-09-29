@@ -613,7 +613,7 @@ func isValidHeaderName(s string) bool {
 
 func isValidCapability(c Capability) bool {
 	switch c {
-	case CapabilityChat, CapabilityResponses, CapabilityEmbeddings:
+	case CapabilityChat, CapabilityResponses, CapabilityMessages, CapabilityEmbeddings:
 		return true
 	case CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech:
 		return true

@@ -82,7 +82,7 @@ func TestConfigureProviderNonInteractiveCreatesOpenCodeGoWithOverride(t *testing
 		`api_key = env("OPENCODE_GO_API_KEY")`,
 		`model "minimax-m3" {`,
 		`protocol = "messages"`,
-		`capabilities = ["chat", "responses"]`,
+		`capabilities = ["chat", "responses", "messages"]`,
 	}
 	for _, check := range checks {
 		if !strings.Contains(configText, check) {
@@ -275,10 +275,10 @@ func TestDefaultProviderEnvExpressionOpenCode(t *testing.T) {
 func TestSupportedCapabilitiesOpenCode(t *testing.T) {
 	for _, providerType := range []string{"opencode-zen", "opencode-go"} {
 		got := supportedCapabilities(providerType)
-		if len(got) != 2 || got[0] != "chat" || got[1] != "responses" {
+		if len(got) != 3 || got[0] != "chat" || got[1] != "responses" || got[2] != "messages" {
 			t.Fatalf("supportedCapabilities(%q) = %v", providerType, got)
 		}
-		if got := defaultCapabilities(providerType); len(got) != 2 {
+		if got := defaultCapabilities(providerType); len(got) != 3 {
 			t.Fatalf("defaultCapabilities(%q) = %v", providerType, got)
 		}
 	}

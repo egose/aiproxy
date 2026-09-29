@@ -29,6 +29,7 @@ const (
 	OpImagesGenerations
 	OpAudioTranscriptions
 	OpAudioSpeech
+	OpMessages
 )
 
 type Request struct {
@@ -206,6 +207,11 @@ var providerDescriptors = map[config.ProviderType]providerDescriptor{
 		defaultBaseURL: defaultZenMuxBaseURL,
 		do:             (*adapter).doOpenAI,
 	},
+	config.ProviderTypeOpenRouter: {
+		providerType:   config.ProviderTypeOpenRouter,
+		defaultBaseURL: defaultOpenRouterBaseURL,
+		do:             (*adapter).doOpenAI,
+	},
 }
 
 type ErrUnsupportedOperation struct {
@@ -244,6 +250,7 @@ const (
 	defaultOpenCodeZenBaseURL = "https://opencode.ai/zen/v1"
 	defaultOpenCodeGoBaseURL  = "https://opencode.ai/zen/go/v1"
 	defaultZenMuxBaseURL      = "https://zenmux.ai/api/v1"
+	defaultOpenRouterBaseURL  = "https://openrouter.ai/api/v1"
 	anthropicVersion          = "2023-06-01"
 	defaultMaxTokens          = 1024
 	maxUpstreamBodyBytes      = 32 << 20
@@ -280,6 +287,7 @@ var operationDescriptors = []operationDescriptor{
 	{operation: OpImagesGenerations, name: "images_generations", path: "/v1/images/generations", capability: config.CapabilityImages},
 	{operation: OpAudioTranscriptions, name: "audio_transcriptions", path: "/v1/audio/transcriptions", capability: config.CapabilityAudioTranscriptions},
 	{operation: OpAudioSpeech, name: "audio_speech", path: "/v1/audio/speech", capability: config.CapabilityAudioSpeech},
+	{operation: OpMessages, name: "messages", path: "/v1/messages", capability: config.CapabilityMessages},
 }
 
 func OperationForHTTP(method, path string) (Operation, bool) {
@@ -304,6 +312,9 @@ func RequiredCapability(op Operation) (config.Capability, bool) {
 }
 
 func openAIPathForOperation(op Operation) (string, error) {
+	if op == OpMessages {
+		return "", ErrUnsupportedOperation{ProviderType: config.ProviderTypeOpenAICompatible, Operation: op}
+	}
 	for _, desc := range operationDescriptors {
 		if desc.operation == op {
 			return desc.path, nil

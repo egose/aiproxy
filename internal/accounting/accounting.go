@@ -28,6 +28,8 @@ type Event struct {
 	Provider      string
 	UpstreamModel string
 
+	ReasoningEffort string `json:",omitempty"`
+
 	PromptTokens        int64
 	CompletionTokens    int64
 	TotalTokens         int64
