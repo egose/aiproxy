@@ -400,17 +400,18 @@ The current public API surface is:
 
 <!-- docs-contract:public-matrix:start -->
 
-| Surface                         | `openai`                           | `openai-compatible`                | `anthropic`                        | `gemini`                           | `opencode-zen`                           | `opencode-go`                            | `github-copilot`                   | `zenmux`                           |
-| ------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------------- | ---------------------------------------- | ---------------------------------- | ---------------------------------- |
-| `GET /v1/models`                | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                              | Proxy-owned                              | Proxy-owned                        | Proxy-owned                        |
-| `GET /v1/billing/usage`         | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting       | Proxy-owned local usage accounting       | Proxy-owned local usage accounting | Proxy-owned local usage accounting |
-| `GET /metrics`                  | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics           | Proxy-owned Prometheus metrics           | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     |
-| `POST /v1/chat/completions`     | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated            | JSON and SSE translated            | JSON and SSE native or translated subset | JSON and SSE native or translated subset | JSON and SSE                       | JSON and SSE                       |
-| `POST /v1/embeddings`           | Yes                                | Yes                                | No                                 | Yes                                | No                                       | No                                       | No                                 | Yes                                |
-| `POST /v1/responses`            | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated subset     | JSON and SSE translated subset     | JSON and SSE native or translated subset | JSON and SSE native or translated subset | No                                 | JSON and SSE                       |
-| `POST /v1/images/generations`   | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       | No                                 | Yes                                |
-| `POST /v1/audio/transcriptions` | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       | No                                 | Yes                                |
-| `POST /v1/audio/speech`         | Yes                                | Yes                                | No                                 | No                                 | No                                       | No                                       | No                                 | Yes                                |
+| Surface                         | `openai`                           | `openai-compatible`                | `anthropic`                        | `gemini`                           | `opencode-zen`                               | `opencode-go`                                | `github-copilot`                   | `zenmux`                           | `openrouter`                       |
+| ------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | -------------------------------------------- | -------------------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- |
+| `GET /v1/models`                | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        | Proxy-owned                                  | Proxy-owned                                  | Proxy-owned                        | Proxy-owned                        | Proxy-owned                        |
+| `GET /v1/billing/usage`         | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting           | Proxy-owned local usage accounting           | Proxy-owned local usage accounting | Proxy-owned local usage accounting | Proxy-owned local usage accounting |
+| `GET /metrics`                  | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics               | Proxy-owned Prometheus metrics               | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     | Proxy-owned Prometheus metrics     |
+| `POST /v1/chat/completions`     | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated            | JSON and SSE translated            | JSON and SSE native or translated subset     | JSON and SSE native or translated subset     | JSON and SSE                       | JSON and SSE                       | JSON and SSE                       |
+| `POST /v1/messages`             | No                                 | No                                 | JSON and SSE                       | No                                 | JSON and SSE native (messages protocol only) | JSON and SSE native (messages protocol only) | No                                 | No                                 | No                                 |
+| `POST /v1/embeddings`           | Yes                                | Yes                                | No                                 | Yes                                | No                                           | No                                           | No                                 | Yes                                | Yes                                |
+| `POST /v1/responses`            | JSON and SSE                       | JSON and SSE                       | JSON and SSE translated subset     | JSON and SSE translated subset     | JSON and SSE native or translated subset     | JSON and SSE native or translated subset     | No                                 | JSON and SSE                       | JSON and SSE                       |
+| `POST /v1/images/generations`   | Yes                                | Yes                                | No                                 | No                                 | No                                           | No                                           | No                                 | Yes                                | Yes                                |
+| `POST /v1/audio/transcriptions` | Yes                                | Yes                                | No                                 | No                                 | No                                           | No                                           | No                                 | Yes                                | Yes                                |
+| `POST /v1/audio/speech`         | Yes                                | Yes                                | No                                 | No                                 | No                                           | No                                           | No                                 | Yes                                | Yes                                |
 
 <!-- docs-contract:public-matrix:end -->
 
@@ -1024,6 +1025,16 @@ loopback rules as other providers). Models declare no `protocol` (rejected);
 default capabilities are `chat`, `responses`, `embeddings`, with additional
 support for `images`, `audio_transcriptions`, and `audio_speech`.
 
+#### `openrouter`
+
+OpenAI pass-through gateway. Defaults to `https://openrouter.ai/api/v1`;
+`base_url` is an optional transport override only (same absolute-URL and
+loopback rules as other providers). Models declare no `protocol` (rejected);
+default capabilities are `chat`, `responses`, `embeddings`, with additional
+support for `images`, `audio_transcriptions`, and `audio_speech`. Upstream
+inference requests additionally send OpenRouter attribution headers
+(`HTTP-Referer: https://opencode.ai/`, `X-Title: opencode`).
+
 ## Model Model
 
 Each provider contains one or more nested `model` blocks:
@@ -1063,16 +1074,17 @@ Default capability behavior:
 
 <!-- docs-contract:capability-matrix:start -->
 
-| Provider type       | Default capabilities when omitted          | Additional supported capabilities                |
-| ------------------- | ------------------------------------------ | ------------------------------------------------ |
-| `openai`            | `chat`, `responses`, `embeddings`          | `images`, `audio_transcriptions`, `audio_speech` |
-| `openai-compatible` | `chat`, `responses`, `embeddings`          | `images`, `audio_transcriptions`, `audio_speech` |
-| `anthropic`         | `chat`, `responses`                        | None                                             |
-| `gemini`            | `chat`, `responses`                        | `embeddings`                                     |
-| `opencode-zen`      | `chat`, `responses`, or both (by protocol) | None                                             |
-| `opencode-go`       | `chat`, `responses`, or both (by protocol) | None                                             |
-| `github-copilot`    | `chat`                                     | None                                             |
-| `zenmux`            | `chat`, `responses`, `embeddings`          | `images`, `audio_transcriptions`, `audio_speech` |
+| Provider type       | Default capabilities when omitted                      | Additional supported capabilities                |
+| ------------------- | ------------------------------------------------------ | ------------------------------------------------ |
+| `openai`            | `chat`, `responses`, `embeddings`                      | `images`, `audio_transcriptions`, `audio_speech` |
+| `openai-compatible` | `chat`, `responses`, `embeddings`                      | `images`, `audio_transcriptions`, `audio_speech` |
+| `anthropic`         | `chat`, `responses`, `messages`                        | None                                             |
+| `gemini`            | `chat`, `responses`                                    | `embeddings`                                     |
+| `opencode-zen`      | `chat`, `responses`, `messages`, or more (by protocol) | None                                             |
+| `opencode-go`       | `chat`, `responses`, `messages`, or more (by protocol) | None                                             |
+| `github-copilot`    | `chat`                                                 | None                                             |
+| `zenmux`            | `chat`, `responses`, `embeddings`                      | `images`, `audio_transcriptions`, `audio_speech` |
+| `openrouter`        | `chat`, `responses`, `embeddings`                      | `images`, `audio_transcriptions`, `audio_speech` |
 
 <!-- docs-contract:capability-matrix:end -->
 
@@ -1080,7 +1092,8 @@ If `capabilities` is set on a model, it replaces the default capability set for
 that model. The config validator rejects capability values that the provider
 type cannot actually serve. On `opencode-zen` and `opencode-go` the omitted
 default is protocol-aware (`chat` serves `chat`, `responses` serves
-`responses`, `messages` and `gemini` serve both), and any capability outside
+`responses`, `messages` serves `chat`, `responses` and `messages`, `gemini`
+serves `chat` and `responses`), and any capability outside
 the protocol-served set fails validation.
 
 ## Alias Model
@@ -1521,7 +1534,7 @@ alias "chat_fallback" {
 
 - `display_name` is descriptive only
 - `base_url` is required only for `openai-compatible`; `opencode-zen`,
-  `opencode-go`, `github-copilot`, and `zenmux` default to their service prefixes and accept `base_url` only
+  `opencode-go`, `github-copilot`, `zenmux`, and `openrouter` default to their service prefixes and accept `base_url` only
   as a transport override that never changes service selection
 - `base_url` must be an absolute `https` URL for remote upstreams; `http` is
   allowed only for loopback hosts such as `localhost`, `127.0.0.1`, or `::1`
@@ -1608,7 +1621,8 @@ snapshots rather than inferred from missing secret state.
 
 ## Ingress Secret Guardrails
 
-Inbound `POST /v1/chat/completions` and `POST /v1/responses` requests can be
+Inbound `POST /v1/chat/completions`, `POST /v1/responses` and
+`POST /v1/messages` requests can be
 scanned for suspected secrets before any provider call when the optional
 `ingress_guardrails` block is enabled. The scanner reuses the embedded
 Gitleaks default rule set as a pinned Go module behind the small

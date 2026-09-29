@@ -163,7 +163,9 @@ alias "chat_fallback" {
 
 Public model names are `zen/glm-5.3` and `go/minimax-m3`. `chat` and
 `responses` protocols are native pass-through for one public operation each,
-while `messages` (and `gemini`, Zen only) serve both through the conservative
+`messages` is native Anthropic passthrough for `POST /v1/messages` (plus
+conservative translation for `chat` and `responses`), and `gemini` (Zen only)
+serves `chat` and `responses` through the conservative
 translation subsets. Direct requests never cross services; only the explicit
 `chat_fallback` alias above may retry across them. Both services send
 `x-opencode-session` on every upstream request. Complete validated versions of
@@ -256,6 +258,32 @@ proxy-owned. The complete validated version lives in `examples/zenmux.hcl`.
 Use this when:
 
 - you serve ZenMux models through the proxy with static, reviewable routing
+- you want OpenAI pass-through without per-model protocols
+
+## OpenRouter Gateway
+
+This setup exposes OpenRouter models through OpenAI pass-through. `base_url`
+is omitted so the type uses its `https://openrouter.ai/api/v1` default.
+
+```hcl
+provider "openrouter" "openrouter" {
+  api_key = env("OPENROUTER_API_KEY")
+
+  model "gpt-4o-mini" {
+    upstream_name = "openai/gpt-4o-mini"
+  }
+}
+```
+
+Public model names look like `openrouter/gpt-4o-mini`. Chat, responses,
+embeddings, images, and audio are served; inventory and usage stay
+proxy-owned. Every upstream request additionally sends OpenRouter attribution
+headers (`HTTP-Referer` and `X-Title`). The complete validated version lives
+in `examples/openrouter.hcl`.
+
+Use this when:
+
+- you serve OpenRouter models through the proxy with static, reviewable routing
 - you want OpenAI pass-through without per-model protocols
 
 ## Multi-Provider Chat Pool With Tenant-Aware Auth

@@ -216,8 +216,9 @@ Common attributes:
 
 - `display_name`
 - `base_url` for `openai-compatible` (required), and as an optional transport
-  override for `opencode-zen`, `opencode-go`, `github-copilot`, and `zenmux`
-  (defaults to `https://zenmux.ai/api/v1`)
+  override for `opencode-zen`, `opencode-go`, `github-copilot`, `zenmux`, and
+  `openrouter` (each defaults to its service prefix, e.g.
+  `https://zenmux.ai/api/v1` and `https://openrouter.ai/api/v1`)
 - `user_agent` as an optional upstream `User-Agent` override for any provider
   type (defaults to `aiproxy/<version>`)
 - `forward_user_agent` to forward the inbound caller `User-Agent` upstream on
@@ -281,6 +282,8 @@ override never changes service selection, auth, or header behavior.
 `github-copilot` defaults to `https://api.githubcopilot.com` with the same
 transport-override-only `base_url` rule. `zenmux` defaults to
 `https://zenmux.ai/api/v1` with the same transport-override-only rule.
+`openrouter` defaults to `https://openrouter.ai/api/v1` with the same
+transport-override-only rule.
 
 Provider names are part of the public model string, so keep them stable and machine-friendly.
 
@@ -320,7 +323,9 @@ provider "opencode-go" "go" {
 
 Public model names are `zen/glm-5.3` and `go/minimax-m3`. `chat` and
 `responses` protocols are native pass-through serving one public operation
-each; `messages` and `gemini` serve `chat` and `responses` through the
+each; `messages` is native Anthropic passthrough for `POST /v1/messages` (plus
+conservative translation for `chat` and `responses`) and `gemini` serves `chat`
+and `responses` through the
 existing conservative translation subsets. Anything else, including
 `embeddings`, `images`, and audio on both OpenCode types, is rejected before
 upstream I/O. `opencode-zen` and `opencode-go` send `x-opencode-session` on every upstream
@@ -429,6 +434,7 @@ Supported capability values:
 
 - `chat`
 - `responses`
+- `messages`
 - `embeddings`
 - `images`
 - `audio_transcriptions`
@@ -436,7 +442,8 @@ Supported capability values:
 
 Omitted `capabilities` default to the provider-type defaults, except on
 OpenCode providers where the default is protocol-aware (`chat` serves `chat`,
-`responses` serves `responses`, `messages` and `gemini` serve both).
+`responses` serves `responses`, `messages` serves `chat`, `responses` and
+`messages`, `gemini` serves `chat` and `responses`).
 
 ## Secrets And Environment Variables
 
@@ -677,15 +684,16 @@ ingress_guardrails {
 }
 ```
 
-Opt-in secret scanning of inbound `POST /v1/chat/completions` and
-`POST /v1/responses` requests using the embedded Gitleaks rule set. Absent or
+Opt-in secret scanning of inbound `POST /v1/chat/completions`,
+`POST /v1/responses` and `POST /v1/messages` requests using the embedded Gitleaks rule set. Absent or
 `enabled = false` preserves existing behavior. `mode` is `block` (default,
 rejects with `400 secret_blocked` / `400 scan_incomplete` and zero upstream
 I/O) or `audit` (forwards and records
 `aiproxy_guardrail_scans_total{operation,mode,outcome}`). A blocked flagged
 request carries `block_id` in the error body. Scanned text is the
 JSON-decoded message content, tool arguments (plus one JSON-decoded level),
-tool results, and responses instructions/input; images, audio, embeddings,
+tool results, responses instructions/input, and messages system/content/tool
+payloads; images, audio, embeddings,
 attachments, encoded blobs, and response/SSE output are out of scope and
 `gitleaks:allow` cannot suppress scans. Bounds are 1024..32MiB text bytes
 and 1..16384 strings and default to 65536 text bytes

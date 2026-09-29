@@ -40,6 +40,7 @@ It lets the proxy own:
 - `opencode-go`
 - `github-copilot` (chat-only, device-flow login; hermetically verified; live GitHub compatibility unverified)
 - `zenmux` (defaults to `https://zenmux.ai/api/v1`)
+- `openrouter` (defaults to `https://openrouter.ai/api/v1`)
 
 ## Supported Public API
 
