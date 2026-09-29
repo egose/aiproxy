@@ -319,6 +319,52 @@ func TestGuardrailExtractionCoverage(t *testing.T) {
 	}
 }
 
+func TestGuardrailExtractionCoverageMessages(t *testing.T) {
+	key := guardrailTestKey(t)
+	token := "ghp_" + guardrailGHToken(t)
+	nestedArgs, _ := json.Marshal(map[string]string{"api_key": token})
+	rt := &config.Runtime{
+		Catalog: config.NewCatalog([]config.Provider{
+			{
+				Type:    config.ProviderTypeAnthropic,
+				Name:    "anthropic",
+				APIKey:  "sk-ant",
+				BaseURL: "https://api.anthropic.com",
+				Models:  []config.Model{{Name: "claude", UpstreamName: "claude-sonnet-4-20250514"}},
+			},
+		}, nil, nil),
+	}
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"system text", `{"model":"anthropic/claude","max_tokens":64,"system":"deploy ` + key + `","messages":[{"role":"user","content":"hi"}]}`},
+		{"text part", `{"model":"anthropic/claude","max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"key is ` + key + `"}]}]}`},
+		{"tool_use input", `{"model":"anthropic/claude","max_tokens":64,"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"deploy","input":{"api_key":"` + token + `"}}]}]}`},
+		{"tool_use input nested", `{"model":"anthropic/claude","max_tokens":64,"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"deploy","input":` + string(nestedArgs) + `}]}]}`},
+		{"tool_result nested", `{"model":"anthropic/claude","max_tokens":64,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"text","text":"result ` + key + `"}]}]}]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			adapter := &countingAdapter{}
+			h := guardrailTestHandler(t, rt, adapter, guardrailTestScanner(t, guardrails.ModeBlock, 0, 0))
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(tc.body))
+			r.Header.Set("Content-Type", "application/json")
+			h.ServeHTTP(w, r)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d body=%s, want 400", w.Code, w.Body.String())
+			}
+			if guardrailErrorType(t, w.Body.String()) != guardrailBlockType {
+				t.Fatalf("error type = %s, want %s", guardrailErrorType(t, w.Body.String()), guardrailBlockType)
+			}
+			if n := adapter.count(); n != 0 {
+				t.Fatalf("upstream calls = %d, want 0", n)
+			}
+		})
+	}
+}
+
 func guardrailGHToken(t *testing.T) string {
 	t.Helper()
 	raw := make([]byte, 36)

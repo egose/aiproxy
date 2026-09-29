@@ -22,7 +22,9 @@ func OpenCodeProtocolCapabilities(protocol ModelProtocol) []Capability {
 		return []Capability{CapabilityChat}
 	case ModelProtocolResponses:
 		return []Capability{CapabilityResponses}
-	case ModelProtocolMessages, ModelProtocolGemini:
+	case ModelProtocolMessages:
+		return []Capability{CapabilityChat, CapabilityResponses, CapabilityMessages}
+	case ModelProtocolGemini:
 		return []Capability{CapabilityChat, CapabilityResponses}
 	default:
 		return nil
@@ -76,6 +78,7 @@ var providerTypeOrder = []ProviderType{
 	ProviderTypeOpenCodeGo,
 	ProviderTypeGitHubCopilot,
 	ProviderTypeZenMux,
+	ProviderTypeOpenRouter,
 }
 
 var providerTypePolicies = map[ProviderType]providerTypePolicy{
@@ -89,8 +92,8 @@ var providerTypePolicies = map[ProviderType]providerTypePolicy{
 		requiresBaseURL:       true,
 	},
 	ProviderTypeAnthropic: {
-		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
-		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses},
+		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses, CapabilityMessages},
+		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityMessages},
 	},
 	ProviderTypeGemini: {
 		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
@@ -98,17 +101,21 @@ var providerTypePolicies = map[ProviderType]providerTypePolicy{
 	},
 	ProviderTypeOpenCodeZen: {
 		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
-		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses},
+		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityMessages},
 	},
 	ProviderTypeOpenCodeGo: {
 		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
-		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses},
+		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityMessages},
 	},
 	ProviderTypeGitHubCopilot: {
 		defaultCapabilities:   []Capability{CapabilityChat},
 		supportedCapabilities: []Capability{CapabilityChat},
 	},
 	ProviderTypeZenMux: {
+		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings},
+		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings, CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech},
+	},
+	ProviderTypeOpenRouter: {
 		defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings},
 		supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings, CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech},
 	},

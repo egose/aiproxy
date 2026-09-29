@@ -289,7 +289,7 @@ func TestUpstreamDiscoveryCountsBlankEntries(t *testing.T) {
 
 func TestUpstreamDiscoveryPageBytes(t *testing.T) {
 	for _, kind := range []config.ProviderType{
-		config.ProviderTypeOpenAI, config.ProviderTypeOpenAICompatible, config.ProviderTypeZenMux,
+		config.ProviderTypeOpenAI, config.ProviderTypeOpenAICompatible, config.ProviderTypeZenMux, config.ProviderTypeOpenRouter,
 		config.ProviderTypeOpenCodeZen, config.ProviderTypeOpenCodeGo, config.ProviderTypeGitHubCopilot,
 		config.ProviderTypeAnthropic, config.ProviderTypeGemini,
 	} {

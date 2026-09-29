@@ -1396,7 +1396,7 @@ func protocolDefaultCapabilities(providerType, protocol string) []string {
 		case "responses":
 			return []string{"responses"}
 		case "messages":
-			return []string{"chat", "responses"}
+			return []string{"chat", "responses", "messages"}
 		case "gemini":
 			if providerType == "opencode-zen" {
 				return []string{"chat", "responses"}
@@ -2029,6 +2029,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 					huh.NewOption("OpenCode Go", "opencode-go"),
 					huh.NewOption("GitHub Copilot", "github-copilot"),
 					huh.NewOption("ZenMux", "zenmux"),
+					huh.NewOption("OpenRouter", "openrouter"),
 				).Value(&providerType),
 				huh.NewInput().Title("Provider name").Description(providerNameDescription()).Value(&providerName).Validate(validateProviderName),
 				huh.NewInput().Title("Display name").Description(providerDisplayNameDescription()).Value(&displayName),
@@ -2098,6 +2099,14 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			if err := prompts.runHuhForm(
 				huh.NewGroup(
 					huh.NewInput().Title("Base URL override").Description(zenMuxBaseURLDescription()).Value(&baseURL),
+				).Title("Endpoint"),
+			); err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
+		} else if providerType == "openrouter" {
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewInput().Title("Base URL override").Description(openRouterBaseURLDescription()).Value(&baseURL),
 				).Title("Endpoint"),
 			); err != nil {
 				return providerInput{}, secretsUpdate{}, err
@@ -2235,7 +2244,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			Models:                models,
 		}, update, nil
 	}
-	providerType, err := prompts.askChoiceWithDescription("Provider type", providerTypeDescription(), []string{"openai", "openai-compatible", "anthropic", "gemini", "opencode-zen", "opencode-go", "github-copilot", "zenmux"}, defaults.ProviderType)
+	providerType, err := prompts.askChoiceWithDescription("Provider type", providerTypeDescription(), []string{"openai", "openai-compatible", "anthropic", "gemini", "opencode-zen", "opencode-go", "github-copilot", "zenmux", "openrouter"}, defaults.ProviderType)
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
@@ -2299,6 +2308,12 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		}
 	} else if providerType == "zenmux" {
 		_, _ = fmt.Fprintln(prompts.out, zenMuxBaseURLDescription())
+		baseURL, err = prompts.ask("Base URL override", baseURL)
+		if err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
+	} else if providerType == "openrouter" {
+		_, _ = fmt.Fprintln(prompts.out, openRouterBaseURLDescription())
 		baseURL, err = prompts.ask("Base URL override", baseURL)
 		if err != nil {
 			return providerInput{}, secretsUpdate{}, err
@@ -3245,14 +3260,14 @@ func listenerTimeoutsDescription() string {
 }
 
 func providerTypeDescription() string {
-	return "Choose the upstream adapter type. 'openai-compatible' is for OpenAI-style APIs hosted elsewhere. 'zenmux' targets ZenMux (defaults to https://zenmux.ai/api/v1). 'opencode-zen' and 'opencode-go' target the OpenCode Zen and Go services with per-model protocol selection. 'github-copilot' references a saved device-flow login and serves chat only."
+	return "Choose the upstream adapter type. 'openai-compatible' is for OpenAI-style APIs hosted elsewhere. 'zenmux' targets ZenMux (defaults to https://zenmux.ai/api/v1). 'openrouter' targets OpenRouter (defaults to https://openrouter.ai/api/v1). 'opencode-zen' and 'opencode-go' target the OpenCode Zen and Go services with per-model protocol selection. 'github-copilot' references a saved device-flow login and serves chat only."
 }
 
 func modelProtocolDescription(providerType string) string {
 	if providerType == "opencode-go" {
-		return "Upstream protocol for this model on OpenCode Go: 'chat' serves chat, 'responses' serves responses, 'messages' serves chat and responses via translation. The service, not the URL, selects behavior."
+		return "Upstream protocol for this model on OpenCode Go: 'chat' serves chat, 'responses' serves responses, 'messages' serves chat, responses and native messages. The service, not the URL, selects behavior."
 	}
-	return "Upstream protocol for this model: 'chat' serves chat, 'responses' serves responses, 'messages' and 'gemini' serve chat and responses via translation. The service, not the URL, selects behavior."
+	return "Upstream protocol for this model: 'chat' serves chat, 'responses' serves responses, 'messages' serves chat, responses and native messages, 'gemini' serves chat and responses via translation. The service, not the URL, selects behavior."
 }
 
 func openCodeBaseURLDescription(providerType string) string {
@@ -3268,6 +3283,10 @@ func openCodeBaseURLDescription(providerType string) string {
 
 func zenMuxBaseURLDescription() string {
 	return "Optional transport override only; the default is https://zenmux.ai/api/v1. Leave blank to use the default."
+}
+
+func openRouterBaseURLDescription() string {
+	return "Optional transport override only; the default is https://openrouter.ai/api/v1. Leave blank to use the default."
 }
 
 func credentialStorageDescription() string {
@@ -3773,6 +3792,8 @@ func defaultProviderEnvExpression(providerType string) string {
 		return `env("OPENCODE_GO_API_KEY")`
 	case "zenmux":
 		return `env("ZENMUX_API_KEY")`
+	case "openrouter":
+		return `env("OPENROUTER_API_KEY")`
 	default:
 		return `env("OPENAI_API_KEY")`
 	}
@@ -3785,7 +3806,7 @@ func defaultCapabilities(providerType string) []string {
 	}
 	switch providerType {
 	case "anthropic":
-		return capabilities[:2]
+		return capabilities
 	case "gemini":
 		return capabilities
 	case "opencode-zen", "opencode-go":
@@ -3799,14 +3820,14 @@ func defaultCapabilities(providerType string) []string {
 
 func supportedCapabilities(providerType string) []string {
 	switch providerType {
-	case "openai", "openai-compatible", "zenmux":
+	case "openai", "openai-compatible", "zenmux", "openrouter":
 		return []string{"chat", "responses", "embeddings", "images", "audio_transcriptions", "audio_speech"}
 	case "anthropic":
-		return []string{"chat", "responses"}
+		return []string{"chat", "responses", "messages"}
 	case "gemini":
 		return []string{"chat", "responses", "embeddings"}
 	case "opencode-zen", "opencode-go":
-		return []string{"chat", "responses"}
+		return []string{"chat", "responses", "messages"}
 	case "github-copilot":
 		return []string{"chat"}
 	default:

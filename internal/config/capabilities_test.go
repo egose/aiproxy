@@ -22,8 +22,8 @@ func TestProviderTypePoliciesCoverCapabilityMatrix(t *testing.T) {
 		},
 		{
 			providerType:          ProviderTypeAnthropic,
-			defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
-			supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses},
+			defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses, CapabilityMessages},
+			supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityMessages},
 		},
 		{
 			providerType:          ProviderTypeGemini,
@@ -33,12 +33,12 @@ func TestProviderTypePoliciesCoverCapabilityMatrix(t *testing.T) {
 		{
 			providerType:          ProviderTypeOpenCodeZen,
 			defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
-			supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses},
+			supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityMessages},
 		},
 		{
 			providerType:          ProviderTypeOpenCodeGo,
 			defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses},
-			supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses},
+			supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityMessages},
 		},
 		{
 			providerType:          ProviderTypeGitHubCopilot,
@@ -47,6 +47,11 @@ func TestProviderTypePoliciesCoverCapabilityMatrix(t *testing.T) {
 		},
 		{
 			providerType:          ProviderTypeZenMux,
+			defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings},
+			supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings, CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech},
+		},
+		{
+			providerType:          ProviderTypeOpenRouter,
 			defaultCapabilities:   []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings},
 			supportedCapabilities: []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings, CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech},
 		},
@@ -91,7 +96,7 @@ func TestDefaultCapabilitiesReturnsCopy(t *testing.T) {
 }
 
 func allCapabilitiesForTest() []Capability {
-	return []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings, CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech}
+	return []Capability{CapabilityChat, CapabilityResponses, CapabilityMessages, CapabilityEmbeddings, CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech}
 }
 
 func assertCapabilities(t *testing.T, got, want []Capability) {

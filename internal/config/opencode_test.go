@@ -44,7 +44,7 @@ provider "opencode-zen" "zen" {
 	if messages.Protocol != ModelProtocolMessages {
 		t.Fatalf("messages model = %+v", messages)
 	}
-	assertCapabilities(t, EffectiveCapabilities(p.Type, messages), []Capability{CapabilityChat, CapabilityResponses})
+	assertCapabilities(t, EffectiveCapabilities(p.Type, messages), []Capability{CapabilityChat, CapabilityResponses, CapabilityMessages})
 }
 
 func TestLoadOpenCodeGoWithOmittedURL(t *testing.T) {
@@ -317,7 +317,7 @@ func TestEffectiveCapabilitiesOpenCodeProtocolAware(t *testing.T) {
 	}{
 		{protocol: ModelProtocolChat, want: []Capability{CapabilityChat}},
 		{protocol: ModelProtocolResponses, want: []Capability{CapabilityResponses}},
-		{protocol: ModelProtocolMessages, want: []Capability{CapabilityChat, CapabilityResponses}},
+		{protocol: ModelProtocolMessages, want: []Capability{CapabilityChat, CapabilityResponses, CapabilityMessages}},
 		{protocol: ModelProtocolGemini, want: []Capability{CapabilityChat, CapabilityResponses}},
 		{protocol: ModelProtocol(""), want: nil},
 		{protocol: ModelProtocol("bogus"), want: nil},

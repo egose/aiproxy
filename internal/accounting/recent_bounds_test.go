@@ -17,6 +17,7 @@ var recentBudgets = map[string]int{
 	"Tenant": RecentIdentityBytes, "Client": RecentIdentityBytes,
 	"Model": RecentModelBytes, "Operation": RecentOperationBytes,
 	"Provider": RecentIdentityBytes, "UpstreamModel": RecentModelBytes,
+	"ReasoningEffort": RecentEffortBytes,
 }
 
 func recentWithStrings(s string) Event {
@@ -136,7 +137,7 @@ func TestRecentBoundsPreserveExactAggregationAndEviction(t *testing.T) {
 	if rows[0].RequestID != rows[1].RequestID || rows[0].ProviderID == rows[1].ProviderID {
 		t.Fatal("prefix fixture or exact provider identity failed")
 	}
-	if len(rows[0].Truncated.Fields()) != 8 {
+	if len(rows[0].Truncated.Fields()) != 9 {
 		t.Fatal("not all fields bounded")
 	}
 	rows[0].Truncated.RequestID = false

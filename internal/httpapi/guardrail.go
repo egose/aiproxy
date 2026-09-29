@@ -22,7 +22,7 @@ const (
 )
 
 func guardrailCovered(op provider.Operation) bool {
-	return op == provider.OpChatCompletions || op == provider.OpResponses
+	return op == provider.OpChatCompletions || op == provider.OpResponses || op == provider.OpMessages
 }
 
 type guardrailTextCollector struct {
@@ -67,6 +67,8 @@ func extractGuardrailTexts(contentType string, op provider.Operation, body []byt
 		collectChatTexts(c, root)
 	case provider.OpResponses:
 		collectResponsesTexts(c, root)
+	case provider.OpMessages:
+		collectMessagesTexts(c, root)
 	default:
 		return nil, guardrailReasonUnparsed
 	}
@@ -124,6 +126,60 @@ func collectResponsesTexts(c *guardrailTextCollector, root map[string]any) {
 		}
 	}
 	collectInputValue(c, root["input"])
+}
+
+func collectMessagesTexts(c *guardrailTextCollector, root map[string]any) {
+	if system, ok := root["system"]; ok {
+		collectContentValue(c, system)
+		if c.reason != "" {
+			return
+		}
+	}
+	messages, ok := root["messages"].([]any)
+	if !ok {
+		return
+	}
+	for _, item := range messages {
+		msg, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		collectContentValue(c, msg["content"])
+		if c.reason != "" {
+			return
+		}
+		collectMessagesToolBlocks(c, msg["content"])
+		if c.reason != "" {
+			return
+		}
+	}
+}
+
+func collectMessagesToolBlocks(c *guardrailTextCollector, content any) {
+	parts, ok := content.([]any)
+	if !ok {
+		return
+	}
+	for _, part := range parts {
+		partMap, ok := part.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch partMap["type"] {
+		case "tool_use":
+			if input, ok := partMap["input"]; ok {
+				if raw, err := json.Marshal(input); err == nil {
+					c.add(string(raw))
+					collectJSONStringLeaves(c, string(raw))
+				}
+			}
+		case "tool_result":
+			collectContentValue(c, partMap["content"])
+		}
+		if c.reason != "" {
+			return
+		}
+	}
 }
 
 func collectInputValue(c *guardrailTextCollector, input any) {

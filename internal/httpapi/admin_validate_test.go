@@ -297,8 +297,8 @@ func TestAdminProviderTypesEndpoint(t *testing.T) {
 		t.Fatalf("status = %d, want 200", code)
 	}
 	items, ok := body["provider_types"].([]interface{})
-	if !ok || len(items) != 8 {
-		t.Fatalf("provider_types has %d items, want 8", len(items))
+	if !ok || len(items) != 9 {
+		t.Fatalf("provider_types has %d items, want 9", len(items))
 	}
 	byType := map[string]map[string]interface{}{}
 	for _, item := range items {
@@ -313,5 +313,11 @@ func TestAdminProviderTypesEndpoint(t *testing.T) {
 	}
 	if byType["opencode-zen"]["credential"] != "optional" {
 		t.Errorf("zen credential = %v", byType["opencode-zen"]["credential"])
+	}
+	if byType["openrouter"]["credential"] != "api_key" {
+		t.Errorf("openrouter credential = %v", byType["openrouter"]["credential"])
+	}
+	if byType["openrouter"]["requires_base_url"] != false {
+		t.Errorf("openrouter must not require base_url")
 	}
 }

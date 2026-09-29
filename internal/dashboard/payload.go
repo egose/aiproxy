@@ -232,7 +232,8 @@ func (m *model) orderedPayloads() []PayloadSummary {
 		}
 		if metadataMatch(m.queries[bottomTabPayload], map[string]string{
 			"id": p.RequestID, "model": p.PublicModel, "resolved": p.UpstreamModel, "provider": p.Provider,
-			"status": fmt.Sprint(p.Status), "method": p.Method, "path": p.Path,
+			"status": fmt.Sprint(p.Status), "method": p.Method, "path": p.Path, "effort": p.ReasoningEffort,
+			"op": p.Operation,
 		}) {
 			out = append(out, p)
 		}

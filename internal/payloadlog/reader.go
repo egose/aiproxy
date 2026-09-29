@@ -25,20 +25,21 @@ const (
 )
 
 type Summary struct {
-	Timestamp     string `json:"ts"`
-	RequestID     string `json:"request_id,omitempty"`
-	Method        string `json:"method,omitempty"`
-	Path          string `json:"path,omitempty"`
-	Operation     string `json:"operation,omitempty"`
-	PublicModel   string `json:"public_model,omitempty"`
-	Client        string `json:"client,omitempty"`
-	Tenant        string `json:"tenant,omitempty"`
-	Provider      string `json:"provider,omitempty"`
-	UpstreamModel string `json:"upstream_model,omitempty"`
-	Status        int    `json:"status"`
-	DurationMs    int64  `json:"duration_ms"`
-	Streaming     bool   `json:"streaming,omitempty"`
-	Error         string `json:"error,omitempty"`
+	Timestamp       string `json:"ts"`
+	RequestID       string `json:"request_id,omitempty"`
+	Method          string `json:"method,omitempty"`
+	Path            string `json:"path,omitempty"`
+	Operation       string `json:"operation,omitempty"`
+	PublicModel     string `json:"public_model,omitempty"`
+	Client          string `json:"client,omitempty"`
+	Tenant          string `json:"tenant,omitempty"`
+	Provider        string `json:"provider,omitempty"`
+	UpstreamModel   string `json:"upstream_model,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	Status          int    `json:"status"`
+	DurationMs      int64  `json:"duration_ms"`
+	Streaming       bool   `json:"streaming,omitempty"`
+	Error           string `json:"error,omitempty"`
 }
 
 func (s Summary) IsError() bool {

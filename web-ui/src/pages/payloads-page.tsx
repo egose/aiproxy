@@ -38,6 +38,7 @@ export function PayloadsPage() {
               onClick={() => setSelected(p.request_id)}
             >
               {p.status ?? '?'} · {p.method ?? ''} {p.path ?? ''} · {p.request_id}
+              {p.reasoning_effort ? ` · effort:${p.reasoning_effort}` : ''}
             </Button>
           ))}
         </CardContent>

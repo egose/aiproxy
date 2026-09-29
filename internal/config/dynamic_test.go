@@ -79,6 +79,18 @@ func TestValidateDynamicProviderRules(t *testing.T) {
 	}
 }
 
+func TestValidateDynamicProviderMessagesCapability(t *testing.T) {
+	p := validDynamicProvider()
+	p.Type = ProviderTypeAnthropic
+	p.Models[0].Capabilities = []Capability{CapabilityMessages}
+	if err := ValidateDynamicProvider(p); err != nil {
+		t.Fatalf("explicit messages capability = %v, want nil", err)
+	}
+	if got := EffectiveCapabilities(p.Type, p.Models[0]); len(got) != 1 || got[0] != CapabilityMessages {
+		t.Fatalf("capabilities = %v, want [messages]", got)
+	}
+}
+
 func TestValidateDynamicProviderZenKeyless(t *testing.T) {
 	p := validDynamicProvider()
 	p.Type = ProviderTypeOpenCodeZen
@@ -168,8 +180,8 @@ func TestNormalizeAliasDefaults(t *testing.T) {
 
 func TestDescribeProviderTypes(t *testing.T) {
 	infos := DescribeProviderTypes()
-	if len(infos) != 8 {
-		t.Fatalf("len = %d, want 8", len(infos))
+	if len(infos) != 9 {
+		t.Fatalf("len = %d, want 9", len(infos))
 	}
 	byType := map[ProviderType]ProviderTypeInfo{}
 	for _, info := range infos {
@@ -190,12 +202,19 @@ func TestDescribeProviderTypes(t *testing.T) {
 	if len(byType[ProviderTypeOpenCodeGo].Protocols) != 3 {
 		t.Fatalf("go protocols = %v", byType[ProviderTypeOpenCodeGo].Protocols)
 	}
-	if len(byType[ProviderTypeAnthropic].SupportedCapabilities) != 2 {
+	if len(byType[ProviderTypeAnthropic].SupportedCapabilities) != 3 {
 		t.Fatalf("anthropic caps = %v", byType[ProviderTypeAnthropic].SupportedCapabilities)
 	}
 	if byType[ProviderTypeGitHubCopilot].SupportsHealthcheck {
 		t.Fatalf("copilot must not support healthcheck")
 	}
+	if byType[ProviderTypeOpenRouter].Credential != ProviderCredentialAPIKey {
+		t.Fatalf("openrouter credential = %q", byType[ProviderTypeOpenRouter].Credential)
+	}
+	if !byType[ProviderTypeOpenRouter].SupportsHealthcheck {
+		t.Fatalf("openrouter must support healthcheck")
+	}
+	assertCapabilities(t, byType[ProviderTypeOpenRouter].DefaultCapabilities, []Capability{CapabilityChat, CapabilityResponses, CapabilityEmbeddings})
 }
 
 func TestValidateDynamicAlias(t *testing.T) {

@@ -10,9 +10,14 @@ import (
 	"net/http"
 	"net/textproto"
 	"strings"
+
+	"github.com/egose/aiproxy/internal/config"
 )
 
 func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
+	if r.Operation == OpMessages {
+		return nil, ErrUnsupportedOperation{ProviderType: r.ProviderType, Operation: r.Operation}
+	}
 	if r.Operation == OpAudioTranscriptions {
 		return a.doOpenAIAudioTranscriptions(ctx, r)
 	}
@@ -36,6 +41,10 @@ func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+r.APIKey)
 	req.Header.Set("Content-Type", "application/json")
+	if r.ProviderType == config.ProviderTypeOpenRouter {
+		req.Header.Set("HTTP-Referer", "https://opencode.ai/")
+		req.Header.Set("X-Title", "opencode")
+	}
 	if accept := r.Inbound.Header.Get("Accept"); accept != "" {
 		req.Header.Set("Accept", accept)
 	}
@@ -160,6 +169,10 @@ func (a *adapter) doOpenAIAudioTranscriptions(ctx context.Context, r Request) (*
 	}
 	req.Header.Set("Authorization", "Bearer "+r.APIKey)
 	req.Header.Set("Content-Type", rewrittenType)
+	if r.ProviderType == config.ProviderTypeOpenRouter {
+		req.Header.Set("HTTP-Referer", "https://opencode.ai/")
+		req.Header.Set("X-Title", "opencode")
+	}
 	if accept := r.Inbound.Header.Get("Accept"); accept != "" {
 		req.Header.Set("Accept", accept)
 	}
