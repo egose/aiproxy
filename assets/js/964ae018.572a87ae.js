@@ -985,6 +985,8 @@ function _createMdxContent(props) {
         children: "enabled"
       }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "forward_user_agent"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "forward_authorization"
       }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "[]"
       }), " to clear local ", (0,jsx_runtime.jsx)(_components.code, {
@@ -1008,6 +1010,19 @@ function _createMdxContent(props) {
       }), "\nand ", (0,jsx_runtime.jsx)(_components.code, {
         children: "credential_ref"
       }), " fields to retain them. Supplied reference objects replace\ntheir path and key/name together; an empty path selects the default secrets path."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "forward_authorization"
+      }), " is a provider-only opt-in for supported bearer-header\nupstreams, independent of inherited defaults. It cannot coexist with stored\ncredentials. To switch an existing keyed provider, explicitly send\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"api_key\": \"\""
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"api_key_ref\": {\"path\": \"\", \"key\": \"\"}"
+      }), " along with\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"forward_authorization\": true"
+      }), ". Omitting the flag preserves its current value.\nSee ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#forwarding-client-authorization",
+        children: "client authorization forwarding"
+      }), "\nfor supported types and credential-exposure warnings."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Within an existing ", (0,jsx_runtime.jsx)(_components.code, {
         children: "healthcheck"

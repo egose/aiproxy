@@ -62,6 +62,10 @@ const toc = [{
   "id": "providers",
   "level": 2
 }, {
+  "value": "Forwarding Client Authorization",
+  "id": "forwarding-client-authorization",
+  "level": 3
+}, {
   "value": "OpenCode Zen And Go",
   "id": "opencode-zen-and-go",
   "level": 3
@@ -483,6 +487,14 @@ function _createMdxContent(props) {
         }), " wins)"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "forward_authorization"
+        }), " to use the caller's ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "Authorization"
+        }), " header instead of\na configured upstream key (provider-only, default ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "false"
+        }), "; see below)"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "extends"
         }), " for restricted provider inheritance"]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
@@ -521,13 +533,79 @@ function _createMdxContent(props) {
         children: "api_key"
       }), " or ", (0,jsx_runtime.jsx)(_components.code, {
         children: "api_key_ref"
-      }), ". Enabled\nproviders with unresolved, empty, or missing credentials fail validation, with\none exception: ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ". Enabled\nproviders with unresolved, empty, or missing credentials fail validation, with\nthese exceptions: providers with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "forward_authorization = true"
+      }), " require no\nconfigured credential, and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "opencode-zen"
       }), " providers may omit the credential entirely for\nkeyless upstream access, in which case the proxy sends no ", (0,jsx_runtime.jsx)(_components.code, {
         children: "Authorization"
       }), "\nheader. To\nintentionally disable a provider, declare ", (0,jsx_runtime.jsx)(_components.code, {
         children: "enabled = false"
       }), "; disabled\nproviders are still validated for structure, URL, models, and capabilities,\nbut they do not require a usable credential."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "forwarding-client-authorization",
+      children: "Forwarding Client Authorization"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "provider \"openai-compatible\" \"custom\" {\n  base_url = \"https://upstream.example.com/v1\"\n  forward_authorization = true\n\n  model \"chat\" {}\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "forward_authorization"
+      }), " is supported by ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "openai"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "openai-compatible"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-zen"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "opencode-go"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "zenmux"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "openrouter"
+      }), ". It is not supported\nby ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "anthropic"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gemini"
+      }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "github-copilot"
+      }), ". There is no root-level default;\nderived providers must opt in locally rather than inherit it."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["When enabled, live inference forwards exactly one nonempty, valid client\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Authorization"
+      }), " header unchanged, including its authentication scheme. Missing,\nblank, repeated, oversized (over 4096 bytes), or invalid header values return\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "400"
+      }), " before upstream I/O, without credential fallback or alias failover.\nConfiguring ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key_ref"
+      }), ", or another credential alongside this mode\nis rejected. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Authorization"
+      }), " remains forbidden in ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "forward_headers"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.strong, {
+        children: "Proxy authentication still runs first."
+      }), " With bearer or JWT authentication,\nthe same token used to authenticate to aiproxy is sent upstream. Enable this\nonly for trusted upstreams; for clients supplying upstream tokens directly,\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "auth"
+      }), " mode ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "none"
+      }), " requires separate access protection. Background health probes\nand CLI upstream model discovery have no caller header and do not forward it.\nAlias health and cooldown state remain shared across callers, not per forwarded\ncredential. Authorization-mode changes apply on successful ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), " reload."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The CLI supports ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy configure provider --non-interactive ... --forward-authorization"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--forward-authorization=false"
+      }), ". Administrative\nprovider POST/PUT also accepts ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "forward_authorization"
+      }), "; existing credentials\nmust be explicitly cleared when switching modes. Existing databases require\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy migrate up"
+      }), " to apply the additive forwarding-column migration."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["GitHub Copilot is ", (0,jsx_runtime.jsx)(_components.strong, {
         children: "hermetically verified; live GitHub compatibility unverified"
