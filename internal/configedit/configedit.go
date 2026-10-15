@@ -63,6 +63,7 @@ type ProviderInput struct {
 	UserAgent             string
 	ForwardUserAgent      bool
 	ForwardHeaders        []string
+	ForwardAuthorization  bool
 	Credential            ProviderCredentialInput
 	Enabled               *bool
 	Healthcheck           *ProviderHealthcheckInput
@@ -286,6 +287,9 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 	b.WriteString(" ")
 	b.WriteString(strconv.Quote(input.Name))
 	b.WriteString(" {\n")
+	if input.ForwardAuthorization {
+		b.WriteString("  forward_authorization = true\n")
+	}
 	if input.Extends != "" {
 		b.WriteString("  extends = ")
 		b.WriteString(strconv.Quote(input.Extends))

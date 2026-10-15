@@ -223,6 +223,8 @@ Common attributes:
   type (defaults to `aiproxy/<version>`)
 - `forward_user_agent` to forward the inbound caller `User-Agent` upstream on
   live inference requests instead of the default (explicit `user_agent` wins)
+- `forward_authorization` to use the caller's `Authorization` header instead of
+  a configured upstream key (provider-only, default `false`; see below)
 - `extends` for restricted provider inheritance
 - `api_key`
 - `api_key_ref`
@@ -233,12 +235,50 @@ Common attributes:
 
 Providers normally declare exactly one of `api_key` or `api_key_ref`. Enabled
 providers with unresolved, empty, or missing credentials fail validation, with
-one exception: `opencode-zen` providers may omit the credential entirely for
+these exceptions: providers with `forward_authorization = true` require no
+configured credential, and `opencode-zen` providers may omit the credential entirely for
 keyless upstream access, in which case the proxy sends no `Authorization`
 header. To
 intentionally disable a provider, declare `enabled = false`; disabled
 providers are still validated for structure, URL, models, and capabilities,
 but they do not require a usable credential.
+
+### Forwarding Client Authorization
+
+```hcl
+provider "openai-compatible" "custom" {
+  base_url = "https://upstream.example.com/v1"
+  forward_authorization = true
+
+  model "chat" {}
+}
+```
+
+`forward_authorization` is supported by `openai`, `openai-compatible`,
+`opencode-zen`, `opencode-go`, `zenmux`, and `openrouter`. It is not supported
+by `anthropic`, `gemini`, or `github-copilot`. There is no root-level default;
+derived providers must opt in locally rather than inherit it.
+
+When enabled, live inference forwards exactly one nonempty, valid client
+`Authorization` header unchanged, including its authentication scheme. Missing,
+blank, repeated, oversized (over 4096 bytes), or invalid header values return
+`400` before upstream I/O, without credential fallback or alias failover.
+Configuring `api_key`, `api_key_ref`, or another credential alongside this mode
+is rejected. `Authorization` remains forbidden in `forward_headers`.
+
+**Proxy authentication still runs first.** With bearer or JWT authentication,
+the same token used to authenticate to aiproxy is sent upstream. Enable this
+only for trusted upstreams; for clients supplying upstream tokens directly,
+`auth` mode `none` requires separate access protection. Background health probes
+and CLI upstream model discovery have no caller header and do not forward it.
+Alias health and cooldown state remain shared across callers, not per forwarded
+credential. Authorization-mode changes apply on successful `SIGHUP` reload.
+
+The CLI supports `aiproxy configure provider --non-interactive ...
+--forward-authorization` and `--forward-authorization=false`. Administrative
+provider POST/PUT also accepts `forward_authorization`; existing credentials
+must be explicitly cleared when switching modes. Existing databases require
+`aiproxy migrate up` to apply the additive forwarding-column migration.
 
 GitHub Copilot is **hermetically verified; live GitHub compatibility unverified**.
 Config validation resolves local credentials; it does not prove GitHub entitlement

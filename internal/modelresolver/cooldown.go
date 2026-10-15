@@ -20,6 +20,9 @@ type CooldownFingerprint struct {
 
 func CooldownFingerprintFor(alias string, prov config.Provider, model config.Model) CooldownFingerprint {
 	credential := "key:" + prov.APIKey
+	if prov.ForwardAuthorization {
+		credential = "forward_authorization"
+	}
 	if prov.CopilotToken != "" {
 		credential = "copilot:" + prov.CopilotToken
 	}

@@ -262,13 +262,16 @@ func validateProviders(providers []Provider, requireCredential bool) error {
 		if err := ValidateForwardHeaders(p.ForwardHeaders, fmt.Sprintf("provider %q", p.Name)); err != nil {
 			return err
 		}
+		if err := validateProviderForwardAuthorization(p); err != nil {
+			return err
+		}
 		if err := validateProviderHealthcheck(p); err != nil {
 			return err
 		}
 		if requireCredential && p.Type == ProviderTypeGitHubCopilot && p.CopilotToken == "" {
 			return fmt.Errorf("provider %q: enabled github-copilot providers require a resolvable credential_ref (run login first; set enabled = false to disable a provider intentionally)", p.Name)
 		}
-		if requireCredential && p.Type != ProviderTypeGitHubCopilot && p.APIKey == "" && p.Type != ProviderTypeOpenCodeZen {
+		if requireCredential && !p.ForwardAuthorization && p.Type != ProviderTypeGitHubCopilot && p.APIKey == "" && p.Type != ProviderTypeOpenCodeZen {
 			return fmt.Errorf("provider %q: enabled providers require a non-empty api_key or a resolvable api_key_ref (set enabled = false to disable a provider intentionally; opencode-zen providers may omit the credential for keyless upstream access)", p.Name)
 		}
 		if len(p.Models) == 0 {
@@ -439,6 +442,28 @@ func isValidUserAgent(s string) bool {
 		}
 	}
 	return true
+}
+
+func SupportsForwardAuthorization(providerType ProviderType) bool {
+	switch providerType {
+	case ProviderTypeOpenAI, ProviderTypeOpenAICompatible, ProviderTypeOpenCodeZen, ProviderTypeOpenCodeGo, ProviderTypeZenMux, ProviderTypeOpenRouter:
+		return true
+	default:
+		return false
+	}
+}
+
+func validateProviderForwardAuthorization(p Provider) error {
+	if !p.ForwardAuthorization {
+		return nil
+	}
+	if !SupportsForwardAuthorization(p.Type) {
+		return fmt.Errorf("provider %q: forward_authorization is not supported by %s", p.Name, p.Type)
+	}
+	if p.APIKey != "" || p.APIKeyRef != nil || p.CopilotCredentialRef != nil || p.CopilotToken != "" { // pragma: allowlist secret
+		return fmt.Errorf("provider %q: forward_authorization cannot be combined with api_key, api_key_ref, or credential_ref", p.Name)
+	}
+	return nil
 }
 
 var deniedForwardHeaders = map[string]struct{}{

@@ -260,6 +260,7 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 	}
 	provider := cloneProvider(base)
 	provider.Name = rawProvider.Name
+	provider.ForwardAuthorization = rawProvider.ForwardAuthorization
 	if rawProvider.DisplayName != "" {
 		provider.DisplayName = rawProvider.DisplayName
 	}
@@ -322,7 +323,7 @@ func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderS
 	if hasAPIKey && hasAPIKeyRef { // pragma: allowlist secret
 		return fmt.Errorf("derived provider requires exactly one local credential: api_key or api_key_ref")
 	}
-	if !hasAPIKey && !hasAPIKeyRef && rawProvider.Type != string(ProviderTypeOpenCodeZen) {
+	if !hasAPIKey && !hasAPIKeyRef && !rawProvider.ForwardAuthorization && rawProvider.Type != string(ProviderTypeOpenCodeZen) {
 		return fmt.Errorf("derived provider requires exactly one local credential: api_key or api_key_ref")
 	}
 	return nil
@@ -534,6 +535,7 @@ func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Durat
 		UserAgent:             rootUserAgent,
 		ForwardUserAgent:      rootForwardUserAgent,
 		ForwardHeaders:        unionForwardHeaders(rootForwardHeaders, rawProvider.ForwardHeaders),
+		ForwardAuthorization:  rawProvider.ForwardAuthorization,
 		APIKey:                rawProvider.APIKey,
 		Enabled:               true,
 		ModelByName:           make(map[string]Model),

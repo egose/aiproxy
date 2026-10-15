@@ -169,6 +169,7 @@ func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases m
 		}
 		p := cloneProvider(base)
 		p.Name = name
+		p.ForwardAuthorization = row.ForwardAuthorization
 		if row.DisplayName != "" {
 			p.DisplayName = row.DisplayName
 		}
@@ -186,8 +187,9 @@ func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases m
 		Type: config.ProviderType(row.Type), Name: name,
 		DisplayName: row.DisplayName, BaseURL: row.BaseURL,
 		UserAgent: row.UserAgent, ForwardUserAgent: row.ForwardUserAgent,
-		ForwardHeaders: append([]string(nil), row.ForwardHeaders...),
-		Enabled:        row.Enabled, ModelByName: make(map[string]config.Model),
+		ForwardHeaders:       append([]string(nil), row.ForwardHeaders...),
+		ForwardAuthorization: row.ForwardAuthorization,
+		Enabled:              row.Enabled, ModelByName: make(map[string]config.Model),
 	}
 	if row.UpstreamTimeoutMs != nil {
 		if *row.UpstreamTimeoutMs <= 0 {
@@ -252,6 +254,9 @@ func attachCredential(p *config.Provider, row store.DBProvider) error {
 	hasAPI := len(row.APIKeyEncrypted) > 0 || row.APIKeyRefKey != "" || row.APIKeyRefPath != ""
 	hasCopilotRef := row.CopilotCredentialName != "" || row.CopilotCredentialPath != ""
 	hasCopilotDB := row.CopilotCredentialEncrypted != nil
+	if p.ForwardAuthorization && (hasAPI || hasCopilotRef || hasCopilotDB) {
+		return fmt.Errorf("provider %q: forward_authorization cannot be combined with stored credentials", p.Name)
+	}
 	if p.Type == config.ProviderTypeGitHubCopilot && hasAPI {
 		return fmt.Errorf("provider %q: api_key and api_key_ref are not supported by github-copilot; use credential_ref or a database credential", p.Name)
 	}

@@ -84,7 +84,7 @@ func TestSpendLedgerPreservesDeletedKeySpend(t *testing.T) {
 		t.Fatalf("repeat schema application = %v, %v", again, err)
 	}
 	status, err := st.Status(ctx)
-	if err != nil || !reflect.DeepEqual(status.Applied, []string{"schema.sql"}) || len(status.Pending) != 0 {
+	if err != nil || !reflect.DeepEqual(status.Applied, []string{"schema.sql", "forward_authorization.sql"}) || len(status.Pending) != 0 {
 		t.Fatalf("schema status = %+v, %v", status, err)
 	}
 	workspace, user, team, key := ledgerFixture(t, st)

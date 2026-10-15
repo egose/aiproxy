@@ -15,7 +15,18 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
+//go:embed forward_authorization.sql
+var forwardAuthorizationSQL string
+
 const schemaVersion = "schema.sql"
+
+var migrations = []struct {
+	name string
+	sql  string
+}{
+	{schemaVersion, schemaSQL},
+	{"forward_authorization.sql", forwardAuthorizationSQL},
+}
 
 type Store struct {
 	DB *bun.DB
@@ -80,10 +91,15 @@ func migrationStatus(ctx context.Context, db *bun.DB) (MigrationStatus, error) {
 	if err != nil {
 		return MigrationStatus{}, err
 	}
-	if applied[schemaVersion] {
-		return MigrationStatus{Applied: []string{schemaVersion}}, nil
+	var status MigrationStatus
+	for _, migration := range migrations {
+		if applied[migration.name] {
+			status.Applied = append(status.Applied, migration.name)
+		} else {
+			status.Pending = append(status.Pending, migration.name)
+		}
 	}
-	return MigrationStatus{Pending: []string{schemaVersion}}, nil
+	return status, nil
 }
 
 func (s *Store) MigrateUp(ctx context.Context) ([]string, error) {
@@ -102,16 +118,25 @@ func migrateUp(ctx context.Context, db *bun.DB) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, schemaSQL); err != nil {
-		_ = tx.Rollback()
-		return nil, fmt.Errorf("migration %s: %w", schemaVersion, err)
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (name) VALUES (?) ON CONFLICT DO NOTHING`, schemaVersion); err != nil {
-		_ = tx.Rollback()
-		return nil, err
+	for _, migration := range migrations {
+		pending := false
+		for _, name := range st.Pending {
+			pending = pending || name == migration.name
+		}
+		if !pending {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, migration.sql); err != nil {
+			_ = tx.Rollback()
+			return nil, fmt.Errorf("migration %s: %w", migration.name, err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (name) VALUES (?) ON CONFLICT DO NOTHING`, migration.name); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return []string{schemaVersion}, nil
+	return st.Pending, nil
 }

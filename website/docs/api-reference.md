@@ -268,12 +268,20 @@ protection and preserves models. Alias POST/PUT likewise save metadata and targe
 in one transaction, preserving omitted update fields.
 
 Provider PUT supports explicit `true`/`false` for `enabled` and
-`forward_user_agent`, `[]` to clear local `forward_headers`, and `""` to clear
+`forward_user_agent` and `forward_authorization`, `[]` to clear local `forward_headers`, and `""` to clear
 `display_name`, `base_url`, `upstream_header_timeout`, `user_agent` or `extends`,
 subject to normal validation. Clearing an override restores applicable defaults;
 it does not disable root-level forwarding. Omit untouched `api_key`, `api_key_ref`
 and `credential_ref` fields to retain them. Supplied reference objects replace
 their path and key/name together; an empty path selects the default secrets path.
+
+`forward_authorization` is a provider-only opt-in for supported bearer-header
+upstreams, independent of inherited defaults. It cannot coexist with stored
+credentials. To switch an existing keyed provider, explicitly send
+`"api_key": ""` and `"api_key_ref": {"path": "", "key": ""}` along with
+`"forward_authorization": true`. Omitting the flag preserves its current value.
+See [client authorization forwarding](configuration.md#forwarding-client-authorization)
+for supported types and credential-exposure warnings.
 
 Within an existing `healthcheck`, omitted scalar fields are preserved and
 `send_authorization: false` disables probe authorization. Empty `method`,

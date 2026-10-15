@@ -48,6 +48,7 @@ type adminProviderView struct {
 	UserAgent               string                `json:"user_agent,omitempty"`
 	ForwardUserAgent        bool                  `json:"forward_user_agent"`
 	ForwardHeaders          []string              `json:"forward_headers,omitempty"`
+	ForwardAuthorization    bool                  `json:"forward_authorization"`
 	Extends                 string                `json:"extends,omitempty"`
 	APIKeyRefPath           string                `json:"api_key_ref_path,omitempty"`
 	APIKeyRefKey            string                `json:"api_key_ref_key,omitempty"`
@@ -340,6 +341,7 @@ type adminProviderUpsert struct {
 	UserAgent             *string                   `json:"user_agent"`
 	ForwardUserAgent      *bool                     `json:"forward_user_agent"`
 	ForwardHeaders        []string                  `json:"forward_headers"`
+	ForwardAuthorization  *bool                     `json:"forward_authorization"`
 	APIKey                *string                   `json:"api_key"`
 	APIKeyRef             *adminAPIKeyRefUpsert     `json:"api_key_ref"`
 	CredentialRef         *adminCredentialRefUpsert `json:"credential_ref"`
@@ -388,6 +390,8 @@ func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r 
 			}
 			mv.UserAgent = p.UserAgent
 			mv.ForwardUserAgent = p.ForwardUserAgent
+			mv.ForwardAuthorization = p.ForwardAuthorization
+			mv.HasCredential = p.APIKey != "" || p.CopilotToken != ""
 			mv.ForwardHeaders = append([]string(nil), p.ForwardHeaders...)
 			if p.Healthcheck != nil {
 				mv.Healthcheck = &adminHealthcheckView{
@@ -427,8 +431,9 @@ func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r 
 			Name: p.Name, Type: p.Type, DisplayName: p.DisplayName, BaseURL: p.BaseURL,
 			UpstreamHeaderTimeout: formatTimeoutMs(p.UpstreamTimeoutMs),
 			UserAgent:             p.UserAgent, ForwardUserAgent: p.ForwardUserAgent,
-			ForwardHeaders: append([]string(nil), p.ForwardHeaders...),
-			Extends:        p.Extends, APIKeyRefPath: p.APIKeyRefPath, APIKeyRefKey: p.APIKeyRefKey,
+			ForwardHeaders:       append([]string(nil), p.ForwardHeaders...),
+			ForwardAuthorization: p.ForwardAuthorization,
+			Extends:              p.Extends, APIKeyRefPath: p.APIKeyRefPath, APIKeyRefKey: p.APIKeyRefKey,
 			CopilotCredentialPath: p.CopilotCredentialPath, CopilotCredentialName: p.CopilotCredentialName,
 			CopilotCredentialSource: copilotCredentialSource(p.Type, p.CopilotCredentialEncrypted, p.CopilotCredentialPath, p.CopilotCredentialName),
 			UpdatedAt:               p.UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -800,6 +805,9 @@ func (h *Handler) applyProviderUpsert(name string, row *store.DBProvider, req ad
 	}
 	if req.ForwardUserAgent != nil {
 		row.ForwardUserAgent = *req.ForwardUserAgent
+	}
+	if req.ForwardAuthorization != nil {
+		row.ForwardAuthorization = *req.ForwardAuthorization
 	}
 	if req.ForwardHeaders != nil {
 		row.ForwardHeaders = append([]string{}, req.ForwardHeaders...)

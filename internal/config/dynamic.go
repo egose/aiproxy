@@ -226,6 +226,9 @@ func BuildDynamicPricing(providerName, modelName string, rates map[string]float6
 }
 
 func validateDynamicCredential(p Provider) error {
+	if err := validateProviderForwardAuthorization(p); err != nil {
+		return err
+	}
 	if p.Type == ProviderTypeGitHubCopilot {
 		if p.APIKey != "" || p.APIKeyRef != nil { // pragma: allowlist secret
 			return fmt.Errorf("provider %q: api_key and api_key_ref are not supported by github-copilot; use credential_ref", p.Name)
@@ -250,7 +253,7 @@ func validateDynamicCredential(p Provider) error {
 	if !p.Enabled {
 		return nil
 	}
-	if p.APIKey == "" && p.APIKeyRef == nil && p.Type != ProviderTypeOpenCodeZen { // pragma: allowlist secret
+	if !p.ForwardAuthorization && p.APIKey == "" && p.APIKeyRef == nil && p.Type != ProviderTypeOpenCodeZen { // pragma: allowlist secret
 		return fmt.Errorf("provider %q: enabled providers require a non-empty api_key or api_key_ref (set enabled = false to disable a provider intentionally; opencode-zen providers may omit the credential for keyless upstream access)", p.Name)
 	}
 	return nil
