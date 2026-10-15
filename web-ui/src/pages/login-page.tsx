@@ -32,25 +32,18 @@ export function LoginPage() {
 
   return (
     <div className="mx-auto grid w-full max-w-2xl gap-6 p-6">
-
       <Card>
-
         <CardHeader>
-                    <CardTitle>Sign in</CardTitle>
+          <CardTitle>Sign in</CardTitle>
 
           <CardDescription>
-                        Sign in with your account email and password to manage your workspaces, API keys, and usage.
-
+            Sign in with your account email and password to manage your workspaces, API keys, and usage.
           </CardDescription>
-
         </CardHeader>
 
         <CardContent>
-
           <FormProvider {...form}>
-
             <form className="grid gap-4" onSubmit={form.handleSubmit((values) => loginMutation.mutate(values))}>
-
               <HookFormTextInput<AdminLogin>
                 name="email"
                 label="Email"
@@ -67,39 +60,30 @@ export function LoginPage() {
 
               {loginMutation.error && (
                 <Alert variant="danger">
-                                    <AlertDescription>{errorMessage(loginMutation.error)}</AlertDescription>
-
+                  <AlertDescription>{errorMessage(loginMutation.error)}</AlertDescription>
                 </Alert>
               )}
 
               <div className="flex items-center gap-3">
-
                 <Button variant="primary" type="submit" disabled={loginMutation.isPending}>
-                                    {loginMutation.isPending ? 'Signing in...' : 'Sign in'}
-
+                  {loginMutation.isPending ? 'Signing in...' : 'Sign in'}
                 </Button>
 
                 {registrationEnabled && (
                   <Link className="text-sm underline" to="/register">
-                                        Create account
+                    Create account
                   </Link>
                 )}
-
               </div>
-
             </form>
-
           </FormProvider>
 
           {ssoEnabled && (
             <>
-
               <div className="my-4 flex items-center gap-2 text-xs text-slate-500">
-
                 <span className="h-px flex-1 bg-slate-200" />
-                 or
+                or
                 <span className="h-px flex-1 bg-slate-200" />
-
               </div>
 
               <Button
@@ -109,17 +93,12 @@ export function LoginPage() {
                   window.location.href = '/_internal/admin/oidc/start';
                 }}
               >
-                                Continue with {ssoLabel}
-
+                Continue with {ssoLabel}
               </Button>
-
             </>
           )}
-
         </CardContent>
-
       </Card>
-
     </div>
   );
 }

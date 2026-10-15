@@ -41,23 +41,15 @@ afterEach(() => {
 function page(element: React.JSX.Element) {
   render(
     <StrictMode>
-
       <QueryClientProvider client={client}>
-
         <MemoryRouter initialEntries={['/entry']}>
-
           <Routes>
-
             <Route path="/entry" element={element} />
 
             <Route path="/" element={<p>Signed-in destination</p>} />
-
           </Routes>
-
         </MemoryRouter>
-
       </QueryClientProvider>
-
     </StrictMode>,
   );
 }

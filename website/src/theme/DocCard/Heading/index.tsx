@@ -16,10 +16,9 @@ export default function DocCardHeading({ item, title, icon }: Props): ReactNode 
       )}
       title={title}
     >
-            {icon && <Icon item={item} icon={icon} />}
+      {icon && <Icon item={item} icon={icon} />}
 
       <Text item={item} title={title} />
-
     </Heading>
   );
 }

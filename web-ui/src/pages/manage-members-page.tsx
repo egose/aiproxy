@@ -14,20 +14,16 @@ export function ManageMembersPage() {
   if (workspaces.isLoading) {
     return (
       <div className="p-6 text-sm text-slate-500">
-                <Spinner size="small">Loading members...</Spinner>
-
+        <Spinner size="small">Loading members...</Spinner>
       </div>
     );
   }
   if (!workspace) {
     return (
       <div className="p-6">
-
         <Empty>
-                    <EmptyTitle>No workspace selected</EmptyTitle>
-
+          <EmptyTitle>No workspace selected</EmptyTitle>
         </Empty>
-
       </div>
     );
   }
@@ -42,35 +38,27 @@ export function ManageMembersPage() {
   };
   return (
     <div className="grid w-full gap-6 p-6">
-
       <Card>
-
         <CardHeader className="flex flex-row items-center justify-between gap-2">
-                    <CardTitle>Members</CardTitle>
+          <CardTitle>Members</CardTitle>
 
           {canManage && !isPersonal && (
             <Button variant="primary" type="button" onClick={openInvite}>
-                            Invite
+              Invite
             </Button>
           )}
-
         </CardHeader>
 
         <CardContent>
-
           {isPersonal ? (
             <p className="text-sm text-slate-600">
-                            Personal workspaces are for a single user. Members and invites are not available for personal workspaces.
-
+              Personal workspaces are for a single user. Members and invites are not available for personal workspaces.
             </p>
           ) : (
             <MemberSection workspace={workspace} canManage={canManage} />
           )}
-
         </CardContent>
-
       </Card>
-
     </div>
   );
 }

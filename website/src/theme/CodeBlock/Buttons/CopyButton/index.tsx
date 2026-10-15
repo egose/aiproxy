@@ -77,15 +77,11 @@ export default function CopyButton({ className }: Props): ReactNode {
       className={clsx(className, styles.copyButton, isCopied && styles.copyButtonCopied)}
       onClick={copyCode}
     >
-
       <span className={styles.copyButtonIcons} aria-hidden="true">
-
         <IconCopy className={styles.copyButtonIcon} />
 
         <IconSuccess className={styles.copyButtonSuccessIcon} />
-
       </span>
-
     </Button>
   );
 }

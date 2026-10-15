@@ -42,20 +42,15 @@ export function BlocksPage() {
 
   return (
     <div className="grid w-full gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-
       <Card>
-
         <CardHeader>
-                    <CardTitle>Guardrail blocks</CardTitle>
-
+          <CardTitle>Guardrail blocks</CardTitle>
         </CardHeader>
 
         <CardContent className="grid gap-2 pt-0 text-sm">
-
           {list.error && (
             <Alert variant="danger">
-                            <AlertDescription>{errorMessage(list.error)}</AlertDescription>
-
+              <AlertDescription>{errorMessage(list.error)}</AlertDescription>
             </Alert>
           )}
 
@@ -74,41 +69,32 @@ export function BlocksPage() {
                 setResult(null);
               }}
             >
-                            {b.block_id} · {b.finding_count} finding(s)
+              {b.block_id} · {b.finding_count} finding(s)
             </Button>
           ))}
-
         </CardContent>
-
       </Card>
 
       <Card>
-
         <CardHeader>
-                    <CardTitle>Block decision</CardTitle>
-
+          <CardTitle>Block decision</CardTitle>
         </CardHeader>
 
         <CardContent className="grid gap-4 pt-0 text-sm">
-
           {!detail.data && <span>Select a block. Opening it consumes the quarantine capture server-side.</span>}
 
           {detail.error && (
             <Alert variant="danger">
-                            <AlertDescription>{errorMessage(detail.error)}</AlertDescription>
-
+              <AlertDescription>{errorMessage(detail.error)}</AlertDescription>
             </Alert>
           )}
 
           {detail.data && !detail.error && !list.error && (
             <>
-
               <div className="font-mono text-xs">{JSON.stringify(detail.data, null, 2).slice(0, 4000)}</div>
 
               <FormProvider {...form}>
-
                 <form className="grid gap-2" onSubmit={form.handleSubmit((values) => decision.mutate(values.action))}>
-
                   <HookFormSelect<DecisionForm>
                     name="action"
                     label="Action"
@@ -120,28 +106,20 @@ export function BlocksPage() {
                   />
 
                   <Button variant="primary" type="submit" disabled={decision.isPending}>
-                                        {decision.isPending ? 'Recording...' : 'Record decision'}
-
+                    {decision.isPending ? 'Recording...' : 'Record decision'}
                   </Button>
-
                 </form>
-
               </FormProvider>
-
             </>
           )}
 
           {result && (
             <Alert variant="info">
-                            <AlertDescription>{result}</AlertDescription>
-
+              <AlertDescription>{result}</AlertDescription>
             </Alert>
           )}
-
         </CardContent>
-
       </Card>
-
     </div>
   );
 }

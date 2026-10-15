@@ -19,20 +19,12 @@ const queryClient = new QueryClient({
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-
     <QueryClientProvider client={queryClient}>
-
       <TooltipProvider>
-
         <BrowserRouter>
-
           <App />
-
         </BrowserRouter>
-
       </TooltipProvider>
-
     </QueryClientProvider>
-
   </StrictMode>,
 );

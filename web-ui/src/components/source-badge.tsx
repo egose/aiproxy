@@ -8,8 +8,7 @@ export function SourceBadge({ source }: { source: string }) {
       size="sm"
       title={database ? 'Stored in the database, managed here' : 'Defined in the static config file, read-only here'}
     >
-            {database ? 'database' : 'config'}
-
+      {database ? 'database' : 'config'}
     </Badge>
   );
 }

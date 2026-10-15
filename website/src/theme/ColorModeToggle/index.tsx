@@ -68,13 +68,11 @@ function getColorModeAriaLabel(colorMode: ColorMode | null) {
 function CurrentColorModeIcon(): ReactNode {
   return (
     <>
-
       <IconLightMode aria-hidden className={clsx(styles.toggleIcon, styles.lightToggleIcon)} />
 
       <IconDarkMode aria-hidden className={clsx(styles.toggleIcon, styles.darkToggleIcon)} />
 
       <IconSystemColorMode aria-hidden className={clsx(styles.toggleIcon, styles.systemToggleIcon)} />
-
     </>
   );
 }
@@ -83,7 +81,6 @@ function ColorModeToggle({ className, buttonClassName, respectPrefersColorScheme
   const isBrowser = useIsBrowser();
   return (
     <div className={clsx('h-10 w-10', className)}>
-
       <button
         className={clsx(
           'clean-btn',
@@ -97,11 +94,8 @@ function ColorModeToggle({ className, buttonClassName, respectPrefersColorScheme
         title={getColorModeLabel(value)}
         aria-label={getColorModeAriaLabel(value)}
       >
-
         <CurrentColorModeIcon />
-
       </button>
-
     </div>
   );
 }

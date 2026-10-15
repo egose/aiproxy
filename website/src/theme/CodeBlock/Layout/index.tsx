@@ -11,22 +11,17 @@ export default function CodeBlockLayout({ className }: Props): ReactNode {
   const { metadata } = useCodeBlockContext();
   return (
     <Container as="div" className={clsx(className, metadata.className)}>
-
       {metadata.title && (
         <div className="border-b border-white/10 bg-slate-900/90 px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
-                    <Title>{metadata.title}</Title>
-
+          <Title>{metadata.title}</Title>
         </div>
       )}
 
       <div className="relative rounded-[inherit]">
-
         <Content />
 
         <Buttons />
-
       </div>
-
     </Container>
   );
 }

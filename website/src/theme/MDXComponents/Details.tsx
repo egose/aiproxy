@@ -18,25 +18,19 @@ export default function MDXDetails(props: Props): ReactNode {
         props.className,
       )}
     >
-
       <summary className="cursor-pointer list-none px-5 py-4 text-sm font-semibold text-slate-900 transition marker:hidden hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-900/80">
-
         <span className="flex items-center justify-between gap-4">
-                    <span>{summaryChildren}</span>
+          <span>{summaryChildren}</span>
 
           <span className="text-xs uppercase tracking-[0.18em] text-blue-700 transition group-open:rotate-180 dark:text-blue-300">
-                        v
+            v
           </span>
-
         </span>
-
       </summary>
 
       <div className="border-t border-slate-200/80 px-5 py-5 text-sm leading-7 text-slate-600 dark:border-slate-800 dark:text-slate-300">
-                {children}
-
+        {children}
       </div>
-
     </details>
   );
 }

@@ -62,13 +62,9 @@ afterEach(() => {
 function renderPage(path: string) {
   render(
     <QueryClientProvider client={queryClient}>
-
       <MemoryRouter initialEntries={[path]}>
-
         <App />
-
       </MemoryRouter>
-
     </QueryClientProvider>,
   );
 }

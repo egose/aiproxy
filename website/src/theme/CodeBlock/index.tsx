@@ -28,8 +28,7 @@ export default function CodeBlock({ children: rawChildren, ...props }: Props): R
   const CodeBlockComp = typeof children === 'string' ? StringContent : ElementContent;
   return (
     <CodeBlockComp key={String(isBrowser)} {...props}>
-            {children as string}
-
+      {children as string}
     </CodeBlockComp>
   );
 }

@@ -29,11 +29,9 @@ export function KeyQuotaLine({
   if (!hasUsage && (!quota || (quota.budget_micros <= 0 && tpm.length === 0))) return null;
   return (
     <>
-
       {hasUsage && (
         <span className="font-mono text-xs text-slate-500">
-                    {usage.requests} req · {usage.tokens} tok · {formatMicros(usage.spend_micros)}
-
+          {usage.requests} req · {usage.tokens} tok · {formatMicros(usage.spend_micros)}
         </span>
       )}
 
@@ -42,8 +40,7 @@ export function KeyQuotaLine({
           className="font-mono text-xs text-slate-500"
           title={`Budget spend ${formatMicros(quota.spend_micros)} of ${formatMicros(quota.budget_micros)}`}
         >
-                    budget {formatMicros(quota.spend_micros)} / {formatMicros(quota.budget_micros)}
-
+          budget {formatMicros(quota.spend_micros)} / {formatMicros(quota.budget_micros)}
         </span>
       )}
 
@@ -55,12 +52,11 @@ export function KeyQuotaLine({
             className="font-mono text-xs text-slate-500"
             title={`${t.model}: ${t.used_tokens} tokens in the last minute${limit > 0 ? `, limit ${limit}` : ''}`}
           >
-                        {t.model}: {t.used_tokens}
-                        {limit > 0 ? `/${limit}` : ''} tpm
+            {t.model}: {t.used_tokens}
+            {limit > 0 ? `/${limit}` : ''} tpm
           </span>
         );
       })}
-
     </>
   );
 }
@@ -169,16 +165,14 @@ export function QuotaEditor({
   if (quota.isLoading) {
     return (
       <div className="text-sm text-slate-500">
-                <Spinner size="small">Loading quotas...</Spinner>
-
+        <Spinner size="small">Loading quotas...</Spinner>
       </div>
     );
   }
   if (quota.error) {
     return (
       <Alert variant="danger">
-                <AlertDescription>{errorMessage(quota.error)}</AlertDescription>
-
+        <AlertDescription>{errorMessage(quota.error)}</AlertDescription>
       </Alert>
     );
   }
@@ -189,16 +183,14 @@ export function QuotaEditor({
 
   return (
     <div className="grid gap-3 rounded-md border p-3">
-
       {error && (
         <Alert variant="danger">
-                    <AlertDescription>{error}</AlertDescription>
-
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
       <div className="grid max-w-xs gap-1">
-                <Label>Budget (USD, empty = unlimited)</Label>
+        <Label>Budget (USD, empty = unlimited)</Label>
 
         <Input
           value={budget}
@@ -209,21 +201,18 @@ export function QuotaEditor({
         />
 
         <span className="text-xs text-slate-500">
-                    Spent {formatMicros(spent)}
-                    {budgetMicros > 0 ? ` of ${formatMicros(budgetMicros)}` : ''}. Requests over budget are blocked.
-
+          Spent {formatMicros(spent)}
+          {budgetMicros > 0 ? ` of ${formatMicros(budgetMicros)}` : ''}. Requests over budget are blocked.
         </span>
-
       </div>
 
       <div className="grid gap-2">
-                <span className="text-sm font-medium">Tokens per minute by model (empty = unlimited)</span>
+        <span className="text-sm font-medium">Tokens per minute by model (empty = unlimited)</span>
 
         {rows.map((row, i) => (
           <div key={i} className="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2">
-
             <div className="grid gap-1">
-                            <Label>Model</Label>
+              <Label>Model</Label>
 
               <Input
                 value={row.model}
@@ -232,11 +221,10 @@ export function QuotaEditor({
                 placeholder="alias/fast"
                 className="font-mono"
               />
-
             </div>
 
             <div className="grid gap-1">
-                            <Label>Admin ceiling</Label>
+              <Label>Admin ceiling</Label>
 
               <Input
                 value={row.ceiling}
@@ -246,11 +234,10 @@ export function QuotaEditor({
                 inputMode="numeric"
                 className="font-mono"
               />
-
             </div>
 
             <div className="grid gap-1">
-                            <Label>Limit</Label>
+              <Label>Limit</Label>
 
               <Input
                 value={row.effective}
@@ -260,11 +247,9 @@ export function QuotaEditor({
                 inputMode="numeric"
                 className="font-mono"
               />
-
             </div>
 
             <div className="pb-1 text-xs text-slate-500">
-
               {usedByModel.has(row.model.trim()) && row.model.trim() !== '' ? (
                 `${usedByModel.get(row.model.trim())} used`
               ) : row.isNew ? (
@@ -274,36 +259,30 @@ export function QuotaEditor({
                   disabled={saveMutation.isPending}
                   onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}
                 >
-                                    Remove
+                  Remove
                 </Button>
               ) : (
                 ''
               )}
-
             </div>
-
           </div>
         ))}
 
         {(canEditPolicy || canEditEffective) && (
           <div>
-
             <Button
               appearance="outline"
               type="button"
               disabled={saveMutation.isPending}
               onClick={() => setRows((prev) => [...prev, { model: '', ceiling: '', effective: '', isNew: true }])}
             >
-                            Add model
+              Add model
             </Button>
-
           </div>
         )}
-
       </div>
 
       <div className="flex gap-2">
-
         {(canEditPolicy || canEditEffective) && (
           <Button
             variant="primary"
@@ -311,20 +290,16 @@ export function QuotaEditor({
             disabled={saveMutation.isPending}
             onClick={() => saveMutation.mutate()}
           >
-                        {saveMutation.isPending ? 'Saving...' : 'Save quotas'}
-
+            {saveMutation.isPending ? 'Saving...' : 'Save quotas'}
           </Button>
         )}
 
         {canEditPolicy && (
           <Button appearance="outline" type="button" disabled={resetMutation.isPending} onClick={askReset}>
-                        {resetMutation.isPending ? 'Resetting...' : 'Reset spend'}
-
+            {resetMutation.isPending ? 'Resetting...' : 'Reset spend'}
           </Button>
         )}
-
       </div>
-
     </div>
   );
 }

@@ -63,76 +63,55 @@ export function DataTable<TData extends RowData>({
 
   return (
     <div className="grid gap-2">
-
       <Input placeholder={filterPlaceholder} value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} />
 
       <div className="overflow-x-auto">
-
         <Table>
-
           <TableHeader>
-
             {table.getHeaderGroups().map((hg) => (
               <TableRow key={hg.id}>
-
                 {hg.headers.map((h) => (
                   <TableHead
                     key={h.id}
                     className={h.column.getCanSort() ? 'cursor-pointer select-none' : ''}
                     onClick={h.column.getCanSort() ? h.column.getToggleSortingHandler() : undefined}
                   >
-                                        {flexRender(h.column.columnDef.header, h.getContext())}
+                    {flexRender(h.column.columnDef.header, h.getContext())}
 
                     {h.column.getIsSorted() === 'asc' ? ' ▲' : h.column.getIsSorted() === 'desc' ? ' ▼' : ''}
-
                   </TableHead>
                 ))}
-
               </TableRow>
             ))}
-
           </TableHeader>
 
           <TableBody>
-
             {rows.map((row) => (
               <Fragment key={row.id}>
-
                 <TableRow>
-
                   {row.getAllCells().map((cell) => (
                     <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
                   ))}
-
                 </TableRow>
 
                 {expandedIds?.has(row.id) && renderExpanded ? (
                   <TableRow>
-                                        <TableCell colSpan={colCount}>{renderExpanded(row.original)}</TableCell>
-
+                    <TableCell colSpan={colCount}>{renderExpanded(row.original)}</TableCell>
                   </TableRow>
                 ) : null}
-
               </Fragment>
             ))}
 
             {rows.length === 0 && (
               <TableRow>
-
                 <TableCell colSpan={colCount} className="text-sm text-slate-500">
-                                    {emptyText}
-
+                  {emptyText}
                 </TableCell>
-
               </TableRow>
             )}
-
           </TableBody>
-
         </Table>
-
       </div>
-
     </div>
   );
 }

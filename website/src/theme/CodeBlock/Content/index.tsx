@@ -46,12 +46,9 @@ export default function CodeBlockContent({ className: classNameProp }: Props): R
   const { code, language, lineNumbersStart, lineClassNames } = metadata;
   return (
     <Highlight theme={prismTheme} code={code} language={language}>
-
       {({ className, style, tokens: lines, getLineProps, getTokenProps }) => (
         <Pre ref={wordWrap.codeBlockRef} className={clsx(classNameProp, className)} style={style}>
-
           <Code>
-
             {lines.map((line, i) => (
               <Line
                 key={i}
@@ -62,12 +59,9 @@ export default function CodeBlockContent({ className: classNameProp }: Props): R
                 showLineNumbers={lineNumbersStart !== undefined}
               />
             ))}
-
           </Code>
-
         </Pre>
       )}
-
     </Highlight>
   );
 }

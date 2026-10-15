@@ -12,26 +12,21 @@ export function ManageWorkspacePage() {
   if (workspaces.isLoading) {
     return (
       <div className="p-6 text-sm text-slate-500">
-                <Spinner size="small">Loading workspace...</Spinner>
-
+        <Spinner size="small">Loading workspace...</Spinner>
       </div>
     );
   }
   if (!workspace) {
     return (
       <div className="p-6">
-
         <Empty>
-                    <EmptyTitle>No workspace selected</EmptyTitle>
-
+          <EmptyTitle>No workspace selected</EmptyTitle>
         </Empty>
-
       </div>
     );
   }
   return (
     <div className="grid w-full gap-6 p-6">
-
       <WorkspaceDetail
         key={workspace.id}
         workspace={workspace}
@@ -41,7 +36,6 @@ export function ManageWorkspacePage() {
           queryClient.invalidateQueries({ queryKey: ['admin', 'workspaces'] });
         }}
       />
-
     </div>
   );
 }

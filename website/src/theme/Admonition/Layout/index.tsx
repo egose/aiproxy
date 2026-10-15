@@ -39,8 +39,7 @@ function AdmonitionContainer({
       )}
       id={id}
     >
-            {children}
-
+      {children}
     </div>
   );
 }
@@ -48,18 +47,15 @@ function AdmonitionContainer({
 function AdmonitionHeading({ type, icon, title }: Pick<Props, 'type' | 'icon' | 'title'>) {
   return (
     <div className="flex items-center gap-3 border-b border-black/5 px-5 py-4 text-sm font-semibold uppercase tracking-[0.16em] text-slate-900 dark:border-white/10 dark:text-slate-50">
-
       <span
         className={clsx(
           'inline-flex h-9 w-9 items-center justify-center rounded-full border border-black/5 bg-white/70 dark:border-white/10 dark:bg-white/5',
           iconToneClassNames[type] ?? iconToneClassNames.note,
         )}
       >
-                {icon}
-
+        {icon}
       </span>
-            {title}
-
+      {title}
     </div>
   );
 }
@@ -67,8 +63,7 @@ function AdmonitionHeading({ type, icon, title }: Pick<Props, 'type' | 'icon' | 
 function AdmonitionContent({ children }: Pick<Props, 'children'>) {
   return children ? (
     <div className="px-5 py-5 text-sm leading-7 text-slate-700 dark:text-slate-300 [&>*:last-child]:mb-0">
-            {children}
-
+      {children}
     </div>
   ) : null;
 }
@@ -77,9 +72,8 @@ export default function AdmonitionLayout(props: Props): ReactNode {
   const { type, icon, title, children, className, id } = props;
   return (
     <AdmonitionContainer type={type} className={className} id={id}>
-            {title || icon ? <AdmonitionHeading type={type} title={title} icon={icon} /> : null}
-            <AdmonitionContent>{children}</AdmonitionContent>
-
+      {title || icon ? <AdmonitionHeading type={type} title={title} icon={icon} /> : null}
+      <AdmonitionContent>{children}</AdmonitionContent>
     </AdmonitionContainer>
   );
 }

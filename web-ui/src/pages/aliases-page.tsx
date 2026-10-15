@@ -36,26 +36,20 @@ function SnapshotAliases() {
   const rows = snapshot.data?.aliases ?? [];
   return (
     <Card>
-
       <CardHeader>
-                <CardTitle>Aliases ({rows.length})</CardTitle>
-
+        <CardTitle>Aliases ({rows.length})</CardTitle>
       </CardHeader>
 
       <CardContent className="grid gap-2">
-
         {rows.map((alias) => (
           <div key={alias.name} className="text-sm">
-                        <span className="font-mono">alias/{alias.name}</span>
-                        <span> ({alias.algorithm}) → </span>
+            <span className="font-mono">alias/{alias.name}</span>
+            <span> ({alias.algorithm}) → </span>
 
             <span className="font-mono">{alias.targets.map((t) => `${t.provider}/${t.model}`).join(', ')}</span>
-
           </div>
         ))}
-
       </CardContent>
-
     </Card>
   );
 }
@@ -213,7 +207,6 @@ function buildAliasBody(v: AliasFormValues): Record<string, unknown> {
 function AliasFields({ lockName }: { lockName: boolean }) {
   return (
     <>
-
       <HookFormTextInput<AliasFormValues>
         name="name"
         label="Name (lowercase, no spaces)"
@@ -247,21 +240,19 @@ function AliasFields({ lockName }: { lockName: boolean }) {
       />
 
       <p className="text-sm text-slate-500">
-                The first slash separates the provider from the full model name: gateway/z-ai/glm-5.2 targets model
-                z-ai/glm-5.2. Blank lines and whitespace around the provider and full model are ignored. Each name segment must
-                start with a lowercase letter or digit; dots, underscores and hyphens are also allowed after the first
-                character. Empty segments and spaces inside names are invalid. The same naming rules apply to shorthand;
-                provider name alias is reserved.
+        The first slash separates the provider from the full model name: gateway/z-ai/glm-5.2 targets model
+        z-ai/glm-5.2. Blank lines and whitespace around the provider and full model are ignored. Each name segment must
+        start with a lowercase letter or digit; dots, underscores and hyphens are also allowed after the first
+        character. Empty segments and spaces inside names are invalid. The same naming rules apply to shorthand;
+        provider name alias is reserved.
       </p>
 
       <div className="grid gap-2">
-
         <span className="text-sm font-medium">
-                    ...or shorthand: same model across providers (cannot be combined with targets)
+          ...or shorthand: same model across providers (cannot be combined with targets)
         </span>
 
         <div className="grid grid-cols-2 gap-2">
-
           <HookFormTextInput<AliasFormValues>
             name="shorthandProviders"
             label="Providers"
@@ -269,9 +260,7 @@ function AliasFields({ lockName }: { lockName: boolean }) {
           />
 
           <HookFormTextInput<AliasFormValues> name="shorthandModel" label="Model" placeholder="model" />
-
         </div>
-
       </div>
 
       <Separator />
@@ -299,7 +288,6 @@ function AliasFields({ lockName }: { lockName: boolean }) {
         label="Match messages (one per line, optional)"
         rows={3}
       />
-
     </>
   );
 }
@@ -324,54 +312,42 @@ function AliasForm({
 
   return (
     <FormProvider {...form}>
-
       <form className="grid gap-4" onSubmit={form.handleSubmit((values) => submitMutation.mutate(values))}>
-
         {submitMutation.error && (
           <Alert variant="danger">
-                        <AlertDescription>{errorMessage(submitMutation.error)}</AlertDescription>
-
+            <AlertDescription>{errorMessage(submitMutation.error)}</AlertDescription>
           </Alert>
         )}
 
         <AliasFields lockName={lockName} />
 
         <div className="flex gap-2">
-
           <Button variant="primary" type="submit" disabled={submitMutation.isPending}>
-                        {submitMutation.isPending ? 'Saving...' : submitLabel}
-
+            {submitMutation.isPending ? 'Saving...' : submitLabel}
           </Button>
 
           {onCancel && (
             <Button appearance="outline" type="button" disabled={submitMutation.isPending} onClick={onCancel}>
-                            Cancel
+              Cancel
             </Button>
           )}
-
         </div>
-
       </form>
-
     </FormProvider>
   );
 }
 
 const CreateAliasDialog = createTypedDialog<object, boolean>(({ open, onClose }) => (
   <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
-
     <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-auto sm:max-w-2xl">
-
       <DialogHeader>
-                <DialogTitle>Create alias</DialogTitle>
+        <DialogTitle>Create alias</DialogTitle>
 
         <DialogDescription>
-                    Aliases are virtual models: clients call <span className="font-mono">alias/&lt;name&gt;</span>
-           and the proxy
-                    routes each request to one of the targets. The new alias belongs to the currently selected workspace.
-
+          Aliases are virtual models: clients call <span className="font-mono">alias/&lt;name&gt;</span>
+          and the proxy routes each request to one of the targets. The new alias belongs to the currently selected
+          workspace.
         </DialogDescription>
-
       </DialogHeader>
 
       <AliasForm
@@ -384,21 +360,16 @@ const CreateAliasDialog = createTypedDialog<object, boolean>(({ open, onClose })
         }}
         onCancel={() => onClose(false)}
       />
-
     </DialogContent>
-
   </Dialog>
 ));
 
 const EditAliasDialog = createTypedDialog<{ alias: AdminAlias }, boolean>(({ open, args, onClose }) => (
   <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
-
     <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-auto sm:max-w-2xl">
-
       <DialogHeader>
-                <DialogTitle>Edit alias alias/{args.alias.name}</DialogTitle>
-                <DialogDescription>Saving applies immediately.</DialogDescription>
-
+        <DialogTitle>Edit alias alias/{args.alias.name}</DialogTitle>
+        <DialogDescription>Saving applies immediately.</DialogDescription>
       </DialogHeader>
 
       <AliasForm
@@ -412,9 +383,7 @@ const EditAliasDialog = createTypedDialog<{ alias: AdminAlias }, boolean>(({ ope
         }}
         onCancel={() => onClose(false)}
       />
-
     </DialogContent>
-
   </Dialog>
 ));
 
@@ -503,8 +472,7 @@ function ManagedAliases() {
         accessorFn: (row) => row.targets.map((t) => `${t.provider}/${t.model}`).join(', '),
         cell: ({ row }) => (
           <span className="font-mono text-xs text-slate-500">
-                        {row.original.targets.map((t) => `${t.provider}/${t.model}`).join(', ')}
-
+            {row.original.targets.map((t) => `${t.provider}/${t.model}`).join(', ')}
           </span>
         ),
       },
@@ -519,7 +487,7 @@ function ManagedAliases() {
             <ActionMenu
               trigger={
                 <Button variant="secondary" appearance="outline-filled" size="sm" aria-label={`Actions for ${a.name}`}>
-                                    Actions
+                  Actions
                 </Button>
               }
               items={[
@@ -529,7 +497,7 @@ function ManagedAliases() {
             />
           ) : (
             <span className="text-xs text-slate-400" title="Defined in the static config file">
-                            read-only
+              read-only
             </span>
           );
         },
@@ -541,27 +509,22 @@ function ManagedAliases() {
 
   return (
     <>
-
       {error && (
         <Alert variant="danger">
-                    <AlertDescription>{error}</AlertDescription>
-
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
       <Card>
-
         <CardHeader className="flex flex-row items-center justify-between gap-2">
-                    <CardTitle>Aliases ({rows.length})</CardTitle>
+          <CardTitle>Aliases ({rows.length})</CardTitle>
 
           <Button variant="primary" type="button" onClick={onCreate}>
-                        Create alias
+            Create alias
           </Button>
-
         </CardHeader>
 
         <CardContent>
-
           <DataTable
             columns={columns}
             data={rows}
@@ -572,15 +535,11 @@ function ManagedAliases() {
 
           {aliases.isLoading && (
             <div className="text-sm text-slate-500">
-                            <Spinner size="small">Loading aliases...</Spinner>
-
+              <Spinner size="small">Loading aliases...</Spinner>
             </div>
           )}
-
         </CardContent>
-
       </Card>
-
     </>
   );
 }
@@ -593,24 +552,18 @@ export function AliasesPage() {
 
   return (
     <div className="grid w-full gap-6 p-6">
-
       {multi && !signedIn && (
         <Alert>
-
           <AlertDescription>
-                        Multi-tenancy is enabled.
-
+            Multi-tenancy is enabled.
             <Link className="underline" to="/login">
-                            Sign in
+              Sign in
             </Link>
-
-                        to add or delete database aliases.
+            to add or delete database aliases.
           </AlertDescription>
-
         </Alert>
       )}
-            {multi && signedIn ? <ManagedAliases /> : <SnapshotAliases />}
-
+      {multi && signedIn ? <ManagedAliases /> : <SnapshotAliases />}
     </div>
   );
 }

@@ -81,56 +81,44 @@ export function AdminOidcPage() {
 
   return (
     <div className="grid w-full gap-6 p-6">
-
       {saveMutation.error && (
         <Alert variant="danger">
-                    <AlertDescription>{errorMessage(saveMutation.error)}</AlertDescription>
-
+          <AlertDescription>{errorMessage(saveMutation.error)}</AlertDescription>
         </Alert>
       )}
 
       {saveMutation.isSuccess && (
         <Alert>
-
           <AlertDescription>Saved. Enabling verifies OIDC discovery before accepting the change.</AlertDescription>
-
         </Alert>
       )}
 
       <Card>
-
         <CardHeader>
-                    <CardTitle>Single sign-on (OIDC)</CardTitle>
+          <CardTitle>Single sign-on (OIDC)</CardTitle>
 
           <CardDescription>
-                        Optional. When disabled, username and password sign-in keeps working on its own. When enabled, the login
-                        page also offers SSO; password sign-in stays available as a fallback. First-time SSO users are provisioned
-                        automatically; the admin role syncs from the claim below when configured.
+            Optional. When disabled, username and password sign-in keeps working on its own. When enabled, the login
+            page also offers SSO; password sign-in stays available as a fallback. First-time SSO users are provisioned
+            automatically; the admin role syncs from the claim below when configured.
           </CardDescription>
-
         </CardHeader>
 
         <CardContent className="grid max-w-2xl gap-4">
-
           <FormProvider {...form}>
-
             <form
               className="grid max-w-2xl gap-4"
               onSubmit={form.handleSubmit((values) => saveMutation.mutate(values))}
             >
-
               <div className="flex items-center gap-2 text-sm">
-
                 <HookFormCheckbox<OidcForm> name="enabled" label="Enable single sign-on" />
 
                 {data && (
                   <span className="text-xs text-slate-500">
-                                        {data.effective_enabled ? 'active' : 'inactive'}
-                                        {data.has_client_secret ? ' · secret set' : ' · no secret stored'}
-
+                    {data.effective_enabled ? 'active' : 'inactive'}
+                    {data.has_client_secret ? ' · secret set' : ' · no secret stored'}
                   </span>
                 )}
-
               </div>
 
               <HookFormTextInput<OidcForm>
@@ -166,29 +154,19 @@ export function AdminOidcPage() {
               <HookFormTextInput<OidcForm> name="display_name" label="Button label" />
 
               <div className="text-xs text-slate-500">
-                                Register this redirect URI on the OIDC client:
-
+                Register this redirect URI on the OIDC client:
                 <span className="font-mono">http(s)://&lt;server-host&gt;/_internal/admin/oidc/callback</span>
-
               </div>
 
               <div>
-
                 <Button variant="primary" type="submit" disabled={saveMutation.isPending || query.isLoading}>
-                                    {saveMutation.isPending ? 'Saving...' : 'Save OIDC settings'}
-
+                  {saveMutation.isPending ? 'Saving...' : 'Save OIDC settings'}
                 </Button>
-
               </div>
-
             </form>
-
           </FormProvider>
-
         </CardContent>
-
       </Card>
-
     </div>
   );
 }

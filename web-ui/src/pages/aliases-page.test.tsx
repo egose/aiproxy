@@ -75,17 +75,11 @@ function mount(initial?: AdminAlias, savedViews: AdminAlias[] = [], saveError?: 
   };
   render(
     <QueryClientProvider client={client}>
-
       <MemoryRouter>
-
         <DialogManagerProvider>
-
           <AliasesPage />
-
         </DialogManagerProvider>
-
       </MemoryRouter>
-
     </QueryClientProvider>,
   );
 }

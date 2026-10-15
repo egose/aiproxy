@@ -29,9 +29,7 @@ export default function WordWrapButton({ className }: Props): ReactNode {
       aria-label={title}
       title={title}
     >
-
       <IconWordWrap className={styles.wordWrapButtonIcon} aria-hidden="true" />
-
     </Button>
   );
 }

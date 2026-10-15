@@ -7,8 +7,7 @@ export function WorkspaceBadge({ workspaceId, workspaceName }: { workspaceId?: s
   if (!workspaceId) return null;
   return (
     <Badge variant="secondary" size="sm" title={`Workspace: ${workspaceName || workspaceId}`}>
-            {workspaceName || workspaceId.slice(0, 8)}
-
+      {workspaceName || workspaceId.slice(0, 8)}
     </Badge>
   );
 }
@@ -17,20 +16,20 @@ export function KindBadge({ kind, isSystem }: { kind?: string; isSystem?: boolea
   if (isSystem) {
     return (
       <Badge variant="warning" size="sm">
-                System
+        System
       </Badge>
     );
   }
   if (kind === 'personal') {
     return (
       <Badge variant="secondary" size="sm" title="Personal workspace">
-                Personal
+        Personal
       </Badge>
     );
   }
   return (
     <Badge variant="secondary" size="sm" title="Organization workspace">
-            Organization
+      Organization
     </Badge>
   );
 }
@@ -49,20 +48,17 @@ export function WorkspaceSelect({
   if (!workspaces || workspaces.length < 2) return null;
   return (
     <div className="grid gap-2">
-            <Label htmlFor={id}>Workspace</Label>
+      <Label htmlFor={id}>Workspace</Label>
 
       <NativeSelect id={id} value={value} onChange={(e) => onChange(e.target.value)}>
-                <NativeSelectOption value="">Select workspace...</NativeSelectOption>
+        <NativeSelectOption value="">Select workspace...</NativeSelectOption>
 
         {workspaces.map((o) => (
           <NativeSelectOption key={o.id} value={o.id}>
-                        {o.display_name || o.name}
-
+            {o.display_name || o.name}
           </NativeSelectOption>
         ))}
-
       </NativeSelect>
-
     </div>
   );
 }

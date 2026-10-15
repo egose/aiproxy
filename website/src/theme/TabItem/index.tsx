@@ -13,8 +13,7 @@ function TabItemPanel({ children, className, hidden }: { children: ReactNode; cl
       )}
       {...{ hidden }}
     >
-            {children}
-
+      {children}
     </div>
   );
 }
@@ -29,8 +28,7 @@ export default function TabItem({ children, className, value }: Props): ReactNod
 
   return (
     <TabItemPanel className={className} hidden={!isSelected}>
-            {children}
-
+      {children}
     </TabItemPanel>
   );
 }

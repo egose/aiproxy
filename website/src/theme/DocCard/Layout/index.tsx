@@ -28,8 +28,7 @@ function Container({
         className,
       )}
     >
-            {children}
-
+      {children}
     </Link>
   );
 }
@@ -37,20 +36,16 @@ function Container({
 export default function DocCardLayout({ item, className, href, icon, title, description }: Props): ReactNode {
   return (
     <Container href={href} className={className}>
-
       <div className="mb-4 inline-flex w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-800 dark:border-blue-900/70 dark:bg-blue-950/30 dark:text-blue-200">
-                {getKindLabel(item)}
-
+        {getKindLabel(item)}
       </div>
 
       <Heading item={item} icon={icon} title={title} />
-            {description && <Description item={item} description={description} />}
+      {description && <Description item={item} description={description} />}
 
       <div className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 transition group-hover:text-blue-700 dark:text-slate-400 dark:group-hover:text-blue-300">
-                Open page         <span aria-hidden="true">&rarr;</span>
-
+        Open page <span aria-hidden="true">&rarr;</span>
       </div>
-
     </Container>
   );
 }

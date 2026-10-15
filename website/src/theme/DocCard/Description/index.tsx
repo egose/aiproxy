@@ -12,8 +12,7 @@ export default function DocCardDescription({ description }: Props): ReactNode {
       )}
       title={description}
     >
-            {description}
-
+      {description}
     </p>
   );
 }

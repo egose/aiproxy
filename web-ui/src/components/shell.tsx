@@ -32,17 +32,12 @@ import { NewWorkspaceDialog } from './dialogs';
 function ShellHeader({ title, group }: { title: string; group: string }) {
   return (
     <div className="flex min-w-0 items-center gap-3">
-
       <div className="grid min-w-0 gap-0.5">
-
         <span className="truncate text-[0.68rem] font-medium uppercase tracking-[0.18em] text-slate-500">
-                    aiproxy {group}
-
+          aiproxy {group}
         </span>
-                <div className="truncate text-sm font-medium">{title}</div>
-
+        <div className="truncate text-sm font-medium">{title}</div>
       </div>
-
     </div>
   );
 }
@@ -113,8 +108,7 @@ export function Shell({ children }: { children: ReactNode }) {
   if (multi && !signedIn) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
-                <div className="w-full">{children}</div>
-
+        <div className="w-full">{children}</div>
       </div>
     );
   }
@@ -304,14 +298,10 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <TooltipProvider>
-
       <SidebarLayout aslink={Link} data={data}>
-
         <HeaderSlot group={group} title={headerTitle} />
-                {children}
-
+        {children}
       </SidebarLayout>
-
     </TooltipProvider>
   );
 }

@@ -104,17 +104,11 @@ function mount(initial: AdminProvider | undefined, savedViews: AdminProvider[] =
   };
   render(
     <QueryClientProvider client={client}>
-
       <MemoryRouter>
-
         <DialogManagerProvider>
-
           <ProvidersPage />
-
         </DialogManagerProvider>
-
       </MemoryRouter>
-
     </QueryClientProvider>,
   );
 }
@@ -602,17 +596,11 @@ describe('copilot device authorization panel', { timeout: 20000 }, () => {
     };
     render(
       <QueryClientProvider client={client}>
-
         <MemoryRouter>
-
           <DialogManagerProvider>
-
             <ProvidersPage />
-
           </DialogManagerProvider>
-
         </MemoryRouter>
-
       </QueryClientProvider>,
     );
     return { flowCalls, flows };
