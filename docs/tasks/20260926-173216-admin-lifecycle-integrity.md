@@ -20,7 +20,7 @@ and this execution record. Avoid broad store/route rewrites.
 
 - Followed AGENTS.md and
   `task-as-you-go skill`.
-- Read-only review session `ses_f1fbafa4fffeYVUeA89CPTBkp3` inspected product
+- Read-only planning review session inspected product
   requirements, organization/team/invite/key/quota routes, store models/migrations,
   tests and relevant browser forms. Coordinator inspected the principal source
   locations independently and checked the dirty worktree.
@@ -806,8 +806,7 @@ Execution notes:
 - Fresh independent LIFE-05 reviewer; implemented none of LIFE-01..04. Read the
   entire task/evidence, AGENTS.md and requested project task-as-you-go skill.
   Dependencies report completed. Auditing the resulting LIFE-04 source and callers
-  after failed session `ses_f1f9a2b20ffe9HsXom7mrT37jS` and fresh recovery session
-  `ses_f1f7e4b6effeaGKzgBXtEuQv6W`, rather than relying on their reports alone.
+  after failed LIFE-04 implementation session and fresh LIFE-04 recovery session, rather than relying on their reports alone.
 - Inspected incoming extensive dirty/untracked BOUNDARY/SAFE/LIFE baseline and all
   Docker containers. No earlier LIFE fixture remains. A new reviewer-owned PG17
   fixture will be used; frontend build/checks will finish before Go asset readers.
@@ -955,12 +954,12 @@ Limitations and final disposition:
   no unresolved execution blockers. Rechecked worktree, `git diff --check` and
   `git diff --exit-code HEAD -- CHANGELOG.md`; both checks passed.
 - Task sessions ran sequentially, with no overlap:
-  LIFE-01 `ses_f1fb7b8feffecWpN31VsCe0ddF`;
-  LIFE-02 `ses_f1faebd66ffeLWejqVU4SEcCuI`;
-  LIFE-03 `ses_f1fa3ab5fffeDnDtT9j0rV6HQb`;
-  LIFE-04 interrupted `ses_f1f9a2b20ffe9HsXom7mrT37jS`, then recovered by fresh
-  session `ses_f1f7e4b6effeaGKzgBXtEuQv6W` using the task's already-owned fixture;
-  independent LIFE-05 `ses_f1f700a9bffeVnKHpkgn6MAn2I`.
+  LIFE-01 implementation session;
+  LIFE-02 implementation session;
+  LIFE-03 implementation session;
+  LIFE-04 interrupted LIFE-04 implementation session, then recovered by fresh
+  LIFE-04 recovery session using the task's already-owned fixture;
+  independent LIFE-05 review session.
 - All task outcomes and verification are recorded above; real-provider and
   exhaustive-product audits are not claimed.
 

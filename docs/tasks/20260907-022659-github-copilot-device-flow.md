@@ -760,8 +760,8 @@ deferred in COPILOT-LIVE-01; implementation completion must not imply otherwise.
 - Confirmed COPILOT-01–06 completed with evidence, reviewed the new composed/binary
   coverage and independent acceptance audit, and verified COPILOT-LIVE-01 remains
   deferred in its separate timestamped record. No revised implementation blocker.
-- COPILOT-05 ran in fresh session `ses_f1c18ec3fffeDNMe5pZlAhS6nK`, followed by
-  independent COPILOT-06 session `ses_f1c106917ffe1PfUCgqBSvS7kK`; no overlap.
+- COPILOT-05 ran in fresh COPILOT-05 implementation session, followed by
+  independent COPILOT-06 review session; no overlap.
 - Rechecked `git diff --check` and `git diff --exit-code HEAD -- CHANGELOG.md`:
   passed. Existing work preserved, no commits. Completion is mock-based only;
   live entitlement/protocol compatibility remains unverified as requested.

@@ -20,7 +20,7 @@ public documentation and in this task file. No provider expansion or broad rewri
 
 - Worktree was clean at review start. Read the requested skill at
   `task-as-you-go skill` and repository instructions.
-- Read-only review session: `ses_f204be853ffeiRF7PF8V0z7TMr`.
+- Read-only planning review session.
 - Reviewed product README/design, admin/OIDC/key/quota/store boundaries,
   authentication, accounting, runtime assembly, dashboard, browser services/hooks,
   and test workflow; coordinator inspected the principal finding locations.
@@ -872,14 +872,14 @@ the test resources created for this plan. `CHANGELOG.md` remains unchanged.
 - Read the full final task record and independent acceptance audit: all eight
   statuses are `completed`, each with Completion evidence and no unresolved blocker.
 - Each task used a distinct sequential sub-agent session:
-  01 `ses_f2046e049ffeiaxdg2rXnh8rBL`,
-  02 `ses_f203adba9ffegi5bLTQQFOtoZh`,
-  03 `ses_f2035723fffeVh4o5Rn0S0J4gI`,
-  04 `ses_f202ee2d1ffe5kFHUsW4WA7da3`,
-  05 `ses_f20240d90ffeYqIuIUIaane8vz`,
-  06 `ses_f201c9f48ffeGvqLyOuJAnqnPC`,
-  07 `ses_f2012f043ffeOm3m2MThb1LbCH`,
-  08 independent review `ses_f2009f4c6ffei5JiellG7F1twY`.
+  01 BOUNDARY-01 implementation session,
+  02 BOUNDARY-02 implementation session,
+  03 BOUNDARY-03 implementation session,
+  04 BOUNDARY-04 implementation session,
+  05 BOUNDARY-05 implementation session,
+  06 BOUNDARY-06 implementation session,
+  07 BOUNDARY-07 implementation session,
+  08 BOUNDARY-08 independent review session.
 - Rechecked final worktree, representative auth/probe/CI/typecheck diffs,
   `git diff --check`, and `git diff --exit-code HEAD -- CHANGELOG.md`; passed.
 - Stopped the owned disposable PostgreSQL container

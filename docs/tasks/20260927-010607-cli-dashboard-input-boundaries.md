@@ -15,7 +15,7 @@ or commit. No unrelated product redesign.
 
 - Followed AGENTS.md and
   `task-as-you-go skill`.
-- Read-only review session `ses_f1e1bf220ffesJtyfwIEaNgPGE` inspected lifecycle,
+- Read-only planning review session inspected lifecycle,
   metadata production/retention/RPC, recent request search/rendering, block list/
   detail transitions, final TUI acceptance evidence and relevant tests. Coordinator
   independently inspected the principal findings and current dirty worktree.

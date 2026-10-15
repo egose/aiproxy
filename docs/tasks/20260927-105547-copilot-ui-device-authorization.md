@@ -23,7 +23,7 @@ deferred in `20260927-102347-copilot-live-compatibility.md` (COPILOT-LIVE-01).
 ## Analysis And Design Decision
 
 Followed AGENTS.md and `task-as-you-go skill`.
-Read-only architecture session `ses_f1c014f75ffessMyXvzZhV0KvT` inspected provider
+Read-only architecture planning session inspected provider
 aggregate revisions, DB/runtime conversion, credential validation, admin/membership
 locks, crypto/migrations, device protocol, UI forms and auth generations. Coordinator
 independently inspected the primary integration points. No baseline tests run during
