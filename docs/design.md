@@ -19,6 +19,31 @@ identity primitives.
 
 Configuration is written in HCL with an Alloy-like two-label block style.
 
+## Provider Authorization Forwarding
+
+`forward_authorization` is a local provider opt-in, never a root default or an
+implicitly inherited setting. Only adapters already using upstream
+`Authorization` support it; Anthropic, Gemini, and Copilot retain their dedicated
+credential contracts. Configuration rejects combining forwarding with stored
+credentials, including disabled providers. The adapter validates exactly one
+nonblank, bounded, HTTP-valid caller header before request construction and
+replaces upstream authorization at the shared execution boundary, preserving
+the authentication scheme without fallback. Invalid headers use the existing
+invalid-request path, so aliases do not retry or mark providers unhealthy.
+
+Inbound proxy authentication is independent and precedes forwarding. Operators
+must trust the upstream with the caller's proxy bearer/JWT token. Background
+probes and model discovery never retain or reuse a request credential. Existing
+origin-bound redirect enforcement and payload-header redaction also apply to
+forwarded credentials. Alias cooldown fingerprints include authorization mode
+so reloads do not retain deadlines across mode changes; cooldown and health
+remain target/provider-scoped, not per caller credential.
+
+Database providers persist the opt-in with an additive migration. Derived
+database providers also select authorization mode locally. Admin updates
+preserve omitted flags and credentials and require explicit credential clearing
+when enabling forwarding.
+
 ## Interactive Dashboard Session Lifetime
 
 The CLI owns signal handling and a single snapshot polling worker. Initial attach

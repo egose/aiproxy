@@ -118,8 +118,10 @@ function SnapshotProviders() {
       <CardHeader>
         <CardTitle>Providers ({rows.length})</CardTitle>
       </CardHeader>
+
       <CardContent className="grid gap-4 pt-0">
         <Input placeholder="Filter providers..." value={filter} onChange={(e) => setFilter(e.target.value)} />
+
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -132,6 +134,7 @@ function SnapshotProviders() {
                 ))}
               </TableRow>
             </TableHeader>
+
             <TableBody>
               {rows.map((p) => (
                 <TableRow key={p.name}>
@@ -172,6 +175,7 @@ const providerFormSchema = z
     userAgent: z.string().optional(),
     timeout: z.string().optional(),
     forwardUserAgent: z.boolean().optional(),
+    forwardAuthorization: z.boolean().optional(),
     forwardHeaders: z.string().optional(),
     apiKey: z.string().optional(),
     apiKeyRefPath: z.string().optional(),
@@ -233,6 +237,7 @@ const emptyProviderForm = (): ProviderFormValues => ({
   userAgent: '',
   timeout: '',
   forwardUserAgent: false,
+  forwardAuthorization: false,
   forwardHeaders: '',
   apiKey: '',
   apiKeyRefPath: '',
@@ -263,6 +268,7 @@ function providerToFormValues(p: AdminProvider): ProviderFormValues {
     userAgent: p.user_agent ?? '',
     timeout: p.upstream_header_timeout ?? '',
     forwardUserAgent: p.forward_user_agent ?? false,
+    forwardAuthorization: p.forward_authorization ?? false,
     forwardHeaders: (p.forward_headers ?? []).join(', '),
     apiKey: '',
     apiKeyRefPath: p.api_key_ref_path ?? '',
@@ -345,6 +351,7 @@ function buildProviderBody(
   set('display_name', 'displayName', (v.displayName ?? '').trim(), !!v.displayName?.trim());
   set('enabled', 'enabled', !!v.enabled, !v.enabled);
   set('extends', 'extendsName', (v.extendsName ?? '').trim(), inherited);
+  set('forward_authorization', 'forwardAuthorization', !!v.forwardAuthorization, !!v.forwardAuthorization);
   if (!inherited) {
     set('models', 'models', modelPayloads);
     set('base_url', 'baseUrl', (v.baseUrl ?? '').trim(), !!v.baseUrl?.trim());
@@ -357,7 +364,12 @@ function buildProviderBody(
       .filter(Boolean);
     set('forward_headers', 'forwardHeaders', headers, headers.length > 0);
   }
-  if (credentialKind === 'credential_ref') {
+  if (v.forwardAuthorization) {
+    if (initial && changed('forwardAuthorization')) {
+      body.api_key = '';
+      body.api_key_ref = { path: '', key: '' };
+    }
+  } else if (credentialKind === 'credential_ref') {
     if (device?.flowId) {
       body.copilot_device_flow_id = device.flowId;
     } else if (!device?.suppressCopilotRef && changed('credentialPath', 'credentialName')) {
@@ -442,6 +454,17 @@ function ProviderForm({
   const { fields, append, remove } = useFieldArray({ control: form.control, name: 'models' });
   const queryClient = useQueryClient();
   const selectedType = form.watch('type');
+  const supportsForwardAuthorization = [
+    'openai',
+    'openai-compatible',
+    'opencode-zen',
+    'opencode-go',
+    'zenmux',
+    'openrouter',
+  ].includes(selectedType);
+  useEffect(() => {
+    if (!supportsForwardAuthorization) form.setValue('forwardAuthorization', false);
+  }, [form, supportsForwardAuthorization]);
   const inherited = !!form.watch('extendsName')?.trim();
   const showHealthcheck = form.watch('showHealthcheck');
   const typeInfo = providerTypeInfos?.find((t) => t.type === selectedType);
@@ -825,16 +848,19 @@ function ProviderForm({
             <AlertDescription>{errorMessage(submitMutation.error)}</AlertDescription>
           </Alert>
         )}
+
         {saveNote && (
           <Alert variant={saveConflict ? 'danger' : undefined}>
             <AlertDescription>{saveNote}</AlertDescription>
           </Alert>
         )}
+
         {saveRecovery && (
           <Alert>
             <AlertDescription>{saveRecovery}</AlertDescription>
           </Alert>
         )}
+
         {(saveConflict || saveNote?.includes('did not complete')) && (
           <div className="flex flex-wrap gap-2">
             {saveConflict && (
@@ -842,11 +868,13 @@ function ProviderForm({
                 Reload current values
               </Button>
             )}
+
             <Button type="button" appearance="outline" onClick={() => void checkSavedState()}>
               Check saved state
             </Button>
           </div>
         )}
+
         {saveNote?.includes('saved, but activation failed') && (
           <div className="flex flex-wrap gap-2">
             <Button type="button" appearance="outline" onClick={() => void checkSavedState()}>
@@ -854,29 +882,35 @@ function ProviderForm({
             </Button>
           </div>
         )}
+
         <HookFormTextInput<ProviderFormValues>
           name="name"
           label="Name (lowercase, no spaces)"
           placeholder="db-openai"
           disabled={lockName}
         />
+
         <HookFormNativeSelect<ProviderFormValues>
           name="type"
           label="Type"
           data={(providerTypeInfos ?? [{ type: 'openai' }]).map((t) => ({ label: t.type, value: t.type }))}
         />
+
         <HookFormTextInput<ProviderFormValues> name="displayName" label="Display name (optional)" />
+
         <HookFormTextInput<ProviderFormValues>
           name="extendsName"
           label="Extends (optional, static base provider of the same type)"
           placeholder="base provider name"
         />
+
         {inherited && (
           <p className="text-sm text-slate-500">
             Models, transport settings and healthcheck are inherited from the base provider. Type must match the base.
             Enabled controls this database provider locally; a blank display name uses the base display name.
           </p>
         )}
+
         {!inherited && (
           <HookFormTextInput<ProviderFormValues>
             name="baseUrl"
@@ -884,25 +918,32 @@ function ProviderForm({
             placeholder="https://..."
           />
         )}
+
         <HookFormCheckbox<ProviderFormValues> name="enabled" label="Enabled" />
+
         <Separator />
+
         {lockName && (
           <p className="text-sm text-slate-500">
             Leave the API key blank to keep the stored secret. Unchanged credential references are preserved without
             being resent.
           </p>
         )}
+
         {isCopilotForm ? (
           <div className="grid gap-3 rounded-md border p-3">
             <span className="text-sm font-medium">Copilot credential</span>
+
             {lockName && editProvider && (
               <p className="text-sm text-slate-500" role="status">
                 Current credential: {editProvider.copilot_credential_source || 'unknown'}
                 {editProvider.has_credential ? '' : ' (no stored credential)'}.
               </p>
             )}
+
             <label className="grid gap-1 text-sm">
               <span className="font-medium">Credential source</span>
+
               <select
                 aria-label="Credential source"
                 value={copilotSource}
@@ -915,10 +956,12 @@ function ProviderForm({
                 {lockName && <option value="sidecar">Switch to CLI sidecar</option>}
               </select>
             </label>
+
             {deviceEnabled && copilotSource === 'device' && (
               <div className="grid gap-2">
                 <label className="grid gap-1 text-sm">
                   <span className="font-medium">GitHub OAuth client ID (public)</span>
+
                   <Input
                     aria-label="GitHub OAuth client ID"
                     placeholder="Iv1...."
@@ -927,6 +970,7 @@ function ProviderForm({
                     disabled={copilotStarting || copilotFlow?.status === 'pending'}
                   />
                 </label>
+
                 {!copilotFlow && (
                   <div>
                     <Button
@@ -939,26 +983,32 @@ function ProviderForm({
                     </Button>
                   </div>
                 )}
+
                 {copilotError && (
                   <Alert variant="danger">
                     <AlertDescription>{copilotError}</AlertDescription>
                   </Alert>
                 )}
+
                 {copilotFlow && (copilotFlow.status === 'pending' || copilotFlow.status === 'starting') && (
                   <div className="grid gap-2" role="status" aria-live="polite">
                     <p className="text-sm">
                       {copilotFlow.status === 'starting'
                         ? 'Starting authorization...'
                         : 'Waiting for GitHub approval...'}
+
                       {copilotFlow.expires_at && (
                         <span> Expires in {countdownText(copilotFlow.expires_at, nowMs)}.</span>
                       )}
                     </p>
+
                     {copilotFlow.user_code && (
                       <p className="text-sm">
-                        Code: <span className="font-mono font-bold">{copilotFlow.user_code}</span>
+                        Code:
+                        <span className="font-mono font-bold">{copilotFlow.user_code}</span>
                       </p>
                     )}
+
                     <div className="flex flex-wrap gap-2">
                       {copilotFlow.verification_uri && (
                         <a
@@ -970,18 +1020,22 @@ function ProviderForm({
                           Open GitHub to authorize
                         </a>
                       )}
+
                       {copilotFlow.user_code && (
                         <Button type="button" appearance="outline" onClick={copyUserCode}>
                           {copilotCopied ? 'Copied' : 'Copy code'}
                         </Button>
                       )}
+
                       <Button type="button" appearance="outline" onClick={cancelDeviceFlow}>
                         Cancel authorization
                       </Button>
                     </div>
+
                     {copilotPolling && <p className="text-xs text-slate-500">Checking approval...</p>}
                   </div>
                 )}
+
                 {copilotFlow && copilotFlow.status === 'ready' && (
                   <div className="grid gap-2" role="status" aria-live="polite">
                     <Alert>
@@ -992,6 +1046,7 @@ function ProviderForm({
                         )}
                       </AlertDescription>
                     </Alert>
+
                     <div className="flex gap-2">
                       <Button type="button" appearance="outline" onClick={cancelDeviceFlow}>
                         Cancel authorization
@@ -999,11 +1054,13 @@ function ProviderForm({
                     </div>
                   </div>
                 )}
+
                 {copilotFlow && ['denied', 'expired', 'failed', 'cancelled'].includes(copilotFlow.status) && (
                   <div className="grid gap-2" role="status" aria-live="polite">
                     <Alert variant="danger">
                       <AlertDescription>{terminalFlowMessage(copilotFlow)}</AlertDescription>
                     </Alert>
+
                     <div>
                       <Button type="button" appearance="outline" onClick={retryDeviceFlow}>
                         Retry authorization
@@ -1011,6 +1068,7 @@ function ProviderForm({
                     </div>
                   </div>
                 )}
+
                 {copilotFlow && copilotFlow.status === 'consumed' && (
                   <Alert>
                     <AlertDescription>
@@ -1019,6 +1077,7 @@ function ProviderForm({
                     </AlertDescription>
                   </Alert>
                 )}
+
                 {pinnedMismatch ? (
                   <Alert variant="danger">
                     <AlertDescription>
@@ -1026,6 +1085,7 @@ function ProviderForm({
                     </AlertDescription>
                   </Alert>
                 ) : null}
+
                 {authDrifted ? (
                   <Alert variant="danger">
                     <AlertDescription>
@@ -1035,6 +1095,7 @@ function ProviderForm({
                 ) : null}
               </div>
             )}
+
             {copilotSource === 'sidecar' && (
               <>
                 <HookFormTextInput<ProviderFormValues>
@@ -1042,9 +1103,11 @@ function ProviderForm({
                   label="Credential name (required, from `aiproxy login`)"
                   placeholder="copilot-main"
                 />
+
                 <HookFormTextInput<ProviderFormValues> name="credentialPath" label="Credential path (optional)" />
               </>
             )}
+
             {lockName && copilotSource === 'keep' && (
               <p className="text-sm text-slate-500">
                 The stored credential stays unchanged unless you reauthorize or switch sources.
@@ -1058,33 +1121,58 @@ function ProviderForm({
               label="Credential name (required, from `aiproxy login`)"
               placeholder="copilot-main"
             />
+
             <HookFormTextInput<ProviderFormValues> name="credentialPath" label="Credential path (optional)" />
           </>
         ) : (
           <>
-            <HookFormTextInput<ProviderFormValues>
-              name="apiKey"
-              label="API key (stored encrypted, write-only)"
-              type="password"
-              autoComplete="off"
-              placeholder="sk-..."
-            />
-            <HookFormTextInput<ProviderFormValues>
-              name="apiKeyRefKey"
-              label="API key reference key (alternative to API key)"
-              placeholder="key name in the secrets file"
-            />
-            <HookFormTextInput<ProviderFormValues> name="apiKeyRefPath" label="API key reference path (optional)" />
+            {supportsForwardAuthorization && (
+              <>
+                <HookFormCheckbox<ProviderFormValues>
+                  name="forwardAuthorization"
+                  label="Forward client Authorization"
+                />
+
+                <p className="text-sm text-slate-500">
+                  Sends the caller's proxy authentication token unchanged to this upstream. Enabling this clears stored
+                  provider credentials on save; trust the upstream.
+                </p>
+              </>
+            )}
+
+            {!form.watch('forwardAuthorization') && (
+              <>
+                <HookFormTextInput<ProviderFormValues>
+                  name="apiKey"
+                  label="API key (stored encrypted, write-only)"
+                  type="password"
+                  autoComplete="off"
+                  placeholder="sk-..."
+                />
+
+                <HookFormTextInput<ProviderFormValues>
+                  name="apiKeyRefKey"
+                  label="API key reference key (alternative to API key)"
+                  placeholder="key name in the secrets file"
+                />
+
+                <HookFormTextInput<ProviderFormValues> name="apiKeyRefPath" label="API key reference path (optional)" />
+              </>
+            )}
           </>
         )}
+
         <Separator />
+
         {!inherited && (
           <>
             <div className="grid gap-2">
               <span className="text-sm font-medium">Models (at least one required)</span>
+
               {form.formState.errors.models?.message && (
                 <span className="text-sm text-red-500">{form.formState.errors.models.message}</span>
               )}
+
               {fields.map((field, index) => (
                 <div key={field.id} className="grid gap-2 rounded-md border p-3">
                   <div className="grid grid-cols-2 gap-2">
@@ -1093,15 +1181,18 @@ function ProviderForm({
                       label="Name"
                       placeholder="gpt-4o-mini"
                     />
+
                     <HookFormTextInput<ProviderFormValues>
                       name={`models.${index}.upstreamName`}
                       label="Upstream name (defaults to name)"
                     />
                   </div>
+
                   <HookFormTextInput<ProviderFormValues>
                     name={`models.${index}.displayName`}
                     label="Display name (optional)"
                   />
+
                   {protocolRequired && (
                     <HookFormNativeSelect<ProviderFormValues>
                       name={`models.${index}.protocol`}
@@ -1112,9 +1203,11 @@ function ProviderForm({
                       ]}
                     />
                   )}
+
                   {supportedCaps.length > 0 && (
                     <div className="grid gap-1">
                       <span className="text-sm font-medium">Capabilities (empty = type defaults)</span>
+
                       <div className="flex flex-wrap gap-3">
                         {supportedCaps.map((cap) => (
                           <label key={cap} className="flex items-center gap-1 text-sm">
@@ -1128,24 +1221,29 @@ function ProviderForm({
                       </div>
                     </div>
                   )}
+
                   <div className="grid gap-1">
                     <span className="text-sm font-medium">Pricing per million tokens (optional)</span>
+
                     <div className="grid grid-cols-2 gap-2">
                       <HookFormTextInput<ProviderFormValues>
                         name={`models.${index}.pricingInput`}
                         label="Input"
                         inputMode="decimal"
                       />
+
                       <HookFormTextInput<ProviderFormValues>
                         name={`models.${index}.pricingOutput`}
                         label="Output"
                         inputMode="decimal"
                       />
+
                       <HookFormTextInput<ProviderFormValues>
                         name={`models.${index}.pricingCached`}
                         label="Cached"
                         inputMode="decimal"
                       />
+
                       <HookFormTextInput<ProviderFormValues>
                         name={`models.${index}.pricingCacheWrite`}
                         label="Cache write"
@@ -1153,6 +1251,7 @@ function ProviderForm({
                       />
                     </div>
                   </div>
+
                   {fields.length > 1 && (
                     <div>
                       <Button
@@ -1167,6 +1266,7 @@ function ProviderForm({
                   )}
                 </div>
               ))}
+
               <div>
                 <Button
                   appearance="outline"
@@ -1178,24 +1278,31 @@ function ProviderForm({
                 </Button>
               </div>
             </div>
+
             <Separator />
+
             <p className="text-sm text-slate-500">
               Blank URL, timeout and user agent use provider/root defaults; a URL is still required for types without a
               default. Turning off forwarding or clearing headers only removes local settings: root forwarding still
               applies.
             </p>
+
             <HookFormTextInput<ProviderFormValues> name="userAgent" label="User agent override (optional)" />
+
             <HookFormTextInput<ProviderFormValues>
               name="timeout"
               label="Upstream header timeout (optional, e.g. 30s)"
               placeholder="30s"
             />
+
             <HookFormCheckbox<ProviderFormValues> name="forwardUserAgent" label="Forward caller user agent" />
+
             <HookFormTextInput<ProviderFormValues>
               name="forwardHeaders"
               label="Forward headers (optional, comma separated)"
               placeholder="x-custom-header"
             />
+
             {typeInfo?.supports_healthcheck !== false && (
               <>
                 <HookFormCheckbox<ProviderFormValues>
@@ -1203,22 +1310,26 @@ function ProviderForm({
                   label="Custom healthcheck"
                   disabled={lockName && !!initial.showHealthcheck}
                 />
+
                 {lockName && initial.showHealthcheck && (
                   <p className="text-sm text-slate-500">
                     This API cannot remove an existing healthcheck. You can edit its settings; the block is retained.
                   </p>
                 )}
+
                 {showHealthcheck && (
                   <>
                     <p className="text-sm text-slate-500">
                       Blank scalar fields reset to defaults: GET, status 200, body *, interval 30s, timeout 5s, failure
                       threshold 2 and success threshold 1. Authorization is sent only when checked.
                     </p>
+
                     <HookFormTextInput<ProviderFormValues>
                       name="hcPath"
                       label="Path (required)"
                       placeholder="/healthz"
                     />
+
                     <div className="grid grid-cols-2 gap-2">
                       <HookFormNativeSelect<ProviderFormValues>
                         name="hcMethod"
@@ -1229,20 +1340,25 @@ function ProviderForm({
                           { label: 'HEAD', value: 'HEAD' },
                         ]}
                       />
+
                       <HookFormTextInput<ProviderFormValues>
                         name="hcStatus"
                         label="Expected status"
                         placeholder="200"
                         inputMode="numeric"
                       />
+
                       <HookFormTextInput<ProviderFormValues> name="hcInterval" label="Interval" placeholder="30s" />
+
                       <HookFormTextInput<ProviderFormValues> name="hcTimeout" label="Timeout" placeholder="5s" />
+
                       <HookFormTextInput<ProviderFormValues>
                         name="hcFailures"
                         label="Failure threshold"
                         placeholder="2"
                         inputMode="numeric"
                       />
+
                       <HookFormTextInput<ProviderFormValues>
                         name="hcSuccesses"
                         label="Success threshold"
@@ -1250,11 +1366,13 @@ function ProviderForm({
                         inputMode="numeric"
                       />
                     </div>
+
                     <HookFormTextInput<ProviderFormValues>
                       name="hcBody"
                       label="Expected body (optional, * matches anything)"
                       placeholder="*"
                     />
+
                     <HookFormCheckbox<ProviderFormValues> name="hcSendAuth" label="Send authorization header" />
                   </>
                 )}
@@ -1262,15 +1380,18 @@ function ProviderForm({
             )}
           </>
         )}
+
         <div className="flex gap-2">
           <Button variant="primary" type="submit" disabled={submitMutation.isPending || deviceBlocksSave}>
             {submitMutation.isPending ? 'Saving...' : submitLabel}
           </Button>
+
           {deviceEnabled && copilotSource === 'device' && !deviceReady && (
             <span className="text-sm text-slate-500" role="status">
               Save is available after authorization is ready.
             </span>
           )}
+
           {onCancel && (
             <Button appearance="outline" type="button" disabled={submitMutation.isPending} onClick={onCancel}>
               Cancel
@@ -1291,6 +1412,7 @@ const EditProviderDialog = createTypedDialog<
       <DialogHeader>
         <DialogTitle>Edit provider {args.provider.name}</DialogTitle>
       </DialogHeader>
+
       <ProviderForm
         key={`edit-${args.provider.name}`}
         initial={providerToFormValues(args.provider)}
@@ -1315,6 +1437,7 @@ const CreateProviderDialog = createTypedDialog<{ typeInfos: ProviderTypeInfo[] |
         <DialogHeader>
           <DialogTitle>Create provider</DialogTitle>
         </DialogHeader>
+
         <ProviderForm
           initial={emptyProviderForm()}
           submitLabel="Create provider"
@@ -1350,19 +1473,23 @@ const RotateCredentialDialog = createTypedDialog<{ name?: string }, { name: stri
           <DialogHeader>
             <DialogTitle>Rotate upstream credential{args.name ? ` for ${args.name}` : ''}</DialogTitle>
           </DialogHeader>
+
           <FormProvider {...form}>
             <form className="grid gap-4" onSubmit={form.handleSubmit((values) => onClose(values))}>
               <HookFormTextInput<CredentialForm> name="name" label="Database provider name" disabled={!!args.name} />
+
               <HookFormTextInput<CredentialForm>
                 name="api_key"
                 label="New API key"
                 type="password"
                 autoComplete="off"
               />
+
               <DialogFooter>
                 <Button appearance="outline" type="button" onClick={() => onClose(null)}>
                   Cancel
                 </Button>
+
                 <Button variant="primary" type="submit">
                   Save credential
                 </Button>
@@ -1492,7 +1619,8 @@ function ManagedProviders() {
           <span className="text-sm">
             <span className="text-slate-500">
               {row.original.models.length} model(s){row.original.has_credential ? '' : ' · no credential'}
-            </span>{' '}
+            </span>
+
             <span className="font-mono text-xs text-slate-500">
               {row.original.models.map((m) => m.name).join(', ')}
             </span>
@@ -1538,13 +1666,16 @@ function ManagedProviders() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2">
           <CardTitle>Providers ({rows.length})</CardTitle>
+
           <Button variant="primary" type="button" onClick={onCreate} disabled={!providerTypes.data}>
             Create provider
           </Button>
         </CardHeader>
+
         <CardContent>
           <DataTable
             columns={columns}
@@ -1553,6 +1684,7 @@ function ManagedProviders() {
             getRowId={(row) => row.name}
             emptyText="No providers."
           />
+
           {providers.isLoading && (
             <div className="text-sm text-slate-500">
               <Spinner size="small">Loading providers...</Spinner>
@@ -1575,10 +1707,10 @@ export function ProvidersPage() {
       {multi && !signedIn && (
         <Alert>
           <AlertDescription>
-            Multi-tenancy is enabled.{' '}
+            Multi-tenancy is enabled.
             <Link className="underline" to="/login">
               Sign in
-            </Link>{' '}
+            </Link>
             to add, delete, or rotate database providers.
           </AlertDescription>
         </Alert>

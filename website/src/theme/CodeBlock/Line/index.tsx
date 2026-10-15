@@ -58,6 +58,7 @@ export default function CodeBlockLine({
       ) : (
         lineTokens
       )}
+
       <LineBreak />
     </div>
   );

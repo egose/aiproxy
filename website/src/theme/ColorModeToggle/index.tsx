@@ -69,7 +69,9 @@ function CurrentColorModeIcon(): ReactNode {
   return (
     <>
       <IconLightMode aria-hidden className={clsx(styles.toggleIcon, styles.lightToggleIcon)} />
+
       <IconDarkMode aria-hidden className={clsx(styles.toggleIcon, styles.darkToggleIcon)} />
+
       <IconSystemColorMode aria-hidden className={clsx(styles.toggleIcon, styles.systemToggleIcon)} />
     </>
   );

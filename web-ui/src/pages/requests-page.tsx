@@ -87,8 +87,10 @@ export function RequestsPage() {
         <CardHeader>
           <CardTitle>Recent requests ({rows.length})</CardTitle>
         </CardHeader>
+
         <CardContent className="grid gap-4 pt-0">
           <Input placeholder="Filter requests..." value={filter} onChange={(e) => setFilter(e.target.value)} />
+
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -101,6 +103,7 @@ export function RequestsPage() {
                   ))}
                 </TableRow>
               </TableHeader>
+
               <TableBody>
                 {rows.map((r, i) => (
                   <TableRow key={`${r.Model}-${r.Client}-${i}`}>

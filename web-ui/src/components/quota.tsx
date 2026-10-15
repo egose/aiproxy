@@ -34,6 +34,7 @@ export function KeyQuotaLine({
           {usage.requests} req · {usage.tokens} tok · {formatMicros(usage.spend_micros)}
         </span>
       )}
+
       {quota && quota.budget_micros > 0 && (
         <span
           className="font-mono text-xs text-slate-500"
@@ -42,6 +43,7 @@ export function KeyQuotaLine({
           budget {formatMicros(quota.spend_micros)} / {formatMicros(quota.budget_micros)}
         </span>
       )}
+
       {tpm.map((t) => {
         const limit = t.effective > 0 ? t.effective : t.ceiling;
         return (
@@ -186,8 +188,10 @@ export function QuotaEditor({
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
       <div className="grid max-w-xs gap-1">
         <Label>Budget (USD, empty = unlimited)</Label>
+
         <Input
           value={budget}
           disabled={!canEditPolicy || saveMutation.isPending}
@@ -195,17 +199,21 @@ export function QuotaEditor({
           placeholder="e.g. 25"
           inputMode="decimal"
         />
+
         <span className="text-xs text-slate-500">
           Spent {formatMicros(spent)}
           {budgetMicros > 0 ? ` of ${formatMicros(budgetMicros)}` : ''}. Requests over budget are blocked.
         </span>
       </div>
+
       <div className="grid gap-2">
         <span className="text-sm font-medium">Tokens per minute by model (empty = unlimited)</span>
+
         {rows.map((row, i) => (
           <div key={i} className="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2">
             <div className="grid gap-1">
               <Label>Model</Label>
+
               <Input
                 value={row.model}
                 disabled={!row.isNew || saveMutation.isPending}
@@ -214,8 +222,10 @@ export function QuotaEditor({
                 className="font-mono"
               />
             </div>
+
             <div className="grid gap-1">
               <Label>Admin ceiling</Label>
+
               <Input
                 value={row.ceiling}
                 disabled={!canEditPolicy || saveMutation.isPending}
@@ -225,8 +235,10 @@ export function QuotaEditor({
                 className="font-mono"
               />
             </div>
+
             <div className="grid gap-1">
               <Label>Limit</Label>
+
               <Input
                 value={row.effective}
                 disabled={!canEditEffective || saveMutation.isPending}
@@ -236,6 +248,7 @@ export function QuotaEditor({
                 className="font-mono"
               />
             </div>
+
             <div className="pb-1 text-xs text-slate-500">
               {usedByModel.has(row.model.trim()) && row.model.trim() !== '' ? (
                 `${usedByModel.get(row.model.trim())} used`
@@ -254,6 +267,7 @@ export function QuotaEditor({
             </div>
           </div>
         ))}
+
         {(canEditPolicy || canEditEffective) && (
           <div>
             <Button
@@ -267,6 +281,7 @@ export function QuotaEditor({
           </div>
         )}
       </div>
+
       <div className="flex gap-2">
         {(canEditPolicy || canEditEffective) && (
           <Button
@@ -278,6 +293,7 @@ export function QuotaEditor({
             {saveMutation.isPending ? 'Saving...' : 'Save quotas'}
           </Button>
         )}
+
         {canEditPolicy && (
           <Button appearance="outline" type="button" disabled={resetMutation.isPending} onClick={askReset}>
             {resetMutation.isPending ? 'Resetting...' : 'Reset spend'}

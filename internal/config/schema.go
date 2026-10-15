@@ -135,6 +135,7 @@ type rawProvider struct {
 	UserAgent             string            `hcl:"user_agent,optional"`
 	ForwardUserAgent      bool              `hcl:"forward_user_agent,optional"`
 	ForwardHeaders        []string          `hcl:"forward_headers,optional"`
+	ForwardAuthorization  bool              `hcl:"forward_authorization,optional"`
 	APIKey                string            `hcl:"api_key,optional"`
 	APIKeyRef             *rawAPIKeyRef     `hcl:"api_key_ref,block"`
 	CredentialRef         *rawCredentialRef `hcl:"credential_ref,block"`

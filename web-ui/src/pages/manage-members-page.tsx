@@ -41,12 +41,14 @@ export function ManageMembersPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2">
           <CardTitle>Members</CardTitle>
+
           {canManage && !isPersonal && (
             <Button variant="primary" type="button" onClick={openInvite}>
               Invite
             </Button>
           )}
         </CardHeader>
+
         <CardContent>
           {isPersonal ? (
             <p className="text-sm text-slate-600">

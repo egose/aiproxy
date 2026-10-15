@@ -33,21 +33,22 @@ const (
 )
 
 type Request struct {
-	Operation        Operation
-	ProviderType     config.ProviderType
-	PublicModel      string
-	BaseURL          string
-	APIKey           string
-	CopilotToken     string
-	UpstreamModel    string
-	ModelProtocol    config.ModelProtocol
-	UserAgent        string
-	ForwardUserAgent bool
-	ForwardHeaders   []string
-	Version          string
-	Body             []byte
-	Inbound          *http.Request
-	Client           *http.Client
+	Operation            Operation
+	ProviderType         config.ProviderType
+	PublicModel          string
+	BaseURL              string
+	APIKey               string
+	CopilotToken         string
+	UpstreamModel        string
+	ModelProtocol        config.ModelProtocol
+	UserAgent            string
+	ForwardUserAgent     bool
+	ForwardHeaders       []string
+	ForwardAuthorization bool
+	Version              string
+	Body                 []byte
+	Inbound              *http.Request
+	Client               *http.Client
 }
 
 type Result struct {
@@ -266,6 +267,14 @@ func (a *adapter) Do(ctx context.Context, r Request) (*Result, error) {
 	desc, ok := providerDescriptors[r.ProviderType]
 	if !ok {
 		return nil, fmt.Errorf("unsupported provider type %q", r.ProviderType)
+	}
+	if r.ForwardAuthorization {
+		if !config.SupportsForwardAuthorization(r.ProviderType) {
+			return nil, ErrInvalidRequest{Message: "forward_authorization is not supported by this provider type"}
+		}
+		if _, err := forwardedAuthorization(r); err != nil {
+			return nil, err
+		}
 	}
 	if r.BaseURL == "" {
 		r.BaseURL = desc.defaultBaseURL
@@ -515,6 +524,13 @@ func defaultVersion(version string) string {
 }
 
 func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHandlers) (*Result, error) {
+	if r.ForwardAuthorization {
+		authorization, err := forwardedAuthorization(r)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", authorization)
+	}
 	req.Header.Set("User-Agent", upstreamUserAgent(r))
 	applyForwardedHeaders(r, req)
 	sentHeaders := req.Header.Clone()
@@ -574,6 +590,17 @@ const (
 	maxForwardedHeaderValueBytes = 4096
 	maxForwardedHeaderValues     = 32
 )
+
+func forwardedAuthorization(r Request) (string, error) {
+	if r.Inbound == nil {
+		return "", ErrInvalidRequest{Message: "forward_authorization requires a client Authorization header"}
+	}
+	values := r.Inbound.Header.Values("Authorization")
+	if len(values) != 1 || strings.TrimSpace(values[0]) == "" || !isForwardableHeaderValue(values[0]) {
+		return "", ErrInvalidRequest{Message: "forward_authorization requires a single valid client Authorization header"}
+	}
+	return values[0], nil
+}
 
 func applyForwardedHeaders(r Request, req *http.Request) {
 	if r.Inbound == nil || len(r.ForwardHeaders) == 0 {

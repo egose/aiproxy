@@ -20,6 +20,7 @@ export function AdminWorkspacesPage() {
         <CardHeader>
           <CardTitle>Workspaces ({rows.length})</CardTitle>
         </CardHeader>
+
         <CardContent className="grid gap-2">
           {rows.map((o) => (
             <div key={o.id} className="flex flex-wrap items-center gap-2 border-t py-2 text-sm">
@@ -27,10 +28,13 @@ export function AdminWorkspacesPage() {
                 {o.display_name || o.name}
               </button>
               <span className="font-mono text-xs text-slate-500">{o.name}</span>
+
               <KindBadge kind={o.kind} isSystem={o.is_system} />
+
               <RoleBadge role={o.role} />
             </div>
           ))}
+
           {workspaces.isLoading && (
             <div className="text-sm text-slate-500">
               <Spinner size="small">Loading workspaces...</Spinner>
@@ -38,6 +42,7 @@ export function AdminWorkspacesPage() {
           )}
         </CardContent>
       </Card>
+
       {current && (
         <WorkspaceDetail
           key={current.id}

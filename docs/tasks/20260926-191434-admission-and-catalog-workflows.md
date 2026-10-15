@@ -21,7 +21,7 @@ public docs and this execution record.
 
 - Followed AGENTS.md and
   `task-as-you-go skill`.
-- Read-only review `ses_f1f5d762cffe7vwysYnRSZoqmX` inspected quota admission and
+- Read-only planning review inspected quota admission and
   storage callers, provider/alias persistence and activation/view ordering, browser
   forms/services, existing regressions and product contracts. Coordinator checked
   principal source locations and incoming worktree independently.

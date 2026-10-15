@@ -46,10 +46,12 @@ function RequireDashboardOperator({ children }: { children: React.JSX.Element })
     return (
       <div className="grid gap-4 p-6" role="alert">
         <h1 className="text-lg font-semibold">Operator access required</h1>
+
         <p>
           Global dashboard data and decisions are available only to system administrators or dashboard-token holders.
         </p>
         {access.error && <p>Unable to verify your account. Sign in again to check access.</p>}
+
         <Link to="/manage/keys" className="underline">
           Manage workspace API keys
         </Link>
@@ -99,8 +101,11 @@ function AppContent() {
         <Shell>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+
             <Route path="/register" element={<RegisterPage />} />
+
             <Route path="/admin/oidc/callback" element={<OidcCallbackPage />} />
+
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </Shell>
@@ -119,8 +124,11 @@ function AppContent() {
               </RequireDashboardOperator>
             }
           />
+
           <Route path="/providers" element={<ProvidersPage />} />
+
           <Route path="/aliases" element={<AliasesPage />} />
+
           <Route
             path="/requests"
             element={
@@ -129,6 +137,7 @@ function AppContent() {
               </RequireDashboardOperator>
             }
           />
+
           <Route
             path="/payloads"
             element={
@@ -137,6 +146,7 @@ function AppContent() {
               </RequireDashboardOperator>
             }
           />
+
           <Route
             path="/blocks"
             element={
@@ -151,6 +161,7 @@ function AppContent() {
           {multi && <Route path="/register" element={<RegisterPage />} />}
           {multi && <Route path="/logout" element={<LogoutPage />} />}
           {multi && <Route path="/admin/oidc/callback" element={<OidcCallbackPage />} />}
+
           {multi && (
             <Route
               path="/manage/workspace"
@@ -161,6 +172,7 @@ function AppContent() {
               }
             />
           )}
+
           {multi && (
             <Route
               path="/manage/members"
@@ -171,6 +183,7 @@ function AppContent() {
               }
             />
           )}
+
           {multi && (
             <Route
               path="/manage/teams"
@@ -181,6 +194,7 @@ function AppContent() {
               }
             />
           )}
+
           {multi && (
             <Route
               path="/manage/keys"
@@ -192,6 +206,7 @@ function AppContent() {
             />
           )}
           {multi && <Route path="/admin/keys" element={<Navigate to="/manage/keys" replace />} />}
+
           {multi && (
             <Route
               path="/admin/oidc"
@@ -202,6 +217,7 @@ function AppContent() {
               }
             />
           )}
+
           {multi && (
             <Route
               path="/admin/users"
@@ -212,6 +228,7 @@ function AppContent() {
               }
             />
           )}
+
           {multi && (
             <Route
               path="/admin/workspaces"
@@ -223,10 +240,15 @@ function AppContent() {
             />
           )}
           {multi && <Route path="/admin/orgs" element={<Navigate to="/admin/workspaces" replace />} />}
+
           {multi && <Route path="/admin/organizations" element={<Navigate to="/admin/workspaces" replace />} />}
+
           {multi && <Route path="/manage/organization" element={<Navigate to="/manage/workspace" replace />} />}
+
           <Route path="/admin/providers" element={<Navigate to="/providers" replace />} />
+
           <Route path="/admin/aliases" element={<Navigate to="/aliases" replace />} />
+
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Shell>

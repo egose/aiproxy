@@ -241,6 +241,7 @@ type Provider struct {
 	UserAgent             string
 	ForwardUserAgent      bool
 	ForwardHeaders        []string
+	ForwardAuthorization  bool
 	APIKey                string
 	APIKeyRef             *APIKeyRef
 	CopilotCredentialRef  *CopilotCredentialRef

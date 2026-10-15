@@ -64,6 +64,7 @@ export function DataTable<TData extends RowData>({
   return (
     <div className="grid gap-2">
       <Input placeholder={filterPlaceholder} value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} />
+
       <div className="overflow-x-auto">
         <Table>
           <TableHeader>
@@ -76,12 +77,14 @@ export function DataTable<TData extends RowData>({
                     onClick={h.column.getCanSort() ? h.column.getToggleSortingHandler() : undefined}
                   >
                     {flexRender(h.column.columnDef.header, h.getContext())}
+
                     {h.column.getIsSorted() === 'asc' ? ' ▲' : h.column.getIsSorted() === 'desc' ? ' ▼' : ''}
                   </TableHead>
                 ))}
               </TableRow>
             ))}
           </TableHeader>
+
           <TableBody>
             {rows.map((row) => (
               <Fragment key={row.id}>
@@ -90,6 +93,7 @@ export function DataTable<TData extends RowData>({
                     <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
                   ))}
                 </TableRow>
+
                 {expandedIds?.has(row.id) && renderExpanded ? (
                   <TableRow>
                     <TableCell colSpan={colCount}>{renderExpanded(row.original)}</TableCell>
@@ -97,6 +101,7 @@ export function DataTable<TData extends RowData>({
                 ) : null}
               </Fragment>
             ))}
+
             {rows.length === 0 && (
               <TableRow>
                 <TableCell colSpan={colCount} className="text-sm text-slate-500">

@@ -36,6 +36,7 @@ export function OidcCallbackPage() {
         <CardHeader>
           <CardTitle>Single sign-on</CardTitle>
         </CardHeader>
+
         <CardContent>
           {error ? (
             <Alert variant="danger">

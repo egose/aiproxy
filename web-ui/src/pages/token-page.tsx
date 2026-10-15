@@ -34,12 +34,14 @@ export function TokenPage() {
       <Card>
         <CardHeader>
           <CardTitle>Dashboard token</CardTitle>
+
           <CardDescription>
             Same bearer token the server uses for <span className="font-mono">/_internal/dashboard/*</span>. When the
             config omits <span className="font-mono">dashboard.token</span>, the server mints one and writes it to the
             dashboard token file; paste it here. It is stored only in this browser.
           </CardDescription>
         </CardHeader>
+
         <CardContent>
           <FormProvider {...form}>
             <form className="grid gap-4" onSubmit={form.handleSubmit((values) => connectMutation.mutate(values))}>
@@ -50,15 +52,18 @@ export function TokenPage() {
                 autoComplete="off"
                 placeholder="paste dashboard token"
               />
+
               {connectMutation.error && (
                 <Alert variant="danger">
                   <AlertDescription>{errorMessage(connectMutation.error)}</AlertDescription>
                 </Alert>
               )}
+
               <div className="flex gap-2">
                 <Button variant="primary" type="submit" disabled={connectMutation.isPending}>
                   {connectMutation.isPending ? 'Verifying...' : 'Save and connect'}
                 </Button>
+
                 <Button appearance="outline" type="button" onClick={onSignOut}>
                   Sign out
                 </Button>

@@ -18,17 +18,21 @@ export function PayloadsPage() {
         <CardHeader>
           <CardTitle>Payloads</CardTitle>
         </CardHeader>
+
         <CardContent className="grid gap-2 pt-0 text-sm">
           <Label className="flex items-center gap-2">
             <input type="checkbox" checked={errorsOnly} onChange={(e) => setErrorsOnly(e.target.checked)} />
             Errors only
           </Label>
+
           {list.error && (
             <Alert variant="danger">
               <AlertDescription>{errorMessage(list.error)}</AlertDescription>
             </Alert>
           )}
+
           {!list.error && list.data && !list.data.enabled && <span>Payload log is not enabled on this server.</span>}
+
           {(!list.error ? (list.data?.payloads ?? []) : []).map((p) => (
             <Button
               key={p.request_id}
@@ -43,17 +47,21 @@ export function PayloadsPage() {
           ))}
         </CardContent>
       </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Payload detail</CardTitle>
         </CardHeader>
+
         <CardContent className="grid gap-2 pt-0 text-sm">
           {!selected && <span>Select a payload to inspect.</span>}
+
           {detail.error && (
             <Alert variant="danger">
               <AlertDescription>{errorMessage(detail.error)}</AlertDescription>
             </Alert>
           )}
+
           {detail.data && !detail.error && !list.error ? (
             <pre className="overflow-auto rounded bg-black/40 p-3 font-mono text-xs">
               {JSON.stringify(detail.data, null, 2)}

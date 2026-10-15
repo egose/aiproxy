@@ -35,10 +35,12 @@ export function LoginPage() {
       <Card>
         <CardHeader>
           <CardTitle>Sign in</CardTitle>
+
           <CardDescription>
             Sign in with your account email and password to manage your workspaces, API keys, and usage.
           </CardDescription>
         </CardHeader>
+
         <CardContent>
           <FormProvider {...form}>
             <form className="grid gap-4" onSubmit={form.handleSubmit((values) => loginMutation.mutate(values))}>
@@ -48,21 +50,25 @@ export function LoginPage() {
                 placeholder="you@example.com"
                 autoComplete="username"
               />
+
               <HookFormTextInput<AdminLogin>
                 name="password"
                 label="Password"
                 type="password"
                 autoComplete="current-password"
               />
+
               {loginMutation.error && (
                 <Alert variant="danger">
                   <AlertDescription>{errorMessage(loginMutation.error)}</AlertDescription>
                 </Alert>
               )}
+
               <div className="flex items-center gap-3">
                 <Button variant="primary" type="submit" disabled={loginMutation.isPending}>
                   {loginMutation.isPending ? 'Signing in...' : 'Sign in'}
                 </Button>
+
                 {registrationEnabled && (
                   <Link className="text-sm underline" to="/register">
                     Create account
@@ -71,11 +77,15 @@ export function LoginPage() {
               </div>
             </form>
           </FormProvider>
+
           {ssoEnabled && (
             <>
               <div className="my-4 flex items-center gap-2 text-xs text-slate-500">
-                <span className="h-px flex-1 bg-slate-200" /> or <span className="h-px flex-1 bg-slate-200" />
+                <span className="h-px flex-1 bg-slate-200" />
+                or
+                <span className="h-px flex-1 bg-slate-200" />
               </div>
+
               <Button
                 appearance="outline"
                 type="button"

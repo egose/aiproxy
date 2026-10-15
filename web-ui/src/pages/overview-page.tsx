@@ -31,8 +31,10 @@ export function OverviewPage() {
           <CardHeader>
             <CardTitle>Connect the dashboard</CardTitle>
           </CardHeader>
+
           <CardContent className="grid gap-4">
             <p className="text-sm">Paste the dashboard bearer token to load live state.</p>
+
             <Link to="/token">
               <Button variant="primary">Open token settings</Button>
             </Link>
@@ -56,10 +58,12 @@ export function OverviewPage() {
         <Alert variant="danger">
           <AlertDescription>{errorMessage(snapshot.error)}</AlertDescription>
         </Alert>
+
         <div className="flex gap-2">
           <Button appearance="outline" onClick={() => queryClient.invalidateQueries({ queryKey: ['dashboard'] })}>
             Retry
           </Button>
+
           {isUnauthorized(snapshot.error) && (
             <Link to="/token">
               <Button variant="primary">Fix token</Button>
@@ -79,8 +83,11 @@ export function OverviewPage() {
     <div className="grid w-full gap-6 p-6">
       <div className="grid gap-4 md:grid-cols-4">
         <Stat label="Providers" value={String(data.providers.length)} />
+
         <Stat label="Aliases" value={String(data.aliases.length)} />
+
         <Stat label="Healthy" value={total ? `${healthy}/${total}` : 'n/a'} />
+
         <Stat label="Cooling" value={String(cooling)} />
       </div>
 
@@ -89,11 +96,14 @@ export function OverviewPage() {
           <CardHeader>
             <CardTitle>Healthchecks</CardTitle>
           </CardHeader>
+
           <CardContent className="grid gap-2 pt-0 text-sm">
             {(data.healthchecks ?? []).length === 0 && <span>No healthcheck state.</span>}
+
             {(data.healthchecks ?? []).map((h) => (
               <div key={h.provider} className="flex items-center justify-between gap-2">
                 <span className="font-mono">{h.provider}</span>
+
                 <span>
                   {!h.configured
                     ? 'not configured'
@@ -107,12 +117,15 @@ export function OverviewPage() {
             ))}
           </CardContent>
         </Card>
+
         <Card>
           <CardHeader>
             <CardTitle>Cooldowns</CardTitle>
           </CardHeader>
+
           <CardContent className="grid gap-2 pt-0 text-sm">
             {(data.cooldowns ?? []).length === 0 && <span>No active cooldowns.</span>}
+
             {(data.cooldowns ?? []).map((c) => (
               <div key={`${c.alias}/${c.provider}/${c.model}`} className="flex items-center justify-between gap-2">
                 <span className="font-mono">
@@ -129,8 +142,10 @@ export function OverviewPage() {
         <CardHeader>
           <CardTitle>Usage</CardTitle>
         </CardHeader>
+
         <CardContent className="grid gap-2 pt-0 text-sm">
           {(data.usage ?? []).length === 0 && <span>No usage recorded yet.</span>}
+
           {(data.usage ?? []).slice(0, 20).map((u) => (
             <div
               key={`${u.Model}/${u.Operation ?? ''}/${u.StatusCode ?? ''}`}
@@ -139,6 +154,7 @@ export function OverviewPage() {
               <span className="font-mono">
                 {u.Model} {u.Operation ? `· ${u.Operation}` : ''}
               </span>
+
               <span>
                 {u.Count ?? 0} req · {u.TotalTokens ?? 0} tok
               </span>

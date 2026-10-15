@@ -91,7 +91,7 @@ files when that is clearer, not simply to avoid integration review.
 
 Status: completed
 
-Owner: sub-agent ses_f7e0253b2ffe0MBmFvGAHJH4mg (HTTP observability/security engineer)
+Owner: SEC-01 implementation session (HTTP observability/security engineer)
 
 Completion evidence:
 
@@ -147,7 +147,7 @@ Verification: `go test -race ./internal/httpapi ./internal/observability`.
 
 Status: completed
 
-Owner: sub-agent ses_f7dfe3af6ffe1HpdpuBOXYvKYZ (filesystem persistence engineer)
+Owner: STORE-02 implementation session (filesystem persistence engineer)
 
 Completion evidence:
 
@@ -202,7 +202,7 @@ Verification: `go test -race ./internal/filestore ./internal/configedit`.
 
 Status: completed
 
-Owner: sub-agent ses_f7df97378ffelWYbQ5PhMGRL1r (streaming protocol engineer)
+Owner: STREAM-02 implementation session (streaming protocol engineer)
 
 Completion evidence:
 
@@ -261,7 +261,7 @@ verification is also required at REVIEW-02.
 
 Status: completed
 
-Owner: sub-agent ses_f7df437f6ffexwBNDxGiRX7Wp4 (alias routing/concurrency engineer)
+Owner: ROUTE-02 implementation session (alias routing/concurrency engineer)
 
 Completion evidence:
 
@@ -316,7 +316,7 @@ Verification: `go test -race ./internal/alias ./internal/modelresolver ./interna
 
 Status: completed
 
-Owner: sub-agent ses_f7ded4c24ffe3y3rui9VuXTWQq (provider resource-safety engineer)
+Owner: STREAM-03 implementation session (provider resource-safety engineer)
 
 Completion evidence:
 
@@ -377,7 +377,7 @@ and record its actual benchmark names/results. No speedup is presumed.
 
 Status: completed
 
-Owner: sub-agent ses_f7ddd08c8ffeeSlGBJsxXdeUz3 (configuration editing engineer)
+Owner: CFG-01 implementation session (configuration editing engineer)
 
 Completion evidence:
 
@@ -429,7 +429,7 @@ Verification: `go test -race ./internal/configedit ./internal/config ./cmd/aipro
 
 Status: completed
 
-Owner: sub-agent ses_f7dda0137ffeUAV3S7u2DeqCgg (protocol contract/usage engineer)
+Owner: USAGE-01 implementation session (protocol contract/usage engineer)
 
 Completion evidence:
 
@@ -484,7 +484,7 @@ Verification: `go test -race ./internal/provider`.
 
 Status: completed
 
-Owner: sub-agent ses_f7dd31537ffegOBRKCZv2Jjxtd (health backend/observability engineer)
+Owner: HEALTH-03 implementation session (health backend/observability engineer)
 
 Completion evidence:
 
@@ -535,7 +535,7 @@ Verification: `go test -race ./internal/providerhealth ./internal/observability 
 
 Status: completed
 
-Owner: sub-agent ses_f7dd14f43ffeNYbaEwfa0KYevn (application credential-lifecycle engineer)
+Owner: DASH-02 implementation session (application credential-lifecycle engineer)
 
 Completion evidence:
 
@@ -593,7 +593,7 @@ transition evidence, not only separate helper tests.
 
 Status: completed
 
-Owner: sub-agent ses_f7dc81bb0ffeV4kYQCE5EikbUw (provider usage observation engineer)
+Owner: USAGE-02 implementation session (provider usage observation engineer)
 
 Completion evidence:
 
@@ -647,7 +647,7 @@ Verification: `go test -race ./internal/provider ./internal/httpapi`.
 
 Status: completed
 
-Owner: sub-agent ses_f7dc2c246ffejqLyTCAn4JgRIp (Linux process lifecycle engineer)
+Owner: LIFE-02 implementation session (Linux process lifecycle engineer)
 
 Completion evidence:
 
@@ -701,7 +701,7 @@ under `make integration` at final review.
 
 Status: completed
 
-Owner: sub-agent ses_f7dbecad5ffe754NynFU0454dP (performance/investigation engineer)
+Owner: PERF-01 implementation session (performance/investigation engineer)
 
 Completion evidence (investigation only, no API changes):
 
@@ -764,7 +764,7 @@ and `go test ./internal/config ./internal/modelresolver -run '^$' -bench 'Catalo
 
 Status: completed
 
-Owner: sub-agent ses_f7db94951ffewBL1AFA4VxOxnG (independent reviewer)
+Owner: REVIEW-02 independent review session (independent reviewer)
 
 Completion evidence:
 

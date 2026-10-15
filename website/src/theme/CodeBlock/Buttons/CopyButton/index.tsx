@@ -79,6 +79,7 @@ export default function CopyButton({ className }: Props): ReactNode {
     >
       <span className={styles.copyButtonIcons} aria-hidden="true">
         <IconCopy className={styles.copyButtonIcon} />
+
         <IconSuccess className={styles.copyButtonSuccessIcon} />
       </span>
     </Button>

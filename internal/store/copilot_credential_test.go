@@ -116,7 +116,7 @@ func TestCopilotCredentialSchemaAndPersistence(t *testing.T) {
 		t.Fatal("schema is not idempotent")
 	}
 	status, err := st.Status(ctx)
-	if err != nil || !reflect.DeepEqual(status.Applied, []string{"schema.sql"}) || len(status.Pending) != 0 {
+	if err != nil || !reflect.DeepEqual(status.Applied, []string{"schema.sql", "forward_authorization.sql"}) || len(status.Pending) != 0 {
 		t.Fatalf("schema status = %+v, %v", status, err)
 	}
 	for _, row := range []struct {

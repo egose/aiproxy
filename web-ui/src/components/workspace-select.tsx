@@ -49,8 +49,10 @@ export function WorkspaceSelect({
   return (
     <div className="grid gap-2">
       <Label htmlFor={id}>Workspace</Label>
+
       <NativeSelect id={id} value={value} onChange={(e) => onChange(e.target.value)}>
         <NativeSelectOption value="">Select workspace...</NativeSelectOption>
+
         {workspaces.map((o) => (
           <NativeSelectOption key={o.id} value={o.id}>
             {o.display_name || o.name}

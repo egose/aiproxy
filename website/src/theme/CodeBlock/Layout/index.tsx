@@ -16,8 +16,10 @@ export default function CodeBlockLayout({ className }: Props): ReactNode {
           <Title>{metadata.title}</Title>
         </div>
       )}
+
       <div className="relative rounded-[inherit]">
         <Content />
+
         <Buttons />
       </div>
     </Container>

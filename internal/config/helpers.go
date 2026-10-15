@@ -38,6 +38,9 @@ func trimLeadingWhitespace(src []byte) []byte {
 // rule and required api_key_ref.key without reading any file. Disabled
 // providers must still pass these structural checks.
 func validateProviderCredentialStructure(p *Provider) error {
+	if err := validateProviderForwardAuthorization(*p); err != nil {
+		return err
+	}
 	if p.Type == ProviderTypeGitHubCopilot {
 		if p.APIKey != "" || p.APIKeyRef != nil { // pragma: allowlist secret
 			return fmt.Errorf("api_key and api_key_ref are not supported by github-copilot; use credential_ref")

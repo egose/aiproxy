@@ -45,6 +45,7 @@ function page(element: React.JSX.Element) {
         <MemoryRouter initialEntries={['/entry']}>
           <Routes>
             <Route path="/entry" element={element} />
+
             <Route path="/" element={<p>Signed-in destination</p>} />
           </Routes>
         </MemoryRouter>

@@ -46,12 +46,14 @@ export function ManageTeamsPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2">
           <CardTitle>Teams</CardTitle>
+
           {canManage && !isPersonal && (
             <Button variant="primary" type="button" onClick={openCreate}>
               Create team
             </Button>
           )}
         </CardHeader>
+
         <CardContent>
           {isPersonal ? (
             <p className="text-sm text-slate-600">

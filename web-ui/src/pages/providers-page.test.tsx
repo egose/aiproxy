@@ -141,6 +141,29 @@ function change(label: string | RegExp, value: string) {
 }
 
 describe('mounted provider form requests and reopened values', { timeout: 15000 }, () => {
+  it('opts into authorization forwarding, clears stored credentials and preserves untouched forwarding', async () => {
+    mount(provider(), [
+      provider({ forward_authorization: true, has_credential: false }),
+      provider({ forward_authorization: true, has_credential: false, display_name: 'Forwarded' }),
+    ]);
+    let form = await edit();
+    expect(form.getByRole('checkbox', { name: 'Forward client Authorization' })).not.toBeChecked();
+    fireEvent.click(form.getByRole('checkbox', { name: 'Forward client Authorization' }));
+    expect(form.queryByLabelText('API key (stored encrypted, write-only)')).not.toBeInTheDocument();
+    expect(form.getByText(/proxy authentication token unchanged/)).toBeInTheDocument();
+    await save();
+    expect(writes[0].body).toEqual({
+      forward_authorization: true,
+      api_key: '',
+      api_key_ref: { path: '', key: '' },
+    });
+    form = await edit();
+    expect(form.getByRole('checkbox', { name: 'Forward client Authorization' })).toBeChecked();
+    fireEvent.change(form.getAllByLabelText('Display name (optional)')[0], { target: { value: 'Forwarded' } });
+    await save();
+    expect(writes[1].body).toEqual({ display_name: 'Forwarded' });
+  });
+
   it('persists enabled in both directions and omits untouched write-only credentials and models', async () => {
     mount(provider({ enabled: false }), [provider(), provider({ enabled: false })]);
     let form = await edit();

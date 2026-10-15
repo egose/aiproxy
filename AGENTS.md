@@ -120,6 +120,12 @@ matrices.
   validation, except `opencode-zen` providers, which may omit the credential
   for keyless upstream access (no `Authorization` header is sent). To intentionally
   disable a provider, set `enabled = false`.
+  Provider-only `forward_authorization = true` instead forwards one valid caller
+  `Authorization` header unchanged on live inference for `openai`,
+  `openai-compatible`, `opencode-zen`, `opencode-go`, `zenmux`, and `openrouter`.
+  It cannot coexist with configured credentials; missing or invalid headers fail
+  with `400` before upstream I/O. Proxy auth still applies, so its caller token
+  is exposed to the trusted upstream. Derived providers must opt in locally.
   `api_key_ref.path` defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json`, falling
   back to `~/.config/aiproxy/keys.json`.
 - Providers may declare `extends = "<base-provider-name>"` to inherit the base
@@ -127,7 +133,9 @@ matrices.
   own provider name and local credential. Derived providers may only declare
   `extends`, optional `display_name`, and at most one local `api_key` or
   `api_key_ref` (exactly one, except `opencode-zen` derivatives which may omit
-  it for keyless access); the base must be enabled, concrete, and the same type.
+  it for keyless access, or derivatives explicitly setting
+  `forward_authorization = true` which must omit it); the base must be enabled,
+  concrete, and the same type.
 - Any provider may declare an optional `user_agent` override (1-256 printable
   ASCII characters, no newlines). It replaces the default `aiproxy/<version>`
   upstream `User-Agent` on every proxy-initiated request for that provider

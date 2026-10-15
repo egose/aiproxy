@@ -81,6 +81,8 @@ type providerOptions struct {
 	HasForwardUserAgent     bool
 	ForwardHeaders          string
 	HasForwardHeaders       bool
+	ForwardAuthorization    bool
+	HasForwardAuthorization bool
 	APIKey                  string
 	APIKeyEnv               string
 	SecretsPath             string
@@ -299,6 +301,7 @@ func newConfigureProviderCommand() *cobra.Command {
 			options.HasEnabled = cmd.Flags().Changed("enabled")
 			options.HasForwardUserAgent = cmd.Flags().Changed("forward-user-agent")
 			options.HasForwardHeaders = cmd.Flags().Changed("forward-headers")
+			options.HasForwardAuthorization = cmd.Flags().Changed("forward-authorization")
 			options.HasHealthcheckStatus = cmd.Flags().Changed("healthcheck-expected-status")
 			options.HasHealthcheckFailures = cmd.Flags().Changed("healthcheck-failure-threshold")
 			options.HasHealthcheckSuccesses = cmd.Flags().Changed("healthcheck-success-threshold")
@@ -317,6 +320,7 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().StringVar(&options.UserAgent, "user-agent", "", "provider user_agent override")
 	cmd.Flags().BoolVar(&options.ForwardUserAgent, "forward-user-agent", false, "forward the inbound User-Agent header upstream (use --forward-user-agent=false to disable; default preserves existing)")
 	cmd.Flags().StringVar(&options.ForwardHeaders, "forward-headers", "", "provider forward_headers as comma-separated names (empty clears it when explicitly passed)")
+	cmd.Flags().BoolVar(&options.ForwardAuthorization, "forward-authorization", false, "forward the client's Authorization header upstream instead of configuring a provider key")
 	cmd.Flags().StringVar(&options.APIKey, "api-key", "", "provider API key or secret value")
 	cmd.Flags().StringVar(&options.APIKeyEnv, "api-key-env", "", "provider API key environment variable name")
 	cmd.Flags().StringVar(&options.SecretsPath, "secrets-path", "", "secrets file path for api_key_ref")
@@ -1933,6 +1937,9 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if options.HasForwardUserAgent {
 		defaults.ForwardUserAgent = options.ForwardUserAgent
 	}
+	if options.HasForwardAuthorization {
+		defaults.ForwardAuthorization = options.ForwardAuthorization
+	}
 	if options.HasForwardHeaders {
 		if err := validateForwardHeadersCSV(options.ForwardHeaders); err != nil {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("invalid forward-headers: %w", err)
@@ -1941,6 +1948,14 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	}
 	if err := applyProviderCredentialOptions(&defaults, options); err != nil {
 		return providerInput{}, secretsUpdate{}, err
+	}
+	if defaults.ForwardAuthorization {
+		if !config.SupportsForwardAuthorization(config.ProviderType(defaults.ProviderType)) {
+			return providerInput{}, secretsUpdate{}, fmt.Errorf("forward_authorization is not supported by %s", defaults.ProviderType)
+		}
+		if defaults.Credential.Mode != "" && defaults.Credential.Mode != "none" {
+			return providerInput{}, secretsUpdate{}, fmt.Errorf("forward_authorization cannot be combined with provider credentials; remove the existing credential first")
+		}
 	}
 	if err := applyProviderHealthcheckOptions(&defaults, options); err != nil {
 		return providerInput{}, secretsUpdate{}, err
@@ -1974,7 +1989,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("github-copilot providers use --credential/--credential-path referencing a saved login, not API key flags")
 		}
 		if defaults.Extends != "" {
-			if defaults.Credential.Mode == "" && defaults.ProviderType != "opencode-zen" {
+			if defaults.Credential.Mode == "" && !defaults.ForwardAuthorization && defaults.ProviderType != "opencode-zen" {
 				return providerInput{}, secretsUpdate{}, fmt.Errorf("derived provider requires local credential flags in non-interactive mode")
 			}
 			if isGitHubCopilotProviderType(defaults.ProviderType) && defaults.Credential.Mode != "credential_ref" {
@@ -1999,7 +2014,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if isGitHubCopilotProviderType(defaults.ProviderType) && defaults.Credential.Mode == "" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("github-copilot provider requires --credential referencing a saved login (run `aiproxy login github-copilot` first) or existing credentials in non-interactive mode")
 		}
-		if defaults.Credential.Mode == "" && defaults.ProviderType != "opencode-zen" {
+		if defaults.Credential.Mode == "" && !defaults.ForwardAuthorization && defaults.ProviderType != "opencode-zen" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider requires credential flags or existing credentials in non-interactive mode")
 		}
 		if isGitHubCopilotProviderType(defaults.ProviderType) && defaults.Credential.Mode != "credential_ref" {
@@ -2155,6 +2170,9 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		} else if providerType == "opencode-zen" {
 			credentialMode = "none"
 		}
+		if defaults.ForwardAuthorization {
+			credentialMode = "forward_authorization"
+		}
 		credentialOptions := []huh.Option[string]{
 			huh.NewOption("Secrets file", "secrets_file"),
 			huh.NewOption(`env("VAR") expression`, "env_expression"),
@@ -2162,6 +2180,9 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		}
 		if providerType == "opencode-zen" {
 			credentialOptions = append(credentialOptions, huh.NewOption("No credential (keyless upstream access)", "none"))
+		}
+		if config.SupportsForwardAuthorization(config.ProviderType(providerType)) {
+			credentialOptions = append(credentialOptions, huh.NewOption("Forward client Authorization (sends client credentials upstream)", "forward_authorization"))
 		}
 		if err := prompts.runHuhForm(
 			huh.NewGroup(
@@ -2173,6 +2194,10 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			return providerInput{}, secretsUpdate{}, err
 		}
 		credential := providerCredentialInput{Mode: credentialMode}
+		forwardAuthorization := credentialMode == "forward_authorization"
+		if forwardAuthorization {
+			credential.Mode = "none"
+		}
 		update := secretsUpdate{}
 		switch credentialMode {
 		case "secrets_file":
@@ -2238,6 +2263,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			UserAgent:             strings.TrimSpace(userAgent),
 			ForwardUserAgent:      forwardUserAgent,
 			ForwardHeaders:        parseForwardHeadersCSV(forwardHeaders),
+			ForwardAuthorization:  forwardAuthorization,
 			Credential:            credential,
 			Enabled:               defaults.Enabled,
 			Healthcheck:           preservedProviderHealthcheck(defaults.Healthcheck, extends, providerType),
@@ -2360,15 +2386,25 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	} else if providerType == "opencode-zen" {
 		credentialDefault = "none"
 	}
+	if defaults.ForwardAuthorization {
+		credentialDefault = "forward_authorization"
+	}
 	credentialChoices := []string{"secrets_file", "env_expression", "inline"}
 	if providerType == "opencode-zen" {
 		credentialChoices = append(credentialChoices, "none")
+	}
+	if config.SupportsForwardAuthorization(config.ProviderType(providerType)) {
+		credentialChoices = append(credentialChoices, "forward_authorization")
 	}
 	credentialMode, err := prompts.askChoiceWithDescription("Credential storage", credentialStorageDescription(), credentialChoices, credentialDefault)
 	if err != nil {
 		return providerInput{}, secretsUpdate{}, err
 	}
 	credential := providerCredentialInput{Mode: credentialMode}
+	forwardAuthorization := credentialMode == "forward_authorization"
+	if forwardAuthorization {
+		credential.Mode = "none"
+	}
 	update := secretsUpdate{}
 	switch credentialMode {
 	case "secrets_file":
@@ -2425,6 +2461,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		UserAgent:             userAgent,
 		ForwardUserAgent:      forwardUserAgent,
 		ForwardHeaders:        parseForwardHeadersCSV(forwardHeaders),
+		ForwardAuthorization:  forwardAuthorization,
 		Credential:            credential,
 		Enabled:               defaults.Enabled,
 		Healthcheck:           preservedProviderHealthcheck(defaults.Healthcheck, extends, providerType),
@@ -4147,6 +4184,7 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 		input.ForwardUserAgent = boolVal
 	}
 	input.ForwardHeaders = parseQuotedListExpr(attributeExpr(src, parsed.Body, "forward_headers"))
+	input.ForwardAuthorization = parseBoolExpr(attributeExpr(src, parsed.Body, "forward_authorization"), false)
 	if enabledExpr := parseLiteralOrExpression(attributeExpr(src, parsed.Body, "enabled")); enabledExpr != "" {
 		boolVal := enabledExpr == "true" || enabledExpr == "1"
 		input.Enabled = &boolVal
