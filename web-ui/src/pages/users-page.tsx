@@ -36,7 +36,8 @@ import { errorMessage } from '../services/dashboard';
 function RoleBadge({ role }: { role: string }) {
   return (
     <Badge variant={role === 'admin' ? 'info' : 'secondary'} size="sm">
-      {role}
+            {role}
+
     </Badge>
   );
 }
@@ -61,29 +62,43 @@ const ResetPasswordDialog = createTypedDialog<{ email: string }, string | null>(
   });
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose(null)}>
+
       <DialogContent className="sm:max-w-md">
+
         <DialogHeader>
-          <DialogTitle>Reset password for {args.email}</DialogTitle>
+                    <DialogTitle>Reset password for {args.email}</DialogTitle>
+
         </DialogHeader>
+
         <FormProvider {...form}>
+
           <form className="grid gap-4" onSubmit={form.handleSubmit((values) => onClose(values.password))}>
+
             <HookFormTextInput<PasswordForm>
               name="password"
               label="New password (min 8 characters)"
               type="password"
               autoComplete="new-password"
             />
+
             <DialogFooter>
+
               <Button appearance="outline" type="button" onClick={() => onClose(null)}>
-                Cancel
+                                Cancel
               </Button>
+
               <Button variant="primary" type="submit">
-                Save
+                                Save
               </Button>
+
             </DialogFooter>
+
           </form>
+
         </FormProvider>
+
       </DialogContent>
+
     </Dialog>
   );
 });
@@ -167,52 +182,71 @@ export function UsersPage() {
 
   return (
     <div className="grid w-full gap-6 p-6">
+
       {error && (
         <Alert variant="danger">
-          <AlertDescription>{error}</AlertDescription>
+                    <AlertDescription>{error}</AlertDescription>
+
         </Alert>
       )}
+
       <Card>
+
         <CardHeader>
-          <CardTitle>Users ({rows.length})</CardTitle>
+                    <CardTitle>Users ({rows.length})</CardTitle>
+
           <CardDescription>
-            Global roles: admins manage providers, aliases, keys, users and sign-on settings; users can view the
-            dashboard and use the APIs allowed to them.
+                        Global roles: admins manage providers, aliases, keys, users and sign-on settings; users can view the
+                        dashboard and use the APIs allowed to them.
           </CardDescription>
+
         </CardHeader>
+
         <CardContent className="grid gap-2">
+
           {rows.map((u) => (
             <div key={u.id} className="grid gap-2 border-t py-2 text-sm">
+
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-mono font-medium">{u.email}</span>
+                                <span className="font-mono font-medium">{u.email}</span>
+
                 <RoleBadge role={u.role} />
+
                 {(u.workspaces ?? []).map((o) => (
                   <Badge key={o.id} variant="secondary" size="sm" title={`Workspace role: ${o.role}`}>
-                    {o.name} · {o.role}
+                                        {o.name} · {o.role}
+
                   </Badge>
                 ))}
+
                 {u.disabled && (
                   <Badge variant="warning" size="sm">
-                    disabled
+                                        disabled
                   </Badge>
                 )}
+
                 {u.id === selfId && (
                   <span className="text-xs text-slate-400" title="Your own account">
-                    (you)
+                                        (you)
                   </span>
                 )}
+
               </div>
+
               {u.id !== selfId && (
                 <div className="flex flex-wrap items-center gap-2">
+
                   <NativeSelect
                     aria-label={`Role for ${u.email}`}
                     value={u.role}
                     disabled={busy}
                     onChange={(e) => rowMutation.mutate({ kind: 'role', id: u.id, role: e.target.value })}
                   >
-                    <NativeSelectOption value="admin">admin</NativeSelectOption>
-                    <NativeSelectOption value="user">user</NativeSelectOption>
+                                        <NativeSelectOption value="admin">admin</NativeSelectOption>
+                                        <NativeSelectOption value="user">user</NativeSelectOption>
+
                   </NativeSelect>
+
                   <ActionMenu
                     items={[
                       {
@@ -229,36 +263,52 @@ export function UsersPage() {
                       },
                     ]}
                   />
+
                 </div>
               )}
+
             </div>
           ))}
+
           {users.isLoading && (
             <div className="text-sm text-slate-500">
-              <Spinner size="small">Loading users...</Spinner>
+                            <Spinner size="small">Loading users...</Spinner>
+
             </div>
           )}
+
         </CardContent>
+
       </Card>
+
       <Card>
+
         <CardHeader>
-          <CardTitle>Invite user</CardTitle>
+                    <CardTitle>Invite user</CardTitle>
+
           <CardDescription>
-            Invited users set their own password via the invite token, which is shown once and expires after 7 days.
+                        Invited users set their own password via the invite token, which is shown once and expires after 7 days.
+
           </CardDescription>
+
         </CardHeader>
+
         <CardContent className="grid max-w-2xl gap-4">
+
           <FormProvider {...inviteForm}>
+
             <form
               className="grid max-w-2xl gap-4"
               onSubmit={inviteForm.handleSubmit((values) => inviteMutation.mutate(values))}
             >
+
               <HookFormTextInput<InviteForm>
                 name="email"
                 label="Email"
                 placeholder="teammate@example.com"
                 autoComplete="off"
               />
+
               <HookFormNativeSelect<InviteForm>
                 name="role"
                 label="Role"
@@ -267,46 +317,70 @@ export function UsersPage() {
                   { label: 'admin', value: 'admin' },
                 ]}
               />
+
               <div>
+
                 <Button variant="primary" type="submit" disabled={inviteMutation.isPending}>
-                  {inviteMutation.isPending ? 'Creating...' : 'Create invite'}
+                                    {inviteMutation.isPending ? 'Creating...' : 'Create invite'}
+
                 </Button>
+
               </div>
+
             </form>
+
           </FormProvider>
+
         </CardContent>
+
       </Card>
+
       <Card>
+
         <CardHeader>
-          <CardTitle>Pending invites ({pending.length})</CardTitle>
+                    <CardTitle>Pending invites ({pending.length})</CardTitle>
+
         </CardHeader>
+
         <CardContent className="grid gap-2">
+
           {pending.map((inv) => (
             <div key={inv.id} className="flex flex-wrap items-center gap-2 border-t py-2 text-sm">
-              <span className="font-mono font-medium">{inv.email}</span>
+                            <span className="font-mono font-medium">{inv.email}</span>
+
               <RoleBadge role={inv.role} />
+
               <span className="text-xs text-slate-500">expires {new Date(inv.expires_at).toLocaleString()}</span>
+
               <Button
                 appearance="outline"
                 type="button"
                 disabled={busy}
                 onClick={() => rowMutation.mutate({ kind: 'revoke', id: inv.id })}
               >
-                Revoke
+                                Revoke
               </Button>
+
             </div>
           ))}
+
           {pending.length === 0 && !invites.isLoading && (
             <div className="text-sm text-slate-500">No pending invites.</div>
           )}
+
           {invites.isLoading && (
             <div className="text-sm text-slate-500">
-              <Spinner size="small">Loading invites...</Spinner>
+                            <Spinner size="small">Loading invites...</Spinner>
+
             </div>
           )}
+
         </CardContent>
+
       </Card>
+
       <Separator />
+
     </div>
   );
 }

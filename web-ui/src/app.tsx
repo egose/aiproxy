@@ -38,21 +38,26 @@ function RequireDashboardOperator({ children }: { children: React.JSX.Element })
   if (access.pending) {
     return (
       <div className="p-6">
-        <Spinner size="small">Checking operator access...</Spinner>
+                <Spinner size="small">Checking operator access...</Spinner>
+
       </div>
     );
   }
   if (session.accessToken && !access.enabled) {
     return (
       <div className="grid gap-4 p-6" role="alert">
-        <h1 className="text-lg font-semibold">Operator access required</h1>
+                <h1 className="text-lg font-semibold">Operator access required</h1>
+
         <p>
-          Global dashboard data and decisions are available only to system administrators or dashboard-token holders.
+                    Global dashboard data and decisions are available only to system administrators or dashboard-token holders.
+
         </p>
-        {access.error && <p>Unable to verify your account. Sign in again to check access.</p>}
+                {access.error && <p>Unable to verify your account. Sign in again to check access.</p>}
+
         <Link to="/manage/keys" className="underline">
-          Manage workspace API keys
+                    Manage workspace API keys
         </Link>
+
       </div>
     );
   }
@@ -69,7 +74,8 @@ function RequireSystemAdmin({ children }: { children: React.JSX.Element }) {
   if (me.isPending || workspaces.isLoading) {
     return (
       <div className="p-6 text-sm text-slate-500">
-        <Spinner size="small">Loading...</Spinner>
+                <Spinner size="small">Loading...</Spinner>
+
       </div>
     );
   }
@@ -83,7 +89,9 @@ export function App() {
   const { generation } = useStateSnapshot(authLifecycle);
   return (
     <DialogManagerProvider key={generation}>
+
       <AppContent />
+
     </DialogManagerProvider>
   );
 }
@@ -96,140 +104,194 @@ function AppContent() {
   if (multi && !signedIn) {
     return (
       <div className="min-h-screen" data-booted="true">
+
         <Shell>
+
           <Routes>
+
             <Route path="/login" element={<LoginPage />} />
+
             <Route path="/register" element={<RegisterPage />} />
+
             <Route path="/admin/oidc/callback" element={<OidcCallbackPage />} />
+
             <Route path="*" element={<Navigate to="/login" replace />} />
+
           </Routes>
+
         </Shell>
+
       </div>
     );
   }
   return (
     <div className="min-h-screen" data-booted="true">
+
       <Shell>
+
         <Routes>
+
           <Route
             path="/"
             element={
               <RequireDashboardOperator>
+
                 <OverviewPage />
+
               </RequireDashboardOperator>
             }
           />
+
           <Route path="/providers" element={<ProvidersPage />} />
+
           <Route path="/aliases" element={<AliasesPage />} />
+
           <Route
             path="/requests"
             element={
               <RequireDashboardOperator>
+
                 <RequestsPage />
+
               </RequireDashboardOperator>
             }
           />
+
           <Route
             path="/payloads"
             element={
               <RequireDashboardOperator>
+
                 <PayloadsPage />
+
               </RequireDashboardOperator>
             }
           />
+
           <Route
             path="/blocks"
             element={
               <RequireDashboardOperator>
+
                 <BlocksPage />
+
               </RequireDashboardOperator>
             }
           />
-          {!multi && <Route path="/token" element={<TokenPage />} />}
-          {multi && <Route path="/token" element={<Navigate to="/" replace />} />}
-          {multi && <Route path="/login" element={<LoginPage />} />}
-          {multi && <Route path="/register" element={<RegisterPage />} />}
-          {multi && <Route path="/logout" element={<LogoutPage />} />}
-          {multi && <Route path="/admin/oidc/callback" element={<OidcCallbackPage />} />}
+                    {!multi && <Route path="/token" element={<TokenPage />} />}
+                    {multi && <Route path="/token" element={<Navigate to="/" replace />} />}
+                    {multi && <Route path="/login" element={<LoginPage />} />}
+                    {multi && <Route path="/register" element={<RegisterPage />} />}
+                    {multi && <Route path="/logout" element={<LogoutPage />} />}
+                    {multi && <Route path="/admin/oidc/callback" element={<OidcCallbackPage />} />}
+
           {multi && (
             <Route
               path="/manage/workspace"
               element={
                 <RequireAdmin>
+
                   <ManageWorkspacePage />
+
                 </RequireAdmin>
               }
             />
           )}
+
           {multi && (
             <Route
               path="/manage/members"
               element={
                 <RequireAdmin>
+
                   <ManageMembersPage />
+
                 </RequireAdmin>
               }
             />
           )}
+
           {multi && (
             <Route
               path="/manage/teams"
               element={
                 <RequireAdmin>
+
                   <ManageTeamsPage />
+
                 </RequireAdmin>
               }
             />
           )}
+
           {multi && (
             <Route
               path="/manage/keys"
               element={
                 <RequireAdmin>
+
                   <ManageKeysPage />
+
                 </RequireAdmin>
               }
             />
           )}
-          {multi && <Route path="/admin/keys" element={<Navigate to="/manage/keys" replace />} />}
+                    {multi && <Route path="/admin/keys" element={<Navigate to="/manage/keys" replace />} />}
+
           {multi && (
             <Route
               path="/admin/oidc"
               element={
                 <RequireSystemAdmin>
+
                   <AdminOidcPage />
+
                 </RequireSystemAdmin>
               }
             />
           )}
+
           {multi && (
             <Route
               path="/admin/users"
               element={
                 <RequireSystemAdmin>
+
                   <UsersPage />
+
                 </RequireSystemAdmin>
               }
             />
           )}
+
           {multi && (
             <Route
               path="/admin/workspaces"
               element={
                 <RequireSystemAdmin>
+
                   <AdminWorkspacesPage />
+
                 </RequireSystemAdmin>
               }
             />
           )}
-          {multi && <Route path="/admin/orgs" element={<Navigate to="/admin/workspaces" replace />} />}
+                    {multi && <Route path="/admin/orgs" element={<Navigate to="/admin/workspaces" replace />} />}
+
           {multi && <Route path="/admin/organizations" element={<Navigate to="/admin/workspaces" replace />} />}
+
           {multi && <Route path="/manage/organization" element={<Navigate to="/manage/workspace" replace />} />}
+
           <Route path="/admin/providers" element={<Navigate to="/providers" replace />} />
+
           <Route path="/admin/aliases" element={<Navigate to="/aliases" replace />} />
+
           <Route path="*" element={<Navigate to="/" replace />} />
+
         </Routes>
+
       </Shell>
+
     </div>
   );
 }

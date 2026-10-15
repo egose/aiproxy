@@ -13,7 +13,8 @@ import styles from './styles.module.css';
 export default function CodeBlockJSX({ children, className }: Props): ReactNode {
   return (
     <Container as="pre" tabIndex={0} className={clsx(styles.codeBlockStandalone, 'thin-scrollbar', className)}>
-      <code className={styles.codeBlockLines}>{children}</code>
+            <code className={styles.codeBlockLines}>{children}</code>
+
     </Container>
   );
 }

@@ -43,7 +43,8 @@ import type { AdminWorkspace, AdminWorkspaceMember, AdminTeam } from '../types';
 export function RoleBadge({ role }: { role: string }) {
   return (
     <Badge variant={role === 'admin' ? 'info' : 'secondary'} size="sm">
-      {role}
+            {role}
+
     </Badge>
   );
 }
@@ -72,30 +73,48 @@ export const CreateTeamDialog = createTypedDialog<{ workspaceId: string }, boole
   });
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
+
       <DialogContent className="sm:max-w-md">
+
         <DialogHeader>
-          <DialogTitle>Create team</DialogTitle>
+                    <DialogTitle>Create team</DialogTitle>
+
         </DialogHeader>
+
         <FormProvider {...form}>
+
           <form className="grid gap-4" onSubmit={form.handleSubmit((values) => createMutation.mutate(values))}>
+
             {error && (
               <Alert variant="danger">
-                <AlertDescription>{error}</AlertDescription>
+                                <AlertDescription>{error}</AlertDescription>
+
               </Alert>
             )}
+
             <HookFormTextInput<TeamForm> name="name" label="Team name" placeholder="backend" />
+
             <HookFormTextInput<TeamForm> name="description" label="Description (optional)" />
+
             <DialogFooter>
+
               <Button appearance="outline" type="button" onClick={() => onClose(false)}>
-                Cancel
+                                Cancel
               </Button>
+
               <Button variant="primary" type="submit" disabled={createMutation.isPending}>
-                {createMutation.isPending ? 'Creating...' : 'Create team'}
+                                {createMutation.isPending ? 'Creating...' : 'Create team'}
+
               </Button>
+
             </DialogFooter>
+
           </form>
+
         </FormProvider>
+
       </DialogContent>
+
     </Dialog>
   );
 });
@@ -159,15 +178,18 @@ export function TeamSection({ workspace, canManage }: { workspace: AdminWorkspac
           const t = row.original;
           return (
             <span className="flex flex-wrap items-center gap-2 text-sm">
+
               <button
                 type="button"
                 className="font-mono font-medium underline"
                 onClick={() => setOpenTeam(openTeam === t.id ? null : t.id)}
               >
-                {t.name}
+                                {t.name}
+
               </button>
-              {t.my_role && <RoleBadge role={t.my_role} />}
-              {t.description && <span className="text-slate-500">{t.description}</span>}
+                            {t.my_role && <RoleBadge role={t.my_role} />}
+                            {t.description && <span className="text-slate-500">{t.description}</span>}
+
             </span>
           );
         },
@@ -187,20 +209,23 @@ export function TeamSection({ workspace, canManage }: { workspace: AdminWorkspac
           const manageTeam = canManage || t.my_role === 'admin';
           return (
             <span className="flex flex-wrap items-center gap-2">
+
               {manageTeam && (
                 <button
                   type="button"
                   className="text-xs text-slate-500 underline"
                   onClick={() => setOpenQuota(openQuota === t.id ? null : t.id)}
                 >
-                  Quotas
+                                    Quotas
                 </button>
               )}
+
               {canManage && (
                 <Button appearance="outline" type="button" disabled={busy} onClick={() => askDelete(t.name, t.id)}>
-                  Delete team
+                                    Delete team
                 </Button>
               )}
+
             </span>
           );
         },
@@ -219,11 +244,14 @@ export function TeamSection({ workspace, canManage }: { workspace: AdminWorkspac
 
   return (
     <div className="grid gap-2">
+
       {error && (
         <Alert variant="danger">
-          <AlertDescription>{error}</AlertDescription>
+                    <AlertDescription>{error}</AlertDescription>
+
         </Alert>
       )}
+
       <DataTable
         columns={columns}
         data={teams.data ?? []}
@@ -235,7 +263,9 @@ export function TeamSection({ workspace, canManage }: { workspace: AdminWorkspac
           const manageTeam = canManage || t.my_role === 'admin';
           return (
             <div className="grid gap-2 pl-2">
+
               {openTeam === t.id && <TeamMembers workspaceId={workspace.id} teamId={t.id} canManage={manageTeam} />}
+
               {openQuota === t.id && manageTeam && (
                 <QuotaEditor
                   key={t.id}
@@ -246,15 +276,19 @@ export function TeamSection({ workspace, canManage }: { workspace: AdminWorkspac
                   canEditEffective={manageTeam}
                 />
               )}
+
             </div>
           );
         }}
       />
+
       {teams.isLoading && (
         <div className="text-sm text-slate-500">
-          <Spinner size="small">Loading teams...</Spinner>
+                    <Spinner size="small">Loading teams...</Spinner>
+
         </div>
       )}
+
     </div>
   );
 }
@@ -303,52 +337,69 @@ export function TeamMembers({
 
   return (
     <div className="grid gap-2 pl-2">
+
       {error && (
         <Alert variant="danger">
-          <AlertDescription>{error}</AlertDescription>
+                    <AlertDescription>{error}</AlertDescription>
+
         </Alert>
       )}
+
       {(members.data ?? []).map((m) => (
         <div key={m.user_id} className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="font-mono">{m.email || m.user_id}</span>
+                    <span className="font-mono">{m.email || m.user_id}</span>
+
           <RoleBadge role={m.role} />
+
           {canManage && (
             <>
+
               <NativeSelect
                 aria-label={`Team role for ${m.email || m.user_id}`}
                 value={m.role}
                 disabled={busy}
                 onChange={(e) => rowMutation.mutate({ kind: 'role', userId: m.user_id, role: e.target.value })}
               >
-                <NativeSelectOption value="admin">admin</NativeSelectOption>
-                <NativeSelectOption value="member">member</NativeSelectOption>
+                                <NativeSelectOption value="admin">admin</NativeSelectOption>
+                                <NativeSelectOption value="member">member</NativeSelectOption>
+
               </NativeSelect>
+
               <Button
                 appearance="outline"
                 type="button"
                 disabled={busy}
                 onClick={() => rowMutation.mutate({ kind: 'remove', userId: m.user_id })}
               >
-                Remove
+                                Remove
               </Button>
+
             </>
           )}
+
         </div>
       ))}
+
       {canManage && (
         <FormProvider {...form}>
+
           <form
             className="flex flex-wrap items-end gap-2"
             onSubmit={form.handleSubmit((values) => addMutation.mutate(values))}
           >
+
             <div className="max-w-xs flex-1">
+
               <HookFormTextInput<TeamMemberForm>
                 name="email"
                 label="Add member (must already belong to the workspace)"
                 placeholder="teammate@example.com"
               />
+
             </div>
+
             <div className="max-w-[10rem] flex-1">
+
               <HookFormNativeSelect<TeamMemberForm>
                 name="role"
                 label="Role"
@@ -357,13 +408,19 @@ export function TeamMembers({
                   { label: 'admin', value: 'admin' },
                 ]}
               />
+
             </div>
+
             <Button appearance="outline" type="submit" disabled={busy}>
-              {addMutation.isPending ? 'Adding...' : 'Add member'}
+                            {addMutation.isPending ? 'Adding...' : 'Add member'}
+
             </Button>
+
           </form>
+
         </FormProvider>
       )}
+
     </div>
   );
 }
@@ -435,8 +492,9 @@ export function MemberSection({ workspace, canManage }: { workspace: AdminWorksp
               disabled={busy}
               onChange={(e) => rowMutation.mutate({ kind: 'role', userId: m.user_id, role: e.target.value })}
             >
-              <NativeSelectOption value="admin">admin</NativeSelectOption>
-              <NativeSelectOption value="member">member</NativeSelectOption>
+                            <NativeSelectOption value="admin">admin</NativeSelectOption>
+                            <NativeSelectOption value="member">member</NativeSelectOption>
+
             </NativeSelect>
           ) : (
             <RoleBadge role={m.role} />
@@ -454,6 +512,7 @@ export function MemberSection({ workspace, canManage }: { workspace: AdminWorksp
           const showQuota = canManage || isSelf;
           return (
             <span className="flex flex-wrap items-center gap-2">
+
               {canManage && (
                 <Button
                   appearance="outline"
@@ -461,18 +520,20 @@ export function MemberSection({ workspace, canManage }: { workspace: AdminWorksp
                   disabled={busy}
                   onClick={() => askRemove(m.email, m.user_id)}
                 >
-                  Remove
+                                    Remove
                 </Button>
               )}
+
               {showQuota && (
                 <button
                   type="button"
                   className="text-xs text-slate-500 underline"
                   onClick={() => setOpenQuota(openQuota === m.user_id ? null : m.user_id)}
                 >
-                  Quotas
+                                    Quotas
                 </button>
               )}
+
             </span>
           );
         },
@@ -490,11 +551,14 @@ export function MemberSection({ workspace, canManage }: { workspace: AdminWorksp
 
   return (
     <div className="grid gap-2">
+
       {error && (
         <Alert variant="danger">
-          <AlertDescription>{error}</AlertDescription>
+                    <AlertDescription>{error}</AlertDescription>
+
         </Alert>
       )}
+
       <DataTable
         columns={columns}
         data={members.data ?? []}
@@ -518,20 +582,27 @@ export function MemberSection({ workspace, canManage }: { workspace: AdminWorksp
           );
         }}
       />
+
       {members.isLoading && (
         <div className="text-sm text-slate-500">
-          <Spinner size="small">Loading members...</Spinner>
+                    <Spinner size="small">Loading members...</Spinner>
+
         </div>
       )}
+
       {canManage && (
         <div className="grid max-w-2xl gap-2 rounded-md border p-3">
+
           <FormProvider {...form}>
+
             <form className="grid gap-2" onSubmit={form.handleSubmit((values) => addMutation.mutate(values))}>
+
               <HookFormTextInput<WorkspaceMemberForm>
                 name="email"
                 label="Add member by email (must already have an account)"
                 placeholder="teammate@example.com"
               />
+
               <HookFormNativeSelect<WorkspaceMemberForm>
                 name="role"
                 label="Role"
@@ -540,15 +611,23 @@ export function MemberSection({ workspace, canManage }: { workspace: AdminWorksp
                   { label: 'admin', value: 'admin' },
                 ]}
               />
+
               <div>
+
                 <Button appearance="outline" type="submit" disabled={busy}>
-                  {addMutation.isPending ? 'Adding...' : 'Add'}
+                                    {addMutation.isPending ? 'Adding...' : 'Add'}
+
                 </Button>
+
               </div>
+
             </form>
+
           </FormProvider>
+
         </div>
       )}
+
     </div>
   );
 }
@@ -584,22 +663,31 @@ export const InviteDialog = createTypedDialog<{ workspaceId: string; workspaceNa
 
     return (
       <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
+
         <DialogContent className="sm:max-w-md">
+
           <DialogHeader>
-            <DialogTitle>Invite to {args.workspaceName}</DialogTitle>
+                        <DialogTitle>Invite to {args.workspaceName}</DialogTitle>
+
           </DialogHeader>
+
           <FormProvider {...form}>
+
             <form className="grid gap-4" onSubmit={form.handleSubmit((values) => inviteMutation.mutate(values))}>
+
               {error && (
                 <Alert variant="danger">
-                  <AlertDescription>{error}</AlertDescription>
+                                    <AlertDescription>{error}</AlertDescription>
+
                 </Alert>
               )}
+
               <HookFormTextInput<InviteForm>
                 name="email"
                 label="Email (new users set their own password)"
                 placeholder="teammate@example.com"
               />
+
               <HookFormNativeSelect<InviteForm>
                 name="role"
                 label="Role"
@@ -608,17 +696,26 @@ export const InviteDialog = createTypedDialog<{ workspaceId: string; workspaceNa
                   { label: 'admin', value: 'admin' },
                 ]}
               />
+
               <DialogFooter>
+
                 <Button appearance="outline" type="button" onClick={() => onClose(false)}>
-                  Cancel
+                                    Cancel
                 </Button>
+
                 <Button variant="primary" type="submit" disabled={inviteMutation.isPending}>
-                  {inviteMutation.isPending ? 'Inviting...' : 'Invite'}
+                                    {inviteMutation.isPending ? 'Inviting...' : 'Invite'}
+
                 </Button>
+
               </DialogFooter>
+
             </form>
+
           </FormProvider>
+
         </DialogContent>
+
       </Dialog>
     );
   },
@@ -694,83 +791,128 @@ export function WorkspaceDetail({
 
   return (
     <div className="grid gap-6">
+
       {error && (
         <Alert variant="danger">
-          <AlertDescription>{error}</AlertDescription>
+                    <AlertDescription>{error}</AlertDescription>
+
         </Alert>
       )}
+
       <Card>
+
         <CardHeader>
+
           <CardTitle className="flex items-center gap-2">
-            {workspace.display_name || workspace.name}
+                        {workspace.display_name || workspace.name}
+
             <KindBadge kind={workspace.kind} isSystem={workspace.is_system} />
+
             <RoleBadge role={workspace.role} />
+
           </CardTitle>
+
         </CardHeader>
+
         <CardContent className="grid max-w-2xl gap-2">
+
           <div className="text-sm text-slate-500">
-            Name: <span className="font-mono">{workspace.name}</span>
+                        Name: <span className="font-mono">{workspace.name}</span>
+
           </div>
+
           {canManage && !workspace.is_system && (
             <FormProvider {...form}>
+
               <form
                 className="flex flex-wrap items-end gap-2"
                 onSubmit={form.handleSubmit((values) => saveMutation.mutate(values))}
               >
+
                 <div className="max-w-xs flex-1">
+
                   <HookFormTextInput<DisplayNameForm> name="display_name" label="Display name" />
+
                 </div>
+
                 <Button appearance="outline" type="submit" disabled={busy}>
-                  Save
+                                    Save
                 </Button>
+
                 <Button variant="danger" appearance="outline" type="button" disabled={busy} onClick={askDelete}>
-                  Delete workspace
+                                    Delete workspace
                 </Button>
+
               </form>
+
             </FormProvider>
           )}
+
         </CardContent>
+
       </Card>
+
       {!compact && !isPersonal && (
         <Card>
+
           <CardHeader className="flex flex-row items-center justify-between gap-2">
-            <CardTitle>Teams</CardTitle>
+                        <CardTitle>Teams</CardTitle>
+
             {canManage && (
               <Button variant="primary" type="button" onClick={openCreateTeam}>
-                Create team
+                                Create team
               </Button>
             )}
+
           </CardHeader>
+
           <CardContent>
+
             <TeamSection workspace={workspace} canManage={canManage} />
+
           </CardContent>
+
         </Card>
       )}
+
       {!compact && !isPersonal && (
         <Card>
+
           <CardHeader className="flex flex-row items-center justify-between gap-2">
-            <CardTitle>Members</CardTitle>
+                        <CardTitle>Members</CardTitle>
+
             {canManage && (
               <Button variant="primary" type="button" onClick={openInvite}>
-                Invite
+                                Invite
               </Button>
             )}
+
           </CardHeader>
+
           <CardContent>
+
             <MemberSection workspace={workspace} canManage={canManage} />
+
           </CardContent>
+
         </Card>
       )}
+
       {!compact && isPersonal && (
         <Card>
+
           <CardContent className="grid gap-2 text-sm text-slate-600">
+
             <p>
-              Personal workspaces are for a single user. Teams, members, and invites are not available for personal
-              workspaces.
+                            Personal workspaces are for a single user. Teams, members, and invites are not available for personal
+                            workspaces.
             </p>
+
           </CardContent>
+
         </Card>
       )}
+
     </div>
   );
 }

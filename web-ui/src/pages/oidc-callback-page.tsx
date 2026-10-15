@@ -32,20 +32,29 @@ export function OidcCallbackPage() {
 
   return (
     <div className="mx-auto grid w-full max-w-2xl gap-6 p-6">
+
       <Card>
+
         <CardHeader>
-          <CardTitle>Single sign-on</CardTitle>
+                    <CardTitle>Single sign-on</CardTitle>
+
         </CardHeader>
+
         <CardContent>
+
           {error ? (
             <Alert variant="danger">
-              <AlertDescription>Sign-in failed: {error}</AlertDescription>
+                            <AlertDescription>Sign-in failed: {error}</AlertDescription>
+
             </Alert>
           ) : (
             <div className="text-sm text-slate-500">Completing sign-in...</div>
           )}
+
         </CardContent>
+
       </Card>
+
     </div>
   );
 }

@@ -74,48 +74,75 @@ export function RequestsPage() {
   if (snapshot.error) {
     return (
       <div className="p-6">
+
         <Alert variant="danger">
-          <AlertDescription>{errorMessage(snapshot.error)}</AlertDescription>
+                    <AlertDescription>{errorMessage(snapshot.error)}</AlertDescription>
+
         </Alert>
+
       </div>
     );
   }
 
   return (
     <div className="grid w-full gap-6 p-6">
+
       <Card>
+
         <CardHeader>
-          <CardTitle>Recent requests ({rows.length})</CardTitle>
+                    <CardTitle>Recent requests ({rows.length})</CardTitle>
+
         </CardHeader>
+
         <CardContent className="grid gap-4 pt-0">
+
           <Input placeholder="Filter requests..." value={filter} onChange={(e) => setFilter(e.target.value)} />
+
           <div className="overflow-x-auto">
+
             <Table>
+
               <TableHeader>
+
                 <TableRow>
+
                   {requestHeaders.map((h) => (
                     <TableHead key={h.key} className="cursor-pointer" onClick={() => toggleSort(h.key)}>
-                      {h.label}
-                      {sorting.key === h.key ? (sorting.desc ? ' ▼' : ' ▲') : ''}
+                                            {h.label}
+                                            {sorting.key === h.key ? (sorting.desc ? ' ▼' : ' ▲') : ''}
+
                     </TableHead>
                   ))}
+
                 </TableRow>
+
               </TableHeader>
+
               <TableBody>
+
                 {rows.map((r, i) => (
                   <TableRow key={`${r.Model}-${r.Client}-${i}`}>
+
                     {requestHeaders.map((h) => (
                       <TableCell key={h.key} className="font-mono">
-                        {cellValue(r, h.key)}
+                                                {cellValue(r, h.key)}
+
                       </TableCell>
                     ))}
+
                   </TableRow>
                 ))}
+
               </TableBody>
+
             </Table>
+
           </div>
+
         </CardContent>
+
       </Card>
+
     </div>
   );
 }

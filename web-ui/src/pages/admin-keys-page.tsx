@@ -94,74 +94,108 @@ const EditKeyDialog = createTypedDialog<{ key: AdminKey }, boolean>(({ open, arg
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
+
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-auto sm:max-w-2xl">
+
         <DialogHeader>
-          <DialogTitle>Edit key {key.name}</DialogTitle>
+                    <DialogTitle>Edit key {key.name}</DialogTitle>
+
         </DialogHeader>
+
         <FormProvider {...form}>
+
           <form className="grid gap-4" onSubmit={form.handleSubmit((values) => saveMutation.mutate(values))}>
+
             <HookFormTextInput<EditKeyForm> name="description" label="Description (optional)" />
+
             <HookFormTextInput<EditKeyForm>
               name="expires_at"
               label="Expiry (optional, RFC3339, empty = never)"
               placeholder="2026-12-31T00:00:00Z"
             />
+
             <HookFormTextInput<EditKeyForm> name="tenant" label="Tenant (optional)" />
+
             <HookFormTagPicker<EditKeyForm>
               name="allowed_models"
               label="Allowed models (empty = all)"
               placeholder="Type a model and press Enter"
             />
+
             <div className="grid gap-2">
-              <Label>Visible to users (optional, empty = workspace admins only)</Label>
+                            <Label>Visible to users (optional, empty = workspace admins only)</Label>
+
               {(members.data ?? []).map((m) => (
                 <label key={m.user_id} className="flex items-center gap-2 text-sm">
+
                   <Checkbox
                     checked={userIds.includes(m.user_id)}
                     onCheckedChange={() => toggle(userIds, m.user_id, setUserIds)}
                   />
-                  <span className="font-mono">{m.email || m.user_id}</span>
+                                    <span className="font-mono">{m.email || m.user_id}</span>
+
                 </label>
               ))}
+
               {members.isLoading && (
                 <div className="text-sm text-slate-500">
-                  <Spinner size="small">Loading members...</Spinner>
+                                    <Spinner size="small">Loading members...</Spinner>
+
                 </div>
               )}
+
             </div>
+
             <div className="grid gap-2">
-              <Label>Visible to teams (optional)</Label>
+                            <Label>Visible to teams (optional)</Label>
+
               {(teams.data ?? []).map((t) => (
                 <label key={t.id} className="flex items-center gap-2 text-sm">
+
                   <Checkbox
                     checked={teamIds.includes(t.id)}
                     onCheckedChange={() => toggle(teamIds, t.id, setTeamIds)}
                   />
-                  <span className="font-mono">{t.name}</span>
+                                    <span className="font-mono">{t.name}</span>
+
                 </label>
               ))}
+
               {teams.isLoading && (
                 <div className="text-sm text-slate-500">
-                  <Spinner size="small">Loading teams...</Spinner>
+                                    <Spinner size="small">Loading teams...</Spinner>
+
                 </div>
               )}
+
             </div>
+
             {error && (
               <Alert variant="danger">
-                <AlertDescription>{error}</AlertDescription>
+                                <AlertDescription>{error}</AlertDescription>
+
               </Alert>
             )}
+
             <DialogFooter>
+
               <Button appearance="outline" type="button" onClick={() => onClose(false)}>
-                Cancel
+                                Cancel
               </Button>
+
               <Button variant="primary" type="submit" disabled={saveMutation.isPending}>
-                {saveMutation.isPending ? 'Saving...' : 'Save changes'}
+                                {saveMutation.isPending ? 'Saving...' : 'Save changes'}
+
               </Button>
+
             </DialogFooter>
+
           </form>
+
         </FormProvider>
+
       </DialogContent>
+
     </Dialog>
   );
 });
@@ -228,17 +262,25 @@ const IssueKeyDialog = createTypedDialog<{ fixedWorkspaceId?: string; canAdminWo
 
     return (
       <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
+
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-auto sm:max-w-2xl">
+
           <DialogHeader>
-            <DialogTitle>Create API key</DialogTitle>
+                        <DialogTitle>Create API key</DialogTitle>
+
           </DialogHeader>
+
           <FormProvider {...form}>
+
             <form className="grid gap-4" onSubmit={form.handleSubmit((values) => issueMutation.mutate(values))}>
+
               {error && (
                 <Alert variant="danger">
-                  <AlertDescription>{error}</AlertDescription>
+                                    <AlertDescription>{error}</AlertDescription>
+
                 </Alert>
               )}
+
               {args.fixedWorkspaceId === undefined && (workspaces.data ?? []).length >= 2 && (
                 <WorkspaceSelect
                   workspaces={workspaces.data}
@@ -247,6 +289,7 @@ const IssueKeyDialog = createTypedDialog<{ fixedWorkspaceId?: string; canAdminWo
                   id="ak-workspace"
                 />
               )}
+
               <HookFormNativeSelect<IssueKeyForm>
                 name="owner_type"
                 label="Owner"
@@ -255,6 +298,7 @@ const IssueKeyDialog = createTypedDialog<{ fixedWorkspaceId?: string; canAdminWo
                   ...(manageableTeams.length > 0 ? [{ label: 'Team key', value: 'team' }] : []),
                 ]}
               />
+
               {form.watch('owner_type') === 'team' && (
                 <HookFormNativeSelect<IssueKeyForm>
                   name="team_id"
@@ -265,30 +309,44 @@ const IssueKeyDialog = createTypedDialog<{ fixedWorkspaceId?: string; canAdminWo
                   ]}
                 />
               )}
+
               <HookFormTextInput<IssueKeyForm> name="name" label="Name" placeholder="ci-key" />
+
               <HookFormTextInput<IssueKeyForm> name="description" label="Description (optional)" />
+
               <HookFormTextInput<IssueKeyForm>
                 name="expires_at"
                 label="Expiry (optional, RFC3339, empty = never)"
                 placeholder="2026-12-31T00:00:00Z"
               />
+
               <HookFormTextInput<IssueKeyForm> name="tenant" label="Tenant (optional)" placeholder="team-a" />
+
               <HookFormTagPicker<IssueKeyForm>
                 name="allowed_models"
                 label="Allowed models (empty = all)"
                 placeholder="Type a model and press Enter"
               />
+
               <DialogFooter>
+
                 <Button appearance="outline" type="button" onClick={() => onClose(false)}>
-                  Cancel
+                                    Cancel
                 </Button>
+
                 <Button variant="primary" type="submit" disabled={issueMutation.isPending}>
-                  {issueMutation.isPending ? 'Issuing...' : 'Create API key'}
+                                    {issueMutation.isPending ? 'Issuing...' : 'Create API key'}
+
                 </Button>
+
               </DialogFooter>
+
             </form>
+
           </FormProvider>
+
         </DialogContent>
+
       </Dialog>
     );
   },
@@ -401,7 +459,8 @@ export function AdminKeysPage({
               className="text-slate-500"
               title={k.owner_team_id ? `Team key owned by ${k.owner_name}` : `Personal key owned by ${k.owner_name}`}
             >
-              {k.owner_team_id ? `team:${k.owner_name}` : `personal:${k.owner_name}`}
+                            {k.owner_team_id ? `team:${k.owner_name}` : `personal:${k.owner_name}`}
+
             </span>
           ) : (
             <span className="text-slate-400">—</span>
@@ -419,13 +478,15 @@ export function AdminKeysPage({
           const k = row.original;
           return (
             <span className="grid gap-0.5 text-xs">
-              {k.description && <span className="text-slate-500">{k.description}</span>}
-              {k.expires_at && <span className="font-mono text-slate-500">expires {k.expires_at}</span>}
-              {k.tenant && <span className="text-slate-500">tenant={k.tenant}</span>}
-              {k.token_prefix && <span className="font-mono text-slate-500">{k.token_prefix}…</span>}
+                            {k.description && <span className="text-slate-500">{k.description}</span>}
+                            {k.expires_at && <span className="font-mono text-slate-500">expires {k.expires_at}</span>}
+                            {k.tenant && <span className="text-slate-500">tenant={k.tenant}</span>}
+                            {k.token_prefix && <span className="font-mono text-slate-500">{k.token_prefix}…</span>}
+
               {k.allowed_models.length > 0 && (
                 <span className="font-mono text-slate-500">{k.allowed_models.join(', ')}</span>
               )}
+
             </span>
           );
         },
@@ -470,7 +531,7 @@ export function AdminKeysPage({
           if (k.source === 'config') {
             return (
               <span className="text-xs text-slate-400" title="Defined in the static config file">
-                read-only
+                                read-only
               </span>
             );
           }
@@ -484,26 +545,38 @@ export function AdminKeysPage({
 
   return (
     <div className="grid w-full gap-6 p-6">
+
       <Tabs value={tab} onValueChange={(v) => setTab(v as 'inbound' | 'upstream')}>
+
         <TabsList>
-          <TabsTrigger value="inbound">Inbound client keys</TabsTrigger>
-          <TabsTrigger value="upstream">Provider credentials</TabsTrigger>
+                    <TabsTrigger value="inbound">Inbound client keys</TabsTrigger>
+                    <TabsTrigger value="upstream">Provider credentials</TabsTrigger>
+
         </TabsList>
+
       </Tabs>
+
       {error && (
         <Alert variant="danger">
-          <AlertDescription>{error}</AlertDescription>
+                    <AlertDescription>{error}</AlertDescription>
+
         </Alert>
       )}
+
       {tab === 'inbound' ? (
         <Card>
+
           <CardHeader className="flex flex-row items-center justify-between gap-2">
-            <CardTitle>API keys ({rows.length})</CardTitle>
+                        <CardTitle>API keys ({rows.length})</CardTitle>
+
             <Button variant="primary" type="button" onClick={openCreate}>
-              Create API key
+                            Create API key
             </Button>
+
           </CardHeader>
+
           <CardContent>
+
             <DataTable
               columns={columns}
               data={rows}
@@ -511,29 +584,42 @@ export function AdminKeysPage({
               getRowId={(row) => `${row.source}-${row.name}`}
               emptyText="No API keys."
             />
+
             {keys.isLoading && (
               <div className="text-sm text-slate-500">
-                <Spinner size="small">Loading keys...</Spinner>
+                                <Spinner size="small">Loading keys...</Spinner>
+
               </div>
             )}
+
           </CardContent>
+
         </Card>
       ) : (
         <Card>
+
           <CardHeader>
-            <CardTitle>Provider credentials</CardTitle>
+                        <CardTitle>Provider credentials</CardTitle>
+
           </CardHeader>
+
           <CardContent className="grid gap-2 text-sm text-slate-600">
+
             <p>
-              Upstream provider credentials are managed per provider on the{' '}
+                            Upstream provider credentials are managed per provider on the
+
               <a className="underline" href="/providers">
-                providers page
-              </a>{' '}
-              (rotate upstream credential). Secrets are stored encrypted and never displayed.
+                                providers page
+              </a>
+
+                            (rotate upstream credential). Secrets are stored encrypted and never displayed.
             </p>
+
           </CardContent>
+
         </Card>
       )}
+
     </div>
   );
 }

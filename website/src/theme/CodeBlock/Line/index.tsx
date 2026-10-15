@@ -43,22 +43,28 @@ export default function CodeBlockLine({
     const tokenProps = getTokenProps({ token });
     return (
       <LineToken key={key} {...tokenProps} line={line} token={token}>
-        {tokenProps.children}
+                {tokenProps.children}
+
       </LineToken>
     );
   });
 
   return (
     <div {...lineProps}>
+
       {showLineNumbers ? (
         <>
+
           <span className={styles.codeLineNumber} />
-          <span className={styles.codeLineContent}>{lineTokens}</span>
+                    <span className={styles.codeLineContent}>{lineTokens}</span>
+
         </>
       ) : (
         lineTokens
       )}
+
       <LineBreak />
+
     </div>
   );
 }

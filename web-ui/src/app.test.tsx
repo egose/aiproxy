@@ -11,9 +11,13 @@ function renderApp(path = '/') {
   });
   return render(
     <QueryClientProvider client={queryClient}>
+
       <MemoryRouter initialEntries={[path]}>
+
         <App />
+
       </MemoryRouter>
+
     </QueryClientProvider>,
   );
 }

@@ -10,10 +10,13 @@ import { errorMessage, isUnauthorized } from '../services/dashboard';
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <Card>
+
       <CardHeader>
-        <CardTitle className="text-sm font-medium">{label}</CardTitle>
+                <CardTitle className="text-sm font-medium">{label}</CardTitle>
+
       </CardHeader>
-      <CardContent className="pt-0 text-2xl font-semibold">{value}</CardContent>
+            <CardContent className="pt-0 text-2xl font-semibold">{value}</CardContent>
+
     </Card>
   );
 }
@@ -27,17 +30,26 @@ export function OverviewPage() {
   if (!token && !session.accessToken) {
     return (
       <div className="mx-auto grid w-full max-w-2xl gap-6 p-6">
+
         <Card>
+
           <CardHeader>
-            <CardTitle>Connect the dashboard</CardTitle>
+                        <CardTitle>Connect the dashboard</CardTitle>
+
           </CardHeader>
+
           <CardContent className="grid gap-4">
-            <p className="text-sm">Paste the dashboard bearer token to load live state.</p>
+                        <p className="text-sm">Paste the dashboard bearer token to load live state.</p>
+
             <Link to="/token">
-              <Button variant="primary">Open token settings</Button>
+                            <Button variant="primary">Open token settings</Button>
+
             </Link>
+
           </CardContent>
+
         </Card>
+
       </div>
     );
   }
@@ -45,7 +57,8 @@ export function OverviewPage() {
   if (snapshot.isPending) {
     return (
       <div className="p-6 text-sm text-slate-500">
-        <Spinner size="small">Loading snapshot...</Spinner>
+                <Spinner size="small">Loading snapshot...</Spinner>
+
       </div>
     );
   }
@@ -53,19 +66,27 @@ export function OverviewPage() {
   if (snapshot.error) {
     return (
       <div className="mx-auto grid w-full max-w-2xl gap-6 p-6">
+
         <Alert variant="danger">
-          <AlertDescription>{errorMessage(snapshot.error)}</AlertDescription>
+                    <AlertDescription>{errorMessage(snapshot.error)}</AlertDescription>
+
         </Alert>
+
         <div className="flex gap-2">
+
           <Button appearance="outline" onClick={() => queryClient.invalidateQueries({ queryKey: ['dashboard'] })}>
-            Retry
+                        Retry
           </Button>
+
           {isUnauthorized(snapshot.error) && (
             <Link to="/token">
-              <Button variant="primary">Fix token</Button>
+                            <Button variant="primary">Fix token</Button>
+
             </Link>
           )}
+
         </div>
+
       </div>
     );
   }
@@ -77,24 +98,37 @@ export function OverviewPage() {
 
   return (
     <div className="grid w-full gap-6 p-6">
+
       <div className="grid gap-4 md:grid-cols-4">
+
         <Stat label="Providers" value={String(data.providers.length)} />
+
         <Stat label="Aliases" value={String(data.aliases.length)} />
+
         <Stat label="Healthy" value={total ? `${healthy}/${total}` : 'n/a'} />
+
         <Stat label="Cooling" value={String(cooling)} />
+
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
+
         <Card>
+
           <CardHeader>
-            <CardTitle>Healthchecks</CardTitle>
+                        <CardTitle>Healthchecks</CardTitle>
+
           </CardHeader>
+
           <CardContent className="grid gap-2 pt-0 text-sm">
-            {(data.healthchecks ?? []).length === 0 && <span>No healthcheck state.</span>}
+                        {(data.healthchecks ?? []).length === 0 && <span>No healthcheck state.</span>}
+
             {(data.healthchecks ?? []).map((h) => (
               <div key={h.provider} className="flex items-center justify-between gap-2">
-                <span className="font-mono">{h.provider}</span>
+                                <span className="font-mono">{h.provider}</span>
+
                 <span>
+
                   {!h.configured
                     ? 'not configured'
                     : !h.checked
@@ -102,50 +136,76 @@ export function OverviewPage() {
                       : h.healthy
                         ? 'healthy'
                         : `unhealthy${h.status_code ? ` (${h.status_code})` : ''}`}
+
                 </span>
+
               </div>
             ))}
+
           </CardContent>
+
         </Card>
+
         <Card>
+
           <CardHeader>
-            <CardTitle>Cooldowns</CardTitle>
+                        <CardTitle>Cooldowns</CardTitle>
+
           </CardHeader>
+
           <CardContent className="grid gap-2 pt-0 text-sm">
-            {(data.cooldowns ?? []).length === 0 && <span>No active cooldowns.</span>}
+                        {(data.cooldowns ?? []).length === 0 && <span>No active cooldowns.</span>}
+
             {(data.cooldowns ?? []).map((c) => (
               <div key={`${c.alias}/${c.provider}/${c.model}`} className="flex items-center justify-between gap-2">
+
                 <span className="font-mono">
-                  {c.alias}/{c.provider}/{c.model}
+                                    {c.alias}/{c.provider}/{c.model}
+
                 </span>
-                <span>{Math.ceil(c.remaining_ms / 1000)}s</span>
+                                <span>{Math.ceil(c.remaining_ms / 1000)}s</span>
+
               </div>
             ))}
+
           </CardContent>
+
         </Card>
+
       </div>
 
       <Card>
+
         <CardHeader>
-          <CardTitle>Usage</CardTitle>
+                    <CardTitle>Usage</CardTitle>
+
         </CardHeader>
+
         <CardContent className="grid gap-2 pt-0 text-sm">
-          {(data.usage ?? []).length === 0 && <span>No usage recorded yet.</span>}
+                    {(data.usage ?? []).length === 0 && <span>No usage recorded yet.</span>}
+
           {(data.usage ?? []).slice(0, 20).map((u) => (
             <div
               key={`${u.Model}/${u.Operation ?? ''}/${u.StatusCode ?? ''}`}
               className="flex items-center justify-between gap-2"
             >
+
               <span className="font-mono">
-                {u.Model} {u.Operation ? `· ${u.Operation}` : ''}
+                                {u.Model} {u.Operation ? `· ${u.Operation}` : ''}
+
               </span>
+
               <span>
-                {u.Count ?? 0} req · {u.TotalTokens ?? 0} tok
+                                {u.Count ?? 0} req · {u.TotalTokens ?? 0} tok
               </span>
+
             </div>
           ))}
+
         </CardContent>
+
       </Card>
+
     </div>
   );
 }

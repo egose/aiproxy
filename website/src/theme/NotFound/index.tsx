@@ -11,10 +11,15 @@ export default function Index(): ReactNode {
   });
   return (
     <>
+
       <PageMetadata title={title} />
+
       <Layout>
+
         <NotFoundContent />
+
       </Layout>
+
     </>
   );
 }

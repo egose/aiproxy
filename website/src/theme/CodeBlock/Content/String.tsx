@@ -29,7 +29,9 @@ export default function CodeBlockString(props: Props): ReactNode {
   const wordWrap = useCodeWordWrap();
   return (
     <CodeBlockContextProvider metadata={metadata} wordWrap={wordWrap}>
+
       <CodeBlockLayout />
+
     </CodeBlockContextProvider>
   );
 }

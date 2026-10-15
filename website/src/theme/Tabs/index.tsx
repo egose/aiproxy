@@ -67,6 +67,7 @@ function TabList({ className }: { className?: string }) {
         className,
       )}
     >
+
       {tabValues.map(({ value, label, attributes }) => (
         <li
           role="tab"
@@ -88,9 +89,11 @@ function TabList({ className }: { className?: string }) {
             },
           )}
         >
-          {label ?? value}
+                    {label ?? value}
+
         </li>
       ))}
+
     </ul>
   );
 }
@@ -102,8 +105,10 @@ function TabContent({ children }: { children: ReactNode }) {
 function TabsContainer({ className, children }: { className?: string; children: ReactNode }): ReactNode {
   return (
     <div className={clsx(ThemeClassNames.tabs.container, 'tabs-container', 'my-6')}>
+
       <TabList className={className} />
-      <TabContent>{children}</TabContent>
+            <TabContent>{children}</TabContent>
+
     </div>
   );
 }
@@ -113,7 +118,8 @@ export default function Tabs(props: Props): ReactNode {
   const value = useTabsContextValue(props);
   return (
     <TabsProvider value={value} key={String(isBrowser)}>
-      <TabsContainer className={props.className}>{sanitizeTabsChildren(props.children)}</TabsContainer>
+            <TabsContainer className={props.className}>{sanitizeTabsChildren(props.children)}</TabsContainer>
+
     </TabsProvider>
   );
 }

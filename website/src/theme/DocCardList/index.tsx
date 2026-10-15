@@ -12,7 +12,9 @@ function DocCardListForCurrentSidebarCategory({ className }: Props) {
 function DocCardListItem({ item }: { item: ComponentProps<typeof DocCard>['item'] }) {
   return (
     <article className="min-w-0">
+
       <DocCard item={item} />
+
     </article>
   );
 }
@@ -25,9 +27,11 @@ export default function DocCardList(props: Props): ReactNode {
   const filteredItems = filterDocCardListItems(items);
   return (
     <section className={clsx('grid gap-4 md:grid-cols-2', className)}>
+
       {filteredItems.map((item, index) => (
         <DocCardListItem key={index} item={item} />
       ))}
+
     </section>
   );
 }

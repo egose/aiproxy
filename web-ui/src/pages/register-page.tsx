@@ -37,51 +37,73 @@ export function RegisterPage() {
 
   return (
     <div className="mx-auto grid w-full max-w-2xl gap-6 p-6">
+
       <Card>
+
         <CardHeader>
-          <CardTitle>Create account</CardTitle>
+                    <CardTitle>Create account</CardTitle>
+
           <CardDescription>
-            Registering creates your own personal workspace where you are the workspace admin. You can create
-            organization workspaces and manage teams from there.
+                        Registering creates your own personal workspace where you are the workspace admin. You can create
+                        organization workspaces and manage teams from there.
           </CardDescription>
+
         </CardHeader>
+
         <CardContent>
+
           <FormProvider {...form}>
+
             <form className="grid gap-4" onSubmit={form.handleSubmit((values) => registerMutation.mutate(values))}>
+
               <HookFormTextInput<RegisterForm>
                 name="email"
                 label="Email"
                 placeholder="you@example.com"
                 autoComplete="username"
               />
+
               <HookFormTextInput<RegisterForm>
                 name="password"
                 label="Password (min 8 characters)"
                 type="password"
                 autoComplete="new-password"
               />
+
               <HookFormTextInput<RegisterForm>
                 name="workspace_name"
                 label="Workspace name (optional, derived from email)"
                 placeholder="acme"
               />
+
               {registerMutation.error && (
                 <Alert variant="danger">
-                  <AlertDescription>{errorMessage(registerMutation.error)}</AlertDescription>
+                                    <AlertDescription>{errorMessage(registerMutation.error)}</AlertDescription>
+
                 </Alert>
               )}
+
               <div className="flex items-center gap-3">
+
                 <Button variant="primary" type="submit" disabled={registerMutation.isPending}>
-                  {registerMutation.isPending ? 'Registering...' : 'Register'}
+                                    {registerMutation.isPending ? 'Registering...' : 'Register'}
+
                 </Button>
+
                 <Link className="text-sm underline" to="/login">
-                  Back to sign in
+                                    Back to sign in
                 </Link>
+
               </div>
+
             </form>
+
           </FormProvider>
+
         </CardContent>
+
       </Card>
+
     </div>
   );
 }
