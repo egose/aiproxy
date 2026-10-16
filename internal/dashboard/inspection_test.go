@@ -64,7 +64,7 @@ func TestSelectedFindingExactHashesAndDuplicateActions(t *testing.T) {
 		if cmd == nil {
 			t.Fatal("missing selected decision")
 		}
-		for _, pendingKey := range []string{key, "a", "s", "d", "n", "N", "ctrl+r"} {
+		for _, pendingKey := range []string{key, "a", "s", "d", "n", "N", "right", "left", "ctrl+r"} {
 			if extra := layoutKey(m, pendingKey); extra != nil || m.blockFindingCursor != i {
 				t.Fatalf("pending %s changed decision/selection", pendingKey)
 			}
@@ -89,12 +89,12 @@ func TestSelectedFindingExactHashesAndDuplicateActions(t *testing.T) {
 		if m.blockDecisionErr != "" {
 			t.Fatal("duplicate result replaced success")
 		}
-		layoutApplyKey(m, "n")
+		layoutApplyKey(m, "right")
 	}
 	if m.blockFindingCursor != 0 || layoutKey(m, "a") != nil || len(f.calls) != 3 {
 		t.Fatal("returning to a finding lost successful action suppression")
 	}
-	layoutApplyKey(m, "N")
+	layoutApplyKey(m, "left")
 	if m.blockFindingCursor != 2 || layoutKey(m, "d") != nil {
 		t.Fatal("reverse finding selection lost identity/status")
 	}
@@ -164,12 +164,12 @@ func TestFindingNavigationHelpAndNumbersNeverMutate(t *testing.T) {
 		}
 	}
 	m, f := findingModel(t)
-	for _, key := range []string{"n", "N", "j", "k", "pgdown", "pgup", "end", "home"} {
+	for _, key := range []string{"n", "N", "right", "left", "j", "k", "pgdown", "pgup", "end", "home"} {
 		layoutApplyKey(m, key)
 		assertViewport(t, m)
 	}
 	layoutApplyKey(m, "?")
-	for _, key := range []string{"a", "s", "d", "n", "N", "1", "2", "3", "4", "5"} {
+	for _, key := range []string{"a", "s", "d", "n", "N", "right", "left", "1", "2", "3", "4", "5"} {
 		layoutApplyKey(m, key)
 	}
 	if len(f.calls) != 0 || m.blockFindingCursor != 0 || !m.showHelp {
@@ -273,7 +273,7 @@ func TestInspectionResizeScopeCapsAndControlBytes(t *testing.T) {
 		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		layoutApplyKey(m, "end")
 		view := assertViewport(t, m)
-		for _, want := range []string{"Finding 1/3", "SELECTED hash only", "future matches", "no replay", "take-once consumed", "truncation unknown", "FINAL-CONTENT", "[a/s/d] selected"} {
+		for _, want := range []string{"Finding 1/3", "SELECTED hash only", "future matches", "no replay", "take-once consumed", "truncation unknown", "FINAL-CONTENT", "[a] Allow non-secret", "[s] Redact", "[d] Deny", "[←/→ n/N] Finding"} {
 			if !strings.Contains(view, want) {
 				t.Fatalf("resize/scroll hides %q: %s", want, view)
 			}

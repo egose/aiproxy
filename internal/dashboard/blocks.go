@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/egose/aiproxy/internal/dashrpc"
 )
 
@@ -271,12 +270,12 @@ func (m *model) blockCursorBottom() bool {
 
 func (m *model) handleBlockKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	switch msg.String() {
-	case "n", "N":
+	case "n", "N", "right", "left":
 		if !m.blockDetailOpen() || m.blockDecisionPending != "" || len(m.blockDetail.Findings) == 0 {
 			return false, nil
 		}
 		delta := 1
-		if msg.String() == "N" {
+		if msg.String() == "N" || msg.String() == "left" {
 			delta = -1
 		}
 		m.blockFindingCursor = (m.blockFindingCursor + delta + len(m.blockDetail.Findings)) % len(m.blockDetail.Findings)
@@ -434,27 +433,27 @@ func blockRow(s dashrpc.BlockSummary, idW, rulesW, modelW int) string {
 
 func renderBlocks(m *model, width, height int) string {
 	borderStyle, inner := paneBox(width, height, m.focus == focusBottom && m.bottomTab == bottomTabBlocks)
-	title := "BLOCKS · Enter consumes take-once capture; re-open unavailable · [r]efresh"
-	rows := []string{title}
+	title := "BLOCKS · Enter consumes take-once capture; re-open unavailable"
+	rows := []string{paneTitle(title, m.focus == focusBottom, inner)}
 	if m.blockFetcher == nil {
 		rows = append(rows, "block viewer unavailable")
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if m.blockErr != "" {
 		hint := " · [r] retry"
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Render("fetch failed: "+truncate(m.blockErr, max(0, inner-len(hint)))+hint))
+		rows = append(rows, errorStyle.Render("fetch failed: "+truncate(m.blockErr, max(0, inner-len(hint)))+hint))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
-	if !m.blockKnown && !m.blockEnabled && len(m.blocks) == 0 {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("quarantine disabled on server (enable ingress_guardrails quarantine in config)"))
+	if !m.blockKnown && !m.blockEnabled && len(m.blocks) == 0 && !m.blockLoading {
+		rows = append(rows, mutedStyle.Render("quarantine disabled on server (enable ingress_guardrails quarantine in config)"))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if !m.blockKnown {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("loading… · [r] retry"))
+		rows = append(rows, mutedStyle.Render("loading… · [r] retry"))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if len(m.blocks) == 0 {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("no quarantined blocks"))
+		rows = append(rows, mutedStyle.Render("no quarantined blocks · [r] refresh"))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	idContent, rulesContent, modelContent := len("BLOCK_ID"), len("RULES"), len("MODEL")
@@ -469,24 +468,23 @@ func renderBlocks(m *model, width, height int) string {
 		{content: rulesContent, min: 5, max: 32, flex: 2},
 		{content: 4, min: 4, max: 4},
 		{content: modelContent, min: 5, max: 40, flex: 2},
-	}, inner)
+	}, inner-2)
 	idW, rulesW, modelW := got[1], got[2], got[4]
-	rows = append(rows, headerStyle.Render(fitRow(headerCells([]col{{"AT", 8}, {"BLOCK_ID", idW}, {"RULES", rulesW}, {"N", 4}, {"MODEL", modelW}}), inner)))
+	rows = append(rows, headerStyle.Render(fitRow("  "+headerCells([]col{{"AT", 8}, {"BLOCK_ID", idW}, {"RULES", rulesW}, {"N", 4}, {"MODEL", modelW}}), inner)))
 	visible := m.bottomVisibleRows()
 	start := m.blockOffset
 	end := start + visible
 	if end > len(m.blocks) {
 		end = len(m.blocks)
 	}
-	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
 	for i := start; i < end; i++ {
 		line := fitRow(blockRow(m.blocks[i], idW, rulesW, modelW), inner-2)
 		if i == m.blockCursor {
-			line = cursorStyle.Render("▸ " + line)
+			line = "▸ " + line
 		} else {
 			line = "  " + line
 		}
-		rows = append(rows, line)
+		rows = append(rows, selectedRow(line, i == m.blockCursor, m.focus == focusBottom, inner))
 	}
 	if end < len(m.blocks) {
 		rows = append(rows, fmt.Sprintf("… %d more (j/k move)", len(m.blocks)-end))
@@ -500,27 +498,40 @@ func renderBlockDetail(m *model, width, height int) string {
 		title = "BLOCK " + m.blockPendingID + " (loading…)"
 	}
 	c := m.blockDetail
-	number := 0
-	if len(c.Findings) > 0 {
-		number = m.blockFindingCursor + 1
+	statusStyle := mutedStyle
+	switch {
+	case m.blockDetailErr != "" || m.blockDecisionErr != "":
+		statusStyle = errorStyle
+	case m.blockPendingID != "" || m.blockDecisionPending != "" || m.paused:
+		statusStyle = warningStyle
+	case m.blockDecisionMsg != "":
+		statusStyle = successStyle
 	}
 	headers := []string{
-		fmt.Sprintf("Finding %d/%d · %s", number, len(c.Findings), title),
-		"SELECTED hash only · persistent GLOBAL future matches · no replay",
-		m.blockInspectionStatus(),
+		accentStyle.Render(logOneLine(inspectionText(title))),
+		warningStyle.Render("SELECTED hash only · persistent GLOBAL future matches · no replay"),
+		statusStyle.Render(m.blockInspectionStatus()),
 	}
-	lines := []string{title, fmt.Sprintf("at=%s op=%s model=%s rules=%s", c.Timestamp, c.Operation, c.PublicModel, strings.Join(c.RuleIDs, ","))}
-	if m.blockDetailErr != "" {
-		lines = append(lines, "fetch failed: "+m.blockDetailErr)
+	sections := []detailSection{}
+	request := detailSection{title: "REQUEST", style: accentStyle, lines: []string{
+		"block ID: " + m.blockDetailID, "at: " + c.Timestamp, "operation: " + c.Operation,
+		"model: " + c.PublicModel, "rules: " + strings.Join(c.RuleIDs, ", "),
+	}}
+	if m.blockPendingID != "" {
+		sections = append(sections, detailSection{title: "CAPTURE", lines: []string{"Loading quarantined capture…"}})
+	} else if m.blockDetailErr != "" {
+		sections = append(sections, detailSection{title: "CAPTURE UNAVAILABLE", style: errorStyle, lines: []string{"fetch failed: " + m.blockDetailErr}})
 	} else if f, ok := m.selectedBlockFinding(); ok {
-		lines = append(lines, "rule: "+f.RuleID, "SHA: "+f.SecretSHA, "desc: "+f.Description,
-			"secret: "+f.Secret, "match: "+f.Match, "line: "+f.Line)
+		sections = append(sections,
+			detailSection{title: "SELECTED FINDING · " + f.RuleID, lines: []string{"rule: " + f.RuleID, "description: " + orDash(f.Description), "SHA: " + f.SecretSHA}},
+			request,
+			detailSection{title: "CAPTURED CONTENT", style: warningStyle, lines: []string{"secret: " + f.Secret, "match: " + f.Match, "line: " + f.Line}})
 		if m.blockDecisionErr != "" {
-			lines = append(lines, "decision error: "+m.blockDecisionErr)
+			sections = append(sections, detailSection{title: "DECISION ERROR", style: errorStyle, raw: true, lines: []string{m.blockDecisionErr}})
 		}
 	} else {
-		lines = append(lines, "no captured findings")
+		sections = append(sections, detailSection{title: "FINDINGS", lines: []string{"no captured findings"}}, request)
 	}
-	return renderInspection(width, height, headers, strings.Join(lines, "\n"),
+	return renderDetailPage(width, height, headers, detailSectionLines(sections, width-2),
 		"server-capped snippets; truncation unknown", &m.blockDetailScroll)
 }

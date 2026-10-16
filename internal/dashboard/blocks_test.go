@@ -145,7 +145,7 @@ func TestBlockDecisionHintShown(t *testing.T) {
 	mm, _ = mm.Update(cmd())
 	mm, cmd = mm.Update(tea.KeyPressMsg(tea.Key{Text: "enter"}))
 	mm, _ = mm.Update(cmd())
-	if got := mm.View().Content; !strings.Contains(got, "a allow non-secret") || !strings.Contains(got, "SELECTED hash only") {
+	if got := mm.View().Content; !strings.Contains(got, "[a] Allow non-secret") || !strings.Contains(got, "[s] Redact") || !strings.Contains(got, "[d] Deny") || !strings.Contains(got, "SELECTED hash only") {
 		t.Fatalf("detail missing decision hint:\n%s", got)
 	}
 }

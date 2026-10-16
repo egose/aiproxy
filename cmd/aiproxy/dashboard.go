@@ -32,6 +32,7 @@ func newDashboardCommand() *cobra.Command {
 		Short: "Attach an interactive dashboard to a running aiproxy server",
 		Long: `Attach a local interactive dashboard. Minimum terminal: 80x12.
 Below 30 rows, only the focused pane is shown. Tab/Shift-Tab cycles panes.
+The focused pane is marked with a diamond; selected rows are highlighted.
 1/2/3/4/5 selects Aliases/Logs/Payloads/Blocks/Requests; [ previous and ] next wraps tabs.
 Enter opens/closes detail (Usage: top group, n/N cycles identities); z toggles pane zoom. Navigation closes detail first.
 Provider detail shows sanitized endpoint, configured models and probe diagnostics; HOST never runs DNS.
@@ -46,7 +47,8 @@ Payload fields: id/model/resolved/provider/status/method/path. Filters combine w
 Request detail l/v opens exact-ID logs/payloads; Esc returns with context. Missing/expired data is explained.
 Payload/block detail wraps long lines; j/k, PgUp/PgDn, Home/End inspect within-cap text.
 Payload pretty output is capped at 64 KiB with explicit truncation notices; block snippet truncation is unknown.
-Blocks: Enter consumes take-once capture (re-open unavailable). n/N selects the next/previous finding.
+Blocks: Enter consumes take-once capture (re-open unavailable). Right/Left or n/N selects the next/previous finding.
+Block detail keeps labeled decision actions, finding index, scope and status visible while scrolling.
 a/s/d allows non-secret / redacts / denies ONLY the selected hash, persisting GLOBAL future-match behavior.
 Decisions never replay the request. Pending locks finding selection and duplicate actions; success suppresses repeats.
 Failed outcomes may be unknown; a/s/d deliberately retries. Missing/invalid hashes cannot be decided.

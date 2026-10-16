@@ -67,7 +67,7 @@ func assertViewport(t *testing.T, m *model) string {
 }
 
 func layoutKey(m *model, key string) tea.Cmd {
-	code := map[string]rune{"tab": tea.KeyTab, "enter": tea.KeyEnter, "esc": tea.KeyEscape, "up": tea.KeyUp, "down": tea.KeyDown, "pgup": tea.KeyPgUp, "pgdown": tea.KeyPgDown, "home": tea.KeyHome, "end": tea.KeyEnd}
+	code := map[string]rune{"tab": tea.KeyTab, "enter": tea.KeyEnter, "esc": tea.KeyEscape, "up": tea.KeyUp, "down": tea.KeyDown, "left": tea.KeyLeft, "right": tea.KeyRight, "pgup": tea.KeyPgUp, "pgdown": tea.KeyPgDown, "home": tea.KeyHome, "end": tea.KeyEnd}
 	k := tea.Key{Text: key}
 	if c, ok := code[key]; ok {
 		k = tea.Key{Code: c}
@@ -121,9 +121,8 @@ func TestViewportMatrixWithPopulatedPanesAndDetails(t *testing.T) {
 				layoutApplyKey(m, "end")
 				got := assertViewport(t, m)
 				if tab == "4" {
-					lines := strings.Split(got, "\n")
-					if !strings.Contains(lines[len(lines)-2], "[a/s/d] selected") {
-						t.Fatal("scrolled block detail hid action scope")
+					if !strings.Contains(got, "Decisions unavailable") || !strings.Contains(got, "SELECTED hash only") || !strings.Contains(got, "[←/→ n/N] Finding") {
+						t.Fatal("scrolled block detail hid action availability, scope or navigation")
 					}
 				}
 				layoutApplyKey(m, "?")

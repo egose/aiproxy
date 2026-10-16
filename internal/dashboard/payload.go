@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/egose/aiproxy/internal/dashrpc"
 	"github.com/egose/aiproxy/internal/payloadlog"
 )
@@ -388,21 +387,21 @@ func renderPayloads(m *model, width, height int) string {
 		order = "oldest-first"
 	}
 	title := fmt.Sprintf("PAYLOADS %s (%s) %s", order, filter, m.searchLabel(bottomTabPayload))
-	rows := []string{title}
+	rows := []string{paneTitle(title, m.focus == focusBottom, inner)}
 	if m.payloadFetcher == nil {
 		rows = append(rows, "payload viewer unavailable")
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if m.snapshot != nil && !m.snapshot.PayloadEnabled && !m.payloadEnabled && len(m.payloads) == 0 && !m.payloadKnown {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("payload log disabled on server (enable payload_log in config)"))
+		rows = append(rows, mutedStyle.Render("payload log disabled on server (enable payload_log in config)"))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if m.payloadErr != "" {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Render("fetch failed: "+truncate(m.payloadErr, inner)))
+		rows = append(rows, errorStyle.Render("fetch failed: "+truncate(m.payloadErr, inner)))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if !m.payloadKnown {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render("loading…"))
+		rows = append(rows, mutedStyle.Render("loading…"))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
 	if len(m.orderedPayloads()) == 0 {
@@ -425,9 +424,9 @@ func renderPayloads(m *model, width, height int) string {
 		{content: 8, min: 8, max: 8},
 		{content: modelContent, min: 10, max: 40, flex: 2},
 		{content: pathContent, min: 8, max: 48, flex: 3},
-	}, inner)
+	}, inner-2)
 	methodW, modelW, pathW := got[1], got[4], got[5]
-	rows = append(rows, headerStyle.Render(fitRow(headerCells([]col{{"AT", 8}, {"METHOD", methodW}, {"ST", 4}, {"DUR", 8}, {"MODEL", modelW}, {"PATH", pathW}}), inner)))
+	rows = append(rows, headerStyle.Render(fitRow("  "+headerCells([]col{{"AT", 8}, {"METHOD", methodW}, {"ST", 4}, {"DUR", 8}, {"MODEL", modelW}, {"PATH", pathW}}), inner)))
 	visible := m.bottomVisibleRows()
 	view := m.orderedPayloads()
 	start := m.payloadOffset
@@ -435,15 +434,14 @@ func renderPayloads(m *model, width, height int) string {
 	if end > len(view) {
 		end = len(view)
 	}
-	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
 	for i := start; i < end; i++ {
 		line := fitRow(payloadRow(view[i], methodW, modelW, pathW), inner-2)
 		if i == m.payloadCursor {
-			line = cursorStyle.Render("▸ " + line)
+			line = "▸ " + line
 		} else {
 			line = "  " + line
 		}
-		rows = append(rows, line)
+		rows = append(rows, selectedRow(line, i == m.payloadCursor, m.focus == focusBottom, inner))
 	}
 	if end < len(view) {
 		rows = append(rows, fmt.Sprintf("… %d more (j/k move)", len(view)-end))

@@ -76,7 +76,7 @@ func (m *model) handleProviderDetailKey(key string) {
 	}
 }
 
-func (m *model) providerDetailLines() []string {
+func (m *model) providerDetailSections() []detailSection {
 	var p *config.Provider
 	enabled := false
 	for i, candidate := range m.providerList() {
@@ -87,7 +87,7 @@ func (m *model) providerDetailLines() []string {
 		}
 	}
 	if p == nil {
-		return []string{"Provider removed from current catalog; back returns to the nearest row."}
+		return []detailSection{{title: "PROVIDER UNAVAILABLE", lines: []string{"Provider removed from current catalog; back returns to the nearest row."}}}
 	}
 	display := p.DisplayName
 	if display == "" {
@@ -106,6 +106,8 @@ func (m *model) providerDetailLines() []string {
 	}
 	lines := []string{"name: " + p.Name, "display: " + display, "type: " + string(p.Type),
 		"endpoint (sanitized): " + endpoint, fmt.Sprintf("enabled: %t; routing health: %s", enabled, state)}
+	sections := []detailSection{{title: "CONNECTION", style: accentStyle, lines: lines}}
+	lines = nil
 	d := m.snapshot.ProviderMetadata[p.Name]
 	if m.snapshot.ProviderMetadata == nil {
 		d = dashrpc.ProviderMetadata(*p)
@@ -166,6 +168,8 @@ func (m *model) providerDetailLines() []string {
 			lines = append(lines, "probe status/last checked: unknown (status unavailable)")
 		}
 	}
+	sections = append(sections, detailSection{title: "HEALTH & PROBES", lines: lines})
+	lines = nil
 	if providerCountersAvailable(m.snapshot.Usage) {
 		ps := accounting.ProviderSummary{}
 		for _, candidate := range m.snapshot.Usage.ProviderSummaries() {
@@ -178,8 +182,12 @@ func (m *model) providerDetailLines() []string {
 	} else {
 		lines = append(lines, "provider-wide lifetime counters: unavailable")
 	}
-	lines = append(lines, fmt.Sprintf("configured models: %d", len(p.Models)))
+	sections = append(sections, detailSection{title: "USAGE", style: accentStyle, lines: lines})
+	lines = []string{fmt.Sprintf("configured models: %d", len(p.Models))}
 	for _, model := range p.Models {
+		if len(lines) > 1 {
+			lines = append(lines, "")
+		}
 		lines = append(lines, "model: "+p.Name+"/"+model.Name)
 		if m.snapshot.ModelMetadata != nil && m.snapshot.ModelMetadata[p.Name+"/"+model.Name] == nil {
 			lines = append(lines, "  upstream/protocol/capabilities: unknown (snapshot metadata unavailable)")
@@ -206,20 +214,11 @@ func (m *model) providerDetailLines() []string {
 			lines = append(lines, "  display: "+model.DisplayName)
 		}
 	}
-	return lines
+	return append(sections, detailSection{title: "MODELS", lines: lines})
 }
 
 func renderProviderDetail(m *model, width, height int) string {
-	frame, inner := paneBox(width, height, true)
-	var raw []string
-	for _, line := range m.providerDetailLines() {
-		raw = append(raw, wrapText(line, inner)...)
-	}
-	visible := max(1, height-4)
-	m.providerDetailScroll = clampInt(m.providerDetailScroll, 0, max(0, len(raw)-visible))
-	end := min(len(raw), m.providerDetailScroll+visible)
-	lines := []string{"PROVIDER " + m.providerDetailName}
-	lines = append(lines, raw[m.providerDetailScroll:end]...)
-	lines = append(lines, fmt.Sprintf("lines %d-%d/%d · j/k PgUp/PgDn Home/End", m.providerDetailScroll+1, end, len(raw)))
-	return frame.Render(strings.Join(lines, "\n"))
+	headers := []string{accentStyle.Render("PROVIDER " + logOneLine(inspectionText(m.providerDetailName)))}
+	return renderDetailPage(width, height, headers, detailSectionLines(m.providerDetailSections(), width-2),
+		"", &m.providerDetailScroll)
 }

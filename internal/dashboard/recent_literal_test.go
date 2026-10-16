@@ -33,7 +33,10 @@ func metadataOwnedCodes(t *testing.T, m *model) map[string]bool {
 	width, height := m.width, m.height
 	for _, size := range [][2]int{{80, 12}, {120, 30}, {160, 48}} {
 		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		for _, view := range []string{m.View().Content, renderLogEntry(20, 20, observability.LogEntry{Message: "owned fixture"})} {
+		clean := *m
+		clean.requestDetail = &accounting.Event{RequestID: "owned fixture"}
+		clean.logDetailEntry = observability.LogEntry{Message: "owned fixture"}
+		for _, view := range []string{m.View().Content, renderLogEntry(20, 20, clean.logDetailEntry), renderMetadataDetail(&clean, size[0], size[1]), renderLogDetail(&clean, size[0], size[1])} {
 			for _, code := range regexp.MustCompile(`\x1b\[[0-9;:]*m`).FindAllString(view, -1) {
 				codes[code] = true
 			}
