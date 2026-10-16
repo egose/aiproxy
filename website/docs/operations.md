@@ -506,6 +506,13 @@ rows and errors are fitted in terminal cells, including wide Unicode characters.
 The footer keeps help/back/quit controls visible (apply/cancel/quit while editing), with a separate live
 connection line. Narrow views abbreviate measurement legends; help explains them.
 
+The **◆** marker identifies the pane receiving keyboard input; its selected row
+has a full-width highlight. The active bottom tab is bracketed, with a filled
+highlight when that pane has focus. Detail views replace the overview metrics
+with a breadcrumb, a named back action and relevant keyboard controls. Section
+headings, separators and muted field labels distinguish connection information,
+health, models, log messages and captured content without relying on color alone.
+
 | Key                                            | Action                                                                            |
 | ---------------------------------------------- | --------------------------------------------------------------------------------- |
 | `1` / `2` / `3` / `4` / `5`                    | Select Aliases / Logs / Payloads / Blocks / Requests and focus it                 |
@@ -535,10 +542,12 @@ Enter on Usage shows the top group's full tenant/client/model/operation/status;
 Help owns input: pane filters, pause, tab navigation and decisions cannot run behind
 it. An undersized-terminal warning also suppresses pane actions until resized.
 
-Block-detail **n/N** selects the next/previous finding. **a/s/d** records allow
+Block-detail **Right/Left** (or **n/N**) selects the next/previous finding. **a/s/d** records allow
 (non-secret), redact (placeholder), or deny (keep blocking) for **only that finding's
 exact hash**. The selected index, scope and status stay visible while scrolling.
-Numbered keys 1–5 always navigate tabs outside search and never record a decision.
+The fixed action bar spells out **Allow non-secret**, **Redact** and **Deny**,
+and shows when decisions are pending, paused or unavailable. Numbered keys 1–5
+always navigate tabs outside search and never record a decision.
 
 ## Dashboard Payload And Block Inspection
 
