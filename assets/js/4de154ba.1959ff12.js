@@ -681,6 +681,10 @@ function _createMdxContent(props) {
       }), ". Below 30 rows (including\n80×24), a compact layout shows only the focused pane. At 30 rows and above, providers,\nusage and the active bottom tab are stacked. ", (0,jsx_runtime.jsx)(_components.strong, {
         children: "Tab / Shift-Tab"
       }), " cycles forward/back\nthrough Providers → Usage → bottom pane, even in compact or zoomed layouts. Headers,\nrows and errors are fitted in terminal cells, including wide Unicode characters.\nThe footer keeps help/back/quit controls visible (apply/cancel/quit while editing), with a separate live\nconnection line. Narrow views abbreviate measurement legends; help explains them."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "◆"
+      }), " marker identifies the pane receiving keyboard input; its selected row\nhas a full-width highlight. The active bottom tab is bracketed, with a filled\nhighlight when that pane has focus. Detail views replace the overview metrics\nwith a breadcrumb, a named back action and relevant keyboard controls. Section\nheadings, separators and muted field labels distinguish connection information,\nhealth, models, log messages and captured content without relying on color alone."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
       children: [(0,jsx_runtime.jsx)(_components.thead, {
         children: (0,jsx_runtime.jsxs)(_components.tr, {
@@ -891,12 +895,20 @@ function _createMdxContent(props) {
       }), " zooms its list.\nHelp owns input: pane filters, pause, tab navigation and decisions cannot run behind\nit. An undersized-terminal warning also suppresses pane actions until resized."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Block-detail ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "Right/Left"
+      }), " (or ", (0,jsx_runtime.jsx)(_components.strong, {
         children: "n/N"
-      }), " selects the next/previous finding. ", (0,jsx_runtime.jsx)(_components.strong, {
+      }), ") selects the next/previous finding. ", (0,jsx_runtime.jsx)(_components.strong, {
         children: "a/s/d"
       }), " records allow\n(non-secret), redact (placeholder), or deny (keep blocking) for ", (0,jsx_runtime.jsx)(_components.strong, {
         children: "only that finding's\nexact hash"
-      }), ". The selected index, scope and status stay visible while scrolling.\nNumbered keys 1–5 always navigate tabs outside search and never record a decision."]
+      }), ". The selected index, scope and status stay visible while scrolling.\nThe fixed action bar spells out ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "Allow non-secret"
+      }), ", ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "Redact"
+      }), " and ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "Deny"
+      }), ",\nand shows when decisions are pending, paused or unavailable. Numbered keys 1–5\nalways navigate tabs outside search and never record a decision."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "dashboard-payload-and-block-inspection",
       children: "Dashboard Payload And Block Inspection"
