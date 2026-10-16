@@ -142,7 +142,7 @@ func TestArrowKeysMoveRemoteCursor(t *testing.T) {
 		if m.logCursor != start+1 {
 			t.Fatalf("seqs=%v: tick after arrows reset cursor to %d, want pinned %d", seqs, m.logCursor, start+1)
 		}
-		if got := m.View().Content; !strings.Contains(got, "(j/k move)") && !strings.Contains(got, "[j/k] move") {
+		if got := ansiSeq.ReplaceAllString(m.View().Content, ""); !strings.Contains(got, "(j/k move)") && !strings.Contains(got, "[j/k] move") {
 			t.Fatalf("seqs=%v: missing payload-style move hint:\n%s", seqs, got)
 		}
 	}
@@ -220,7 +220,7 @@ func TestAliasDetailShowsCooldownAndHealth(t *testing.T) {
 	m = mm.(*model)
 	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Text: "enter"}))
 	m = mm.(*model)
-	got := m.View().Content
+	got := ansiSeq.ReplaceAllString(m.View().Content, "")
 	if !strings.Contains(got, "openai/gpt-4o-mini") {
 		t.Fatalf("missing target in detail:\n%s", got)
 	}

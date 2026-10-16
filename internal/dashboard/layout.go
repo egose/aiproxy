@@ -62,7 +62,7 @@ func (m *model) renderContextFooter() string {
 	back := "[esc] back/quit"
 	actions := "[j/k] move [enter] detail [z] zoom"
 	if m.focus == focusUsage {
-		actions = "[tab] focus [t/e/u] filters [z] zoom"
+		actions = "[enter] identity [t/e/u] filters [z] zoom"
 	} else if m.searchable() && m.correlation == nil {
 		actions = "[/] search [Ctrl+U] clear [j/k] move [enter] detail"
 	}
@@ -87,13 +87,8 @@ func (m *model) renderContextFooter() string {
 		if m.usageDetail != nil {
 			actions = "[n/N] group [j/k] scroll"
 		}
-		if m.blockDetailOpen() && m.blockDetailErr == "" {
-			actions = "[a/s/d] selected [n/N] finding"
-			if m.blockDecisionPending != "" {
-				actions = "Recording " + m.blockDecisionPending
-			} else if m.paused {
-				actions = "PAUSED [p] resume [j/k] scroll"
-			}
+		if m.blockDetailOpen() && m.blockDetailErr == "" && m.paused {
+			actions = "PAUSED [p] resume [j/k] scroll"
 		}
 	}
 	if m.inputMode() == inputBrowse && m.bottomTab == bottomTabBlocks && m.focus == focusBottom && !m.blockListVisible() {
@@ -112,7 +107,17 @@ func (m *model) renderContextFooter() string {
 	}
 	essential := "[?] help " + back + " [q/Ctrl+C] quit"
 	space := max(0, m.width-visibleLen(essential)-2)
-	hints := padRight(truncate(actions, space), space) + "  " + essential
+	if m.inputMode() == inputBrowse && visibleLen(actions) > space {
+		switch {
+		case m.focus == focusUsage:
+			actions = "[enter] identity [t/e/u] filters"
+		case m.searchable() && m.correlation == nil:
+			actions = "[enter] detail [/] search"
+		default:
+			actions = "[enter] detail [j/k] move"
+		}
+	}
+	hints := shortcutHints(padRight(truncate(actions, space), space) + "  " + essential)
 	state := "LIVE"
 	if m.paused {
 		state = "PAUSED"
@@ -126,15 +131,25 @@ func (m *model) renderContextFooter() string {
 	if m.zoomed {
 		layout = "zoom"
 	}
-	status := fmt.Sprintf("%s %s %s · [p] pause · [Ctrl+R] retry", state, m.focusName(), layout)
+	if m.hasDetail() {
+		layout = "detail"
+	}
+	context := fmt.Sprintf("Focus: %s · [Tab] pane · %s", m.focusName(), layout)
+	status := context + " · " + state + " · [p] pause · [Ctrl+R] retry"
 	if m.showHelp {
 		status = "HELP · " + status
 	}
 	if !m.connection.LastSuccess.IsZero() || m.connection.Reconnecting || m.connection.Denied {
-		status = m.connection.text() + " · " + state + " " + m.focusName() + " " + layout
+		status = context + " · " + m.connection.text()
+		if m.connection.Reconnecting || m.connection.Denied {
+			status = m.connection.text() + " · " + context
+		}
+		if m.paused {
+			status = "PAUSED · " + status
+		}
 	}
 	if m.search.active {
 		hints = truncate(m.searchPrompt(), max(0, m.width-visibleLen(searchControls))) + searchControls
 	}
-	return fitView(hints+"\n"+truncate(status, m.width), m.width)
+	return fitView(hints+"\n"+shortcutHints(truncate(logOneLine(inspectionText(status)), m.width)), m.width)
 }

@@ -31,21 +31,15 @@ func inspectionText(s string) string {
 }
 
 func renderInspection(width, height int, headers []string, body, notice string, scroll *int) string {
-	frame, inner := paneBox(width, height, true)
-	parts := wrapText(inspectionText(body), inner)
-	visible := max(1, height-3-len(headers))
-	*scroll = clampInt(*scroll, 0, max(0, len(parts)-visible))
-	end := min(len(parts), *scroll+visible)
-	rows := make([]string, 0, height-2)
-	for _, h := range headers {
-		rows = append(rows, truncate(logOneLine(inspectionText(h)), inner))
+	styled := make([]string, len(headers))
+	for i, h := range headers {
+		style := mutedStyle
+		if i == 0 {
+			style = accentStyle
+		}
+		styled[i] = style.Render(logOneLine(inspectionText(h)))
 	}
-	rows = append(rows, parts[*scroll:end]...)
-	for len(rows) < height-3 {
-		rows = append(rows, "")
-	}
-	rows = append(rows, fmt.Sprintf("wrap %d-%d/%d · %s", *scroll+1, end, len(parts), notice))
-	return frame.Render(strings.Join(rows, "\n"))
+	return renderDetailPage(width, height, styled, wrapText(inspectionText(body), width-2), notice, scroll)
 }
 
 func boundedPayloadText(s string) (string, bool) {
@@ -118,5 +112,5 @@ func (m *model) blockInspectionStatus() string {
 	if !validFindingSHA(f.SecretSHA) {
 		return "take-once consumed · missing/invalid SHA; decisions unavailable"
 	}
-	return "take-once consumed · a allow non-secret / s redact / d deny"
+	return "take-once consumed · closing discards capture; re-open unavailable"
 }

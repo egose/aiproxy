@@ -24,6 +24,14 @@ import (
 	"github.com/egose/aiproxy/internal/httpapi"
 )
 
+func (m *model) providerDetailLines() []string {
+	var lines []string
+	for _, section := range m.providerDetailSections() {
+		lines = append(lines, section.lines...)
+	}
+	return lines
+}
+
 func diagnosticHTTP(t *testing.T, handler http.Handler) (*model, dashrpc.Snapshot, string) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, dashrpc.SnapshotPath, nil)
@@ -197,7 +205,7 @@ func TestProviderCatalogDiagnosticsSecretsAndAffinityThroughHTTP(t *testing.T) {
 			t.Fatalf("affinity %s: %+v", a.Name, a.SessionAffinity)
 		}
 		m.aliasDetailName = a.Name
-		got := renderAliasDetail(m, 160, 45)
+		got := ansiSeq.ReplaceAllString(renderAliasDetail(m, 160, 45), "")
 		want := "disabled"
 		if i == 0 {
 			want = "x-custom-session"
@@ -227,7 +235,7 @@ func TestProviderOldMetadataRemainsUnknown(t *testing.T) {
 		}
 	}
 	m.aliasDetailName = "a"
-	if got := renderAliasDetail(m, 120, 30); !strings.Contains(got, "session_affinity: unknown") {
+	if got := ansiSeq.ReplaceAllString(renderAliasDetail(m, 120, 30), ""); !strings.Contains(got, "session_affinity: unknown") {
 		t.Fatal(got)
 	}
 	wire.Healthchecks = nil

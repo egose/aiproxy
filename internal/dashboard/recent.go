@@ -90,12 +90,12 @@ func (m *model) handleRequestKey(key string) (bool, tea.Cmd) {
 }
 
 func renderRequests(m *model, width, height int) string {
-	frame, _ := paneBox(width, height, m.focus == focusBottom)
+	frame, inner := paneBox(width, height, m.focus == focusBottom)
 	filter := "all"
 	if m.requestErrorsOnly {
 		filter = "errors"
 	}
-	rows := []string{fmt.Sprintf("REQUESTS completions only · cap %d · %s", recentLimit, filter), m.searchLabel(bottomTabRequests)}
+	rows := []string{paneTitle(fmt.Sprintf("REQUESTS completions only · cap %d · %s", recentLimit, filter), m.focus == focusBottom, inner), m.searchLabel(bottomTabRequests)}
 	all := m.recentRequests()
 	if len(all) == 0 {
 		rows = append(rows, "no matches / no recent completion metadata")
@@ -109,7 +109,8 @@ func renderRequests(m *model, width, height int) string {
 		if e.Truncated != (accounting.RecentTruncation{}) {
 			mark += "[truncated] "
 		}
-		rows = append(rows, fmt.Sprintf("%s%s %d %s %s · client:%s tenant:%s", mark, e.Timestamp.Format("15:04:05"), e.StatusCode, metadataText(orDash(e.RequestID)), metadataText(orDash(requestPublicModel(e))), metadataText(orDash(e.Client)), metadataText(orDash(e.Tenant))))
+		line := fmt.Sprintf("%s%s %d %s %s · client:%s tenant:%s", mark, e.Timestamp.Format("15:04:05"), e.StatusCode, metadataText(orDash(e.RequestID)), metadataText(orDash(requestPublicModel(e))), metadataText(orDash(e.Client)), metadataText(orDash(e.Tenant)))
+		rows = append(rows, selectedRow(line, i == m.requestCursor, m.focus == focusBottom, inner))
 	}
 	return frame.Render(strings.Join(rows, "\n"))
 }
@@ -173,18 +174,10 @@ func (m *model) metadataLines() (string, []string) {
 }
 
 func renderMetadataDetail(m *model, width, height int) string {
-	frame, inner := paneBox(width, height, true)
 	title, lines := m.metadataLines()
-	var raw []string
-	for _, line := range lines {
-		raw = append(raw, wrapText(line, inner)...)
-	}
-	visible := max(1, height-4)
-	m.metadataScroll = clampInt(m.metadataScroll, 0, max(0, len(raw)-visible))
-	end := min(len(raw), m.metadataScroll+visible)
-	rows := append([]string{title}, raw[m.metadataScroll:end]...)
-	rows = append(rows, fmt.Sprintf("lines %d-%d/%d", m.metadataScroll+1, end, len(raw)))
-	return frame.Render(strings.Join(rows, "\n"))
+	sections := []detailSection{{title: "IDENTITY & USAGE", lines: lines}}
+	return renderDetailPage(width, height, []string{accentStyle.Render(title)},
+		detailSectionLines(sections, width-2), "", &m.metadataScroll)
 }
 
 func (m *model) nextUsageDetail(delta int) {

@@ -615,9 +615,11 @@ func (m *model) scrollFocusedPage(sign int) bool {
 }
 
 func (m *model) detailVisibleRows() int {
-	n := zoomBodyHeight(m.height) - 5
-	if m.blockDetailOpen() {
-		n--
+	n := zoomBodyHeight(m.height) - 4
+	if m.payloadDetailOpen() {
+		n = zoomBodyHeight(m.height) - 5
+	} else if m.blockDetailOpen() {
+		n = zoomBodyHeight(m.height) - 6
 	}
 	if n < 1 {
 		n = 1
@@ -1332,6 +1334,9 @@ func (m *model) render() string {
 	}
 	header := renderHeader(m)
 	rate := renderRate(m, m.width)
+	if m.hasDetail() {
+		rate = m.renderDetailContext()
+	}
 	if m.requestDetail != nil || m.usageDetail != nil {
 		body := renderMetadataDetail(m, m.width, zoomBodyHeight(m.height))
 		return fitView(lipgloss.JoinVertical(lipgloss.Left, header, rate, body, renderFooter(m)), m.width)
@@ -1484,36 +1489,38 @@ func renderBottom(m *model, width, height int) string {
 }
 
 func renderTabStrip(m *model, width int) string {
-	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B"))
 	aliasLabel := "1:Aliases"
 	if width >= 100 && m.snapshot != nil {
 		aliasLabel = fmt.Sprintf("1:Aliases(%d) cool:%d", len(m.snapshot.Aliases), len(m.snapshot.Cooldowns))
 	}
-	logsLabel := "2:Logs"
-	payloadLabel := "3:Payloads"
-	alias := dimStyle.Render("  " + aliasLabel)
-	logs := dimStyle.Render("  " + logsLabel)
-	payload := dimStyle.Render("  " + payloadLabel)
 	blocksLabel := "4:Blocks"
 	if width >= 100 && m.blockKnown {
 		blocksLabel = fmt.Sprintf("4:Blocks(%d)", len(m.blocks))
 	}
-	blocks := dimStyle.Render("  " + blocksLabel)
-	requests := dimStyle.Render("  5:Requests")
-	switch m.bottomTab {
-	case bottomTabAliases:
-		alias = activeStyle.Render("▸ " + aliasLabel)
-	case bottomTabLogs:
-		logs = activeStyle.Render("▸ " + logsLabel)
-	case bottomTabBlocks:
-		blocks = activeStyle.Render("▸ " + blocksLabel)
-	case bottomTabRequests:
-		requests = activeStyle.Render("▸ 5:Requests")
-	default:
-		payload = activeStyle.Render("▸ " + payloadLabel)
+	var tabs []string
+	for _, tab := range []struct {
+		id    bottomTab
+		label string
+	}{{bottomTabAliases, aliasLabel}, {bottomTabLogs, "2:Logs"}, {bottomTabPayload, "3:Payloads"}, {bottomTabBlocks, blocksLabel}, {bottomTabRequests, "5:Requests"}} {
+		text, style := " "+tab.label+" ", mutedStyle
+		if tab.id == m.bottomTab {
+			text = "[" + tab.label + "]"
+			style = mutedStyle.Bold(true)
+			if m.focus == focusBottom {
+				style = selectionStyle
+			}
+		}
+		tabs = append(tabs, style.Render(text))
 	}
-	return fitRow(alias+" "+logs+" "+payload+" "+blocks+" "+requests+" [prev ]next", width)
+	strip := strings.Join(tabs, " ")
+	hint := " · [ prev ] next"
+	if width >= 120 {
+		hint = " · [ prev ] next · Tab: pane"
+	}
+	if visibleLen(strip+hint) <= width {
+		strip += mutedStyle.Render(hint)
+	}
+	return fitRow(strip, width)
 }
 
 func (m *model) renderHelp() string {
@@ -1545,7 +1552,7 @@ func (m *model) renderHelp() string {
 		"  ctrl+r     retry dashboard connection (does not reload credentials)",
 		"  o          toggle newest/oldest order (logs/payloads tab)",
 		"  l          cycle log level (focused LOGS only)",
-		"  n/N        next/previous block finding (locked while recording)",
+		"  right/left or n/N: next/previous block finding (locked while recording)",
 		"  a/s/d      allow non-secret / redact / deny SELECTED finding hash only",
 		"             Persistent GLOBAL future-match effect; never replays the request.",
 		"             Pending actions cannot repeat; success suppresses the same action.",
@@ -1797,7 +1804,7 @@ func renderProviders(m *model, width, height int) string {
 		costs = append(costs, "-")
 	}
 	nameW, ipW, reqW, t429W, tokW, costW := providerColWidths(names, ips, reqs, t429s, toks, costs, inner-2)
-	rows := []string{headerStyle.Render(fitRow("  "+headerCells([]col{{"PROVIDER", nameW}, {"", 1}, {"HC", 2}, {"REQS", reqW}, {"ERR%", 6}, {"429", t429W}, {"P95/n", 12}, {"TOKENS", tokW}, {"EST$", costW}, {"HOST", ipW}}), inner))}
+	rows := []string{paneTitle("PROVIDERS · routing health & lifetime totals", m.focus == focusProviders, inner), headerStyle.Render(fitRow("  "+headerCells([]col{{"PROVIDER", nameW}, {"", 1}, {"HC", 2}, {"REQS", reqW}, {"ERR%", 6}, {"429", t429W}, {"P95/n", 12}, {"TOKENS", tokW}, {"EST$", costW}, {"HOST", ipW}}), inner))}
 	unresolved := int64(0)
 	for _, s := range summaries {
 		if strings.HasPrefix(s.Model, "_") {
@@ -1815,7 +1822,7 @@ func renderProviders(m *model, width, height int) string {
 		ps := byName[p.Name]
 		data = append(data, providerLine{text: providerRow(p.Name, known, healthy, hcByName[p.Name], ps, ps.Throttled, latency[p.Name], samples[p.Name], false, m.providerHost(p), providerCostTextWithAliases(p.Name, summaries, prices, snap.Aliases, upstream), nameW, ipW, reqW, t429W, tokW, costW, providerCountersAvailable(snap.Usage))})
 	}
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B"))
+	dimStyle := mutedStyle
 	for _, p := range snap.DisabledProviders {
 		ps := byName[p.Name]
 		data = append(data, providerLine{
@@ -1852,6 +1859,7 @@ func renderProviders(m *model, width, height int) string {
 		if d.dim {
 			line = dimStyle.Render(line)
 		}
+		line = selectedRow(line, start+i == m.providerCursor, m.focus == focusProviders, inner)
 		rows = append(rows, line)
 	}
 	if len(data) == 0 {
@@ -2195,9 +2203,9 @@ func renderUsage(m *model, width, height int) string {
 	if retainedBilling(m.snapshot.Usage) == nil {
 		prices = nil
 	}
-	modelW, opW, countW, tokW, costW := usageColWidths(summaries, costTexts(summaries, prices, aliases, upstream), inner)
-	header := headerStyle.Render(fitRow(headerCells([]col{{"MODEL", modelW}, {"OP", opW}, {"STATUS", 6}, {"COUNT", countW}, {"TOKENS", tokW}, {"EST$", costW}}), inner))
-	rows := []string{fitRow(title, inner), header}
+	modelW, opW, countW, tokW, costW := usageColWidths(summaries, costTexts(summaries, prices, aliases, upstream), inner-2)
+	header := headerStyle.Render(fitRow("  "+headerCells([]col{{"MODEL", modelW}, {"OP", opW}, {"STATUS", 6}, {"COUNT", countW}, {"TOKENS", tokW}, {"EST$", costW}}), inner))
+	rows := []string{paneTitle(title, m.focus == focusUsage, inner), header}
 	visible := m.usageVisibleRows()
 	total := len(summaries)
 	start := m.usageScroll
@@ -2208,15 +2216,20 @@ func renderUsage(m *model, width, height int) string {
 	if end > total {
 		end = total
 	}
-	for _, s := range summaries[start:end] {
-		rows = append(rows, fitRow(dataRow([]string{
+	for i, s := range summaries[start:end] {
+		mark := "  "
+		if i == 0 {
+			mark = "▸ "
+		}
+		line := mark + dataRow([]string{
 			truncate(s.Model, modelW),
 			truncate(s.Operation, opW),
 			fmt.Sprintf("%d", s.StatusCode),
 			fmt.Sprintf("%*s", countW, comma(s.Count)),
 			tokensCell(s, tokW),
 			fmt.Sprintf("%*s", costW, truncate(summaryCostTextWithAliases(s, prices, aliases, upstream), costW)),
-		}, []int{modelW, opW, 6, countW, tokW, costW}), inner))
+		}, []int{modelW, opW, 6, countW, tokW, costW})
+		rows = append(rows, selectedRow(line, i == 0, m.focus == focusUsage, inner))
 	}
 	if total == 0 {
 		if m.usageUpstream && retainedBilling(m.snapshot.Usage) == nil {
@@ -2281,7 +2294,7 @@ func renderAliases(m *model, width, height int) string {
 	borderStyle, inner := paneBox(width, height, m.focus == focusBottom && m.bottomTab == bottomTabAliases)
 	m.clampAliasCursor()
 	aliases := m.aliasList()
-	rows := []string{fmt.Sprintf("ALIASES (%d) cool:%d", len(aliases), len(m.snapshot.Cooldowns))}
+	rows := []string{paneTitle(fmt.Sprintf("ALIASES (%d) cool:%d", len(aliases), len(m.snapshot.Cooldowns)), m.focus == focusBottom, inner)}
 	if len(aliases) == 0 {
 		rows = append(rows, "no aliases configured")
 		return borderStyle.Render(strings.Join(rows, "\n"))
@@ -2333,7 +2346,6 @@ func renderAliases(m *model, width, height int) string {
 			cooldown[key] = d
 		}
 	}
-	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
 	for i := start; i < end; i++ {
 		a := aliases[i]
 		retry := "default"
@@ -2357,22 +2369,21 @@ func renderAliases(m *model, width, height int) string {
 		}
 		line := fmt.Sprintf("alias/%s [%s] retry:%s targets:%d cool:%d", a.Name, algo, retry, len(a.Targets), cool)
 		if i == cursor {
-			line = cursorStyle.Render("▸ " + line)
+			line = "▸ " + line
 		} else {
 			line = "  " + line
 		}
-		rows = append(rows, truncate(line, inner))
+		rows = append(rows, selectedRow(line, i == cursor, m.focus == focusBottom, inner))
 	}
 	if end < len(aliases) {
 		rows = append(rows, fmt.Sprintf("… %d more (j/k move)", len(aliases)-end))
 	} else if len(aliases) > visible {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Render("[j/k] move [enter] detail"))
+		rows = append(rows, mutedStyle.Render("[j/k] move [enter] detail"))
 	}
 	return borderStyle.Render(strings.Join(rows, "\n"))
 }
 
 func renderAliasDetail(m *model, width, height int) string {
-	borderStyle, inner := paneBox(width, height, true)
 	var a *config.Alias
 	for i := range m.snapshot.Aliases {
 		if m.snapshot.Aliases[i].Name == m.aliasDetailName {
@@ -2381,7 +2392,7 @@ func renderAliasDetail(m *model, width, height int) string {
 		}
 	}
 	if a == nil {
-		return borderStyle.Render("alias not found\n[esc] back")
+		return renderDetailPage(width, height, []string{accentStyle.Render("ALIAS")}, []string{"alias not found"}, "[esc] back", &m.aliasDetailScroll)
 	}
 	retry := "default"
 	if len(a.RetryStatusCodes) > 0 {
@@ -2425,8 +2436,9 @@ func renderAliasDetail(m *model, width, height int) string {
 		"algorithm: " + algo,
 		"retry: " + retry,
 		"session_affinity: " + affinity,
-		"Counters: provider-wide lifetime; repeated per target, NOT target/alias counts.",
 	}
+	sections := []detailSection{{title: "ROUTING", style: accentStyle, lines: raw}}
+	raw = []string{"Counters: provider-wide lifetime; repeated per target, NOT target/alias counts."}
 	for _, t := range a.Targets {
 		key := a.Name + "\x00" + t.Provider + "\x00" + t.Model
 		state := "-"
@@ -2451,42 +2463,14 @@ func renderAliasDetail(m *model, width, height int) string {
 		if !providerCountersAvailable(m.snapshot.Usage) {
 			line = fmt.Sprintf("%s %s/%s hc:%s provider counters unavailable %s", mark, t.Provider, t.Model, hc, state)
 		}
-		raw = append(raw, wrapText(line, inner)...)
+		raw = append(raw, line)
 		if detail := healthcheckDetail(m.snapshot.Healthchecks, t.Provider); detail != "" {
-			raw = append(raw, wrapText("  "+detail, inner)...)
+			raw = append(raw, "  "+detail)
 		}
 	}
-	var wrapped []string
-	for _, line := range raw {
-		wrapped = append(wrapped, wrapText(line, inner)...)
-	}
-	raw = wrapped
-	lines := []string{"ALIAS " + a.Name}
-	visible := height - 5
-	if visible < 1 {
-		visible = 1
-	}
-	start := m.aliasDetailScroll
-	if start > len(raw)-1 {
-		start = len(raw) - 1
-	}
-	if start < 0 {
-		start = 0
-	}
-	m.aliasDetailScroll = start
-	end := start + visible
-	if end > len(raw) {
-		end = len(raw)
-	}
-	for _, l := range raw[start:end] {
-		lines = append(lines, truncate(l, inner))
-	}
-	if end < len(raw) {
-		lines = append(lines, fmt.Sprintf("… %d more lines (j/k scroll, esc back)", len(raw)-end))
-	} else {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Render("[j/k] scroll [esc] back"))
-	}
-	return borderStyle.Render(strings.Join(lines, "\n"))
+	sections = append(sections, detailSection{title: "TARGETS", lines: raw})
+	return renderDetailPage(width, height, []string{accentStyle.Render("ALIAS " + logOneLine(inspectionText(a.Name)))},
+		detailSectionLines(sections, width-2), "", &m.aliasDetailScroll)
 }
 
 func (m *model) logNewestIdx(n int) int {
@@ -2643,7 +2627,7 @@ func renderLogs(m *model, width, height int) string {
 		order = "oldest-first"
 	}
 	title := fmt.Sprintf("LOGS %s (%s) %s", order, levelName, m.searchLabel(bottomTabLogs))
-	rows := []string{title, headerStyle.Render(fitRow(headerCells([]col{{"TIME", 8}, {"LEVEL", 6}, {"MESSAGE", msgWidth}, {"ATTRS", attrsWidth}}), inner))}
+	rows := []string{paneTitle(title, m.focus == focusBottom, inner), headerStyle.Render(fitRow("  "+headerCells([]col{{"TIME", 8}, {"LEVEL", 6}, {"MESSAGE", msgWidth}, {"ATTRS", attrsWidth}}), inner))}
 	if height <= 3 {
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
@@ -2651,59 +2635,38 @@ func renderLogs(m *model, width, height int) string {
 		rows = append(rows, m.emptySearchText(bottomTabLogs, "no logs captured"))
 		return borderStyle.Render(strings.Join(rows, "\n"))
 	}
-	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
 	for i, e := range page {
 		idx := start + i
 		line := renderLogEntry(msgWidth, attrsWidth, e)
 		if idx == cursor {
-			line = cursorStyle.Render("▸ " + line)
+			line = "▸ " + line
 		} else {
 			line = "  " + line
 		}
-		rows = append(rows, line)
+		rows = append(rows, selectedRow(line, idx == cursor, m.focus == focusBottom, inner))
 	}
 	if end < len(entries) {
 		rows = append(rows, fmt.Sprintf("… %d more (j/k move)", len(entries)-end))
 	} else if len(entries) > visible {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Render("[j/k] move [enter] detail"))
+		rows = append(rows, mutedStyle.Render("[j/k] move [enter] detail"))
 	}
 	return borderStyle.Render(strings.Join(rows, "\n"))
 }
 
 func renderLogDetail(m *model, width, height int) string {
-	borderStyle, inner := paneBox(width, height, true)
 	e := m.logDetailEntry
 	title := "LOG " + e.Time.Format(time.RFC3339) + " " + e.Level.String()
-	lines := []string{title}
-	attrs := orDash(e.Attrs)
-	raw := []string{"level: " + e.Level.String(), "time: " + e.Time.Format(time.RFC3339Nano)}
-	raw = append(raw, wrapText("message: "+e.Message, inner)...)
-	raw = append(raw, wrapText("attrs: "+attrs, inner)...)
-	visible := height - 5
-	if visible < 1 {
-		visible = 1
+	metadata := []string{"level: " + e.Level.String(), "time: " + e.Time.Format(time.RFC3339Nano)}
+	if e.RequestID != "" {
+		metadata = append(metadata, "request ID: "+metadataText(e.RequestID))
 	}
-	start := m.logDetailScroll
-	if start > len(raw)-1 {
-		start = len(raw) - 1
+	sections := []detailSection{
+		{title: "EVENT", style: accentStyle, lines: metadata},
+		{title: "MESSAGE", raw: true, lines: []string{e.Message}},
+		{title: "ATTRIBUTES", style: accentStyle, raw: true, lines: []string{orDash(e.Attrs)}},
 	}
-	if start < 0 {
-		start = 0
-	}
-	m.logDetailScroll = start
-	end := start + visible
-	if end > len(raw) {
-		end = len(raw)
-	}
-	for _, l := range raw[start:end] {
-		lines = append(lines, truncate(l, inner))
-	}
-	if end < len(raw) {
-		lines = append(lines, fmt.Sprintf("… %d more lines (j/k scroll, esc back)", len(raw)-end))
-	} else {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Render("[j/k] scroll [esc] back"))
-	}
-	return borderStyle.Render(strings.Join(lines, "\n"))
+	return renderDetailPage(width, height, []string{levelStyleFor(e.Level).Bold(true).Render(title)},
+		detailSectionLines(sections, width-2), "", &m.logDetailScroll)
 }
 
 func wrapText(s string, width int) []string {
