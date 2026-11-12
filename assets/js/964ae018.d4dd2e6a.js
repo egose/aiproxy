@@ -983,10 +983,12 @@ function _createMdxContent(props) {
         children: "false"
       }), " for ", (0,jsx_runtime.jsx)(_components.code, {
         children: "enabled"
-      }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "forward_user_agent"
-      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "forward_authorization"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allow_insecure_base_url"
       }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "[]"
       }), " to clear local ", (0,jsx_runtime.jsx)(_components.code, {
@@ -1010,6 +1012,21 @@ function _createMdxContent(props) {
       }), "\nand ", (0,jsx_runtime.jsx)(_components.code, {
         children: "credential_ref"
       }), " fields to retain them. Supplied reference objects replace\ntheir path and key/name together; an empty path selects the default secrets path."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "allow_insecure_base_url"
+      }), " is a provider-only opt-in that accepts a non-loopback\nplain-HTTP ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " (see\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#allowing-plain-http-upstreams",
+        children: "plain-HTTP upstreams"
+      }), ").\nOmitting the flag preserves its current value on concrete providers. Enabling\nit does not relax any other URL validation. Derived provider POST/PUT rejects\nexplicit ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "true"
+      }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "false"
+      }), "; setting a non-empty ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "extends"
+      }), " without declaring the\nflag clears any previously stored local opt-in so the base's value is inherited."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.code, {
         children: "forward_authorization"

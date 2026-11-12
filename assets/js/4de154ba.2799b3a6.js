@@ -42,6 +42,10 @@ const toc = [{
   "id": "build-and-run",
   "level": 2
 }, {
+  "value": "Helm NetworkPolicy",
+  "id": "helm-networkpolicy",
+  "level": 2
+}, {
   "value": "Configure Wizard",
   "id": "configure-wizard",
   "level": 2
@@ -222,6 +226,38 @@ function _createMdxContent(props) {
         className: "language-sh",
         children: "set -a; . ./.env; set +a\n"
       })
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "helm-networkpolicy",
+      children: "Helm NetworkPolicy"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "helm/main"
+      }), " chart enables release-scoped default-deny policies. Empty API or\nrelay ingress source lists deny ingress; add explicit caller/router peers,\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allowSameNamespace"
+      }), " (same-release pods), or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allowOpenShiftIngress"
+      }), " as appropriate.\n", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "Upgrade note:"
+      }), " empty source lists previously rendered an unrestricted ingress\nrule. Configure the intended sources before upgrading instead of relying on that\nbehavior."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "For a relay fronting this release's API, explicitly enable the narrow upstream\nconnection on both policy surfaces:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-yaml",
+        children: "relay:\n  enabled: true\n  env:\n    UPSTREAM: http://aiproxy-api:8080\nnetworkPolicy:\n  relay:\n    allowApiUpstream: true\n    ingressFrom:\n      - podSelector:\n          matchLabels:\n            app.kubernetes.io/name: trusted-caller\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Replace ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy"
+      }), " with the release name and adjust service overrides/caller labels\nas needed. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allowApiUpstream"
+      }), " defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "false"
+      }), ", requires both components to be\nenabled, and allows only relay egress plus API ingress between same-release pods\non the configured API service port. It never opens relay ingress. External\nupstreams require explicit CIDR or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "extraEgress"
+      }), " rules instead. Run\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "make helm-test"
+      }), " with Helm installed to check the rendered policy contracts;\nthese checks do not exercise a live cluster's NetworkPolicy implementation."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "configure-wizard",
       children: "Configure Wizard"
@@ -1228,12 +1264,32 @@ function _createMdxContent(props) {
         children: "x-api-key"
       }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "x-goog-api-key"
-      }), ", cookies)\nare redacted on every side, and bodies covered by an ingress-guardrail policy\nare omitted from both request sides."]
+      }), ", cookies)\nare redacted on every side, and bodies covered by an ingress-guardrail policy\n(chat completions, responses, messages) are omitted from the request and\nupstream request sides unless ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "redact_guardrail_bodies"
+      }), " is enabled."]
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
         children: "logging {\n  level      = \"info\"\n  access_log = true\n\n  payload_log {\n    enabled        = true\n    dir            = \"/var/log/aiproxy/payloads\"\n    rotation       = \"daily\"\n    retention      = \"168h\"\n    max_body_bytes = 1048576\n\n    mongodb {\n      uri        = env(\"AIPROXY_PAYLOAD_MONGO_URI\")\n      database   = \"aiproxy\"\n      collection = \"payloads\"\n      timeout    = \"5s\"\n    }\n  }\n}\n"
       })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["With ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "redact_guardrail_bodies = true"
+      }), " and an ingress guardrail policy enabled,\nguardrail-covered request bodies are logged with gitleaks-flagged text replaced\nby the guardrail ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "redact_placeholder"
+      }), " instead of being omitted. The split is\ndecision-aware: the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "request"
+      }), " side masks every flagged occurrence (determined\nby the scan, independent of quarantine decisions), while the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "upstream_request"
+      }), "\nside shows the body that was actually sent upstream — so after an operator\nallows a finding as non-secret and the client resends, the literal text appears\non the upstream side; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "redact"
+      }), " decisions appear as the placeholder; requests\nstill blocked or denied never reach upstream, so those entries carry no\nupstream side. Audit-mode requests proceed upstream, so their upstream side\ncontains flagged text verbatim. Bodies that were never scanned (early\nrejections before the guardrail scan) or scans that could not complete\n(unparsable or multipart bodies, oversize text, captures cut off by the\nfindings cap) stay omitted on both sides. Redaction operates on decoded JSON,\nincluding JSON-encoded tool arguments, and safely escapes the replacement while\npreserving JSON numbers. Bodies that exceed the 128-level rewrite nesting bound\n(including embedded JSON) or cannot be completely rewritten stay omitted on both\nsides. Because masking depends on the scanner's coverage and rules, opting in\naccepts that unscanned or unrecognized secrets could reach the log; keep the\noutput directory protected either way."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The logging setting never selects guardrail admission behavior. Fingerprint\nexceptions apply with or without quarantine/logging, but an incomplete capture\ncannot clear block-mode findings through exceptions. Exactly-at-cap captures\nremain complete when no findings were dropped. A block-mode ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "redact"
+      }), " decision\nthat cannot be rewritten safely returns ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "400 scan_incomplete"
+      }), "; audit mode instead\nforwards the original body and omits both logged request sides. Standard response\ncapture remains unchanged; response scanning/redaction is not provided by this\nsetting."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["The disk backend (", (0,jsx_runtime.jsx)(_components.code, {
         children: "dir"

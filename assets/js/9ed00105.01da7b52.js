@@ -66,6 +66,10 @@ const toc = [{
   "id": "forwarding-client-authorization",
   "level": 3
 }, {
+  "value": "Allowing Plain-HTTP Upstreams",
+  "id": "allowing-plain-http-upstreams",
+  "level": 3
+}, {
   "value": "OpenCode Zen And Go",
   "id": "opencode-zen-and-go",
   "level": 3
@@ -305,6 +309,23 @@ function _createMdxContent(props) {
           children: "dir"
         }), " (or leave it empty) to disable the disk\nbackend."]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "redact_guardrail_bodies"
+        }), " defaults to ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "false"
+        }), ". When ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "true"
+        }), " and an ingress\nguardrail policy is enabled, chat-completions/responses/messages bodies are\nlogged with gitleaks-flagged text replaced by the guardrail\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "redact_placeholder"
+        }), " instead of being omitted entirely (see\n", (0,jsx_runtime.jsx)(_components.a, {
+          href: "/docs/operations#payload-logging",
+          children: "operations → payload logging"
+        }), " for the exact\nsemantics and limits). Bodies that were not scanned (early rejections) or\ncould not be scanned completely or safely redacted stay omitted. Logging-only\nCLI edits preserve a declared ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "true"
+        }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "false"
+        }), " value."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["The optional nested ", (0,jsx_runtime.jsx)(_components.code, {
           children: "mongodb"
         }), " block selects the MongoDB backend, which\ninserts one document per inference request with the same JSON field names as\nthe disk entries. It is disabled when ", (0,jsx_runtime.jsx)(_components.code, {
@@ -471,6 +492,14 @@ function _createMdxContent(props) {
         }), ")"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "allow_insecure_base_url"
+        }), " to accept a non-loopback plain-HTTP ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "base_url"
+        }), "\n(provider-only, default ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "false"
+        }), "; see below)"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "user_agent"
         }), " as an optional upstream ", (0,jsx_runtime.jsx)(_components.code, {
           children: "User-Agent"
@@ -606,6 +635,50 @@ function _createMdxContent(props) {
       }), "; existing credentials\nmust be explicitly cleared when switching modes. Existing databases require\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "aiproxy migrate up"
       }), " to apply the additive forwarding-column migration."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "allowing-plain-http-upstreams",
+      children: "Allowing Plain-HTTP Upstreams"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "provider \"openai-compatible\" \"incluster\" {\n  base_url = \"http://llm.internal.my-ns.svc.cluster.local/v1\"\n  allow_insecure_base_url = true\n  api_key_ref { key = \"localai\" }\n\n  model \"chat\" {}\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " must normally be ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https"
+      }), ", with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "http"
+      }), " allowed only for loopback\nhosts (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "localhost"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "127.0.0.1"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "::1"
+      }), "). Setting ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allow_insecure_base_url = true"
+      }), "\non a provider opts that provider into a non-loopback plain-HTTP upstream. This\nexists for trusted transport-local networks, most commonly another Service in\nthe same Kubernetes namespace. There is no root-level default, environment\nvariable, or CLI bypass; the opt-in is per provider and explicit."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.strong, {
+        children: "Credentials and payloads travel unencrypted."
+      }), " Only enable this for networks\nwhere cleartext HTTP is acceptable. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https"
+      }), " base URLs are always allowed and\nthe flag has no effect on them; non-http(s) schemes, userinfo, and\nnon-absolute URLs remain rejected. Derived providers cannot declare the\nattribute — it is inherited from the base provider together with the base URL.\nThe admin API rejects explicit ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "true"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "false"
+      }), " on derived providers. Changing\na concrete database provider to a derived one clears its omitted local flag;\nstored derived rows with a true local override are rejected during catalog load."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The CLI supports ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy configure provider --non-interactive ... --allow-insecure-base-url"
+      }), " (and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--allow-insecure-base-url=false"
+      }), "), with a\nplain-HTTP confirmation prompt in interactive flows. Administrative provider\nPOST/PUT also accepts ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allow_insecure_base_url"
+      }), ", and existing databases require\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy migrate up"
+      }), " to apply the additive column migration."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["GitHub Copilot is ", (0,jsx_runtime.jsx)(_components.strong, {
         children: "hermetically verified; live GitHub compatibility unverified"
