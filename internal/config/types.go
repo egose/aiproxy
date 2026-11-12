@@ -139,14 +139,15 @@ const (
 )
 
 type PayloadLog struct {
-	Enabled      bool
-	Dir          string
-	Rotation     PayloadLogRotation
-	Retention    time.Duration
-	MaxBodyBytes int
-	HasRetention bool
-	HasMaxBody   bool
-	Mongo        PayloadMongo
+	Enabled               bool
+	Dir                   string
+	Rotation              PayloadLogRotation
+	Retention             time.Duration
+	MaxBodyBytes          int
+	HasRetention          bool
+	HasMaxBody            bool
+	RedactGuardrailBodies bool
+	Mongo                 PayloadMongo
 }
 
 type PayloadMongo struct {
@@ -242,6 +243,7 @@ type Provider struct {
 	ForwardUserAgent      bool
 	ForwardHeaders        []string
 	ForwardAuthorization  bool
+	AllowInsecureBaseURL  bool
 	APIKey                string
 	APIKeyRef             *APIKeyRef
 	CopilotCredentialRef  *CopilotCredentialRef

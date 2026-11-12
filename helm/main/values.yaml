@@ -59,8 +59,39 @@ api:
   # OPENAI_API_KEY / AIPROXY_CLIENT_TOKEN referenced by env("VAR").
   envSecretName: ""
 
+# Optional bun-relay companion (published chart, oci://ghcr.io/egose/charts/bun-relay).
+# Runs as its own Deployment, reachable in-cluster at
+# http://<release>-relay:8787. The container exits at startup unless UPSTREAM
+# is set, so configure env.UPSTREAM or envSecretName before enabling.
+relay:
+  enabled: false
+  replicaCount: 1
+
+  image:
+    pullPolicy: IfNotPresent
+    # Empty pins the image to the chart's appVersion (the release tag that
+    # published it). Set explicitly to override, e.g. "0.1.0".
+    tag: ""
+
+  resources:
+    requests:
+      cpu: 50m          # 0.05 CPU core
+      memory: 64Mi      # 64 MB RAM
+    limits:
+      cpu: 250m         # 0.25 CPU core
+      memory: 256Mi     # 256 MB RAM
+
+  # Relay is configured through environment variables; UPSTREAM is required
+  # (the container exits at startup without it). Prefer envSecretName for
+  # anything sensitive so credentials never live in chart values.
+  env: {}
+  #  UPSTREAM: http://aiproxy-api:8080
+
+  envSecretName: ""
+
 networkPolicy:
   enabled: true
+  # Empty ingress source lists deny all ingress unless a specific opt-in applies.
   allowSameNamespace: false
   allowOpenShiftIngress: false
   dns:
@@ -73,4 +104,13 @@ networkPolicy:
   api:
     ingressFrom: []
     idpEgressIpBlocks: []
+    extraEgress: []
+  relay:
+    # Allow relay egress and API ingress only between these same-release pods.
+    # Enable when env.UPSTREAM points at this release's API Service; does not
+    # open relay ingress or allow relay-to-API traffic on other ports.
+    allowApiUpstream: false
+    ingressFrom: []
+    # CIDR blocks the relay may reach on 443 (its UPSTREAM providers).
+    upstreamEgressIpBlocks: []
     extraEgress: []

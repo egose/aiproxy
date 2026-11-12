@@ -158,6 +158,14 @@ logging {
   `dir` for disk logging, only `mongodb` for MongoDB-only logging, or both to
   fan out to both backends. Omit `dir` (or leave it empty) to disable the disk
   backend.
+- `redact_guardrail_bodies` defaults to `false`. When `true` and an ingress
+  guardrail policy is enabled, chat-completions/responses/messages bodies are
+  logged with gitleaks-flagged text replaced by the guardrail
+  `redact_placeholder` instead of being omitted entirely (see
+  [operations → payload logging](operations.md#payload-logging) for the exact
+  semantics and limits). Bodies that were not scanned (early rejections) or
+  could not be scanned completely or safely redacted stay omitted. Logging-only
+  CLI edits preserve a declared `true` or `false` value.
 - The optional nested `mongodb` block selects the MongoDB backend, which
   inserts one document per inference request with the same JSON field names as
   the disk entries. It is disabled when `uri` is empty, so keep the secret in
@@ -219,6 +227,8 @@ Common attributes:
   override for `opencode-zen`, `opencode-go`, `github-copilot`, `zenmux`, and
   `openrouter` (each defaults to its service prefix, e.g.
   `https://zenmux.ai/api/v1` and `https://openrouter.ai/api/v1`)
+- `allow_insecure_base_url` to accept a non-loopback plain-HTTP `base_url`
+  (provider-only, default `false`; see below)
 - `user_agent` as an optional upstream `User-Agent` override for any provider
   type (defaults to `aiproxy/<version>`)
 - `forward_user_agent` to forward the inbound caller `User-Agent` upstream on
@@ -279,6 +289,40 @@ The CLI supports `aiproxy configure provider --non-interactive ...
 provider POST/PUT also accepts `forward_authorization`; existing credentials
 must be explicitly cleared when switching modes. Existing databases require
 `aiproxy migrate up` to apply the additive forwarding-column migration.
+
+### Allowing Plain-HTTP Upstreams
+
+```hcl
+provider "openai-compatible" "incluster" {
+  base_url = "http://llm.internal.my-ns.svc.cluster.local/v1"
+  allow_insecure_base_url = true
+  api_key_ref { key = "localai" }
+
+  model "chat" {}
+}
+```
+
+`base_url` must normally be `https`, with `http` allowed only for loopback
+hosts (`localhost`, `127.0.0.1`, `::1`). Setting `allow_insecure_base_url = true`
+on a provider opts that provider into a non-loopback plain-HTTP upstream. This
+exists for trusted transport-local networks, most commonly another Service in
+the same Kubernetes namespace. There is no root-level default, environment
+variable, or CLI bypass; the opt-in is per provider and explicit.
+
+**Credentials and payloads travel unencrypted.** Only enable this for networks
+where cleartext HTTP is acceptable. `https` base URLs are always allowed and
+the flag has no effect on them; non-http(s) schemes, userinfo, and
+non-absolute URLs remain rejected. Derived providers cannot declare the
+attribute — it is inherited from the base provider together with the base URL.
+The admin API rejects explicit `true` and `false` on derived providers. Changing
+a concrete database provider to a derived one clears its omitted local flag;
+stored derived rows with a true local override are rejected during catalog load.
+
+The CLI supports `aiproxy configure provider --non-interactive ...
+--allow-insecure-base-url` (and `--allow-insecure-base-url=false`), with a
+plain-HTTP confirmation prompt in interactive flows. Administrative provider
+POST/PUT also accepts `allow_insecure_base_url`, and existing databases require
+`aiproxy migrate up` to apply the additive column migration.
 
 GitHub Copilot is **hermetically verified; live GitHub compatibility unverified**.
 Config validation resolves local credentials; it does not prove GitHub entitlement

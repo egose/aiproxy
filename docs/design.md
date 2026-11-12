@@ -792,7 +792,12 @@ the latest saved catalog. A response view may reflect a subsequent committed edi
 Database catalog merging receives the runtime's root defaults on startup, reload
 and CLI database validation. Concrete rows inherit an omitted timeout/user-agent,
 OR root/local user-agent forwarding and union root-first forwarded headers using
-the static provider rules. Derived rows inherit the already-resolved base settings;
+the static provider rules. `allow_insecure_base_url` is a concrete-row column;
+derived rows inherit it from the resolved base together with the base URL and
+never carry a row-level override. Explicit true/false admin declarations on
+derived providers are rejected before persistence; becoming derived clears an
+omitted local flag, and stored true overrides reject catalog load. Derived rows
+inherit the already-resolved base settings;
 their enabled state and credentials remain local. Defaults are never persisted into
 the database row or its admin response view, so clearing a local override and later
 changing a root setting remain effective without rewriting saved providers.
@@ -864,6 +869,7 @@ Provider attributes:
 
 - `display_name`
 - `base_url`
+- `allow_insecure_base_url`
 - `api_key`
 - `api_key_ref`
 - `credential_ref` (`github-copilot` only)
@@ -886,7 +892,9 @@ Derived provider blocks are intentionally restricted:
 - exactly one local credential form, `api_key` or `api_key_ref`, is required
   (`github-copilot` derivatives require a local `credential_ref` instead and
   reject `api_key`/`api_key_ref`; `credential_ref` is rejected on all other types) # pragma: allowlist secret
-- local `base_url`, `upstream_header_timeout`, `enabled`, and `model` blocks are rejected
+- local `base_url`, `allow_insecure_base_url`, `upstream_header_timeout`,
+  `enabled`, and `model` blocks are rejected; the flag is inherited from the
+  base provider together with the inherited `base_url`
 
 After loading, derived providers are ordinary providers. Direct routing,
 health, metrics, billing, dashboard inventory, reloads, and aliases identify
@@ -1562,7 +1570,12 @@ alias "chat_fallback" {
   `opencode-go`, `github-copilot`, `zenmux`, and `openrouter` default to their service prefixes and accept `base_url` only
   as a transport override that never changes service selection
 - `base_url` must be an absolute `https` URL for remote upstreams; `http` is
-  allowed only for loopback hosts such as `localhost`, `127.0.0.1`, or `::1`
+  allowed only for loopback hosts such as `localhost`, `127.0.0.1`, or `::1`.
+  A provider may set `allow_insecure_base_url = true` to accept a non-loopback
+  `http` base_url explicitly (cleartext transport, intended for trusted
+  in-cluster services such as same-namespace Kubernetes upstreams); `https`
+  remains always allowed and non-http(s) schemes, userinfo, and non-absolute
+  URLs stay rejected regardless of the flag
 - `api_key_ref.path` is optional because it has a secure default
 - `upstream_header_timeout` accepts a positive duration at root or provider scope; provider values override root values, and the default is 90 seconds
 - `user_agent` accepts a 1-256 printable ASCII override at root or provider scope; provider values override the root value, and the default is `aiproxy/<version>`
@@ -1652,8 +1665,9 @@ scanned for suspected secrets before any provider call when the optional
 `ingress_guardrails` block is enabled. The scanner reuses the embedded
 Gitleaks default rule set as a pinned Go module behind the small
 `internal/guardrails` interface (complete-clean, findings, and
-incomplete/error outcomes); only bounded safe metadata (outcome, rule IDs,
-counts, reason) leaves the wrapper.
+incomplete/error outcomes). Standard logs, metrics, and generated client errors
+receive only bounded safe metadata (outcome, rule IDs, counts, reason); opt-in
+quarantine snippets remain behind the authenticated operator surface.
 
 - Coverage is decoded text: chat message content (string and text parts),
   tool-call arguments (plus one JSON-decoded level for stringified
@@ -1665,7 +1679,8 @@ counts, reason) leaves the wrapper.
   `400 secret_blocked` and unscannable required scans with
   `400 scan_incomplete`, with zero upstream I/O (no adapter call, retries,
   cooldowns, health updates, or upstream usage). `mode = "audit"` forwards
-  unchanged and records the outcome. `gitleaks:allow` never suppresses a
+  without blocking and records the outcome; complete approved redact decisions
+  can still rewrite the forwarded body. `gitleaks:allow` never suppresses a
   finding; cancellation and bound overruns are visible `incomplete`
   outcomes, never clean scans.
 - `max_text_bytes` (default 65536, 1024..32MiB) and `max_strings` (default 512, 1..16384) bound the
@@ -1673,14 +1688,27 @@ counts, reason) leaves the wrapper.
   host while full 32 MiB bodies take tens of seconds, so the cap is the latency
   budget. Scanning runs synchronously in the request goroutine against one
   immutable shared detector per policy generation.
-- While enabled, covered-operation request bodies are omitted from
-  payload-log entries on success, blocked, and early-rejected paths.
-  Response capture is unchanged (response scanning is deferred). Findings
-  never appear in logs, metrics, or client errors.
+- While enabled, covered-operation request bodies are omitted from both
+  payload-log request sides by default, on success, blocked, and early-rejected
+  paths. `logging.payload_log.redact_guardrail_bodies` explicitly opts into
+  masked original-request bodies; the upstream side remains a faithful record
+  of what was sent, including literal allowed/audit findings. Redaction decodes
+  JSON and embedded tool arguments, preserves numbers, and safely encodes
+  placeholders. Incomplete captures, missing matches, colliding rewritten keys,
+  or more than 128 nesting levels omit both sides rather than retaining a
+  potentially unmasked body. Response capture is unchanged (response scanning
+  is deferred). Standard logs, metrics, and generated client errors never carry
+  finding text.
+- Fingerprint exceptions apply independently of quarantine retention and payload
+  logging. Only a complete capture can clear findings through allow/redact
+  decisions; exact-cap captures remain complete if no findings were dropped.
+  Redaction uses full request-local secrets, not truncated quarantine snippets.
+  Unsafe exception rewrites fail closed in block mode and keep audit forwarding
+  unchanged. Config editing preserves declared true/false logging opt-ins.
 - Policy compiles at startup (failure fails startup) and rebuilds before
   publication on `SIGHUP` (failure rejects the reload with the active policy
-  intact). Custom rules, rule subsets, and operator allowlists are not v1
-  scope; use the full default rule set or leave the block disabled.
+  intact). Custom detector rules and rule subsets remain out of scope; use the
+  full default rule set or leave the block disabled.
 
 ## Observability And Security
 
@@ -1917,6 +1945,15 @@ Recommended image approach:
 - multi-stage Docker build
 - static or near-static Go binary
 - minimal runtime image with CA certificates
+
+The Helm chart denies ingress when no peers are configured, rather than emitting
+an empty `from` allow rule. Its optional relay can contact the same-release API
+only when `networkPolicy.relay.allowApiUpstream` is explicitly enabled (default
+false), with matching narrow relay-egress and API-ingress rules on the configured
+API port. The opt-in never exposes relay ingress, and disabled components do not
+gain connectivity. Template-only policy tests use dependency-free temporary
+charts; `make helm-test` requires Helm and asserts policy scopes without OCI
+downloads or claiming live CNI verification.
 
 ## Recommended Package Layout
 

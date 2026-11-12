@@ -629,6 +629,178 @@ func TestGuardrailPayloadLogDisabledKeepsBodies(t *testing.T) {
 	}
 }
 
+func TestGuardrailPayloadLogRedactsFlaggedBodies(t *testing.T) {
+	key := guardrailTestKey(t)
+	rt := newRT()
+	pl, dir := payloadTestLogger(t, 1<<20)
+	adapter := &countingAdapter{}
+	h := NewHandler(Dependencies{
+		Resolver:              modelresolver.New(rt),
+		Adapter:               adapter,
+		Auth:                  auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:               rt.Catalog,
+		Metrics:               observability.NewMetrics(),
+		PayloadLog:            pl,
+		Guardrails:            guardrailTestScanner(t, guardrails.ModeBlock, 0, 0),
+		RedactGuardrailBodies: true,
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(guardrailChatBody("openai/gpt-4o-mini", "deploy with "+key)))
+	r.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	entries := readPayloadEntries(t, dir)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	e := entries[0]
+	reqBody := e.Request.Body.AsString()
+	if reqBody == "" || e.Request.Body.Bytes == 0 {
+		t.Fatalf("redacted request body missing: %+v", e.Request.Body)
+	}
+	if strings.Contains(reqBody, key) {
+		t.Fatalf("request body leaks secret: %q", reqBody)
+	}
+	if !strings.Contains(reqBody, guardrails.DefaultRedactPlaceholder) {
+		t.Fatalf("request body missing redaction placeholder: %q", reqBody)
+	}
+	if !strings.Contains(reqBody, "openai/gpt-4o-mini") {
+		t.Fatalf("redacted request body lost non-secret content: %q", reqBody)
+	}
+	if len(e.UpstreamRequest.Headers) != 0 || e.UpstreamRequest.Body.AsString() != "" {
+		t.Fatalf("blocked request must not have an upstream side: %+v", e.UpstreamRequest)
+	}
+	raw, _ := json.Marshal(e)
+	if strings.Contains(string(raw), key) {
+		t.Fatalf("payload entry leaks secret text")
+	}
+}
+
+func TestGuardrailPayloadLogRedactedCleanKeepsBody(t *testing.T) {
+	rt := newRT()
+	pl, dir := payloadTestLogger(t, 1<<20)
+	adapter := &countingAdapter{}
+	h := NewHandler(Dependencies{
+		Resolver:              modelresolver.New(rt),
+		Adapter:               adapter,
+		Auth:                  auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:               rt.Catalog,
+		Metrics:               observability.NewMetrics(),
+		PayloadLog:            pl,
+		Guardrails:            guardrailTestScanner(t, guardrails.ModeBlock, 0, 0),
+		RedactGuardrailBodies: true,
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(guardrailChatBody("openai/gpt-4o-mini", "explain photosynthesis")))
+	r.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	entries := readPayloadEntries(t, dir)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	if !strings.Contains(entries[0].Request.Body.AsString(), "explain photosynthesis") {
+		t.Fatalf("clean scan should keep the raw body: %+v", entries[0].Request.Body)
+	}
+}
+
+func TestGuardrailPayloadLogRedactedAuditKeepsUpstreamLiteral(t *testing.T) {
+	key := guardrailTestKey(t)
+	rt := newRT()
+	pl, dir := payloadTestLogger(t, 1<<20)
+	upstreamBody := `{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"deploy with ` + key + `"}]}`
+	adapter := &stubAdapter{result: &provider.Result{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       []byte(`{"id":"chatcmpl-stub"}`),
+		UpstreamRequestHeaders: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		UpstreamRequestBody: []byte(upstreamBody),
+	}}
+	h := NewHandler(Dependencies{
+		Resolver:              modelresolver.New(rt),
+		Adapter:               adapter,
+		Auth:                  auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:               rt.Catalog,
+		Metrics:               observability.NewMetrics(),
+		PayloadLog:            pl,
+		Guardrails:            guardrailTestScanner(t, guardrails.ModeAudit, 0, 0),
+		RedactGuardrailBodies: true,
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(guardrailChatBody("openai/gpt-4o-mini", "deploy with "+key)))
+	r.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	entries := readPayloadEntries(t, dir)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	e := entries[0]
+	if strings.Contains(e.Request.Body.AsString(), key) || !strings.Contains(e.Request.Body.AsString(), guardrails.DefaultRedactPlaceholder) {
+		t.Fatalf("request side must mask flagged text: %q", e.Request.Body.AsString())
+	}
+	up := e.UpstreamRequest.Body.AsString()
+	if up == "" {
+		t.Fatalf("upstream side missing")
+	}
+	if !strings.Contains(up, key) {
+		t.Fatalf("upstream side must reflect what was actually sent: %q", up)
+	}
+	if strings.Contains(up, guardrails.DefaultRedactPlaceholder) {
+		t.Fatalf("upstream side must not be masked: %q", up)
+	}
+	if strings.Contains(e.Request.Body.AsString(), key) {
+		t.Fatalf("request side leaked secret into the log")
+	}
+}
+
+func TestGuardrailPayloadLogRedactedOmitsUnscannedBodies(t *testing.T) {
+	rt := newRT()
+	pl, dir := payloadTestLogger(t, 1<<20)
+	adapter := &countingAdapter{}
+	h := NewHandler(Dependencies{
+		Resolver:              modelresolver.New(rt),
+		Adapter:               adapter,
+		Auth:                  auth.NewAuthenticator(config.Auth{Mode: config.AuthModeNone}),
+		Catalog:               rt.Catalog,
+		Metrics:               observability.NewMetrics(),
+		PayloadLog:            pl,
+		Guardrails:            guardrailTestScanner(t, guardrails.ModeAudit, 1024, 0),
+		RedactGuardrailBodies: true,
+	})
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"early rejected", `{"messages":[]}`},
+		{"scan incomplete", guardrailChatBody("openai/gpt-4o-mini", "padding "+strings.Repeat("a", 2048))},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(tc.body))
+			r.Header.Set("Content-Type", "application/json")
+			h.ServeHTTP(w, r)
+			entries := readPayloadEntries(t, dir)
+			if len(entries) == 0 {
+				t.Fatalf("no entries recorded")
+			}
+			e := entries[len(entries)-1]
+			if e.Request.Body.AsString() != "" || e.Request.Body.Bytes != 0 {
+				t.Fatalf("unscanned body must stay omitted: %+v", e.Request.Body)
+			}
+		})
+	}
+}
+
 func TestGuardrailMultipartCoveredOpIsIncomplete(t *testing.T) {
 	rt := newRT()
 	adapter := &countingAdapter{}

@@ -64,6 +64,7 @@ type ProviderInput struct {
 	ForwardUserAgent      bool
 	ForwardHeaders        []string
 	ForwardAuthorization  bool
+	AllowInsecureBaseURL  bool
 	Credential            ProviderCredentialInput
 	Enabled               *bool
 	Healthcheck           *ProviderHealthcheckInput
@@ -151,12 +152,13 @@ type LoggingInput struct {
 }
 
 type PayloadLogInput struct {
-	Enabled      bool
-	Dir          string
-	Rotation     string
-	Retention    string
-	MaxBodyBytes *int
-	Mongo        *PayloadMongoInput
+	Enabled               bool
+	Dir                   string
+	Rotation              string
+	Retention             string
+	MaxBodyBytes          *int
+	RedactGuardrailBodies *bool
+	Mongo                 *PayloadMongoInput
 }
 
 type PayloadMongoInput struct {
@@ -310,6 +312,9 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 		b.WriteString("  base_url = ")
 		b.WriteString(strconv.Quote(input.BaseURL))
 		b.WriteString("\n")
+		if input.AllowInsecureBaseURL {
+			b.WriteString("  allow_insecure_base_url = true\n")
+		}
 	}
 	if input.UpstreamHeaderTimeout != "" {
 		b.WriteString("  upstream_header_timeout = ")
@@ -614,6 +619,11 @@ func RenderLoggingBlock(input LoggingInput) string {
 		if input.PayloadLog.MaxBodyBytes != nil {
 			b.WriteString("    max_body_bytes = ")
 			b.WriteString(strconv.Itoa(*input.PayloadLog.MaxBodyBytes))
+			b.WriteString("\n")
+		}
+		if input.PayloadLog.RedactGuardrailBodies != nil {
+			b.WriteString("    redact_guardrail_bodies = ")
+			b.WriteString(strconv.FormatBool(*input.PayloadLog.RedactGuardrailBodies))
 			b.WriteString("\n")
 		}
 		if input.PayloadLog.Mongo != nil {

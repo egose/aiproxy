@@ -182,6 +182,28 @@ describe('mounted provider form requests and reopened values', { timeout: 15000 
     expect(form.getByRole('checkbox', { name: 'Enabled' })).not.toBeChecked();
   });
 
+  it('persists the plain-HTTP opt-in in both directions and warns on cleartext', async () => {
+    mount(provider({ base_url: 'https://example.com/v1', allow_insecure_base_url: true }), [
+      provider({ base_url: 'https://example.com/v1' }),
+      provider({ base_url: 'https://example.com/v1', allow_insecure_base_url: true }),
+    ]);
+    let form = await edit();
+    const toggle = form.getByRole('checkbox', { name: 'Allow plain-HTTP (non-HTTPS) base URL' });
+    expect(toggle).toBeChecked();
+    expect(form.getByRole('note')).toHaveTextContent(/cleartext/i);
+    fireEvent.click(toggle);
+    await save();
+    expect(writes[0].body).toEqual({ allow_insecure_base_url: false });
+    form = await edit();
+    expect(form.getByRole('checkbox', { name: 'Allow plain-HTTP (non-HTTPS) base URL' })).not.toBeChecked();
+    expect(form.queryByRole('note')).not.toBeInTheDocument();
+    fireEvent.click(form.getByRole('checkbox', { name: 'Allow plain-HTTP (non-HTTPS) base URL' }));
+    await save();
+    expect(writes[1].body).toEqual({ allow_insecure_base_url: true });
+    form = await edit();
+    expect(form.getByRole('checkbox', { name: 'Allow plain-HTTP (non-HTTPS) base URL' })).toBeChecked();
+  });
+
   it('clears local strings, header lists and forwarding without resending an API-key reference', async () => {
     const refs = { api_key_ref_key: 'account', api_key_ref_path: '/secrets/keys.json' }; // pragma: allowlist secret
     mount(

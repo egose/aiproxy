@@ -48,6 +48,40 @@ When running locally with env-based secrets, load your environment before invoki
 set -a; . ./.env; set +a
 ```
 
+## Helm NetworkPolicy
+
+The `helm/main` chart enables release-scoped default-deny policies. Empty API or
+relay ingress source lists deny ingress; add explicit caller/router peers,
+`allowSameNamespace` (same-release pods), or `allowOpenShiftIngress` as appropriate.
+**Upgrade note:** empty source lists previously rendered an unrestricted ingress
+rule. Configure the intended sources before upgrading instead of relying on that
+behavior.
+
+For a relay fronting this release's API, explicitly enable the narrow upstream
+connection on both policy surfaces:
+
+```yaml
+relay:
+  enabled: true
+  env:
+    UPSTREAM: http://aiproxy-api:8080
+networkPolicy:
+  relay:
+    allowApiUpstream: true
+    ingressFrom:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: trusted-caller
+```
+
+Replace `aiproxy` with the release name and adjust service overrides/caller labels
+as needed. `allowApiUpstream` defaults to `false`, requires both components to be
+enabled, and allows only relay egress plus API ingress between same-release pods
+on the configured API service port. It never opens relay ingress. External
+upstreams require explicit CIDR or `extraEgress` rules instead. Run
+`make helm-test` with Helm installed to check the rendered policy contracts;
+these checks do not exercise a live cluster's NetworkPolicy implementation.
+
 ## Configure Wizard
 
 `aiproxy` includes an interactive config editor for the top-level HCL blocks and
@@ -811,7 +845,8 @@ when an upstream call was made, so alias retries log the final attempt), and
 `response` (the upstream reply, or the proxy's own error on early rejections).
 Credential headers (`Authorization`, `x-api-key`, `x-goog-api-key`, cookies)
 are redacted on every side, and bodies covered by an ingress-guardrail policy
-are omitted from both request sides.
+(chat completions, responses, messages) are omitted from the request and
+upstream request sides unless `redact_guardrail_bodies` is enabled.
 
 ```hcl
 logging {
@@ -834,6 +869,36 @@ logging {
   }
 }
 ```
+
+With `redact_guardrail_bodies = true` and an ingress guardrail policy enabled,
+guardrail-covered request bodies are logged with gitleaks-flagged text replaced
+by the guardrail `redact_placeholder` instead of being omitted. The split is
+decision-aware: the `request` side masks every flagged occurrence (determined
+by the scan, independent of quarantine decisions), while the `upstream_request`
+side shows the body that was actually sent upstream — so after an operator
+allows a finding as non-secret and the client resends, the literal text appears
+on the upstream side; `redact` decisions appear as the placeholder; requests
+still blocked or denied never reach upstream, so those entries carry no
+upstream side. Audit-mode requests proceed upstream, so their upstream side
+contains flagged text verbatim. Bodies that were never scanned (early
+rejections before the guardrail scan) or scans that could not complete
+(unparsable or multipart bodies, oversize text, captures cut off by the
+findings cap) stay omitted on both sides. Redaction operates on decoded JSON,
+including JSON-encoded tool arguments, and safely escapes the replacement while
+preserving JSON numbers. Bodies that exceed the 128-level rewrite nesting bound
+(including embedded JSON) or cannot be completely rewritten stay omitted on both
+sides. Because masking depends on the scanner's coverage and rules, opting in
+accepts that unscanned or unrecognized secrets could reach the log; keep the
+output directory protected either way.
+
+The logging setting never selects guardrail admission behavior. Fingerprint
+exceptions apply with or without quarantine/logging, but an incomplete capture
+cannot clear block-mode findings through exceptions. Exactly-at-cap captures
+remain complete when no findings were dropped. A block-mode `redact` decision
+that cannot be rewritten safely returns `400 scan_incomplete`; audit mode instead
+forwards the original body and omits both logged request sides. Standard response
+capture remains unchanged; response scanning/redaction is not provided by this
+setting.
 
 The disk backend (`dir`) and the MongoDB backend (`mongodb`) are enabled
 independently: set `dir` for JSONL files, `uri` for one MongoDB document per

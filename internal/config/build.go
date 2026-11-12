@@ -295,7 +295,7 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 }
 
 func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderSyntax) error {
-	for _, name := range []string{"base_url", "upstream_header_timeout", "user_agent", "forward_user_agent", "forward_headers", "enabled"} {
+	for _, name := range []string{"base_url", "allow_insecure_base_url", "upstream_header_timeout", "user_agent", "forward_user_agent", "forward_headers", "enabled"} {
 		if syntax.Attrs[name] {
 			return fmt.Errorf("derived provider cannot declare %s", name)
 		}
@@ -360,6 +360,9 @@ func buildLogging(rawLogging *rawLogging) (Logging, error) {
 		if raw.MaxBodyBytes != nil {
 			out.PayloadLog.MaxBodyBytes = *raw.MaxBodyBytes
 			out.PayloadLog.HasMaxBody = true
+		}
+		if raw.RedactGuardrailBodies != nil {
+			out.PayloadLog.RedactGuardrailBodies = *raw.RedactGuardrailBodies
 		}
 		if raw.Mongo != nil {
 			mongo, err := buildPayloadMongo(raw.Mongo)
@@ -536,6 +539,7 @@ func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Durat
 		ForwardUserAgent:      rootForwardUserAgent,
 		ForwardHeaders:        unionForwardHeaders(rootForwardHeaders, rawProvider.ForwardHeaders),
 		ForwardAuthorization:  rawProvider.ForwardAuthorization,
+		AllowInsecureBaseURL:  rawProvider.AllowInsecureBaseURL != nil && *rawProvider.AllowInsecureBaseURL,
 		APIKey:                rawProvider.APIKey,
 		Enabled:               true,
 		ModelByName:           make(map[string]Model),

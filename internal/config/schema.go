@@ -71,12 +71,13 @@ type rawLogging struct {
 }
 
 type rawPayloadLog struct {
-	Enabled      *bool            `hcl:"enabled,optional"`
-	Dir          string           `hcl:"dir,optional"`
-	Rotation     string           `hcl:"rotation,optional"`
-	Retention    string           `hcl:"retention,optional"`
-	MaxBodyBytes *int             `hcl:"max_body_bytes,optional"`
-	Mongo        *rawPayloadMongo `hcl:"mongodb,block"`
+	Enabled               *bool            `hcl:"enabled,optional"`
+	Dir                   string           `hcl:"dir,optional"`
+	Rotation              string           `hcl:"rotation,optional"`
+	Retention             string           `hcl:"retention,optional"`
+	MaxBodyBytes          *int             `hcl:"max_body_bytes,optional"`
+	RedactGuardrailBodies *bool            `hcl:"redact_guardrail_bodies,optional"`
+	Mongo                 *rawPayloadMongo `hcl:"mongodb,block"`
 }
 
 type rawPayloadMongo struct {
@@ -136,6 +137,7 @@ type rawProvider struct {
 	ForwardUserAgent      bool              `hcl:"forward_user_agent,optional"`
 	ForwardHeaders        []string          `hcl:"forward_headers,optional"`
 	ForwardAuthorization  bool              `hcl:"forward_authorization,optional"`
+	AllowInsecureBaseURL  *bool             `hcl:"allow_insecure_base_url,optional"`
 	APIKey                string            `hcl:"api_key,optional"`
 	APIKeyRef             *rawAPIKeyRef     `hcl:"api_key_ref,block"`
 	CredentialRef         *rawCredentialRef `hcl:"credential_ref,block"`

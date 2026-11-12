@@ -181,7 +181,7 @@ func Build(ctx context.Context, opts BuildOptions) (_ *App, err error) {
 
 	startTime := time.Now()
 	resolver := modelresolver.New(rt)
-	deps := buildDependencies(rt, resolver, logger, adapter, metrics, health, healthchecks, rateLimiter, usage, httpClients, logs, startTime, opts.Version, payloadRecorder, payloadDirOf(payloadLog), scanner, quarantine, exceptions, adminStore, dynKeys)
+	deps := buildDependencies(rt, resolver, logger, adapter, metrics, health, healthchecks, rateLimiter, usage, httpClients, logs, startTime, opts.Version, payloadRecorder, payloadDirOf(payloadLog), rt.Logging.PayloadLog.RedactGuardrailBodies, scanner, quarantine, exceptions, adminStore, dynKeys)
 	app := &App{Config: rt, metrics: metrics, logger: logger, adapter: adapter, resolver: resolver, clients: httpClients, health: health, healthchecks: healthchecks, rateLimiter: rateLimiter, quotaTracker: httpapi.NewQuotaTracker(adminStore), usage: usage, logs: logs, payloadLog: payloadLog, payloadMongo: payloadMongo, payloadRecorder: payloadRecorder, guardrails: scanner, quarantine: quarantine, exceptions: exceptions, adminStore: adminStore, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}
 	deps.Quota = app.quotaTracker
 	deps.RequestReload = app.Reload
@@ -390,7 +390,7 @@ func (a *App) Reload() (err error) {
 	a.healthchecks.SetProviders(rt.Catalog)
 	a.metrics.SetBuildInfo(a.buildOpt.Version)
 	a.metrics.RecordConfig(rt)
-	deps := buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadRecorder, payloadDirOf(nextPayloadLog), nextGuardrails, nextQuarantine, nextExceptions, a.adminStore, dynKeys)
+	deps := buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadRecorder, payloadDirOf(nextPayloadLog), rt.Logging.PayloadLog.RedactGuardrailBodies, nextGuardrails, nextQuarantine, nextExceptions, a.adminStore, dynKeys)
 	deps.Quota = a.quotaTracker
 	deps.RequestReload = a.Reload
 	a.mu.RLock()
@@ -485,7 +485,7 @@ func (a *App) persistDashboardTokenIfNeeded() error {
 	return nil
 }
 
-func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, healthchecks *healthcheck.Manager, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string, payloadRecorder payloadlog.Recorder, payloadDir string, scanner *guardrails.Scanner, quarantine *guardrails.Quarantine, exceptions *guardrails.Exceptions, adminStore *store.Store, dynKeys []auth.DynamicClient) httpapi.Dependencies {
+func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, logger *slog.Logger, adapter provider.Adapter, metrics *observability.Metrics, health *providerhealth.Tracker, healthchecks *healthcheck.Manager, rateLimiter ratelimit.Limiter, usage accounting.Recorder, clients *upstreamClientPool, logs *observability.LogBuffer, startTime time.Time, version string, payloadRecorder payloadlog.Recorder, payloadDir string, redactGuardrailBodies bool, scanner *guardrails.Scanner, quarantine *guardrails.Quarantine, exceptions *guardrails.Exceptions, adminStore *store.Store, dynKeys []auth.DynamicClient) httpapi.Dependencies {
 	if resolver == nil {
 		resolver = modelresolver.New(rt)
 	}
@@ -499,32 +499,33 @@ func buildDependencies(rt *config.Runtime, resolver *modelresolver.Resolver, log
 		dashboard.SetBlockSource(quarantineAdapter{quarantine})
 	}
 	return httpapi.Dependencies{
-		Resolver:          resolver,
-		Adapter:           adapter,
-		Auth:              auth.NewAuthenticatorWithClients(rt.Auth, dynKeys),
-		Authorizer:        auth.NewAuthorizerWithClients(rt.Auth, dynKeys),
-		Client:            clients.Client(config.DefaultUpstreamHeaderTimeout),
-		ClientForProvider: clients.ClientForProvider,
-		Catalog:           rt.Catalog,
-		Metrics:           metrics,
-		MetricsToken:      rt.Metrics.Token,
-		Health:            health,
-		RateLimiter:       rateLimiter,
-		Accounting:        accounting.NewMulti(metrics, usage),
-		Usage:             aOrUsage(usage),
-		AccessLog:         rt.Logging.AccessLog,
-		HasAccessLog:      true,
-		PayloadLog:        payloadRecorder,
-		Logger:            logger,
-		Dashboard:         dashboard,
-		WebUI:             rt.WebUI,
-		MultiTenancy:      rt.MultiTenancy,
-		AdminStore:        adminStore,
-		AdminAuthConfig:   rt.Auth,
-		Version:           version,
-		Guardrails:        scanner,
-		Quarantine:        quarantine,
-		Exceptions:        exceptions,
+		Resolver:              resolver,
+		Adapter:               adapter,
+		Auth:                  auth.NewAuthenticatorWithClients(rt.Auth, dynKeys),
+		Authorizer:            auth.NewAuthorizerWithClients(rt.Auth, dynKeys),
+		Client:                clients.Client(config.DefaultUpstreamHeaderTimeout),
+		ClientForProvider:     clients.ClientForProvider,
+		Catalog:               rt.Catalog,
+		Metrics:               metrics,
+		MetricsToken:          rt.Metrics.Token,
+		Health:                health,
+		RateLimiter:           rateLimiter,
+		Accounting:            accounting.NewMulti(metrics, usage),
+		Usage:                 aOrUsage(usage),
+		AccessLog:             rt.Logging.AccessLog,
+		HasAccessLog:          true,
+		RedactGuardrailBodies: redactGuardrailBodies,
+		PayloadLog:            payloadRecorder,
+		Logger:                logger,
+		Dashboard:             dashboard,
+		WebUI:                 rt.WebUI,
+		MultiTenancy:          rt.MultiTenancy,
+		AdminStore:            adminStore,
+		AdminAuthConfig:       rt.Auth,
+		Version:               version,
+		Guardrails:            scanner,
+		Quarantine:            quarantine,
+		Exceptions:            exceptions,
 	}
 }
 

@@ -13,16 +13,22 @@ import (
 )
 
 const (
-	guardrailBlockType       = "secret_blocked"
-	guardrailBlockMessage    = "request blocked: suspected secret in request content"
-	guardrailGapType         = "scan_incomplete"
-	guardrailGapMessage      = "request blocked: secret scan could not complete"
-	guardrailReasonUnparsed  = "unparsable"
-	guardrailReasonMultipart = "multipart"
+	guardrailBlockType         = "secret_blocked"
+	guardrailBlockMessage      = "request blocked: suspected secret in request content"
+	guardrailGapType           = "scan_incomplete"
+	guardrailGapMessage        = "request blocked: secret scan could not complete"
+	guardrailReasonUnparsed    = "unparsable"
+	guardrailReasonMultipart   = "multipart"
+	maxGuardrailRedactionDepth = 128
 )
 
 func guardrailCovered(op provider.Operation) bool {
 	return op == provider.OpChatCompletions || op == provider.OpResponses || op == provider.OpMessages
+}
+
+type guardrailLogState struct {
+	incomplete bool
+	redactions map[string]string
 }
 
 type guardrailTextCollector struct {
@@ -260,18 +266,32 @@ func collectStringLeaves(c *guardrailTextCollector, v any) {
 	}
 }
 
-func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *http.Request, op provider.Operation, body []byte, scanner *guardrails.Scanner, publicModel string, logger *slog.Logger) (bool, []byte) {
+func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *http.Request, op provider.Operation, body []byte, scanner *guardrails.Scanner, publicModel string, logger *slog.Logger, logRedactions bool) (bool, []byte, *guardrailLogState) {
 	policy := scanner.Policy()
 	mode := string(policy.Mode)
 	texts, reason := extractGuardrailTexts(r.Header.Get("Content-Type"), op, body, policy.MaxStrings, policy.MaxTextBytes)
 	var res guardrails.Result
 	var captured []guardrails.CapturedFinding
+	var secrets []string
+	captureComplete := true
 	if reason != "" {
 		res = guardrails.Result{Outcome: guardrails.OutcomeIncomplete, Reason: reason}
-	} else if deps.Quarantine != nil {
-		res, captured = scanner.ScanCapture(r.Context(), texts)
+	} else if deps.Quarantine != nil || deps.Exceptions != nil || logRedactions {
+		res, captured, secrets, captureComplete = scanner.ScanCapture(r.Context(), texts)
 	} else {
 		res = scanner.Scan(r.Context(), texts)
+	}
+	var logState *guardrailLogState
+	if logRedactions {
+		logState = &guardrailLogState{}
+		switch {
+		case reason != "" || res.Outcome == guardrails.OutcomeIncomplete:
+			logState.incomplete = true
+		case res.Outcome == guardrails.OutcomeFlagged && (len(captured) == 0 || len(secrets) == 0 || !captureComplete):
+			logState.incomplete = true
+		case res.Outcome == guardrails.OutcomeFlagged:
+			logState.redactions = guardrailSecretRedactions(secrets, deps.Exceptions)
+		}
 	}
 	outcome := string(res.Outcome)
 	blockID := ""
@@ -293,23 +313,35 @@ func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *h
 	}
 	switch res.Outcome {
 	case guardrails.OutcomeClean:
-		return false, body
+		return false, body, logState
 	case guardrails.OutcomeFlagged, guardrails.OutcomeIncomplete:
-		if res.Outcome == guardrails.OutcomeFlagged && len(captured) > 0 {
-			if blocking, redactions := partitionGuardrailFindings(deps.Exceptions, captured); len(blocking) == 0 {
+		if res.Outcome == guardrails.OutcomeFlagged && len(captured) > 0 && captureComplete {
+			if blocking, redactions := partitionGuardrailFindings(deps.Exceptions, captured, secrets); len(blocking) == 0 {
 				out := body
 				extra := []any{}
 				if len(redactions) > 0 {
 					out = rewriteGuardrailBody(body, redactions)
+					if out == nil {
+						if logState != nil {
+							logState.incomplete = true
+						}
+						if policy.Mode == guardrails.ModeAudit {
+							logger.Info("guardrail redaction could not complete; audit request unchanged", safeAttrs()...)
+							return false, body, logState
+						}
+						logger.Warn("guardrail redaction could not complete", safeAttrs()...)
+						h.writeRequestError(deps.Metrics, w, r, http.StatusBadRequest, guardrailGapType, guardrailGapMessage)
+						return true, body, logState
+					}
 					extra = append(extra, "redacted", len(redactions))
 				} else {
 					extra = append(extra, "allowed", len(captured))
 				}
 				logger.Info("guardrail scan cleared by exceptions", append(safeAttrs(), extra...)...)
-				return false, out
+				return false, out, logState
 			} else if policy.Mode == guardrails.ModeAudit {
 				logger.Info("guardrail scan did not block request", safeAttrs()...)
-				return false, body
+				return false, body, logState
 			} else {
 				captured = blocking
 				res.RuleIDs = guardrailRuleIDs(blocking)
@@ -317,7 +349,7 @@ func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *h
 			}
 		} else if policy.Mode == guardrails.ModeAudit {
 			logger.Info("guardrail scan did not block request", safeAttrs()...)
-			return false, body
+			return false, body, logState
 		}
 		if res.Outcome == guardrails.OutcomeFlagged && deps.Quarantine != nil && len(captured) > 0 {
 			if id, err := guardrails.MintBlockID(); err == nil {
@@ -336,21 +368,45 @@ func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *h
 		} else {
 			h.writeRequestError(deps.Metrics, w, r, http.StatusBadRequest, guardrailGapType, guardrailGapMessage)
 		}
-		return true, body
+		return true, body, logState
 	default:
-		return false, body
+		return false, body, logState
 	}
 }
 
-func partitionGuardrailFindings(exceptions *guardrails.Exceptions, captured []guardrails.CapturedFinding) ([]guardrails.CapturedFinding, map[string]string) {
+func guardrailRedactPlaceholder(exceptions *guardrails.Exceptions) string {
+	placeholder := ""
+	if exceptions != nil {
+		placeholder = exceptions.Placeholder()
+	}
+	if placeholder == "" {
+		placeholder = guardrails.DefaultRedactPlaceholder
+	}
+	return placeholder
+}
+
+func guardrailSecretRedactions(secrets []string, exceptions *guardrails.Exceptions) map[string]string {
+	placeholder := guardrailRedactPlaceholder(exceptions)
+	out := make(map[string]string, len(secrets))
+	for _, value := range secrets {
+		if value == "" || value == placeholder {
+			continue
+		}
+		out[value] = placeholder
+	}
+	return out
+}
+
+func partitionGuardrailFindings(exceptions *guardrails.Exceptions, captured []guardrails.CapturedFinding, secrets []string) ([]guardrails.CapturedFinding, map[string]string) {
 	blocking := make([]guardrails.CapturedFinding, 0, len(captured))
 	redactions := map[string]string{}
 	if exceptions == nil {
 		return append(blocking, captured...), redactions
 	}
-	placeholder := exceptions.Placeholder()
-	if placeholder == "" {
-		placeholder = guardrails.DefaultRedactPlaceholder
+	placeholder := guardrailRedactPlaceholder(exceptions)
+	fullSecrets := make(map[string]string, len(secrets))
+	for _, value := range secrets {
+		fullSecrets[guardrails.Fingerprint(value)] = value
 	}
 	for _, f := range captured {
 		sha := f.SecretSHA
@@ -366,8 +422,11 @@ func partitionGuardrailFindings(exceptions *guardrails.Exceptions, captured []gu
 		case guardrails.ExceptionActionAllow:
 			continue
 		case guardrails.ExceptionActionRedact:
-			if f.Secret != "" && f.Secret != placeholder { // pragma: allowlist secret
-				redactions[f.Secret] = placeholder // pragma: allowlist secret
+			value, ok := fullSecrets[sha]
+			if !ok || value == "" {
+				blocking = append(blocking, f)
+			} else if value != placeholder {
+				redactions[value] = placeholder
 			}
 		default:
 			blocking = append(blocking, f)
@@ -377,14 +436,117 @@ func partitionGuardrailFindings(exceptions *guardrails.Exceptions, captured []gu
 }
 
 func rewriteGuardrailBody(body []byte, redactions map[string]string) []byte {
-	out := body
-	for secret, placeholder := range redactions {
-		if secret == "" {
-			continue
+	keys := make([]string, 0, len(redactions))
+	for value := range redactions {
+		if value != "" {
+			keys = append(keys, value)
 		}
-		out = bytes.ReplaceAll(out, []byte(secret), []byte(placeholder))
 	}
-	return out
+	if len(keys) == 0 {
+		return body
+	}
+	value, ok := decodeGuardrailJSON(body)
+	if !ok {
+		return nil
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if len(keys[i]) != len(keys[j]) {
+			return len(keys[i]) > len(keys[j])
+		}
+		return keys[i] < keys[j]
+	})
+	pairs := make([]string, 0, len(keys)*2)
+	remaining := make(map[string]struct{}, len(keys))
+	for _, value := range keys {
+		pairs = append(pairs, value, redactions[value])
+		remaining[value] = struct{}{}
+	}
+	redactor := guardrailBodyRedactor{replacer: strings.NewReplacer(pairs...), remaining: remaining}
+	out, changed := redactor.rewrite(value, 0)
+	if redactor.incomplete || len(redactor.remaining) > 0 {
+		return nil
+	}
+	if !changed {
+		return body
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func decodeGuardrailJSON(body []byte) (any, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil || len(bytes.TrimSpace(body[decoder.InputOffset():])) != 0 {
+		return nil, false
+	}
+	return value, true
+}
+
+type guardrailBodyRedactor struct {
+	replacer   *strings.Replacer
+	remaining  map[string]struct{}
+	incomplete bool
+}
+
+func (r *guardrailBodyRedactor) replace(text string) string {
+	for value := range r.remaining {
+		if strings.Contains(text, value) {
+			delete(r.remaining, value)
+		}
+	}
+	return r.replacer.Replace(text)
+}
+
+func (r *guardrailBodyRedactor) rewrite(value any, depth int) (any, bool) {
+	if depth > maxGuardrailRedactionDepth {
+		r.incomplete = true
+		return value, false
+	}
+	switch v := value.(type) {
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if len(trimmed) >= 2 && (trimmed[0] == '{' || trimmed[0] == '[') {
+			if nested, ok := decodeGuardrailJSON([]byte(trimmed)); ok {
+				if out, changed := r.rewrite(nested, depth+1); changed {
+					data, err := json.Marshal(out)
+					if err != nil {
+						r.incomplete = true
+						return value, false
+					}
+					return string(data), true
+				}
+			}
+		}
+		out := r.replace(v)
+		return out, out != v
+	case []any:
+		changed := false
+		for i, item := range v {
+			out, replaced := r.rewrite(item, depth+1)
+			v[i] = out
+			changed = changed || replaced
+		}
+		return v, changed
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		changed := false
+		for key, item := range v {
+			nextKey := r.replace(key)
+			next, replaced := r.rewrite(item, depth+1)
+			if _, exists := out[nextKey]; exists {
+				r.incomplete = true
+			}
+			out[nextKey] = next
+			changed = changed || replaced || nextKey != key
+		}
+		return out, changed
+	default:
+		return value, false
+	}
 }
 
 func guardrailRuleIDs(blocking []guardrails.CapturedFinding) []string {
