@@ -7,6 +7,25 @@ import (
 	"testing"
 )
 
+func TestRenderLoggingBlockGuardrailRedaction(t *testing.T) {
+	for _, flag := range []bool{false, true} {
+		block := RenderLoggingBlock(LoggingInput{
+			Level: "info", AccessLog: true,
+			PayloadLog: &PayloadLogInput{Enabled: true, Dir: "payloads", RedactGuardrailBodies: &flag},
+		})
+		want := "redact_guardrail_bodies = false"
+		if flag {
+			want = "redact_guardrail_bodies = true"
+		}
+		if !strings.Contains(block, want) {
+			t.Fatalf("rendered logging block is missing %q", want)
+		}
+		if err := ValidateGeneratedConfig([]byte(block), "config.hcl"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestUpsertBlockPreservesDocumentShape(t *testing.T) {
 	source := strings.TrimSpace(`listener "http" "public" {
   address = ":8080"

@@ -267,13 +267,21 @@ credentials are preserved on update. Credential-only PUT uses the same concurren
 protection and preserves models. Alias POST/PUT likewise save metadata and targets
 in one transaction, preserving omitted update fields.
 
-Provider PUT supports explicit `true`/`false` for `enabled` and
-`forward_user_agent` and `forward_authorization`, `[]` to clear local `forward_headers`, and `""` to clear
+Provider PUT supports explicit `true`/`false` for `enabled`,
+`forward_user_agent`, `forward_authorization` and `allow_insecure_base_url`, `[]` to clear local `forward_headers`, and `""` to clear
 `display_name`, `base_url`, `upstream_header_timeout`, `user_agent` or `extends`,
 subject to normal validation. Clearing an override restores applicable defaults;
 it does not disable root-level forwarding. Omit untouched `api_key`, `api_key_ref`
 and `credential_ref` fields to retain them. Supplied reference objects replace
 their path and key/name together; an empty path selects the default secrets path.
+
+`allow_insecure_base_url` is a provider-only opt-in that accepts a non-loopback
+plain-HTTP `base_url` (see
+[plain-HTTP upstreams](configuration.md#allowing-plain-http-upstreams)).
+Omitting the flag preserves its current value on concrete providers. Enabling
+it does not relax any other URL validation. Derived provider POST/PUT rejects
+explicit `true` or `false`; setting a non-empty `extends` without declaring the
+flag clears any previously stored local opt-in so the base's value is inherited.
 
 `forward_authorization` is a provider-only opt-in for supported bearer-header
 upstreams, independent of inherited defaults. It cannot coexist with stored

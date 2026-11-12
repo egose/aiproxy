@@ -157,6 +157,9 @@ func cloneProvider(base config.Provider) config.Provider {
 func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases map[string]config.Provider) (config.Provider, error) {
 	name := row.Name
 	if row.Extends != "" {
+		if row.AllowInsecureBaseURL {
+			return config.Provider{}, fmt.Errorf("provider %q: derived provider cannot declare allow_insecure_base_url", name)
+		}
 		if row.Extends == name {
 			return config.Provider{}, fmt.Errorf("provider %q: extends %q references itself", name, row.Extends)
 		}
@@ -189,6 +192,7 @@ func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases m
 		UserAgent: row.UserAgent, ForwardUserAgent: row.ForwardUserAgent,
 		ForwardHeaders:       append([]string(nil), row.ForwardHeaders...),
 		ForwardAuthorization: row.ForwardAuthorization,
+		AllowInsecureBaseURL: row.AllowInsecureBaseURL,
 		Enabled:              row.Enabled, ModelByName: make(map[string]config.Model),
 	}
 	if row.UpstreamTimeoutMs != nil {

@@ -152,22 +152,31 @@ func MintBlockID() (string, error) {
 	return BlockIDPrefix + hex.EncodeToString(raw), nil
 }
 
-func (s *Scanner) ScanCapture(ctx context.Context, texts []string) (Result, []CapturedFinding) {
+func (s *Scanner) ScanCapture(ctx context.Context, texts []string) (Result, []CapturedFinding, []string, bool) {
 	res := s.Scan(ctx, texts)
 	if res.Outcome != OutcomeFlagged {
-		return res, nil
+		return res, nil, nil, true
 	}
 	maxSnippet := DefaultQuarantineMaxSnippet
 	var out []CapturedFinding
+	seen := make(map[string]struct{})
+	var secrets []string
 	for _, text := range texts {
 		if err := ctx.Err(); err != nil {
-			return Result{Outcome: OutcomeIncomplete, Reason: ReasonCanceled}, nil
+			return Result{Outcome: OutcomeIncomplete, Reason: ReasonCanceled}, nil, nil, true
 		}
 		findings := s.detector.DetectContext(ctx, detect.Fragment{Raw: text})
 		if err := ctx.Err(); err != nil {
-			return Result{Outcome: OutcomeIncomplete, Reason: ReasonCanceled}, nil
+			return Result{Outcome: OutcomeIncomplete, Reason: ReasonCanceled}, nil, nil, true
 		}
 		for _, f := range findings {
+			if f.Secret != "" {
+				value := f.Secret
+				if _, ok := seen[value]; !ok {
+					seen[value] = struct{}{}
+					secrets = append(secrets, f.Secret)
+				}
+			}
 			out = append(out, CapturedFinding{
 				RuleID:      f.RuleID,
 				Description: f.Description,
@@ -177,11 +186,11 @@ func (s *Scanner) ScanCapture(ctx context.Context, texts []string) (Result, []Ca
 				Line:        truncateSecret(f.Line, maxSnippet),
 			})
 			if len(out) >= MaxCapturedFindings {
-				return res, out
+				return res, out, secrets, len(out) == res.FindingCount
 			}
 		}
 	}
-	return res, out
+	return res, out, secrets, len(out) == res.FindingCount
 }
 
 func truncateSecret(s string, max int) string {

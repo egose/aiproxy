@@ -106,7 +106,7 @@ func TestExceptionsDecideRejectsInvalid(t *testing.T) {
 func TestScanCaptureIncludesFingerprint(t *testing.T) {
 	s := testScanner(t, nil)
 	key := awsKey(t)
-	_, captured := s.ScanCapture(context.Background(), []string{"deploy with " + key})
+	_, captured, _, _ := s.ScanCapture(context.Background(), []string{"deploy with " + key})
 	if len(captured) == 0 {
 		t.Fatalf("no findings captured")
 	}

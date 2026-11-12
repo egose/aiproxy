@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -83,6 +84,8 @@ type providerOptions struct {
 	HasForwardHeaders       bool
 	ForwardAuthorization    bool
 	HasForwardAuthorization bool
+	AllowInsecureBaseURL    bool
+	HasAllowInsecureBaseURL bool
 	APIKey                  string
 	APIKeyEnv               string
 	SecretsPath             string
@@ -302,6 +305,7 @@ func newConfigureProviderCommand() *cobra.Command {
 			options.HasForwardUserAgent = cmd.Flags().Changed("forward-user-agent")
 			options.HasForwardHeaders = cmd.Flags().Changed("forward-headers")
 			options.HasForwardAuthorization = cmd.Flags().Changed("forward-authorization")
+			options.HasAllowInsecureBaseURL = cmd.Flags().Changed("allow-insecure-base-url")
 			options.HasHealthcheckStatus = cmd.Flags().Changed("healthcheck-expected-status")
 			options.HasHealthcheckFailures = cmd.Flags().Changed("healthcheck-failure-threshold")
 			options.HasHealthcheckSuccesses = cmd.Flags().Changed("healthcheck-success-threshold")
@@ -321,6 +325,7 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&options.ForwardUserAgent, "forward-user-agent", false, "forward the inbound User-Agent header upstream (use --forward-user-agent=false to disable; default preserves existing)")
 	cmd.Flags().StringVar(&options.ForwardHeaders, "forward-headers", "", "provider forward_headers as comma-separated names (empty clears it when explicitly passed)")
 	cmd.Flags().BoolVar(&options.ForwardAuthorization, "forward-authorization", false, "forward the client's Authorization header upstream instead of configuring a provider key")
+	cmd.Flags().BoolVar(&options.AllowInsecureBaseURL, "allow-insecure-base-url", false, "allow a non-loopback plain-HTTP base_url (cleartext upstream; for trusted in-cluster services)")
 	cmd.Flags().StringVar(&options.APIKey, "api-key", "", "provider API key or secret value")
 	cmd.Flags().StringVar(&options.APIKeyEnv, "api-key-env", "", "provider API key environment variable name")
 	cmd.Flags().StringVar(&options.SecretsPath, "secrets-path", "", "secrets file path for api_key_ref")
@@ -1940,6 +1945,9 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if options.HasForwardAuthorization {
 		defaults.ForwardAuthorization = options.ForwardAuthorization
 	}
+	if options.HasAllowInsecureBaseURL {
+		defaults.AllowInsecureBaseURL = options.AllowInsecureBaseURL
+	}
 	if options.HasForwardHeaders {
 		if err := validateForwardHeadersCSV(options.ForwardHeaders); err != nil {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("invalid forward-headers: %w", err)
@@ -1956,6 +1964,9 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if defaults.Credential.Mode != "" && defaults.Credential.Mode != "none" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("forward_authorization cannot be combined with provider credentials; remove the existing credential first")
 		}
+	}
+	if defaults.AllowInsecureBaseURL && defaults.Extends != "" {
+		return providerInput{}, secretsUpdate{}, fmt.Errorf("allow_insecure_base_url is inherited from the base provider and cannot be set on a derived provider")
 	}
 	if err := applyProviderHealthcheckOptions(&defaults, options); err != nil {
 		return providerInput{}, secretsUpdate{}, err
@@ -2137,6 +2148,18 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		} else {
 			baseURL = ""
 		}
+		allowInsecure := defaults.AllowInsecureBaseURL
+		if strings.TrimSpace(extends) == "" && isPlainHTTPBaseURL(baseURL) {
+			if err := prompts.runHuhForm(
+				huh.NewGroup(
+					huh.NewConfirm().Title("Allow plain-HTTP upstream").Description(allowInsecureBaseURLDescription()).Value(&allowInsecure),
+				).Title("Insecure Transport"),
+			); err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
+		} else {
+			allowInsecure = false
+		}
 		if isGitHubCopilotProviderType(providerType) {
 			credential, err := promptCopilotCredentialInteractive(prompts, defaults, strings.TrimSpace(providerName))
 			if err != nil {
@@ -2159,6 +2182,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 				UserAgent:             strings.TrimSpace(userAgent),
 				ForwardUserAgent:      forwardUserAgent,
 				ForwardHeaders:        parseForwardHeadersCSV(forwardHeaders),
+				AllowInsecureBaseURL:  allowInsecure,
 				Credential:            credential,
 				Enabled:               defaults.Enabled,
 				Models:                models,
@@ -2264,6 +2288,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			ForwardUserAgent:      forwardUserAgent,
 			ForwardHeaders:        parseForwardHeadersCSV(forwardHeaders),
 			ForwardAuthorization:  forwardAuthorization,
+			AllowInsecureBaseURL:  allowInsecure,
 			Credential:            credential,
 			Enabled:               defaults.Enabled,
 			Healthcheck:           preservedProviderHealthcheck(defaults.Healthcheck, extends, providerType),
@@ -2353,6 +2378,15 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	} else {
 		baseURL = ""
 	}
+	allowInsecure := defaults.AllowInsecureBaseURL
+	if strings.TrimSpace(extends) == "" && isPlainHTTPBaseURL(baseURL) {
+		allowInsecure, err = prompts.askYesNo("Allow plain-HTTP (non-HTTPS) upstream", defaults.AllowInsecureBaseURL)
+		if err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
+	} else {
+		allowInsecure = false
+	}
 	if isGitHubCopilotProviderType(providerType) {
 		credential, err := promptCopilotCredentialLineOriented(prompts, defaults, providerName)
 		if err != nil {
@@ -2375,6 +2409,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			UserAgent:             userAgent,
 			ForwardUserAgent:      forwardUserAgent,
 			ForwardHeaders:        parseForwardHeadersCSV(forwardHeaders),
+			AllowInsecureBaseURL:  allowInsecure,
 			Credential:            credential,
 			Enabled:               defaults.Enabled,
 			Models:                models,
@@ -2462,6 +2497,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		ForwardUserAgent:      forwardUserAgent,
 		ForwardHeaders:        parseForwardHeadersCSV(forwardHeaders),
 		ForwardAuthorization:  forwardAuthorization,
+		AllowInsecureBaseURL:  allowInsecure,
 		Credential:            credential,
 		Enabled:               defaults.Enabled,
 		Healthcheck:           preservedProviderHealthcheck(defaults.Healthcheck, extends, providerType),
@@ -3454,6 +3490,15 @@ func forwardUserAgentDescription() string {
 	return "Forward the inbound caller User-Agent upstream instead of aiproxy/<version>. An explicit user_agent override still takes precedence."
 }
 
+func allowInsecureBaseURLDescription() string {
+	return "Accept a non-loopback plain-HTTP (non-HTTPS) base_url. Credentials and payloads travel in cleartext; use only for trusted in-cluster or otherwise protected networks."
+}
+
+func isPlainHTTPBaseURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && u.Scheme == "http" && u.Host != ""
+}
+
 func forwardHeadersDescription() string {
 	return "Inbound header names forwarded upstream verbatim. Proxy-managed headers (authorization, cookies, content headers, hop-by-hop) are rejected; headers the adapter already sets keep the adapter value."
 }
@@ -4185,6 +4230,7 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 	}
 	input.ForwardHeaders = parseQuotedListExpr(attributeExpr(src, parsed.Body, "forward_headers"))
 	input.ForwardAuthorization = parseBoolExpr(attributeExpr(src, parsed.Body, "forward_authorization"), false)
+	input.AllowInsecureBaseURL = parseBoolExpr(attributeExpr(src, parsed.Body, "allow_insecure_base_url"), false)
 	if enabledExpr := parseLiteralOrExpression(attributeExpr(src, parsed.Body, "enabled")); enabledExpr != "" {
 		boolVal := enabledExpr == "true" || enabledExpr == "1"
 		input.Enabled = &boolVal
@@ -4440,6 +4486,9 @@ func parsePayloadLogInput(src []byte, block *hclsyntax.Block) *configedit.Payloa
 		if n, err := strconv.Atoi(expr); err == nil {
 			out.MaxBodyBytes = &n
 		}
+	}
+	if expr := strings.TrimSpace(attributeExpr(src, block.Body, "redact_guardrail_bodies")); expr != "" {
+		out.RedactGuardrailBodies = boolPtr(parseBoolExpr(expr, false))
 	}
 	if nested := findNestedBlock(block.Body, "mongodb"); nested != nil {
 		out.Mongo = parsePayloadMongoInput(src, nested)

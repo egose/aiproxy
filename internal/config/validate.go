@@ -342,10 +342,10 @@ func validateProviderBaseURL(p Provider) error {
 	case "https":
 		return nil
 	case "http":
-		if isLoopbackHost(u.Hostname()) {
+		if p.AllowInsecureBaseURL || isLoopbackHost(u.Hostname()) {
 			return nil
 		}
-		return fmt.Errorf("provider %q: non-HTTPS base_url is allowed only for loopback hosts", p.Name)
+		return fmt.Errorf("provider %q: non-HTTPS base_url is allowed only for loopback hosts (set allow_insecure_base_url = true on the provider to accept cleartext upstreams)", p.Name)
 	default:
 		return fmt.Errorf("provider %q: base_url scheme must be http or https", p.Name)
 	}

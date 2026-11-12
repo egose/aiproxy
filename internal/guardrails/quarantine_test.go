@@ -50,14 +50,26 @@ func TestQuarantinePolicyValidation(t *testing.T) {
 
 func TestScanCaptureRetainsSecretOnlyOnFlagged(t *testing.T) {
 	s := testScanner(t, nil)
-	cleanRes, cleanCap := s.ScanCapture(context.Background(), []string{"explain photosynthesis"})
+	cleanRes, cleanCap, _, _ := s.ScanCapture(context.Background(), []string{"explain photosynthesis"})
 	if cleanRes.Outcome != OutcomeClean || len(cleanCap) != 0 {
 		t.Fatalf("clean capture = %+v %+v", cleanRes, cleanCap)
 	}
 	key := awsKey(t)
-	res, captured := s.ScanCapture(context.Background(), []string{"deploy with " + key})
+	res, captured, secrets, complete := s.ScanCapture(context.Background(), []string{"deploy with " + key})
 	if res.Outcome != OutcomeFlagged {
 		t.Fatalf("outcome = %q, want flagged", res.Outcome)
+	}
+	if !complete || len(secrets) == 0 {
+		t.Fatalf("flagged capture complete=%v secrets=%v", complete, secrets)
+	}
+	secretSeen := false
+	for _, secret := range secrets {
+		if strings.Contains(secret, key) {
+			secretSeen = true
+		}
+	}
+	if !secretSeen {
+		t.Fatalf("captured secrets do not include the key")
 	}
 	if len(captured) == 0 {
 		t.Fatalf("flagged capture has no findings")
@@ -73,6 +85,48 @@ func TestScanCaptureRetainsSecretOnlyOnFlagged(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("capture does not contain the synthetic key: %+v", captured)
+	}
+}
+
+func TestScanCaptureCapsFindingsAndMarksIncomplete(t *testing.T) {
+	s := testScanner(t, nil)
+	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ234567"
+	var sb strings.Builder
+	seed := uint32(1)
+	for n := 0; n < 20; n++ {
+		key := make([]byte, 16)
+		for i := range key {
+			seed = seed*1664525 + 1013904223
+			key[i] = alphabet[int(seed>>16)%len(alphabet)]
+		}
+		sb.WriteString("deploy with AKIA")
+		sb.Write(key)
+		sb.WriteString(" now\n")
+	}
+	res, captured, secrets, complete := s.ScanCapture(context.Background(), []string{sb.String()})
+	if res.Outcome != OutcomeFlagged {
+		t.Fatalf("outcome = %q, want flagged", res.Outcome)
+	}
+	if len(captured) != MaxCapturedFindings {
+		t.Fatalf("captured = %d, want %d", len(captured), MaxCapturedFindings)
+	}
+	if complete {
+		t.Fatalf("capture over the cap must not be complete")
+	}
+	if len(secrets) == 0 {
+		t.Fatalf("no secrets captured")
+	}
+}
+
+func TestScanCaptureAtLimitIsComplete(t *testing.T) {
+	s := testScanner(t, nil)
+	texts := make([]string, 0, MaxCapturedFindings)
+	for n := 0; n < MaxCapturedFindings; n++ {
+		texts = append(texts, "deploy with "+awsKey(t))
+	}
+	res, captured, secrets, complete := s.ScanCapture(context.Background(), texts)
+	if res.FindingCount != MaxCapturedFindings || len(captured) != MaxCapturedFindings || len(secrets) != MaxCapturedFindings || !complete {
+		t.Fatalf("exact-cap capture: total=%d captured=%d secrets=%d complete=%t", res.FindingCount, len(captured), len(secrets), complete)
 	}
 }
 

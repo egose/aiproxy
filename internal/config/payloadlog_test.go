@@ -68,6 +68,25 @@ func TestLoadPayloadLogFull(t *testing.T) {
 	if p.MaxBodyBytes != 1024 {
 		t.Fatalf("max_body_bytes = %d", p.MaxBodyBytes)
 	}
+	if p.RedactGuardrailBodies {
+		t.Fatalf("redact_guardrail_bodies should default to false")
+	}
+}
+
+func TestLoadPayloadLogRedactGuardrailBodies(t *testing.T) {
+	rt, err := Load([]byte(payloadTestConfig(`
+  payload_log {
+    enabled = true
+    dir = "/tmp/payloads"
+    redact_guardrail_bodies = true
+  }
+`)), "test.hcl")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !rt.Logging.PayloadLog.RedactGuardrailBodies {
+		t.Fatalf("redact_guardrail_bodies = false, want true")
+	}
 }
 
 func TestLoadPayloadMongoOnly(t *testing.T) {

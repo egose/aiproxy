@@ -374,6 +374,15 @@ provider "openai" "base" {
   api_key = "k"
   model "gpt-4o-mini" {}
 }`, want: `provider "child": derived provider cannot declare base_url`},
+		{name: "forbidden allow_insecure_base_url", body: `provider "openai" "child" {
+  extends = "base"
+  allow_insecure_base_url = true
+  api_key = "k"
+}
+provider "openai" "base" {
+  api_key = "k"
+  model "gpt-4o-mini" {}
+}`, want: `provider "child": derived provider cannot declare allow_insecure_base_url`},
 		{name: "forbidden model", body: `provider "openai" "child" {
   extends = "base"
   api_key = "k"
@@ -613,6 +622,93 @@ provider "openai-compatible" "local" {
 	if _, err := Load([]byte(cfg), "test.hcl"); err != nil {
 		t.Fatalf("load: %v", err)
 	}
+}
+
+func TestLoadAllowInsecureBaseURL(t *testing.T) {
+	t.Run("flag allows non-loopback http", func(t *testing.T) {
+		cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai-compatible" "incluster" {
+  base_url = "http://llm.internal.svc.cluster.local/v1"
+  allow_insecure_base_url = true
+  api_key = "k"
+  model "m" {}
+}
+`
+		rt, err := Load([]byte(cfg), "test.hcl")
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		p := testProvider(t, rt, "incluster")
+		if !p.AllowInsecureBaseURL {
+			t.Fatalf("allow_insecure_base_url = false, want true")
+		}
+	})
+	t.Run("flag false keeps rejection", func(t *testing.T) {
+		cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai-compatible" "incluster" {
+  base_url = "http://llm.internal.svc.cluster.local/v1"
+  allow_insecure_base_url = false
+  api_key = "k"
+  model "m" {}
+}
+`
+		_, err := Load([]byte(cfg), "test.hcl")
+		if err == nil || !strings.Contains(err.Error(), "non-HTTPS base_url") {
+			t.Fatalf("expected loopback error, got %v", err)
+		}
+	})
+	t.Run("derived inherits flag", func(t *testing.T) {
+		cfg := `
+listener "http" "public" { address = ":8080" }
+auth "main" { mode = "none" }
+provider "openai-compatible" "base" {
+  base_url = "http://llm.internal.svc.cluster.local/v1"
+  allow_insecure_base_url = true
+  api_key = "sk-base"
+  model "m" {}
+}
+provider "openai-compatible" "child" {
+  extends = "base"
+  api_key = "sk-child"
+}
+`
+		rt, err := Load([]byte(cfg), "test.hcl")
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		child := testProvider(t, rt, "child")
+		if child.BaseURL != "http://llm.internal.svc.cluster.local/v1" {
+			t.Fatalf("child base_url = %q", child.BaseURL)
+		}
+		if !child.AllowInsecureBaseURL {
+			t.Fatalf("child allow_insecure_base_url = false, want inherited true")
+		}
+	})
+	t.Run("json round-trip", func(t *testing.T) {
+		cfg := `{"listener":{"http":{"public":{"address":":8080"}}},"auth":{"main":{"mode":"none"}},"provider":{"openai-compatible":{"incluster":{"base_url":"http://llm.internal.svc.cluster.local/v1","allow_insecure_base_url":true,"api_key":"k","model":{"m":{}}}}}}`
+		rt, err := Load([]byte(cfg), "test.json")
+		if err != nil {
+			t.Fatalf("load json: %v", err)
+		}
+		p := testProvider(t, rt, "incluster")
+		if !p.AllowInsecureBaseURL {
+			t.Fatalf("json allow_insecure_base_url = false, want true")
+		}
+	})
+	t.Run("json rejects flag on derived", func(t *testing.T) {
+		cfg := `{"listener":{"http":{"public":{"address":":8080"}}},"auth":{"main":{"mode":"none"}},"provider":{"openai-compatible":{
+      "base":{"base_url":"https://example.com/v1","api_key":"sk-base","model":{"m":{}}},
+      "child":{"extends":"base","allow_insecure_base_url":true,"api_key":"sk-child"}
+    }}}`
+		_, err := Load([]byte(cfg), "test.json")
+		if err == nil || !strings.Contains(err.Error(), "derived provider cannot declare allow_insecure_base_url") {
+			t.Fatalf("error = %v, want derived allow_insecure_base_url rejection", err)
+		}
+	})
 }
 
 func TestLoadRejectsNegativeListenerTimeouts(t *testing.T) {

@@ -31,35 +31,36 @@ import (
 )
 
 type Dependencies struct {
-	Resolver            *modelresolver.Resolver
-	Adapter             provider.Adapter
-	Auth                auth.Authenticator
-	Authorizer          auth.Authorizer
-	Client              *http.Client
-	ClientForProvider   func(config.Provider) *http.Client
-	Catalog             config.Catalog
-	Metrics             *observability.Metrics
-	MetricsToken        string
-	Health              *providerhealth.Tracker
-	RateLimiter         ratelimit.Limiter
-	Quota               *QuotaTracker
-	Accounting          accounting.Recorder
-	Usage               accounting.Reader
-	AccessLog           bool
-	HasAccessLog        bool
-	PayloadLog          payloadlog.Recorder
-	Logger              *slog.Logger
-	Dashboard           dashrpc.Source
-	WebUI               config.WebUI
-	MultiTenancy        config.MultiTenancy
-	AdminStore          *store.Store
-	AdminAuthConfig     config.Auth
-	CopilotDeviceClient func() *copilotlogin.Client
-	RequestReload       func() error
-	Version             string
-	Guardrails          *guardrails.Scanner
-	Quarantine          *guardrails.Quarantine
-	Exceptions          *guardrails.Exceptions
+	Resolver              *modelresolver.Resolver
+	Adapter               provider.Adapter
+	Auth                  auth.Authenticator
+	Authorizer            auth.Authorizer
+	Client                *http.Client
+	ClientForProvider     func(config.Provider) *http.Client
+	Catalog               config.Catalog
+	Metrics               *observability.Metrics
+	MetricsToken          string
+	Health                *providerhealth.Tracker
+	RateLimiter           ratelimit.Limiter
+	Quota                 *QuotaTracker
+	Accounting            accounting.Recorder
+	Usage                 accounting.Reader
+	AccessLog             bool
+	HasAccessLog          bool
+	RedactGuardrailBodies bool
+	PayloadLog            payloadlog.Recorder
+	Logger                *slog.Logger
+	Dashboard             dashrpc.Source
+	WebUI                 config.WebUI
+	MultiTenancy          config.MultiTenancy
+	AdminStore            *store.Store
+	AdminAuthConfig       config.Auth
+	CopilotDeviceClient   func() *copilotlogin.Client
+	RequestReload         func() error
+	Version               string
+	Guardrails            *guardrails.Scanner
+	Quarantine            *guardrails.Quarantine
+	Exceptions            *guardrails.Exceptions
 }
 
 const maxRequestBodyBytes int64 = 8 << 20
@@ -308,16 +309,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestBytes = len(body)
-	omitRequestBody := deps.Guardrails != nil && guardrailCovered(op)
+	grCovered := deps.Guardrails != nil && guardrailCovered(op)
+	redactGuardrailBodies := grCovered && deps.RedactGuardrailBodies
+	var grLogState *guardrailLogState
 	var payloadCapture *payloadlog.Capture
 	if deps.PayloadLog != nil {
+		requestBody := body
 		reqHeaders := payloadlog.RedactHeaders(r.Header)
 		reqContentType := r.Header.Get("Content-Type")
-		var reqBody []byte
-		if !omitRequestBody {
-			reqBody = body
-		}
 		defer func() {
+			var reqBody []byte
+			switch {
+			case !grCovered:
+				reqBody = requestBody
+			case !redactGuardrailBodies || grLogState == nil || grLogState.incomplete:
+				reqBody = nil
+			case len(grLogState.redactions) > 0:
+				reqBody = rewriteGuardrailBody(requestBody, grLogState.redactions)
+			default:
+				reqBody = requestBody
+			}
+			omitUpstream := grCovered && (!redactGuardrailBodies || grLogState == nil || grLogState.incomplete || reqBody == nil)
 			entry := payloadlog.Entry{
 				RequestID:       requestID,
 				Method:          r.Method,
@@ -343,7 +355,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case result != nil && result.Streaming && payloadCapture != nil:
 				entry.UpstreamModel = accountingUpstream
-				if side, ok := payloadUpstreamRequest(result, deps.PayloadLog.MaxBodyBytes(), omitRequestBody); ok {
+				if side, ok := payloadUpstreamRequest(result, deps.PayloadLog.MaxBodyBytes(), omitUpstream); ok {
 					entry.UpstreamRequest = side
 				}
 				entry.Response = payloadlog.EntrySide{
@@ -352,7 +364,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			case result != nil && !result.Streaming:
 				entry.UpstreamModel = accountingUpstream
-				if side, ok := payloadUpstreamRequest(result, deps.PayloadLog.MaxBodyBytes(), omitRequestBody); ok {
+				if side, ok := payloadUpstreamRequest(result, deps.PayloadLog.MaxBodyBytes(), omitUpstream); ok {
 					entry.UpstreamRequest = side
 				}
 				entry.Response = payloadlog.EntrySide{
@@ -413,7 +425,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if deps.Guardrails != nil && guardrailCovered(op) {
-		blocked, outBody := h.checkGuardrails(deps, rw, r, op, body, deps.Guardrails, publicModel, logger)
+		blocked, outBody, logState := h.checkGuardrails(deps, rw, r, op, body, deps.Guardrails, publicModel, logger, redactGuardrailBodies)
+		grLogState = logState
 		if blocked {
 			return
 		}

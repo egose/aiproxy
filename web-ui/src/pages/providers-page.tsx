@@ -176,6 +176,7 @@ const providerFormSchema = z
     timeout: z.string().optional(),
     forwardUserAgent: z.boolean().optional(),
     forwardAuthorization: z.boolean().optional(),
+    allowInsecureBaseUrl: z.boolean().optional(),
     forwardHeaders: z.string().optional(),
     apiKey: z.string().optional(),
     apiKeyRefPath: z.string().optional(),
@@ -238,6 +239,7 @@ const emptyProviderForm = (): ProviderFormValues => ({
   timeout: '',
   forwardUserAgent: false,
   forwardAuthorization: false,
+  allowInsecureBaseUrl: false,
   forwardHeaders: '',
   apiKey: '',
   apiKeyRefPath: '',
@@ -269,6 +271,7 @@ function providerToFormValues(p: AdminProvider): ProviderFormValues {
     timeout: p.upstream_header_timeout ?? '',
     forwardUserAgent: p.forward_user_agent ?? false,
     forwardAuthorization: p.forward_authorization ?? false,
+    allowInsecureBaseUrl: p.allow_insecure_base_url ?? false,
     forwardHeaders: (p.forward_headers ?? []).join(', '),
     apiKey: '',
     apiKeyRefPath: p.api_key_ref_path ?? '',
@@ -355,6 +358,7 @@ function buildProviderBody(
   if (!inherited) {
     set('models', 'models', modelPayloads);
     set('base_url', 'baseUrl', (v.baseUrl ?? '').trim(), !!v.baseUrl?.trim());
+    set('allow_insecure_base_url', 'allowInsecureBaseUrl', !!v.allowInsecureBaseUrl, !!v.allowInsecureBaseUrl);
     set('upstream_header_timeout', 'timeout', (v.timeout ?? '').trim(), !!v.timeout?.trim());
     set('user_agent', 'userAgent', v.userAgent ?? '', !!v.userAgent);
     set('forward_user_agent', 'forwardUserAgent', !!v.forwardUserAgent, !!v.forwardUserAgent);
@@ -912,11 +916,25 @@ function ProviderForm({
         )}
 
         {!inherited && (
-          <HookFormTextInput<ProviderFormValues>
-            name="baseUrl"
-            label={`Base URL${typeInfo?.requires_base_url ? ' (required for this type)' : ' (optional)'}`}
-            placeholder="https://..."
-          />
+          <>
+            <HookFormTextInput<ProviderFormValues>
+              name="baseUrl"
+              label={`Base URL${typeInfo?.requires_base_url ? ' (required for this type)' : ' (optional)'}`}
+              placeholder="https://..."
+            />
+
+            <HookFormCheckbox<ProviderFormValues>
+              name="allowInsecureBaseUrl"
+              label="Allow plain-HTTP (non-HTTPS) base URL"
+            />
+
+            {form.watch('allowInsecureBaseUrl') && (
+              <p className="text-sm text-amber-600" role="note">
+                The upstream is contacted over cleartext HTTP; credentials and payloads are not encrypted in transit.
+                Only enable this for trusted in-cluster or otherwise protected networks.
+              </p>
+            )}
+          </>
         )}
 
         <HookFormCheckbox<ProviderFormValues> name="enabled" label="Enabled" />

@@ -54,6 +54,7 @@ type DBProvider struct {
 	ForwardUserAgent           bool            `bun:"forward_user_agent,notnull,default:false"`
 	ForwardHeaders             []string        `bun:"forward_headers,type:jsonb,nullzero"`
 	ForwardAuthorization       bool            `bun:"forward_authorization,notnull,default:false"`
+	AllowInsecureBaseURL       bool            `bun:"allow_insecure_base_url,notnull,default:false"`
 	APIKeyEncrypted            []byte          `bun:"api_key_encrypted"`
 	APIKeyRefPath              string          `bun:"api_key_ref_path,notnull,default:''"`
 	APIKeyRefKey               string          `bun:"api_key_ref_key,notnull,default:''"`

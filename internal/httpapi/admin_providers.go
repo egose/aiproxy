@@ -49,6 +49,7 @@ type adminProviderView struct {
 	ForwardUserAgent        bool                  `json:"forward_user_agent"`
 	ForwardHeaders          []string              `json:"forward_headers,omitempty"`
 	ForwardAuthorization    bool                  `json:"forward_authorization"`
+	AllowInsecureBaseURL    bool                  `json:"allow_insecure_base_url"`
 	Extends                 string                `json:"extends,omitempty"`
 	APIKeyRefPath           string                `json:"api_key_ref_path,omitempty"`
 	APIKeyRefKey            string                `json:"api_key_ref_key,omitempty"`
@@ -342,6 +343,7 @@ type adminProviderUpsert struct {
 	ForwardUserAgent      *bool                     `json:"forward_user_agent"`
 	ForwardHeaders        []string                  `json:"forward_headers"`
 	ForwardAuthorization  *bool                     `json:"forward_authorization"`
+	AllowInsecureBaseURL  *bool                     `json:"allow_insecure_base_url"`
 	APIKey                *string                   `json:"api_key"`
 	APIKeyRef             *adminAPIKeyRefUpsert     `json:"api_key_ref"`
 	CredentialRef         *adminCredentialRefUpsert `json:"credential_ref"`
@@ -391,6 +393,7 @@ func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r 
 			mv.UserAgent = p.UserAgent
 			mv.ForwardUserAgent = p.ForwardUserAgent
 			mv.ForwardAuthorization = p.ForwardAuthorization
+			mv.AllowInsecureBaseURL = p.AllowInsecureBaseURL
 			mv.HasCredential = p.APIKey != "" || p.CopilotToken != ""
 			mv.ForwardHeaders = append([]string(nil), p.ForwardHeaders...)
 			if p.Healthcheck != nil {
@@ -433,6 +436,7 @@ func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r 
 			UserAgent:             p.UserAgent, ForwardUserAgent: p.ForwardUserAgent,
 			ForwardHeaders:       append([]string(nil), p.ForwardHeaders...),
 			ForwardAuthorization: p.ForwardAuthorization,
+			AllowInsecureBaseURL: p.AllowInsecureBaseURL,
 			Extends:              p.Extends, APIKeyRefPath: p.APIKeyRefPath, APIKeyRefKey: p.APIKeyRefKey,
 			CopilotCredentialPath: p.CopilotCredentialPath, CopilotCredentialName: p.CopilotCredentialName,
 			CopilotCredentialSource: copilotCredentialSource(p.Type, p.CopilotCredentialEncrypted, p.CopilotCredentialPath, p.CopilotCredentialName),
@@ -783,6 +787,13 @@ func (h *Handler) updateDBProviderWithFlow(ctx context.Context, deps Dependencie
 }
 
 func (h *Handler) applyProviderUpsert(name string, row *store.DBProvider, req adminProviderUpsert) error {
+	extends := row.Extends
+	if req.Extends != nil {
+		extends = strings.TrimSpace(*req.Extends)
+	}
+	if extends != "" && req.AllowInsecureBaseURL != nil {
+		return fmt.Errorf("provider %q: derived provider cannot declare allow_insecure_base_url", name)
+	}
 	if req.DisplayName != nil {
 		row.DisplayName = *req.DisplayName
 	}
@@ -809,14 +820,18 @@ func (h *Handler) applyProviderUpsert(name string, row *store.DBProvider, req ad
 	if req.ForwardAuthorization != nil {
 		row.ForwardAuthorization = *req.ForwardAuthorization
 	}
+	if req.AllowInsecureBaseURL != nil {
+		row.AllowInsecureBaseURL = *req.AllowInsecureBaseURL
+	}
 	if req.ForwardHeaders != nil {
 		row.ForwardHeaders = append([]string{}, req.ForwardHeaders...)
 	}
 	if req.Enabled != nil {
 		row.Enabled = *req.Enabled
 	}
-	if req.Extends != nil {
-		row.Extends = strings.TrimSpace(*req.Extends)
+	row.Extends = extends
+	if row.Extends != "" {
+		row.AllowInsecureBaseURL = false
 	}
 	if req.APIKey != nil { // pragma: allowlist secret
 		if *req.APIKey == "" {

@@ -281,6 +281,7 @@ export const adminProviderSchema = z.object({
   forward_user_agent: z.boolean().optional().default(false),
   forward_headers: z.array(z.string()).catch([]),
   forward_authorization: z.boolean().optional().default(false),
+  allow_insecure_base_url: z.boolean().optional().default(false),
   extends: z.string().optional().default(''),
   api_key_ref_path: z.string().optional().default(''),
   api_key_ref_key: z.string().optional().default(''),
