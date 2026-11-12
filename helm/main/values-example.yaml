@@ -65,10 +65,30 @@ api:
 #           - path: /
 #             pathType: Prefix
 
+# Optional bun-relay companion (published chart, oci://ghcr.io/egose/charts/bun-relay).
+# Runs as its own pod; here it fronts the in-cluster api service. UPSTREAM is
+# required — the container exits at startup without it. The example uses release
+# name "aiproxy"; also enable networkPolicy.relay.allowApiUpstream below and
+# configure relay ingress sources for your caller or ingress controller.
+# relay:
+#   enabled: true
+#   env:
+#     UPSTREAM: http://aiproxy-api:8080
+
 # Standard NetworkPolicy cannot match DNS names. Add the CIDR ranges used by
 # your IdP or external secret provider, and configure ingress controller sources.
+# Empty ingress source lists deny ingress. For an external relay upstream, add
+# its HTTPS CIDR ranges or explicit extraEgress instead of allowApiUpstream.
 networkPolicy:
   allowOpenShiftIngress: false
   api:
     idpEgressIpBlocks:
     - cidr: 203.0.113.10/32
+  # relay:
+  #   allowApiUpstream: true
+  #   ingressFrom:
+  #   - podSelector:
+  #       matchLabels:
+  #         app.kubernetes.io/name: trusted-caller
+  #   upstreamEgressIpBlocks:
+  #   - cidr: 203.0.113.20/32

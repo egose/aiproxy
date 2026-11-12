@@ -22,6 +22,10 @@ logging {
   #   retention      = "168h"
   #   max_body_bytes = 1048576
   #
+  #   # Log guardrail-covered bodies with gitleaks-flagged text replaced by
+  #   # the redact placeholder instead of omitting them. Defaults to false.
+  #   # redact_guardrail_bodies = true
+  #
   #   # Optional MongoDB sink for the same entries (one document per
   #   # request). Either backend — or both — can be enabled; omit dir to
   #   # log to MongoDB only. Disabled when uri is empty.

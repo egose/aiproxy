@@ -94,6 +94,7 @@ dashboard after startup require restart.
 | `make test-race`     | `go test -race ./...`                                   |
 | `make cover`         | Unit tests with coverage profile at `dist/coverage.out` |
 | `make docs-contract` | Verify public docs contract matrices stay aligned       |
+| `make helm-test`     | Verify Helm NetworkPolicies (requires Helm)             |
 
 `make vet test` is the default pre-commit sanity check; run it after any
 non-trivial change. There is no separate typecheck target — Go's compiler
@@ -120,6 +121,11 @@ matrices.
   validation, except `opencode-zen` providers, which may omit the credential
   for keyless upstream access (no `Authorization` header is sent). To intentionally
   disable a provider, set `enabled = false`.
+  Provider-only `allow_insecure_base_url = true` opts a provider into a
+  non-loopback plain-HTTP `base_url` (cleartext transport for trusted
+  in-cluster networks); `https` is always allowed, other URL rules stay
+  enforced, derived providers cannot declare it locally (it is inherited with
+  the base URL), and there is no root default, env var, or CLI bypass.
   Provider-only `forward_authorization = true` instead forwards one valid caller
   `Authorization` header unchanged on live inference for `openai`,
   `openai-compatible`, `opencode-zen`, `opencode-go`, `zenmux`, and `openrouter`.

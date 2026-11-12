@@ -1,6 +1,6 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
-.PHONY: help build web-build check-toolchain shell-test lint-shell lint-workflows docs-contract format fmt vet test test-race integration cover clean docker-build \
+.PHONY: help build web-build check-toolchain shell-test helm-test lint-shell lint-workflows docs-contract format fmt vet test test-race integration cover clean docker-build \
         docker-run run validate sandbox sandbox-up sandbox-provision sandbox-down sandbox-logs sandbox-config sandbox-destroy
 
 COMPOSE := docker compose -f sandbox/docker-compose.yml
@@ -40,6 +40,10 @@ check-toolchain: ## Validate declared Go and pnpm tool versions stay aligned
 
 shell-test: ## Test the public asdf plugin scripts
 	@bats test/asdf-plugin.bats
+
+helm-test: ## Verify Helm NetworkPolicy contracts (requires Helm)
+	@helm version --short
+	@go test -count=1 ./helm/main
 
 lint-shell: ## Validate shell scripts
 	@shellcheck bin/* scripts/*.sh test/*.bats

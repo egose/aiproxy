@@ -9,3 +9,12 @@ dependencies:
     version: '0.1.0'
     repository: 'file://../_api'
     condition: api.enabled
+  # Published chart: oci://ghcr.io/egose/charts/bun-relay (from egose/bun-tools).
+  # Optional companion relay; rendered under the "relay" values key via alias.
+  # Requires the chart to be published; run `helm dependency update` once the
+  # first tag (v0.1.0) has been pushed to egose/bun-tools.
+  - name: bun-relay
+    alias: relay
+    version: '0.2.0'
+    repository: 'oci://ghcr.io/egose/charts'
+    condition: relay.enabled
