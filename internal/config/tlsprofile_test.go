@@ -360,6 +360,15 @@ func TestTLSProfileReferenceBounds(t *testing.T) {
 
 func TestCustomTLSProfileFileErrorsAreBoundedAndRedacted(t *testing.T) {
 	dir := t.TempDir()
+	var fixedHostname map[string]any
+	if err := json.Unmarshal(tlsTestFixture(t), &fixedHostname); err != nil {
+		t.Fatal(err)
+	}
+	fixedHostname["extensions"].([]any)[0].(map[string]any)["hostname"] = "private-content-value"
+	fixedHostnameData, err := json.Marshal(fixedHostname)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name string
 		data []byte
@@ -368,7 +377,7 @@ func TestCustomTLSProfileFileErrorsAreBoundedAndRedacted(t *testing.T) {
 		{"empty", nil, "spec: invalid JSON"},
 		{"truncated", []byte(`{"cipher_suites":`), "invalid JSON"},
 		{"unknown field", append([]byte(`{"private-content-value":1,`), tlsTestFixture(t)[1:]...), "unknown field"},
-		{"fixed hostname", bytes.Replace(tlsTestFixture(t), []byte(`{"name": "server_name"}`), []byte(`{"name":"server_name","hostname":"private-content-value"}`), 1), "extensions[0]: unknown field"},
+		{"fixed hostname", fixedHostnameData, "extensions[0]: unknown field"},
 		{"oversized", bytes.Repeat([]byte{' '}, tlsprofile.MaxSpecBytes+1), "65536 bytes"},
 		{"invalid utf8", []byte{0xff}, "valid UTF-8"},
 	} {
