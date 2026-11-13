@@ -29,6 +29,7 @@ repos:
           pnpm-lock\.yaml$ |
           .*/pnpm-lock\.yaml$ |
           helm/.*\.(yaml|yml)$ |
+          examples/tls/bun-1\.4\.4-fetch\.metadata\.json$ |
           .*_test\.go$
       )
 - repo: local
