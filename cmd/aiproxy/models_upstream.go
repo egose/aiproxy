@@ -80,6 +80,11 @@ func (d *upstreamModelDiscovery) list(ctx context.Context, provider config.Provi
 }
 
 func (d *upstreamModelDiscovery) readPage(req *http.Request, provider config.Provider) ([]byte, error) {
+	if d.client.Timeout > 0 {
+		ctx, cancel := context.WithTimeout(req.Context(), d.client.Timeout)
+		defer cancel()
+		req = req.WithContext(ctx)
+	}
 	if err := req.Context().Err(); err != nil {
 		return nil, err
 	}
@@ -98,6 +103,9 @@ func (d *upstreamModelDiscovery) readPage(req *http.Request, provider config.Pro
 	defer resp.Body.Close()
 	limit := min(int64(upstreamModelMaxPageBytes), remaining)
 	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if contextErr := req.Context().Err(); contextErr != nil {
+		return nil, fmt.Errorf("read upstream body: %w", contextErr)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}
