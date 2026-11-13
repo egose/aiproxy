@@ -1,3 +1,17 @@
+## Unreleased
+
+### Features
+
+- Add provider-only upstream TLS ClientHello profiles: native Go TLS by default,
+  frozen bundled Chrome 133/Safari 16.0 presets from uTLS v1.8.2, and strictly
+  validated static custom JSON recipes. Profiles cover inference, health and model
+  discovery, retaining certificate/hostname verification and profile-aware graceful
+  reload. Managed providers support built-ins only; custom paths/content are never
+  exposed in admin views.
+- Add an optional local Bun `fetch` capture/export/structural-comparison tool and a
+  measured Bun 1.4.4 Linux x64 fixture. This changes ClientHello only, not the full
+  HTTP/browser/Bun stack, and makes no live-provider, WAF or bot-acceptance guarantee.
+
 ## [0.20.0](https://github.com/egose/aiproxy/compare/v0.19.0...v0.20.0) (2026-08-24)
 
 ### Features

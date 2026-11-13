@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func buildRuntime(raw *rawFile) (*Runtime, error) {
+func buildRuntime(raw *rawFile, filename string) (*Runtime, error) {
 	rt := &Runtime{
 		Logging:               Logging{Level: LogLevelInfo, AccessLog: true},
 		UpstreamHeaderTimeout: DefaultUpstreamHeaderTimeout,
@@ -138,7 +138,7 @@ func buildRuntime(raw *rawFile) (*Runtime, error) {
 		if p.Extends != "" {
 			continue
 		}
-		provider, err := buildProvider(p, rt.UpstreamHeaderTimeout, rt.UserAgent, rt.ForwardUserAgent, rt.ForwardHeaders)
+		provider, err := buildProvider(p, providerSyntaxByName[p.Name], filename, rt.UpstreamHeaderTimeout, rt.UserAgent, rt.ForwardUserAgent, rt.ForwardHeaders)
 		if err != nil {
 			return nil, fmt.Errorf("provider %q: %w", p.Name, err)
 		}
@@ -260,6 +260,7 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 	}
 	provider := cloneProvider(base)
 	provider.Name = rawProvider.Name
+	provider.TLSClientHelloInherited = true
 	provider.ForwardAuthorization = rawProvider.ForwardAuthorization
 	if rawProvider.DisplayName != "" {
 		provider.DisplayName = rawProvider.DisplayName
@@ -295,7 +296,7 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 }
 
 func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderSyntax) error {
-	for _, name := range []string{"base_url", "allow_insecure_base_url", "upstream_header_timeout", "user_agent", "forward_user_agent", "forward_headers", "enabled"} {
+	for _, name := range []string{"base_url", "allow_insecure_base_url", "tls_client_hello", "tls_client_hello_spec_file", "upstream_header_timeout", "user_agent", "forward_user_agent", "forward_headers", "enabled"} {
 		if syntax.Attrs[name] {
 			return fmt.Errorf("derived provider cannot declare %s", name)
 		}
@@ -528,22 +529,31 @@ func buildAuth(rawAuths []rawAuth) (Auth, error) {
 	return auth, nil
 }
 
-func buildProvider(rawProvider rawProvider, rootUpstreamHeaderTimeout time.Duration, rootUserAgent string, rootForwardUserAgent bool, rootForwardHeaders []string) (Provider, error) {
+func buildProvider(rawProvider rawProvider, syntax rawProviderSyntax, filename string, rootUpstreamHeaderTimeout time.Duration, rootUserAgent string, rootForwardUserAgent bool, rootForwardHeaders []string) (Provider, error) {
 	provider := Provider{
-		Type:                  ProviderType(rawProvider.Type),
-		Name:                  rawProvider.Name,
-		DisplayName:           rawProvider.DisplayName,
-		BaseURL:               rawProvider.BaseURL,
-		UpstreamHeaderTimeout: rootUpstreamHeaderTimeout,
-		UserAgent:             rootUserAgent,
-		ForwardUserAgent:      rootForwardUserAgent,
-		ForwardHeaders:        unionForwardHeaders(rootForwardHeaders, rawProvider.ForwardHeaders),
-		ForwardAuthorization:  rawProvider.ForwardAuthorization,
-		AllowInsecureBaseURL:  rawProvider.AllowInsecureBaseURL != nil && *rawProvider.AllowInsecureBaseURL,
-		APIKey:                rawProvider.APIKey,
-		Enabled:               true,
-		ModelByName:           make(map[string]Model),
+		Type:                      ProviderType(rawProvider.Type),
+		Name:                      rawProvider.Name,
+		DisplayName:               rawProvider.DisplayName,
+		BaseURL:                   rawProvider.BaseURL,
+		UpstreamHeaderTimeout:     rootUpstreamHeaderTimeout,
+		UserAgent:                 rootUserAgent,
+		ForwardUserAgent:          rootForwardUserAgent,
+		ForwardHeaders:            unionForwardHeaders(rootForwardHeaders, rawProvider.ForwardHeaders),
+		ForwardAuthorization:      rawProvider.ForwardAuthorization,
+		AllowInsecureBaseURL:      rawProvider.AllowInsecureBaseURL != nil && *rawProvider.AllowInsecureBaseURL,
+		TLSClientHello:            rawProvider.TLSClientHello,
+		TLSClientHelloSpecFile:    rawProvider.TLSClientHelloSpecFile,
+		HasTLSClientHello:         syntax.Attrs["tls_client_hello"],
+		HasTLSClientHelloSpecFile: syntax.Attrs["tls_client_hello_spec_file"],
+		APIKey:                    rawProvider.APIKey,
+		Enabled:                   true,
+		ModelByName:               make(map[string]Model),
 	}
+	profile, err := buildProviderTLSProfile(provider, filename)
+	if err != nil {
+		return Provider{}, err
+	}
+	provider.TLSProfile = profile
 	if rawProvider.UserAgent != "" {
 		provider.UserAgent = rawProvider.UserAgent
 	}

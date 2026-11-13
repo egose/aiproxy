@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/upstreamhttp"
 )
 
 func TestUpstreamDiscoveryRegression(t *testing.T) {
@@ -369,6 +370,7 @@ func TestUpstreamDiscoveryAggregateBytes(t *testing.T) {
 type discoveryTransport func(*http.Request) (*http.Response, error)
 
 func (f discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+func (f discoveryTransport) CloseIdleConnections()                               {}
 
 type discoveryBody struct {
 	io.Reader
@@ -500,9 +502,7 @@ func TestUpstreamDiscoveryWholeListDeadline(t *testing.T) {
 						time.AfterFunc(tc.cancelAfter, cancel)
 					}
 					var bodies []*discoveryBody
-					oldTransport := http.DefaultTransport
-					defer func() { http.DefaultTransport = oldTransport }()
-					http.DefaultTransport = discoveryTransport(func(req *http.Request) (*http.Response, error) {
+					transport := discoveryTransport(func(req *http.Request) (*http.Response, error) {
 						if len(bodies) > 0 && bodies[len(bodies)-1].closed != 1 {
 							t.Error("previous body still open")
 						}
@@ -525,7 +525,7 @@ func TestUpstreamDiscoveryWholeListDeadline(t *testing.T) {
 					provider := discoveryProvider(kind, "http://fixture.invalid")
 					provider.UpstreamHeaderTimeout = tc.requestTimeout
 					start := time.Now()
-					models, err := listUpstreamModels(ctx, provider)
+					models, err := listUpstreamModelsWithTransportFactory(ctx, provider, func(upstreamhttp.Options) (upstreamhttp.Transport, error) { return transport, nil })
 					if !errors.Is(err, tc.wantErr) || models != nil || len(bodies) != tc.wantCalls || time.Since(start) != tc.wantDuration {
 						t.Fatalf("models=%v err=%v calls=%d duration=%v", models, err, len(bodies), time.Since(start))
 					}
@@ -580,13 +580,11 @@ func TestUpstreamDiscoveryCancellationAfterRead(t *testing.T) {
 			defer cancel()
 			calls := 0
 			body := &discoveryBody{Reader: strings.NewReader(discoveryPage(config.ProviderTypeGemini, 1, next)), onClose: cancel}
-			oldTransport := http.DefaultTransport
-			defer func() { http.DefaultTransport = oldTransport }()
-			http.DefaultTransport = discoveryTransport(func(req *http.Request) (*http.Response, error) {
+			transport := discoveryTransport(func(req *http.Request) (*http.Response, error) {
 				calls++
 				return &http.Response{StatusCode: 200, Body: body, Header: make(http.Header)}, nil
 			})
-			models, err := listUpstreamModels(ctx, discoveryProvider(config.ProviderTypeGemini, "http://fixture.invalid"))
+			models, err := listUpstreamModelsWithTransportFactory(ctx, discoveryProvider(config.ProviderTypeGemini, "http://fixture.invalid"), func(upstreamhttp.Options) (upstreamhttp.Transport, error) { return transport, nil })
 			if !errors.Is(err, context.Canceled) || models != nil || calls != 1 || body.closed != 1 {
 				t.Fatalf("models=%v err=%v calls=%d closed=%d", models, err, calls, body.closed)
 			}

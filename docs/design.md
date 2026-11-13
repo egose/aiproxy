@@ -875,12 +875,15 @@ Provider attributes:
 - `credential_ref` (`github-copilot` only)
 - `extends`
 - `upstream_header_timeout`
+- `tls_client_hello`
+- `tls_client_hello_spec_file` (static custom profiles only)
 - `enabled`
 - nested `model` blocks
 
 Provider inheritance is resolved during configuration loading. A provider may
 declare `extends = "<base-provider-name>"` to inherit the base provider's type,
-`base_url`, effective upstream header timeout, enabled state, and complete model
+`base_url`, effective upstream header timeout, TLS ClientHello settings/profile,
+enabled state, and complete model
 inventory while using its own provider name and credential.
 
 Derived provider blocks are intentionally restricted:
@@ -893,7 +896,8 @@ Derived provider blocks are intentionally restricted:
   (`github-copilot` derivatives require a local `credential_ref` instead and
   reject `api_key`/`api_key_ref`; `credential_ref` is rejected on all other types) # pragma: allowlist secret
 - local `base_url`, `allow_insecure_base_url`, `upstream_header_timeout`,
-  `enabled`, and `model` blocks are rejected; the flag is inherited from the
+  `tls_client_hello`, `tls_client_hello_spec_file`, `enabled`, and `model` blocks
+  are rejected, including explicit TLS defaults; the flag is inherited from the
   base provider together with the inherited `base_url`
 
 After loading, derived providers are ordinary providers. Direct routing,
@@ -1067,6 +1071,211 @@ default capabilities are `chat`, `responses`, `embeddings`, with additional
 support for `images`, `audio_transcriptions`, and `audio_speech`. Upstream
 inference requests additionally send OpenRouter attribution headers
 (`HTTP-Referer: https://opencode.ai/`, `X-Title: opencode`).
+
+## Upstream TLS ClientHello Profiles
+
+`internal/tlsprofile` pins `github.com/refraction-networking/utls v1.8.2`
+(BSD-3-Clause; see `THIRD-PARTY-NOTICES`). This is an opt-in ClientHello shaping
+boundary, not a replacement for Go's HTTP/TCP stack, a browser impersonator, or
+a WAF-bypass mechanism. `user_agent`, credentials, redirects, provider capabilities
+and alias retry/cooldown policy remain independent.
+
+The provider-only selector registry is deliberately closed:
+
+| Selector                | Effective profile                                        |
+| ----------------------- | -------------------------------------------------------- |
+| Omitted or `native`     | Standard host Go 1.27 TLS, not uTLS `HelloGolang`        |
+| `chrome`, `chrome-133`  | Bundled `HelloChrome_133`, canonical name `chrome-133`   |
+| `safari`, `safari-16.0` | Bundled `HelloSafari_16_0`, canonical name `safari-16.0` |
+| `custom`                | Validated operator-supplied static JSON recipe           |
+
+Aliases are frozen mappings to these bundled presets, not downloads of current
+browser fingerprints. Empty, wrong-case and unknown selectors fail. Firefox 120
+is excluded because selecting its second offered P-256 key share reproduced the
+released dependency's [second-key-share failure](https://github.com/refraction-networking/utls/issues/402).
+Unsupported presets are not repaired or relabeled silently. Bun/BoringSSL/iOS,
+randomized, draft-Kyber, PSK and arbitrary version aliases are not supported.
+
+### Custom Source And Immutable Recipes
+
+Omission means native, with no root-level default or bypass setting. `custom`
+requires a nonempty `tls_client_hello_spec_file`; any declaration of that attribute
+on a different selector is invalid, even empty. Static derived providers inherit
+both fields and the effective profile with their base endpoint, rejecting local
+declarations including `native`. Disabled providers undergo the same TLS validation
+without acquiring a new credential requirement.
+
+Relative references use the named config file's absolute **lexical** directory,
+not the invocation cwd or the resolved target of a config-file symlink.
+Inline `AIPROXY_CONFIG` and other source-less loading require absolute references.
+Paths are nonempty UTF-8, at most 4096 bytes, without control characters/NUL.
+Regular-file symlinks are operator-owned and allowed; directories, FIFOs and devices
+are rejected, with bounded nonblocking opening where required. This is not a
+filesystem sandbox. Paths have no tilde, shell or URL expansion, and recipe JSON
+does not expand `env()`. HCL/JSON config `env()` inlining still applies normally.
+
+In-place configuration editing validates against the actual source file and retains
+declared references and `env()` spelling. Conversion resolves custom references to
+absolute paths before validating relocated HCL/JSON output. It neither copies
+profiles nor makes host-local paths automatically portable across machines or
+container mounts.
+
+Candidate construction reads and validates each custom recipe before activation.
+The private canonical recipe and content digest include dependency, schema and
+policy versions. Runtime validators, provider-client selection and materialization
+perform no source-file I/O. Every connection decodes fresh mutable extension/list
+objects and generates fresh randomness, session bytes and real key shares; actual
+upstream SNI replaces any capture context. Global uTLS dictionaries are not mutated.
+
+The stable custom JSON v1 subset is documented in the
+[configuration reference](../website/docs/configuration.md#custom-specification-files).
+It is native-shaped JSON, not a Go `ClientHelloSpec` struct marshal or metadata
+envelope. Validation precedes uTLS decoding:
+
+- One valid UTF-8 object, at most 64 KiB, depth 8 and 4096 tokens; reject duplicate
+  keys, unknown fields, null required arrays, trailing data and contradictions.
+- Ordered unique suites (1–64) and extensions (1–32), with at most one suite GREASE
+  and two GREASE extensions; compression exactly `NULL`. Require SNI, groups and
+  signatures, with versions/key shares for TLS 1.3.
+- Restrict versions to TLS 1.2/1.3, groups to X25519MLKEM768/X25519/P-256/384/521
+  plus GREASE, signatures to the approved modern names plus advertised-only SHA-1
+  names, and ALPN to absent, h1-only or h2+h1 in either order. h2-only is unsupported.
+- Groups are bounded to 16 entries, signatures to 32 and shares to three. Share
+  order follows groups; allow at most one real classical share and require X25519
+  fallback with MLKEM. Real `key_exchange` bytes must be omitted; GREASE uses dummy
+  `[0]` only. A private adapter supplies the missing v1.8.2 JSON symbol
+  `X25519MLKEM768` without changing the library dictionaries.
+- Empty ticket and `psk_dhe_ke` advertisements describe fresh first flights, not
+  resumable sessions. Custom ALPS, ECH, certificate compression, raw/generic fields,
+  cookies, delegated credentials, early data and PSK identities are rejected.
+- Padding `len` is 0–4096; zero selects BoringPaddingStyle, not a fixed zero-byte
+  padding rule. A synthetic-SNI dry run must produce at most a 16 KiB ClientHello;
+  its generated cryptographic state is discarded.
+
+Errors identify provider/field/index without echoing recipe bytes or arbitrary
+source paths. The bare uTLS JSON decoder is not this validation boundary.
+
+### Negotiated Cryptography Is A Separate Safety Boundary
+
+Bundled browser advertisements remain intact; some suites/signatures and other
+compatibility fields are advertised but cannot safely be selected by this client.
+Removing legacy advertisements while keeping a browser label would misstate the
+fingerprint. Instead, post-`ApplyPreset` version bounds allow only TLS 1.2/1.3,
+and a read-only guard rejects weak server selections without rewriting wire bytes.
+TLS 1.2 must select strong ECDHE with AES-GCM or ChaCha20-Poly1305; TLS 1.3 uses
+its three standard AEAD suites. SHA-1/unknown TLS 1.2 handshake signatures and
+unsupported ECDHE groups fail, even under synthetic trusted certificates.
+
+The guard reassembles fragmented ServerHello and TLS 1.2 ServerKeyExchange messages,
+with 18,432-byte record payload, 64 KiB ServerHello and 4 KiB ServerKeyExchange bounds.
+It skips certificate payloads rather than buffering them, and warning alerts cannot
+disable inspection. uTLS still checks certificates/hostnames, cryptography,
+transcripts, downgrade markers and TLS 1.3 signatures. Cipher/version checks alone
+were insufficient: an unguarded trusted SHA-1 handshake was reproduced.
+
+Session caching is disabled, resumed/PSK handshakes and post-initial renegotiation
+are unsupported, and **selected ALPS is rejected even with an empty settings
+payload** because Go HTTP/2 does not consume it. Custom recipes cannot advertise
+ALPS; a bundled preset's advertisement is not a promise to support selection.
+No insecure verification flag, weak-cipher opt-in, native fallback, profile retry
+or automatic fingerprint cycling is introduced. Native remains standard Go TLS.
+
+### HTTP Transport And Generation Ownership
+
+`internal/upstreamhttp.NewTransport` accepts an immutable profile and exact response
+header timeout. Native clones the standard Go transport unchanged except for that
+existing header-timeout option. Non-native transports keep Go 1.27 HTTP/1.1/HTTP/2
+and expose standard `crypto/tls.ConnectionState` through an internal UConn adapter
+so protocol selection follows negotiated ALPN. A bare UConn or a TLS dial hook
+alone would not cover HTTP/2 and proxy CONNECT correctly.
+
+Each environment-selected HTTP/HTTPS proxy route gets an immutable inner transport
+with `Proxy = nil`; its TLS dialer connects directly or creates an HTTP/1.1 CONNECT
+tunnel before upstream uTLS. HTTPS proxy TLS is separate, standard Go TLS with
+normal verification and HTTP/1.1 ALPN, never the provider fingerprint. CONNECT
+preserves buffered bytes and sends only proxy-URL Basic credentials, not caller or
+provider credentials. `NO_PROXY` behavior is retained. CONNECT response headers are
+bounded to 10 MiB and a profiled transport caches at most eight total TLS route
+entries, including the direct route. SOCKS5/SOCKS5h, HTTP/2 CONNECT and QUIC/HTTP/3
+are unsupported for non-native upstream TLS, not silently rerouted.
+
+Actual plain-HTTP requests use the native HTTP path and do not acquire upstream TLS.
+An absolute HTTPS health URL uses the provider's profile even when its base URL is
+HTTP. Direct TLS and both supported CONNECT routes carry HTTP/1.1 or HTTP/2 according
+to ALPN. TCP dial/keepalive remains 30 seconds, TLS handshake 10 seconds and CONNECT
+one minute, bounded by earlier context deadlines. Header timeout remains header-only
+(factory zero means disabled), inference has no whole-client or stream-read deadline,
+and bodies/SSE retain cancellation and existing unrestricted post-header lifetimes.
+
+Application runtime generations prepare their clients before activation and pool by
+effective header timeout and profile identity, including custom content rather than
+just its path. After successful publication, new work uses the new generation;
+retirement closes old idle connections immediately and again as response bodies
+reach EOF/Close/error. Already-admitted requests, later alias attempts in their
+snapshot and streams can finish. No historical generation map is retained. Failed
+reloads discard candidate resources and keep the old immutable bytes and clients,
+including after a malformed replacement of the same custom file.
+
+Health probes use fixed probe-owned clients prepared before activation, restarting
+on profile-identity changes while unchanged probes keep their own clients. Failed
+preparation leaves active probes intact. Discovery uses one operation-owned retiring
+transport across pages and retires it on every exit. Neither path retains retired
+inference generations or reopens custom files. Existing probe deadlines and
+[discovery pagination/aggregate bounds](#upstream-model-discovery) remain intact;
+their separately bounded operations use factory header timeout zero. OAuth/device
+authorization and dashboard clients remain outside this provider policy.
+
+### Managed Provider Trust Boundary
+
+Database/API/web UI providers support only the built-in selectors, including
+effective inheritance. Arbitrary server-local file access is not delegated to any
+administrator role: custom selectors, file or inline-spec declarations are rejected
+before commit/file reads, even if empty/null, and a managed derivative cannot extend
+a static custom base. Credential-only PUT rejects TLS declarations too.
+
+One SQL selector column defaults to empty, meaning omitted rather than explicitly
+native. Existing rows preserve native/inheritance defaults. Missing API input
+preserves the stored selection on update; `native` resets a concrete provider;
+explicit empty/null/wrong-case/unknown selections fail. A concrete-to-derived update
+clears the old local selection only when its incoming TLS field is omitted. All local
+derived declarations, including `native`, are invalid. Invalid stored rows reject
+startup/reload rather than being ignored.
+
+Views expose `tls_client_hello`, `tls_client_hello_effective`,
+`tls_client_hello_inherited` and `tls_client_hello_static_only`, never file paths or
+recipe content. The selector can describe an inherited base selection; effective
+names are canonical. Provider-type metadata supplies `tls_client_hello_selectors`.
+The UI offers these built-ins, shows inherited profiles without local overrides and
+labels static custom profiles read-only. No new global authorization or capability
+surface is added; existing saved-versus-activated and receiving-instance-only
+activation semantics apply.
+
+### Local Capture Evidence And Limits
+
+The standalone developer program under
+[`scripts/tls-clienthello/`](../scripts/tls-clienthello/README.md) measures an installed
+Bun `fetch` executable, not a serving dependency or a `bun = chrome` alias. Fresh
+minimal-environment children have isolated HOME/cwd, an empty Bun config, no dotenv
+or auto-install, disabled proxies, literal loopback requests and synthetic localhost
+SNI. The parent environment is unchanged; no credentials, external provider traffic,
+HTTP body or privileged packet capture is required. Process/socket/reaping work is
+bounded. The selected executable is trusted operator input, not a hostile-code sandbox.
+
+An explicit exporter creates accepted recipe JSON separately from secret-free
+version/platform/API/condition/digest/comparison metadata. Byte-structural comparison
+normalizes only client random, session-ID bytes and real key-exchange bytes; record
+framing/lengths, ordering, SNI, GREASE, ALPN and key-share structure remain significant.
+Matching JA3/JA4 alone is insufficient. Unsupported data and uninferable padding or
+resumption policies fail rather than producing misleading recipes.
+
+The [measured fixture](../examples/tls/README.md) is Bun **1.4.4 fetch, Linux x64**,
+default experimental h2/h3 flags off: three fresh Bun and three uTLS initial records
+matched at 1500 bytes, h1-only ALPN, 17 suites and MLKEM/X25519 shares, without GREASE,
+ALPS, padding or residual structural differences. Separate local synthetic-trust
+tests verified materialized TLS 1.2/1.3 handshakes. Capture commands stop at
+ClientHello and are not complete handshakes or TLS-specific binary integration
+evidence. Other Bun versions/APIs/options, SNI lengths, resumption, full HTTP/TCP
+stack equivalence, live-provider compatibility and WAF/bot acceptance remain unverified.
 
 ## Model Model
 
@@ -1580,6 +1789,9 @@ alias "chat_fallback" {
 - `upstream_header_timeout` accepts a positive duration at root or provider scope; provider values override root values, and the default is 90 seconds
 - `user_agent` accepts a 1-256 printable ASCII override at root or provider scope; provider values override the root value, and the default is `aiproxy/<version>`
 - `forward_user_agent` enables inbound `User-Agent` forwarding at root or provider scope; it is effective when set at either level, with no per-provider opt-out when the root enables it
+- `tls_client_hello` is provider-only, defaults to native Go TLS, and is independent
+  of `user_agent`; `custom` requires a cached static JSON recipe referenced by
+  `tls_client_hello_spec_file`, with no local declarations on static derivatives
 - the upstream header timeout limits only the wait for response headers, not JSON or streaming response bodies after headers arrive
 - aliases reference provider and model names without extra ref prefixes
 
@@ -1636,6 +1848,9 @@ The config loader should validate:
   `credential_ref.name`, or `credential_ref` on any other provider type
 - `protocol` on any non-OpenCode provider type
 - malformed, zero, or negative `upstream_header_timeout` values
+- empty/wrong-case/unknown TLS ClientHello selectors, root or local derived TLS
+  declarations, irrelevant spec-file declarations, or missing/unreadable/invalid
+  custom recipes; these checks apply to disabled providers too
 - active providers with no resolved credential, including an empty
   `api_key = env("...")`; missing or empty credentials fail validation unless
   `enabled = false` is declared explicitly
@@ -1653,7 +1868,7 @@ The service should fail startup on invalid config.
 
 Providers default to enabled. To intentionally disable a provider, declare
 `enabled = false`; disabled providers are still structurally validated (name,
-type, base URL, models, capabilities) but do not require a usable credential.
+type, base URL, models, capabilities, TLS profiles) but do not require a usable credential.
 The disabled state is reported explicitly in startup logs and dashboard
 snapshots rather than inferred from missing secret state.
 
@@ -2101,6 +2316,7 @@ Reload currently rebuilds and swaps:
 - provider/model catalog
 - alias routing state
 - root and provider upstream header timeouts
+- provider TLS ClientHello profiles and custom recipe contents
 - access-log enablement
 - payload-log configuration
 - metrics configuration
@@ -2110,8 +2326,9 @@ Reload currently rebuilds and swaps:
 Reload does not replace the active listener socket.
 
 Runtime construction and reload separate resource preparation from activation.
-Preparation loads and validates the catalog, opens candidate payload sinks,
-compiles guardrails, loads the exception file, and validates quarantine policy.
+Preparation loads and validates the catalog and custom TLS recipes, prepares
+profile-aware transport generations and probe clients, opens candidate payload
+sinks, compiles guardrails, loads the exception file, and validates quarantine policy.
 Reload publishes a required dashboard-token file only after these steps succeed,
 as the final fallible preparation step. Until then, the active health catalog,
 probe manager, routing dependencies, and config inventory remain in use. A corrupt
@@ -2220,6 +2437,8 @@ The chosen design allows fallback only for alias-based requests.
   access sends no `Authorization` header); `github-copilot` declares
   `credential_ref` instead and resolves its device-flow sidecar at load
 - `api_key_ref.path` defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json` and falls back to `~/.config/aiproxy/keys.json`
+- provider-only TLS ClientHello profiles default to native Go TLS; bundled Chrome
+  133/Safari 16.0 are opt-in, and strict custom recipe files are static-config-only
 - aliases support `round_robin` and `least_connections`
 - alias retry happens for transport errors, timeouts, and configured
   `retry_status_codes` in the `400`-`599` range

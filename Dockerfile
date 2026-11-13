@@ -24,11 +24,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath -buildvcs=false \
     -ldflags="-buildid= -s -w -X main.version=${VERSION}" \
     -o /out/aiproxy \
-    ./cmd/aiproxy
+    ./cmd/aiproxy && mkdir -p /out/tls
 
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 COPY --from=builder /out/aiproxy /usr/local/bin/aiproxy
+COPY --from=builder /out/tls/ /usr/local/share/aiproxy/tls/
+COPY --chmod=0444 examples/tls/*-fetch.json /usr/local/share/aiproxy/tls/
 
 EXPOSE 8080
 

@@ -76,7 +76,8 @@ JSON config form, where `env("VAR")` is written bare as the value. Run
 `set -a; . ./.env; set +a` before invoking the binary locally so env vars resolve.
 
 The server supports `SIGHUP`-triggered live config reload for auth, providers,
-models, aliases, root and provider upstream header timeouts, root and provider
+models, aliases, root and provider upstream header timeouts, provider TLS
+ClientHello profiles and custom recipes, root and provider
 user-agent settings, access-log
 enablement, payload-log configuration, metrics config, provider-health config, ingress-guardrail policy, web UI enablement, and metrics-backed inventory
 state. When multi-tenancy is enabled, database-backed providers, aliases, and
@@ -105,6 +106,10 @@ integration`. Real-provider sandbox tests remain separate and optional.
 Markdown-only documentation pull requests run the `Docs Contract` workflow,
 which executes `make docs-contract` against the highest-drift public support
 matrices.
+
+`pnpm docs:build` builds the documentation website, not the embedded web UI.
+The optional standalone Bun capture tool is documented in
+`scripts/tls-clienthello/README.md`; Bun is not a serving or fixture-test dependency.
 
 ## Conventions
 
@@ -153,6 +158,37 @@ matrices.
   Both attributes also exist at root scope as defaults for all providers:
   a provider-level `user_agent` overrides the root value, while
   `forward_user_agent` is effective when set at either level.
+- Provider-only `tls_client_hello` accepts `native` (omitted default), `chrome`,
+  `chrome-133`, `safari`, `safari-16.0`, or `custom`. Pinned uTLS v1.8.2 maps aliases
+  to bundled Chrome 133/Safari 16.0, never a live/latest browser catalog. Empty,
+  wrong-case and unknown selectors fail; Firefox/Bun/BoringSSL/randomized aliases
+  are not supported. `custom` requires `tls_client_hello_spec_file`; any file
+  declaration on non-custom is invalid, even empty. There is no root default or
+  bypass knob. Static derived providers inherit both fields with the endpoint and
+  reject local declarations; disabled profiles are validated too.
+  Custom recipes are strict native-shaped JSON (64 KiB, depth 8, 4096 tokens,
+  64 suites, 32 extensions) loaded into immutable cached profiles during candidate
+  validation. Runtime validation and requests never reopen files; each connection
+  gets fresh SNI/random/key material. Relative paths use the config file's lexical
+  directory; inline/source-less config requires absolute paths. In-place CLI edits
+  preserve references and `env()` spelling; conversion emits resolved absolute
+  host-local references without copying files. See
+  `website/docs/configuration.md#upstream-tls-clienthello` and `docs/design.md`.
+  Profiles apply to inference, health and model discovery HTTPS, including absolute
+  HTTPS health URLs for HTTP-based providers. Plain HTTP remains unchanged. Go 1.27
+  HTTP/1.1/HTTP/2 follows ALPN; HTTP/1.1 CONNECT through HTTP/HTTPS proxies is
+  supported, with separate verified standard Go proxy TLS. Non-native SOCKS,
+  HTTP/2 CONNECT, QUIC, resumption and selected ALPS (even empty) fail explicitly.
+  Never disable certificate/hostname verification, enable weak negotiation, rewrite
+  fingerprints to hide unsupported behavior, or fall back/cycle profiles. Retiring
+  successful-reload transports let admitted requests/alias attempts/streams finish;
+  failed reloads retain old cached bytes even after same-file replacement.
+  Managed providers support built-ins only, including effective inheritance; reject
+  custom/file/inline data before commit for every admin role and credential PUT.
+  A managed derivative cannot extend a static custom base. API views expose selector,
+  effective/inherited/static-only metadata, never profile paths or contents. This
+  adds no provider capability or global authorization surface and does not configure
+  OAuth/device/dashboard clients or the upstream `User-Agent`.
 - Direct (`<provider>/<model>`) requests never fail over to a different
   target and never consult or populate alias cooldown state. Alias requests retry the next target on transport errors, timeouts,
   and configured `retry_status_codes` in the `400`-`599` range. The default list

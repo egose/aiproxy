@@ -156,6 +156,15 @@ func cloneProvider(base config.Provider) config.Provider {
 
 func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases map[string]config.Provider) (config.Provider, error) {
 	name := row.Name
+	if row.Extends != "" && row.TLSClientHello != "" {
+		return config.Provider{}, fmt.Errorf("provider %q: derived provider cannot declare tls_client_hello", name)
+	}
+	localTLS, err := config.ResolveDynamicProviderTLSProfile(config.Provider{
+		Name: name, TLSClientHello: row.TLSClientHello, HasTLSClientHello: row.TLSClientHello != "",
+	})
+	if err != nil {
+		return config.Provider{}, err
+	}
 	if row.Extends != "" {
 		if row.AllowInsecureBaseURL {
 			return config.Provider{}, fmt.Errorf("provider %q: derived provider cannot declare allow_insecure_base_url", name)
@@ -170,8 +179,16 @@ func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases m
 		if string(base.Type) != row.Type {
 			return config.Provider{}, fmt.Errorf("provider %q: type %q must match base provider %q type %q", name, row.Type, row.Extends, base.Type)
 		}
+		baseTLS := base
+		baseTLS.Name = name
+		baseTLS, err = config.ResolveDynamicProviderTLSProfile(baseTLS)
+		if err != nil {
+			return config.Provider{}, err
+		}
+		base.TLSProfile = baseTLS.TLSProfile
 		p := cloneProvider(base)
 		p.Name = name
+		p.TLSClientHelloInherited = true
 		p.ForwardAuthorization = row.ForwardAuthorization
 		if row.DisplayName != "" {
 			p.DisplayName = row.DisplayName
@@ -189,6 +206,7 @@ func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases m
 	p := config.Provider{
 		Type: config.ProviderType(row.Type), Name: name,
 		DisplayName: row.DisplayName, BaseURL: row.BaseURL,
+		TLSClientHello: row.TLSClientHello, HasTLSClientHello: row.TLSClientHello != "", TLSProfile: localTLS.TLSProfile,
 		UserAgent: row.UserAgent, ForwardUserAgent: row.ForwardUserAgent,
 		ForwardHeaders:       append([]string(nil), row.ForwardHeaders...),
 		ForwardAuthorization: row.ForwardAuthorization,

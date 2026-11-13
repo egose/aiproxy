@@ -257,6 +257,37 @@ aiproxy configure provider --config /etc/aiproxy/config.hcl --delete --name back
 aiproxy configure alias --config /etc/aiproxy/config.hcl --delete --name chat_default
 ```
 
+### Configuring Provider TLS Profiles
+
+The wizard and scripted provider edits support the
+[provider-only ClientHello settings](configuration.md#upstream-tls-clienthello).
+With an existing `config/config.hcl` and the measured recipe copied as described
+in the [local capture workflow](#using-a-recipe-with-static-configuration):
+
+```sh
+aiproxy configure provider \
+  --config config/config.hcl \
+  --non-interactive \
+  --name measured-bun \
+  --type openai-compatible \
+  --base-url https://api.example.test/v1 \
+  --api-key-env UPSTREAM_API_KEY \
+  --tls-client-hello custom \
+  --tls-client-hello-spec-file tls/bun-1.4.4-fetch.json \
+  --model example-model
+```
+
+Omitting TLS flags preserves existing selections, custom references and `env()`
+spelling. Explicit `--tls-client-hello native` resets a concrete provider; choosing
+a non-custom profile removes an old custom reference when the file flag is omitted.
+Explicit empty flags or a file flag with a non-custom selector are rejected.
+Derived providers inherit both fields and cannot declare either flag. A scripted
+concrete-to-derived transition clears old local TLS settings when both are omitted.
+The interactive `default` choice removes the declaration; `default` is not a config
+selector. Editing/validation performs no provider networking and does not activate
+the running server until restart or `SIGHUP`. Conversion resolves custom paths to
+absolute host-local references; it does not copy profile files.
+
 ## Docker
 
 ```sh
@@ -267,6 +298,120 @@ make docker-run CONFIG=path/to/config.hcl
 The image mounts the config file and runs the same CLI entrypoint.
 
 In containerized deployments, mount the config file read-only and inject secrets through environment variables or the key file used by `api_key_ref`.
+
+## Local Bun ClientHello Capture
+
+The optional standalone developer tool requires the repository Go toolchain and
+an **already installed** Bun. It does not install tools or become a dependency of
+the serving binary. Initially only Bun `fetch`, fresh first-flight TLS and default
+experimental HTTP/2/HTTP/3 flags off are supported; there is no automatic Bun profile.
+Run from the repository root:
+
+```sh
+mkdir -p tls
+go run ./scripts/tls-clienthello capture --bun bun --api fetch --samples 3 --out tls/bun-fetch.json --metadata tls/bun-fetch.metadata.json
+go run ./scripts/tls-clienthello compare --bun bun --api fetch --samples 3 --spec tls/bun-fetch.json
+```
+
+Output directories must exist and recipe/metadata paths must be different.
+`--samples` accepts 2–16 (default 3). Capture publishes only after the recipe passes
+validation and all structural comparisons match. Existing regular outputs require
+explicit `--force`; symlink/special-file destinations are rejected even with it.
+Outputs use `0600`. The two publications are not one filesystem-wide transaction;
+see [tool usage and limits](https://github.com/egose/aiproxy/blob/main/scripts/tls-clienthello/README.md)
+for failure/partial-publication semantics. `compare` prints a separate JSON report
+and exits nonzero on mismatch. It does not rewrite the supplied spec.
+
+`--bun bun` resolves a recognized asdf shim safely to the direct installed binary
+without inheriting provider secrets; other wrappers fail with guidance. Selecting
+`--bun "$(asdf which bun)"` explicitly is also supported. The executable is trusted
+operator input, not sandboxed hostile code. Each fresh child uses a minimal explicit
+environment, isolated HOME/cwd, empty Bun config, no dotenv or auto-install, disabled
+proxies and a literal loopback URL with synthetic `localhost` SNI. The parent
+environment is unchanged. The listener stops after ClientHello: no provider
+credentials, external application traffic, HTTP body, certificate-verification
+bypass or privileged packet capture is needed. Capture/compare is **not a complete
+TLS handshake**. Accept/read is bounded to three seconds, child execution to five;
+sockets close and canceled children are reaped. Record/handshake and child-output
+bounds are documented with the tool.
+
+The exporter emits the accepted native-shaped JSON, not `json.Marshal(ClientHelloSpec)`.
+Metadata separately records runtime version/revision/platform/API, conditions,
+dependency/schema/policy pins, digests and comparison results, without machine paths,
+credentials or session secrets. Comparison checks actual byte structure, ordering,
+record framing/lengths, SNI, ALPN, GREASE and share groups/lengths, normalizing **only**
+random, session-ID bytes and real key-exchange bytes. JA3/JA4 alone is insufficient.
+Unsupported/resumption-dependent data and padding policies that cannot be inferred
+are rejected rather than approximated.
+
+The committed
+[Bun 1.4.4 fetch recipe](https://github.com/egose/aiproxy/blob/main/examples/tls/bun-1.4.4-fetch.json)
+and [metadata](https://github.com/egose/aiproxy/blob/main/examples/tls/bun-1.4.4-fetch.metadata.json)
+are **measured**, not an illustrative Chrome preset: Linux x64, three fresh Bun and
+three uTLS samples, matching 1500-byte initial records, HTTP/1.1-only ALPN and
+MLKEM/X25519 shares, with no GREASE, ALPS, padding or residual structural differences.
+Separate local synthetic-trust tests verified materialized TLS 1.2/1.3 handshakes.
+This does not verify other Bun versions/APIs/options, SNI lengths, resumed TLS, the
+full HTTP/TCP stack, live providers or WAF/bot acceptance, and is not new TLS-specific
+binary integration evidence. Use version/API-specific output names for new captures.
+
+### Using A Recipe With Static Configuration
+
+Copy a recipe into the **config directory**, not merely the shell's working
+directory. For example, from the repository root with an existing
+`config/config.hcl`, create a new recipe destination:
+
+```sh
+mkdir -p config/tls
+cp -- examples/tls/bun-1.4.4-fetch.json config/tls/bun-1.4.4-fetch.json
+```
+
+Then add this provider to `config/config.hcl` (replace the illustrative endpoint,
+model and secret source for real use):
+
+```hcl
+provider "openai-compatible" "measured-bun" {
+  base_url                  = "https://api.example.test/v1"
+  api_key                   = env("UPSTREAM_API_KEY")
+  tls_client_hello           = "custom"
+  tls_client_hello_spec_file = "tls/bun-1.4.4-fetch.json"
+
+  model "example-model" {}
+}
+```
+
+The relative reference now resolves to `config/tls/bun-1.4.4-fetch.json`.
+Do not use a repository-relative `examples/tls/...` reference in an unrelated
+config directory. Only the recipe is loaded; metadata is documentation.
+For a complete checkout example, with synthetic credentials and no provider calls:
+
+```sh
+UPSTREAM_API_KEY=test-placeholder-key BACKUP_UPSTREAM_API_KEY=test-placeholder-key aiproxy validate --config examples/tls-client-hello.hcl
+```
+
+Mount custom recipes read-only alongside the config in containers, and ensure
+references resolve in that container's filesystem. Inline `AIPROXY_CONFIG` requires
+absolute references. Conversion output contains resolved absolute host-local paths;
+copy/mount recipes and adjust references when relocating to a different host.
+Replacing recipe files requires a successful reload to affect new work.
+
+### Provider TLS Transport Limits
+
+Native keeps Go's standard transport. For non-native HTTPS profiles, direct TLS and
+HTTP/1.1 CONNECT through HTTP or HTTPS environment proxies support HTTP/1.1/HTTP/2
+according to ALPN. HTTPS proxy TLS is separately verified standard Go TLS with h1
+CONNECT, not the provider profile; `NO_PROXY` remains effective. Non-native SOCKS5/
+SOCKS5h, HTTP/2 CONNECT and QUIC/HTTP/3 are explicitly unsupported, with no native
+or protocol fallback. Actual HTTP upstream requests still use standard HTTP.
+
+TCP dial/keepalive is 30 seconds, TLS handshake 10 seconds and CONNECT one minute,
+subject to earlier cancellation/deadlines. CONNECT response headers are bounded to
+10 MiB, with at most eight cached TLS route entries including direct. Provider
+`upstream_header_timeout` remains header-only, with no added whole-inference or
+stream-read timeout. Health and discovery retain their separate operation deadlines
+and discovery pagination/aggregate limits. OAuth/device/dashboard clients and
+`User-Agent` behavior are unaffected. Fix unsupported proxy or upstream negotiation
+instead of disabling verification or cycling profiles.
 
 ## Tests
 
@@ -297,6 +442,7 @@ build` from the `website` directory.
 - auth configuration
 - provider and model inventory
 - root and provider upstream header timeouts
+- provider TLS ClientHello selections and custom recipe contents
 - alias routing state
 - access-log enablement
 - payload-log configuration
@@ -306,6 +452,15 @@ build` from the `website` directory.
 
 If rate-limit settings are unchanged, reload preserves existing limiter buckets.
 Changing rate-limit settings creates a fresh limiter and resets bucket state.
+
+TLS recipes and transport generations are prepared before activation. Successful
+reloads select new profile identities (including custom content changes at the same
+path) for new work and retire old idle connections. Already-admitted requests,
+their later alias attempts and streams finish against their admitted runtime;
+retired connections close as their bodies finish. Changed profile identities restart
+probe-owned clients, while discovery owns and retires a client per listing operation.
+A failed candidate leaves old clients, probes and cached recipe bytes intact,
+even if the source file was replaced. No custom-file reads occur on requests.
 
 Alias cooldown deadlines survive reload only for fingerprint-unchanged targets
 (resolved `base_url`, credential, upstream model, protocol); removed or changed
@@ -373,6 +528,16 @@ transport and healthcheck rather than asking for local model rows. Type must mat
 the static base; display name and credentials remain local, with a blank display
 name falling back to the base. The database provider's Enabled flag remains local.
 Clearing Extends requires valid local settings and models before saving.
+
+TLS ClientHello choices come from provider-type `tls_client_hello_selectors`
+metadata: native, bundled Chrome 133/Safari 16.0 and their approved aliases.
+Omitting the field preserves a concrete provider's selection; choosing Native
+explicitly resets it. Inherited profiles are displayed without a local selector
+override, and a concrete-to-derived save omits the TLS field to clear its old local
+selection. Static custom profiles are labeled static-only/read-only, with no file
+path or contents shown. Database providers cannot use custom files/inline recipes
+or inherit a static custom base, even for system administrators. Invalid TLS edits
+save nothing; otherwise the existing saved-versus-activated outcomes still apply.
 
 An existing custom healthcheck remains selected because the current API cannot
 remove its block. Its path must stay nonempty. Clearing other scalar fields resets
@@ -981,6 +1146,9 @@ requires an explicitly supplied client ID and uses GitHub's fixed issuer URLs.
 - enable `bearer_static` auth unless the deployment is fully trusted
 - keep provider secrets out of the HCL file when possible
 - mount config and key files read-only
+- when using static custom TLS profiles, mount recipe files read-only at their
+  config-relative paths and validate replacements before reload; do not rely on
+  ClientHello matching as a provider/WAF-acceptance guarantee
 - declare `metrics { token = env("AIPROXY_METRICS_TOKEN") }` and scrape
   `GET /metrics` with the configured bearer token
 - use `aiproxy dashboard` only from the local host; remote dashboard access is

@@ -1,0 +1,82 @@
+{
+  "capture_schema_version": "1",
+  "utls_version": "v1.8.2",
+  "spec_schema_version": "1",
+  "policy_version": "1",
+  "canonical_spec_sha256": "4f01b4c41c8b130b87af18447159b12576e15865b45f3fa41075ad63b9bdc650",
+  "profile_identity": "custom:b611bd95c510b7123c19555ece600a975df9d15cd8cb8b91d628deba4f51ee15",
+  "bun": {
+    "version": "1.4.4",
+    "revision": "38afee6c84fcf48c0edb2466aa4b27d287a59c30",
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "conditions": {
+    "api": "fetch",
+    "fresh_process": true,
+    "url": "https://127.0.0.1:\u003cephemeral-port\u003e/",
+    "tls_server_name": "localhost",
+    "proxy": false,
+    "method": "GET",
+    "request_body": false,
+    "redirect": "error",
+    "abort_milliseconds": 4000,
+    "empty_bun_config": true,
+    "dotenv": false,
+    "auto_install": false,
+    "experimental_flags": [],
+    "isolated_home_and_cwd": true,
+    "inherited_environment": false,
+    "tls_verification_bypass": false,
+    "stop_after_client_hello": true,
+    "accept_read_milliseconds": 3000,
+    "child_milliseconds": 5000,
+    "child_output_bytes_per_stream": 65536,
+    "max_records": 16,
+    "max_record_payload_bytes": 18432,
+    "max_handshake_bytes": 32768
+  },
+  "sample_count": 3,
+  "comparison": {
+    "matched": true,
+    "bun_samples": 3,
+    "utls_samples": 3,
+    "normalized_sha256": "a766b8a372feecaec084632ceffb7c99bd3398e21547ec347246da6b8dc7327e",
+    "normalization": ["client_random_bytes", "session_id_bytes", "real_key_exchange_bytes"],
+    "structure": {
+      "record_bytes": 1500,
+      "record_versions": [769],
+      "record_payload_bytes": [1495],
+      "handshake_bytes": 1495,
+      "handshake_version": 771,
+      "session_id_bytes": 32,
+      "cipher_suites": [
+        4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49161, 49171, 49162, 49172, 156, 157, 47, 53
+      ],
+      "compression_methods": [0],
+      "extension_ids": [0, 23, 65281, 10, 11, 35, 16, 5, 13, 18, 51, 45, 43],
+      "groups": [4588, 29, 23, 24],
+      "signature_algorithms": [1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537, 2055, 1539, 513],
+      "alpn": ["http/1.1"],
+      "key_shares": [
+        {
+          "group": 4588,
+          "bytes": 1216
+        },
+        {
+          "group": 29,
+          "bytes": 32
+        }
+      ]
+    },
+    "differences": []
+  },
+  "limitations": [
+    "Measured installed Bun version and fetch API only; other versions, APIs, TLS options and SNI lengths are not covered.",
+    "Fresh first-flight ClientHello only; resumed/PSK handshakes and unsupported extensions are rejected.",
+    "Padding policy is not inferred; GREASE values are not normalized or guaranteed to match.",
+    "Capture closes before certificates or HTTP traffic; successful verified TLS and serving activation require separate tests.",
+    "Comparison preserves TLS record framing and all nonvolatile handshake bytes, not TCP segmentation or the HTTP stack.",
+    "No provider networking, full Bun/browser impersonation, WAF acceptance or bot-detection bypass has been verified."
+  ]
+}

@@ -121,6 +121,9 @@ func cloneProviders(in []Provider) []Provider {
 
 func cloneProvider(provider Provider) Provider {
 	out := provider
+	if profile, err := resolveProviderTLSProfile(provider, true); err == nil {
+		out.TLSProfile = profile
+	}
 	if provider.APIKeyRef != nil { // pragma: allowlist secret
 		ref := *provider.APIKeyRef
 		out.APIKeyRef = &ref

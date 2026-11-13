@@ -4,6 +4,6 @@ dependencies:
   version: 0.1.0
 - name: bun-relay
   repository: oci://ghcr.io/egose/charts
-  version: 0.2.0
-digest: sha256:9a06980aec5e8cb34a9fdacbc14efb7ae2f176179715ddcc6af7c4a28a23574f
-generated: "2026-11-11T17:48:24.749189545-08:00"
+  version: 0.3.0
+digest: sha256:ff5404aa46882af4272d0dfe65033efe473abadf4060eea782b68ddc678bb6cc
+generated: "2026-11-12T12:20:09.501988693-08:00"

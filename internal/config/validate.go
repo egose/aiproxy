@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/egose/aiproxy/internal/guardrails"
+	"github.com/egose/aiproxy/internal/tlsprofile"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -259,6 +260,9 @@ func validateProviders(providers []Provider, requireCredential bool) error {
 		if err := validateProviderUserAgent(p); err != nil {
 			return err
 		}
+		if _, err := resolveProviderTLSProfile(p, true); err != nil {
+			return fmt.Errorf("provider %q: %w", p.Name, err)
+		}
 		if err := ValidateForwardHeaders(p.ForwardHeaders, fmt.Sprintf("provider %q", p.Name)); err != nil {
 			return err
 		}
@@ -307,6 +311,55 @@ func validateProviders(providers []Provider, requireCredential bool) error {
 		}
 	}
 	return nil
+}
+
+func providerTLSSelection(p Provider) (string, error) {
+	selection := p.TLSClientHello
+	if selection == "" && !p.HasTLSClientHello {
+		selection = "native"
+	}
+	if selection != "custom" {
+		if _, err := tlsprofile.ResolveBuiltin(selection); err != nil {
+			return "", err
+		}
+		if p.HasTLSClientHelloSpecFile || p.TLSClientHelloSpecFile != "" {
+			return "", fmt.Errorf("tls_client_hello_spec_file cannot be declared unless tls_client_hello is custom")
+		}
+		return selection, nil
+	}
+	if err := validateTLSProfileReference(p.TLSClientHelloSpecFile); err != nil {
+		return "", err
+	}
+	return selection, nil
+}
+
+func resolveProviderTLSProfile(p Provider, allowCustom bool) (tlsprofile.Profile, error) {
+	if !allowCustom {
+		if p.HasTLSClientHelloSpecFile || p.TLSClientHelloSpecFile != "" {
+			return tlsprofile.Profile{}, fmt.Errorf("tls_client_hello_spec_file is static-config-only; managed providers support built-in profiles only")
+		}
+		if p.TLSClientHello == "custom" || p.TLSProfile.IsCustom() {
+			return tlsprofile.Profile{}, fmt.Errorf("tls_client_hello: custom is static-config-only; managed providers cannot use or inherit custom profiles")
+		}
+	}
+	selection, err := providerTLSSelection(p)
+	if err != nil {
+		return tlsprofile.Profile{}, err
+	}
+	if selection == "custom" {
+		if !p.TLSProfile.IsCustom() {
+			return tlsprofile.Profile{}, fmt.Errorf("tls_client_hello: custom profile must be resolved during config construction")
+		}
+		return p.TLSProfile, nil
+	}
+	profile, err := tlsprofile.ResolveBuiltin(selection)
+	if err != nil {
+		return tlsprofile.Profile{}, err
+	}
+	if !p.TLSProfile.IsNative() && p.TLSProfile.Identity() != profile.Identity() {
+		return tlsprofile.Profile{}, fmt.Errorf("tls_client_hello: effective profile does not match the selector")
+	}
+	return profile, nil
 }
 
 func validateModelProtocol(providerType ProviderType, providerName string, m Model) error {

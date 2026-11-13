@@ -26,6 +26,7 @@ func TestConfigureProviderCreatesConfigAndSecrets(t *testing.T) {
 		"",
 		"",
 		"",
+		"",
 		secretsPath,
 		"",
 		"sk-test-primary",
@@ -90,6 +91,7 @@ func TestConfigureProviderRejectsInvalidProviderName(t *testing.T) {
 		"",
 		"",
 		"",
+		"",
 		secretsPath,
 		"",
 		"sk-test-primary",
@@ -145,6 +147,7 @@ provider "openai" "primary" {
 		"2",
 		"primary",
 		"Backup provider",
+		"",
 		"",
 		"",
 		"",
@@ -1445,6 +1448,7 @@ func TestConfigureProviderEnvExpressionRejectsMalformedThenAccepts(t *testing.T)
 		"primary",               // provider name
 		"",                      // display name
 		"",                      // extends
+		"",                      // TLS ClientHello default
 		"",                      // upstream header timeout
 		"",                      // user agent override
 		"",                      // forward inbound User-Agent

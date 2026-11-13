@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProvidersPage } from './providers-page';
 import { adminClient } from '../services/admin';
 import { clearAdminSession, setAdminWorkspaceId, setAdminSession } from '../store';
-import { adminProviderSchema, type AdminProvider } from '../types';
+import { adminProviderSchema, builtinTLSClientHelloSelectors, type AdminProvider } from '../types';
 
 const originalAdapter = axios.defaults.adapter;
 const originalAdminAdapter = adminClient.defaults.adapter;
@@ -95,6 +95,7 @@ function mount(initial: AdminProvider | undefined, savedViews: AdminProvider[] =
             credential: 'api_key',
             supports_healthcheck: true,
             supported_capabilities: ['chat', 'responses'],
+            tls_client_hello_selectors: [...builtinTLSClientHelloSelectors],
           },
           { type: 'github-copilot', credential: 'credential_ref', supports_healthcheck: false },
         ],
@@ -477,10 +478,110 @@ describe('mounted provider form requests and reopened values', { timeout: 15000 
     expect(writes).toEqual([]);
     change('Name', 'gpt-4o-mini');
     await save();
-    expect(writes[0].body).toEqual({ extends: '', models: [{ name: 'gpt-4o-mini' }] });
+    expect(writes[0].body).toEqual({ extends: '', tls_client_hello: 'native', models: [{ name: 'gpt-4o-mini' }] });
     const reopened = await edit();
     expect(reopened.getByLabelText(/^Extends/)).toHaveValue('');
     expect(reopened.getByLabelText('Name', { exact: true })).toHaveValue('gpt-4o-mini');
+  });
+});
+
+describe('TLS ClientHello management', { timeout: 15000 }, () => {
+  it('preserves a declared alias on unrelated edits and resets explicitly to native', async () => {
+    const chrome = provider({ tls_client_hello: 'chrome', tls_client_hello_effective: 'chrome-133' });
+    mount(chrome, [{ ...chrome, display_name: 'Unrelated' }, provider({ display_name: 'Unrelated' })]);
+    let form = await edit();
+    const select = form.getByRole('combobox', { name: 'TLS ClientHello profile' });
+    expect(select).toHaveValue('chrome');
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((option) => (option as HTMLOptionElement).value),
+    ).toEqual([...builtinTLSClientHelloSelectors]);
+    expect(form.getByText(/Custom JSON files are static-config-only/)).toBeInTheDocument();
+    expect(form.queryByLabelText(/spec file|custom.*file/i)).not.toBeInTheDocument();
+    fireEvent.change(form.getAllByLabelText('Display name (optional)')[0], { target: { value: 'Unrelated' } });
+    await save();
+    expect(writes[0].body).toEqual({ display_name: 'Unrelated' });
+    form = await edit();
+    expect(form.getByLabelText('TLS ClientHello profile')).toHaveValue('chrome');
+    change('TLS ClientHello profile', 'native');
+    await save();
+    expect(writes[1].body).toEqual({ tls_client_hello: 'native' });
+    expect((await edit()).getByLabelText('TLS ClientHello profile')).toHaveValue('native');
+  });
+
+  it('creates a built-in selection without any custom source fields', async () => {
+    mount(undefined, [provider({ tls_client_hello: 'safari', tls_client_hello_effective: 'safari-16.0' })]);
+    const form = await create();
+    change('Name (lowercase, no spaces)', 'primary');
+    change('Name', 'gpt-4o-mini');
+    change('TLS ClientHello profile', 'safari');
+    fireEvent.click(form.getByRole('button', { name: 'Create provider' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(writes[0].body).toEqual({
+      name: 'primary',
+      type: 'openai',
+      models: [{ name: 'gpt-4o-mini' }],
+      tls_client_hello: 'safari',
+    });
+    expect((await edit()).getByLabelText('TLS ClientHello profile')).toHaveValue('safari');
+  });
+
+  it('omits local TLS fields on concrete-to-derived transitions and reports inheritance', async () => {
+    mount(provider({ tls_client_hello: 'chrome', tls_client_hello_effective: 'chrome-133' }), [
+      provider({
+        extends: 'base',
+        models: [],
+        tls_client_hello: 'safari',
+        tls_client_hello_effective: 'safari-16.0',
+        tls_client_hello_inherited: true,
+      }),
+    ]);
+    let form = await edit();
+    change('TLS ClientHello profile', 'native');
+    change(/^Extends/, 'base');
+    expect(form.queryByLabelText('TLS ClientHello profile')).not.toBeInTheDocument();
+    expect(form.getByText(/no local TLS selection is submitted/)).toBeInTheDocument();
+    expect(form.getByText(/cannot extend a static custom-profile base/)).toBeInTheDocument();
+    await save();
+    expect(writes[0].body).toEqual({ extends: 'base' });
+    form = await edit();
+    expect(form.getByText(/TLS ClientHello \(safari\) is inherited/)).toBeInTheDocument();
+    expect(form.queryByLabelText('TLS ClientHello profile')).not.toBeInTheDocument();
+  });
+
+  it('uses the effective inherited built-in selection when becoming concrete', async () => {
+    mount(
+      provider({
+        extends: 'base',
+        models: [],
+        tls_client_hello: 'chrome',
+        tls_client_hello_effective: 'chrome-133',
+        tls_client_hello_inherited: true,
+      }),
+      [provider({ tls_client_hello: 'chrome', tls_client_hello_effective: 'chrome-133' })],
+    );
+    const form = await edit();
+    change(/^Extends/, '');
+    expect(form.getByLabelText('TLS ClientHello profile')).toHaveValue('chrome');
+    change('Name', 'gpt-4o-mini');
+    await save();
+    expect(writes[0].body).toEqual({ extends: '', models: [{ name: 'gpt-4o-mini' }], tls_client_hello: 'chrome' });
+  });
+
+  it('displays static custom metadata read-only without a file path or editable custom option', async () => {
+    mount(
+      provider({
+        source: 'config',
+        tls_client_hello: 'custom',
+        tls_client_hello_effective: 'custom',
+        tls_client_hello_static_only: true,
+      }),
+    );
+    expect(await screen.findByText('custom · static-only')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Actions for primary' })).not.toBeInTheDocument();
+    expect(screen.getByText('read-only')).toBeInTheDocument();
+    expect(writes).toEqual([]);
   });
 });
 

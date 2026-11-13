@@ -1,0 +1,1 @@
+ALTER TABLE db_providers ADD COLUMN IF NOT EXISTS tls_client_hello TEXT NOT NULL DEFAULT '';

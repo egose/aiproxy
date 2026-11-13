@@ -1,6 +1,10 @@
 package config
 
-import "time"
+import (
+	"time"
+
+	"github.com/egose/aiproxy/internal/tlsprofile"
+)
 
 const DefaultUpstreamHeaderTimeout = 90 * time.Second
 
@@ -234,23 +238,29 @@ const (
 )
 
 type Provider struct {
-	Type                  ProviderType
-	Name                  string
-	DisplayName           string
-	BaseURL               string
-	UpstreamHeaderTimeout time.Duration
-	UserAgent             string
-	ForwardUserAgent      bool
-	ForwardHeaders        []string
-	ForwardAuthorization  bool
-	AllowInsecureBaseURL  bool
-	APIKey                string
-	APIKeyRef             *APIKeyRef
-	CopilotCredentialRef  *CopilotCredentialRef
-	CopilotToken          string
-	Enabled               bool
-	Models                []Model
-	Healthcheck           *ProviderHealthcheck
+	Type                      ProviderType
+	Name                      string
+	DisplayName               string
+	BaseURL                   string
+	UpstreamHeaderTimeout     time.Duration
+	UserAgent                 string
+	ForwardUserAgent          bool
+	ForwardHeaders            []string
+	ForwardAuthorization      bool
+	AllowInsecureBaseURL      bool
+	TLSClientHello            string
+	TLSClientHelloSpecFile    string
+	HasTLSClientHello         bool
+	HasTLSClientHelloSpecFile bool
+	TLSClientHelloInherited   bool
+	TLSProfile                tlsprofile.Profile
+	APIKey                    string
+	APIKeyRef                 *APIKeyRef
+	CopilotCredentialRef      *CopilotCredentialRef
+	CopilotToken              string
+	Enabled                   bool
+	Models                    []Model
+	Healthcheck               *ProviderHealthcheck
 
 	ModelByName map[string]Model
 }

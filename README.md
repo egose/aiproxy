@@ -246,6 +246,55 @@ bearer credential without changing the static inventory. Each listing loads the
 current sidecar; an already running server keeps its loaded credential until reload.
 The example model name is illustrative, not a verified available GitHub model.
 
+### Upstream TLS ClientHello
+
+Provider-only `tls_client_hello` changes the upstream TLS ClientHello, not the
+HTTP stack or `User-Agent`. Omission or `native` keeps standard Go 1.27 TLS.
+The other selectors are `chrome`, `chrome-133`, `safari`, `safari-16.0`, and
+`custom`. With pinned uTLS v1.8.2, `chrome` resolves to the bundled Chrome 133
+profile and `safari` to Safari 16.0; aliases never fetch a latest browser profile.
+Empty, wrong-case, and unknown values are rejected. Firefox, Bun, and generic
+BoringSSL selectors are not supported.
+
+```hcl
+provider "openai-compatible" "profiled" {
+  base_url         = "https://api.example.test/v1"
+  api_key          = env("UPSTREAM_API_KEY")
+  tls_client_hello = "chrome-133"
+
+  model "example-model" {}
+}
+```
+
+`custom` requires `tls_client_hello_spec_file`, a strictly validated JSON recipe
+loaded and cached at configuration validation, never detected from Bun or read
+on requests. Relative references resolve against the config file's directory;
+inline `AIPROXY_CONFIG` requires an absolute reference. Declaring the file
+attribute on any other selector is invalid, even when empty. Static derived
+providers inherit both settings with the endpoint and cannot declare either
+locally. Disabled providers' profiles are validated too. Database/API/web UI
+providers support built-ins only, including inheritance; custom files remain
+operator-owned static configuration.
+
+The selected profile applies to HTTPS inference (including each alias target),
+health probes and CLI upstream model discovery. Plain HTTP has no upstream TLS;
+an absolute HTTPS health URL still uses the profile. Direct TLS and HTTP/1.1
+CONNECT through HTTP or separately verified HTTPS proxies support HTTP/1.1 or
+HTTP/2 according to negotiated ALPN. Non-native SOCKS and HTTP/2 CONNECT, QUIC,
+resumption and negotiated ALPS are unsupported. Certificate and hostname
+verification remain enabled, weak negotiation is rejected, and there is no
+profile fallback or cycling. Successful reloads replace profiles for new work
+without cutting off admitted requests or streams; failed reloads retain cached
+recipes even if their files were replaced.
+
+See the [configuration contract](website/docs/configuration.md#upstream-tls-clienthello),
+[local capture workflow](scripts/tls-clienthello/README.md), and complete
+[`examples/tls-client-hello.hcl`](examples/tls-client-hello.hcl).
+The [measured Bun 1.4.4 fetch recipe and metadata](examples/tls/README.md) cover
+Linux x64, three matching fresh Bun/uTLS 1500-byte, HTTP/1.1-only ClientHellos.
+They do not establish other Bun versions/APIs, SNI lengths, a full browser/Bun
+fingerprint, or live-provider, WAF or bot-detector acceptance.
+
 ### Routing
 
 - Direct model addressing: `<provider-name>/<model-name>`
@@ -277,7 +326,8 @@ The example model name is illustrative, not a verified available GitHub model.
   external billing or quota authority.
 
 The server supports live config reload on `SIGHUP` for auth, providers, models,
-aliases, root and provider upstream header timeouts, access-log enablement,
+aliases, root and provider upstream header timeouts, provider TLS ClientHello
+profiles and custom recipes, access-log enablement,
 payload-log configuration, metrics config, provider-health config,
 ingress-guardrail policy, and
 metrics-backed inventory state.
@@ -816,7 +866,7 @@ can inspect what was flagged:
 
 Use the optional `enabled` field on a `provider` block to intentionally disable
 a provider. Disabled providers are structurally validated (name, type, base
-URL, models, capabilities) but do not require a usable `api_key` or
+URL, models, capabilities, TLS profiles) but do not require a usable `api_key` or
 `api_key_ref`. Enabled providers with an unresolved, empty, or missing
 credential fail validation, except `opencode-zen` providers, which may omit
 the credential for keyless upstream access (no `Authorization` header is sent).
@@ -846,7 +896,7 @@ provider "openai" "backup" {
 - A provider with no resolved credential, including an empty `api_key = env("...")`,
   fails validation when the provider is enabled. To intentionally disable a
   provider, set `enabled = false`; disabled providers are still structurally
-  validated (name, type, base URL, models, capabilities) but do not require a
+  validated (name, type, base URL, models, capabilities, TLS profiles) but do not require a
   usable credential.
 - `/v1/models` returns effective capabilities for both direct models and
   aliases. Alias capabilities are the safe intersection of their target models.

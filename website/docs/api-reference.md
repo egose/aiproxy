@@ -319,6 +319,59 @@ Successful provider POST/PUT and credential PUT responses carry
 `X-Aiproxy-Catalog-Saved: true` once the database commit is durable, including
 when activation itself fails.
 
+### Provider TLS ClientHello Settings
+
+Provider POST/PUT accepts `tls_client_hello` for **built-ins only**:
+`native`, `chrome`, `chrome-133`, `safari`, `safari-16.0`. Browser aliases resolve
+to the frozen bundled Chrome 133/Safari 16.0 presets in uTLS v1.8.2, not live/latest
+browser profiles. This adds no inference capability or new authorization surface.
+
+| Input on a concrete provider                             | Behavior                                                    |
+| -------------------------------------------------------- | ----------------------------------------------------------- |
+| Field omitted on create                                  | Native Go TLS                                               |
+| Field omitted on update                                  | Preserve the saved selection                                |
+| `"tls_client_hello": "native"`                           | Explicitly reset to native                                  |
+| Empty, null, wrong-type, wrong-case or unknown selection | `400`; no commit or activation                              |
+| `custom`, any spec-file or inline-spec declaration       | `400`; static-config-only, no commit or profile-file access |
+
+Derived providers inherit the effective profile with their base transport. Every
+local TLS declaration, including `native`, is rejected. Changing a concrete
+provider to a derived one clears its previous local selection **only if the incoming
+TLS field is omitted**. A managed derivative cannot extend a static custom-profile
+base. Invalid stored selectors or inheritance also reject catalog startup/reload.
+Existing databases require `aiproxy migrate up`; the additive selector column's
+empty default means omitted, preserving existing native/inheritance behavior.
+
+`tls_client_hello_spec_file`, `tls_client_hello_spec` and other custom TLS-prefixed
+fields are forbidden, even empty or null, for both workspace and system
+administrators. `PUT /_internal/admin/providers/{name}/credential` rejects **all**
+TLS declarations, including built-in selection, without saving a replacement
+credential. Use provider PUT to change a concrete provider's built-in profile.
+Static custom configuration requires a file reference; `tls_client_hello_spec`
+is not a supported inline recipe or upload option on either surface.
+
+Provider views expose these metadata fields, never profile paths or recipe contents:
+
+```json
+{
+  "tls_client_hello": "chrome",
+  "tls_client_hello_effective": "chrome-133",
+  "tls_client_hello_inherited": false,
+  "tls_client_hello_static_only": false
+}
+```
+
+`tls_client_hello` describes the selected or inherited base selector (omitted native
+is presented as `native`); `tls_client_hello_effective` is canonical. The booleans
+identify inheritance and static-only custom profiles. Effective/inherited/static-only
+fields are view metadata, not writable configuration. Each provider-type entry from
+`GET /_internal/admin/provider-types` supplies `tls_client_hello_selectors` with the
+approved built-in list. The UI uses that list, shows inheritance and displays static
+custom profiles read-only. Do not send a derived view's inherited selector back as
+a local update. See [configuration](configuration.md#upstream-tls-clienthello) and
+[reload behavior](operations.md#reload-behavior); the saved-versus-activated outcomes
+above and receiving-instance-only activation remain unchanged.
+
 ## GitHub Copilot Device Authorization
 
 `github-copilot` providers can be authorized from the admin API without handling

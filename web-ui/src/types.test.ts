@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { blockCaptureSchema, blockListSchema, payloadListSchema, snapshotSchema } from './types';
+import {
+  adminProviderSchema,
+  blockCaptureSchema,
+  blockListSchema,
+  builtinTLSClientHelloSelectors,
+  payloadListSchema,
+  providerTypeInfoSchema,
+  snapshotSchema,
+} from './types';
 
 // Field names mirror the Go structs verbatim: accounting.Summary/Event have
 // no JSON tags (Capitalized keys), observability logs use time/message,
@@ -224,5 +232,51 @@ describe('dashboard contracts', () => {
       findings: [{ rule_id: 'r1', secret: 's', secret_sha256: 'a'.repeat(64) }],
     });
     expect(capture.findings).toHaveLength(1);
+  });
+});
+
+describe('TLS ClientHello management contracts', () => {
+  it('preserves declared aliases, canonical effective selection and readonly custom metadata', () => {
+    const base = { name: 'profiled', type: 'openai', source: 'database', models: [] };
+    expect(adminProviderSchema.parse(base).tls_client_hello).toBe('native');
+    const alias = adminProviderSchema.parse({
+      ...base,
+      tls_client_hello: 'chrome',
+      tls_client_hello_effective: 'chrome-133',
+      tls_client_hello_inherited: true,
+    });
+    expect(alias.tls_client_hello).toBe('chrome');
+    expect(alias.tls_client_hello_effective).toBe('chrome-133');
+    expect(alias.tls_client_hello_inherited).toBe(true);
+    const custom = adminProviderSchema.parse({
+      ...base,
+      source: 'config',
+      tls_client_hello: 'custom',
+      tls_client_hello_effective: 'custom',
+      tls_client_hello_static_only: true,
+      tls_client_hello_spec_file: 'private-file-path',
+      tls_client_hello_spec: 'private-content',
+    });
+    expect(custom.tls_client_hello_static_only).toBe(true);
+    expect(custom).not.toHaveProperty('tls_client_hello_spec_file');
+    expect(custom).not.toHaveProperty('tls_client_hello_spec');
+  });
+
+  it('validates the management endpoint allowlist and rejects unsupported/custom choices', () => {
+    const metadata = {
+      type: 'openai',
+      credential: 'api_key',
+      tls_client_hello_selectors: [...builtinTLSClientHelloSelectors],
+    };
+    expect(providerTypeInfoSchema.parse(metadata).tls_client_hello_selectors).toEqual([
+      'native',
+      'chrome',
+      'chrome-133',
+      'safari',
+      'safari-16.0',
+    ]);
+    for (const selector of ['custom', 'firefox', 'bun', 'boringssl', 'chrome-155', '', 'Chrome']) {
+      expect(() => providerTypeInfoSchema.parse({ ...metadata, tls_client_hello_selectors: [selector] })).toThrow();
+    }
   });
 });
