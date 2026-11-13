@@ -21,6 +21,9 @@ var forwardAuthorizationSQL string
 //go:embed allow_insecure_base_url.sql
 var allowInsecureBaseURLSQL string
 
+//go:embed tls_client_hello.sql
+var tlsClientHelloSQL string
+
 const schemaVersion = "schema.sql"
 
 var migrations = []struct {
@@ -30,6 +33,7 @@ var migrations = []struct {
 	{schemaVersion, schemaSQL},
 	{"forward_authorization.sql", forwardAuthorizationSQL},
 	{"allow_insecure_base_url.sql", allowInsecureBaseURLSQL},
+	{"tls_client_hello.sql", tlsClientHelloSQL},
 }
 
 type Store struct {

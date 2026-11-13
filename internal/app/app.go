@@ -31,6 +31,7 @@ import (
 	"github.com/egose/aiproxy/internal/providerhealth"
 	"github.com/egose/aiproxy/internal/ratelimit"
 	"github.com/egose/aiproxy/internal/store"
+	"github.com/egose/aiproxy/internal/tlsprofile"
 	"github.com/egose/aiproxy/internal/upstreamhttp"
 )
 
@@ -40,10 +41,11 @@ const (
 )
 
 type BuildOptions struct {
-	ConfigPath    string
-	ConfigFromEnv bool
-	Version       string
-	LogOutput     io.Writer
+	ConfigPath       string
+	ConfigFromEnv    bool
+	Version          string
+	LogOutput        io.Writer
+	transportFactory func(upstreamhttp.Options) (upstreamhttp.Transport, error)
 }
 
 type App struct {
@@ -51,6 +53,7 @@ type App struct {
 	reloadMu              sync.Mutex
 	closeOnce             sync.Once
 	closeErr              error
+	closed                bool
 	Config                *config.Runtime
 	Server                *http.Server
 	handler               *httpapi.Handler
@@ -83,10 +86,12 @@ type App struct {
 }
 
 type candidateResources struct {
-	health *providerhealth.Tracker
-	disk   *payloadlog.Logger
-	mongo  *mongolog.Logger
-	store  *store.Store
+	clients *upstreamClientPool
+	probes  *healthcheck.Prepared
+	health  *providerhealth.Tracker
+	disk    *payloadlog.Logger
+	mongo   *mongolog.Logger
+	store   *store.Store
 }
 
 func (c *candidateResources) cleanup(err *error) {
@@ -94,6 +99,12 @@ func (c *candidateResources) cleanup(err *error) {
 		return
 	}
 	var cleanupErr error
+	if c.probes != nil {
+		c.probes.Close()
+	}
+	if c.clients != nil {
+		c.clients.Retire()
+	}
 	if c.mongo != nil {
 		cleanupErr = errors.Join(cleanupErr, c.mongo.Close())
 	}
@@ -119,6 +130,18 @@ func Build(ctx context.Context, opts BuildOptions) (_ *App, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
+	httpClients, err := prepareUpstreamClientPool(rt.Catalog, opts.transportFactory)
+	if err != nil {
+		return nil, err
+	}
+	candidate.clients = httpClients
+	metrics := observability.NewMetrics()
+	healthchecks := healthcheck.New(nil, metrics, opts.Version)
+	preparedProbes, err := healthchecks.Prepare(rt.Catalog, opts.transportFactory)
+	if err != nil {
+		return nil, err
+	}
+	candidate.probes = preparedProbes
 	adminStore, err := openAdminStore(ctx, rt)
 	if err != nil {
 		return nil, err
@@ -131,6 +154,15 @@ func Build(ctx context.Context, opts BuildOptions) (_ *App, err error) {
 			return nil, fmt.Errorf("database catalog: %w", err)
 		}
 		rt.Catalog = config.NewCatalog(merged.Providers, merged.DisabledProviders, merged.Aliases)
+		if err := httpClients.prepareProviders(rt.Catalog); err != nil {
+			return nil, err
+		}
+		preparedProbes.Close()
+		preparedProbes, err = healthchecks.Prepare(rt.Catalog, opts.transportFactory)
+		if err != nil {
+			return nil, err
+		}
+		candidate.probes = preparedProbes
 		dynKeys = merged.Keys
 	}
 	dashboardTokenMinted, _, err := ensureDashboardToken(rt, config.Dashboard{}, false)
@@ -152,13 +184,11 @@ func Build(ctx context.Context, opts BuildOptions) (_ *App, err error) {
 	})
 
 	adapter := provider.New()
-	metrics := observability.NewMetrics()
 	metrics.SetBuildInfo(opts.Version)
 	metrics.RecordConfig(rt)
 	usage := accounting.NewAggregator()
 	health := providerhealth.New(metrics, rt.ProviderHealth)
 	candidate.health = health
-	healthchecks := healthcheck.New(health, metrics, opts.Version)
 	rateLimiter := ratelimit.New(rt.Auth)
 
 	payloadLog, payloadMongo, payloadRecorder, err := openPayloadSinks(rt.Logging.PayloadLog)
@@ -177,8 +207,6 @@ func Build(ctx context.Context, opts BuildOptions) (_ *App, err error) {
 		return nil, err
 	}
 
-	httpClients := newUpstreamClientPool()
-
 	startTime := time.Now()
 	resolver := modelresolver.New(rt)
 	deps := buildDependencies(rt, resolver, logger, adapter, metrics, health, healthchecks, rateLimiter, usage, httpClients, logs, startTime, opts.Version, payloadRecorder, payloadDirOf(payloadLog), rt.Logging.PayloadLog.RedactGuardrailBodies, scanner, quarantine, exceptions, adminStore, dynKeys)
@@ -193,7 +221,9 @@ func Build(ctx context.Context, opts BuildOptions) (_ *App, err error) {
 	applyServerConfig(server, rt.Listener)
 	app.Server = server
 	health.SetProviders(rt.Catalog)
-	healthchecks.SetProviders(rt.Catalog)
+	if err := preparedProbes.Activate(health); err != nil {
+		return nil, err
+	}
 	if adminStore != nil {
 		app.copilotCleanup = startCopilotFlowCleanup(adminStore, logger)
 	}
@@ -305,6 +335,9 @@ func (a *App) RunReady(ctx context.Context, ready func() error) (runErr error) {
 func (a *App) Reload() (err error) {
 	a.reloadMu.Lock()
 	defer a.reloadMu.Unlock()
+	if a.closed {
+		return errors.New("app is closed")
+	}
 	var candidate candidateResources
 	defer candidate.cleanup(&err)
 
@@ -341,6 +374,16 @@ func (a *App) Reload() (err error) {
 	if current != nil && rt.MultiTenancy.Enabled && rt.Database.URL != current.Database.URL {
 		return fmt.Errorf("changing database url requires restart")
 	}
+	nextClients, err := prepareUpstreamClientPool(rt.Catalog, a.buildOpt.transportFactory)
+	if err != nil {
+		return err
+	}
+	candidate.clients = nextClients
+	preparedProbes, err := a.healthchecks.Prepare(rt.Catalog, a.buildOpt.transportFactory)
+	if err != nil {
+		return err
+	}
+	candidate.probes = preparedProbes
 	var currentDashboard config.Dashboard
 	if current != nil {
 		currentDashboard = current.Dashboard
@@ -386,23 +429,26 @@ func (a *App) Reload() (err error) {
 	}
 
 	nextHealth.SetProviders(rt.Catalog)
-	a.healthchecks.SetTracker(nextHealth)
-	a.healthchecks.SetProviders(rt.Catalog)
+	if err := preparedProbes.Activate(nextHealth); err != nil {
+		return err
+	}
 	a.metrics.SetBuildInfo(a.buildOpt.Version)
 	a.metrics.RecordConfig(rt)
-	deps := buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, a.clients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadRecorder, payloadDirOf(nextPayloadLog), rt.Logging.PayloadLog.RedactGuardrailBodies, nextGuardrails, nextQuarantine, nextExceptions, a.adminStore, dynKeys)
+	deps := buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, nextClients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadRecorder, payloadDirOf(nextPayloadLog), rt.Logging.PayloadLog.RedactGuardrailBodies, nextGuardrails, nextQuarantine, nextExceptions, a.adminStore, dynKeys)
 	deps.Quota = a.quotaTracker
 	deps.RequestReload = a.Reload
 	a.mu.RLock()
 	deps.CopilotDeviceClient = a.copilotDeviceClient
 	a.mu.RUnlock()
-	a.handler.UpdateDependencies(deps)
+	oldClients := a.clients
 	oldHealth := a.health
 	oldPayloadLog := a.payloadLog
 	oldPayloadMongo := a.payloadMongo
 	a.mu.Lock()
+	a.handler.UpdateDependencies(deps)
 	a.Config = rt
 	a.resolver = nextResolver
+	a.clients = nextClients
 	a.health = nextHealth
 	a.rateLimiter = nextRateLimiter
 	a.payloadLog = nextPayloadLog
@@ -414,6 +460,9 @@ func (a *App) Reload() (err error) {
 	a.dashboardTokenMinted = dashboardTokenMinted
 	a.dashboardTokenWritten = a.dashboardTokenWritten || dashboardTokenPublished
 	a.mu.Unlock()
+	if oldClients != nil {
+		oldClients.Retire()
+	}
 	if oldHealth != nil && oldHealth != nextHealth {
 		_ = oldHealth.Close()
 	}
@@ -432,6 +481,9 @@ func (a *App) Close() error {
 		return nil
 	}
 	a.closeOnce.Do(func() {
+		a.reloadMu.Lock()
+		defer a.reloadMu.Unlock()
+		a.closed = true
 		a.mu.RLock()
 		clients := a.clients
 		health := a.health
@@ -448,7 +500,7 @@ func (a *App) Close() error {
 			healthchecks.Close()
 		}
 		if clients != nil {
-			clients.CloseIdleConnections()
+			clients.Retire()
 		}
 		if health != nil {
 			a.closeErr = health.Close()
@@ -693,8 +745,14 @@ func loadRuntime(opts BuildOptions) (*config.Runtime, error) {
 }
 
 type upstreamClientPool struct {
-	mu      sync.Mutex
-	clients map[time.Duration]*http.Client
+	clients     map[upstreamClientKey]*http.Client
+	factory     func(upstreamhttp.Options) (upstreamhttp.Transport, error)
+	unavailable *http.Client
+}
+
+type upstreamClientKey struct {
+	timeout time.Duration
+	profile string
 }
 
 func openAdminStore(ctx context.Context, rt *config.Runtime) (*store.Store, error) {
@@ -725,36 +783,106 @@ func openAdminStore(ctx context.Context, rt *config.Runtime) (*store.Store, erro
 	return st, nil
 }
 
-func newUpstreamClientPool() *upstreamClientPool {
-	return &upstreamClientPool{clients: make(map[time.Duration]*http.Client)}
+func newUpstreamClientPool(catalog config.Catalog) (*upstreamClientPool, error) {
+	return prepareUpstreamClientPool(catalog, nil)
 }
 
-func (p *upstreamClientPool) ClientForProvider(provider config.Provider) *http.Client {
-	return p.Client(provider.UpstreamHeaderTimeout)
+func prepareUpstreamClientPool(catalog config.Catalog, factory func(upstreamhttp.Options) (upstreamhttp.Transport, error)) (*upstreamClientPool, error) {
+	if factory == nil {
+		factory = upstreamhttp.NewTransport
+	}
+	pool := &upstreamClientPool{
+		clients:     make(map[upstreamClientKey]*http.Client),
+		factory:     factory,
+		unavailable: &http.Client{Transport: unavailableUpstreamTransport{}, CheckRedirect: upstreamhttp.CheckRedirect},
+	}
+	if err := pool.prepare(config.DefaultUpstreamHeaderTimeout, tlsprofile.Native()); err != nil {
+		pool.Retire()
+		return nil, err
+	}
+	if err := pool.prepareProviders(catalog); err != nil {
+		pool.Retire()
+		return nil, err
+	}
+	return pool, nil
 }
 
-func (p *upstreamClientPool) Client(timeout time.Duration) *http.Client {
+func (p *upstreamClientPool) prepareProviders(catalog config.Catalog) error {
+	for _, provider := range catalog.Providers() {
+		profile, err := upstreamhttp.ProfileForProvider(provider)
+		if err != nil {
+			return fmt.Errorf("upstream transports: %w", err)
+		}
+		if err := p.prepare(provider.UpstreamHeaderTimeout, profile); err != nil {
+			return fmt.Errorf("provider %q: %w", provider.Name, err)
+		}
+	}
+	return nil
+}
+
+func upstreamKey(timeout time.Duration, profile tlsprofile.Profile) upstreamClientKey {
 	if timeout <= 0 {
 		timeout = config.DefaultUpstreamHeaderTimeout
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if client := p.clients[timeout]; client != nil {
+	return upstreamClientKey{timeout: timeout, profile: profile.Identity()}
+}
+
+func (p *upstreamClientPool) prepare(timeout time.Duration, profile tlsprofile.Profile) error {
+	key := upstreamKey(timeout, profile)
+	if p.clients[key] != nil {
+		return nil
+	}
+	transport, err := p.factory(upstreamhttp.Options{Profile: profile, ResponseHeaderTimeout: key.timeout})
+	if err != nil {
+		if transport != nil {
+			transport.CloseIdleConnections()
+		}
+		return fmt.Errorf("upstream transports: %w", err)
+	}
+	if transport == nil {
+		return errors.New("upstream transports: factory returned no transport")
+	}
+	p.clients[key] = &http.Client{Transport: upstreamhttp.NewRetiringTransport(transport), CheckRedirect: upstreamhttp.CheckRedirect}
+	return nil
+}
+
+func (p *upstreamClientPool) ClientForProvider(provider config.Provider) *http.Client {
+	if client := p.clients[upstreamKey(provider.UpstreamHeaderTimeout, provider.TLSProfile)]; client != nil {
 		return client
 	}
-	client := newHTTPClient(timeout)
-	p.clients[timeout] = client
-	return client
+	return p.unavailable
+}
+
+func (p *upstreamClientPool) Client(timeout time.Duration) *http.Client {
+	if client := p.clients[upstreamKey(timeout, tlsprofile.Native())]; client != nil {
+		return client
+	}
+	return p.unavailable
 }
 
 func (p *upstreamClientPool) CloseIdleConnections() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	for _, client := range p.clients {
-		if transport, ok := client.Transport.(*http.Transport); ok {
-			transport.CloseIdleConnections()
+		client.CloseIdleConnections()
+	}
+}
+
+func (p *upstreamClientPool) Retire() {
+	for _, client := range p.clients {
+		if transport, ok := client.Transport.(interface{ Retire() }); ok {
+			transport.Retire()
+		} else {
+			client.CloseIdleConnections()
 		}
 	}
+}
+
+type unavailableUpstreamTransport struct{}
+
+func (unavailableUpstreamTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Body != nil {
+		_ = req.Body.Close()
+	}
+	return nil, errors.New("upstream transport was not prepared for this provider")
 }
 
 func newHTTPClient(upstreamHeaderTimeout time.Duration) *http.Client {

@@ -240,6 +240,8 @@ Common attributes:
 - `api_key_ref`
 - `credential_ref` for `github-copilot` only (saved device-flow login)
 - `upstream_header_timeout`
+- `tls_client_hello` (provider-only upstream TLS profile; see below)
+- `tls_client_hello_spec_file` (required only for static `custom` profiles)
 - `enabled` (optional, default `true`)
 - nested `model` blocks (OpenCode models additionally require `protocol`)
 
@@ -250,7 +252,7 @@ configured credential, and `opencode-zen` providers may omit the credential enti
 keyless upstream access, in which case the proxy sends no `Authorization`
 header. To
 intentionally disable a provider, declare `enabled = false`; disabled
-providers are still validated for structure, URL, models, and capabilities,
+providers are still validated for structure, URL, models, capabilities and TLS profiles,
 but they do not require a usable credential.
 
 ### Forwarding Client Authorization
@@ -450,11 +452,11 @@ provider "openai-compatible" "nvidia-2" {
 }
 ```
 
-A derived provider may be declared before or after its base. It may declare only `extends`, optional `display_name`, and exactly one local credential, either `api_key` or `api_key_ref`. It inherits the base provider type, `base_url`, effective upstream header timeout, enabled state, and all model blocks.
+A derived provider may be declared before or after its base. It may declare only `extends`, optional `display_name`, and exactly one local credential, either `api_key` or `api_key_ref`. It inherits the base provider type, `base_url`, effective upstream header timeout, TLS ClientHello settings/profile, enabled state, and all model blocks.
 
 `github-copilot` derivatives instead require a local `credential_ref` and stay compact (no `base_url`/models); `credential_ref` is rejected on all other types, and `api_key`/`api_key_ref` are rejected on Copilot blocks.
 
-The type label remains required and must match the base. The base must exist, be enabled, and must not itself use `extends`; inheritance chains are rejected. Local `base_url`, `upstream_header_timeout`, `enabled`, and `model` declarations are rejected instead of ignored.
+The type label remains required and must match the base. The base must exist, be enabled, and must not itself use `extends`; inheritance chains are rejected. Local `base_url`, `upstream_header_timeout`, `tls_client_hello`, `tls_client_hello_spec_file`, `enabled`, and `model` declarations are rejected instead of ignored, including explicit TLS defaults.
 
 Derived providers are flattened during config loading and reload. After a successful load, direct model strings, health, metrics, billing, and dashboard inventory use the derived provider's own name. Aliases still list each provider target explicitly.
 
@@ -473,6 +475,184 @@ provider "openai" "openai" {
 ```
 
 Precedence is provider value, then root value, then the 90-second default. The timeout applies only until response headers arrive; JSON and streaming response bodies can continue for any duration after headers are received. Root and provider timeout changes apply on a successful `SIGHUP` reload.
+
+## Upstream TLS ClientHello
+
+`tls_client_hello` is an optional **provider-only** selector for upstream HTTPS.
+There is no root default or bypass setting. Values are strict, case-sensitive
+strings; empty, null, wrong-type, wrong-case and unknown selections fail validation.
+
+| Selection                 | Effective behavior                                                 |
+| ------------------------- | ------------------------------------------------------------------ |
+| Omitted or `native`       | Standard Go 1.27 TLS (the default)                                 |
+| `chrome` or `chrome-133`  | Bundled Chrome 133; canonical selector `chrome-133`                |
+| `safari` or `safari-16.0` | Bundled Safari 16.0; canonical selector `safari-16.0`              |
+| `custom`                  | Supplied static JSON recipe; requires `tls_client_hello_spec_file` |
+
+Browser presets come from pinned uTLS **v1.8.2**. Aliases are frozen bundled
+mappings, not live/latest browser downloads. Firefox, Bun, generic BoringSSL/iOS,
+randomized, draft and PSK selectors are not supported. `custom` never detects Bun.
+
+```hcl
+provider "openai-compatible" "profiled" {
+  base_url         = "https://api.example.test/v1"
+  api_key          = env("UPSTREAM_API_KEY")
+  tls_client_hello = "chrome-133"
+
+  model "example-model" {}
+}
+```
+
+The effective profile applies to HTTPS inference, each alias target, provider health
+probes and CLI upstream model discovery. Plain-HTTP requests perform no upstream TLS;
+an absolute HTTPS health URL still uses the profile even when `base_url` is HTTP.
+Static derived providers inherit both TLS attributes/profile with the base endpoint
+and reject all local declarations. Disabled profiles are validated too.
+
+Profiles change **ClientHello only**, not HTTP headers, HTTP/2 settings, the TCP stack,
+inbound listener transport or `user_agent`. Certificate and hostname verification
+remain enabled. Bundled compatibility advertisements do not enable weak negotiation:
+non-native connections require TLS 1.2/1.3 with strong ECDHE/AEAD or TLS 1.3 AEAD,
+reject SHA-1/weak server selections, and never rewrite, fall back or cycle profiles.
+Resumed/PSK handshakes, renegotiation and selected ALPS (even empty settings) are
+unsupported. A ClientHello match does not guarantee provider, WAF or bot acceptance.
+
+### Custom Specification Files
+
+`custom` requires a nonempty `tls_client_hello_spec_file`. Declaring that attribute
+with any non-custom selector is invalid **even when the file value is empty**.
+Custom recipes are file-based only; inline recipe fields/uploads are unsupported.
+
+```hcl
+provider "openai-compatible" "custom-profile" {
+  base_url                  = "https://api.example.test/v1"
+  api_key                   = env("UPSTREAM_API_KEY")
+  tls_client_hello           = "custom"
+  tls_client_hello_spec_file = "tls/custom-clienthello.json"
+
+  model "example-model" {}
+}
+```
+
+If the config is `config/config.hcl`, create `config/tls/custom-clienthello.json`.
+Relative paths resolve against the config file's absolute **lexical directory**,
+not the shell cwd. Inline `AIPROXY_CONFIG` or source-less loading requires an
+absolute host-local reference. References are at most 4096 UTF-8 bytes without
+control characters/NUL. Regular-file symlinks are allowed; directories, devices
+and FIFOs are rejected. There is no tilde, shell or URL expansion, and recipe JSON
+does not expand `env()`; config-level `env()` inlining remains available.
+
+Recipes are read, strictly validated and cached immutably during candidate
+configuration validation. Requests and runtime validators never reopen files;
+each connection gets fresh mutable extension objects, randomness, session bytes
+and real key shares, with SNI from the actual upstream hostname. Replacing a file
+alone does not change a running server. Successful `SIGHUP` reload picks up new
+contents; a failed reload preserves old cached bytes, even at the same path.
+In-place CLI edits preserve reference and `env()` spelling. HCL/JSON conversion
+emits resolved absolute references without copying recipes: this preserves
+host-local usability, not portability across machines or container mounts.
+
+The following **illustrative**, unmeasured recipe is a minimal TLS 1.2/1.3 example,
+not a Chrome or Bun fingerprint. Save it at the path above. Capture metadata is
+separate and must not be added to this object.
+
+```json
+{
+  "cipher_suites": ["TLS_AES_128_GCM_SHA256", "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"],
+  "compression_methods": ["NULL"],
+  "extensions": [
+    { "name": "server_name" },
+    { "name": "supported_groups", "named_group_list": ["x25519", "secp256r1"] },
+    { "name": "signature_algorithms", "supported_signature_algorithms": ["rsa_pss_rsae_sha256"] },
+    { "name": "application_layer_protocol_negotiation", "protocol_name_list": ["h2", "http/1.1"] },
+    { "name": "supported_versions", "versions": ["TLS 1.3", "TLS 1.2"] },
+    { "name": "key_share", "client_shares": [{ "group": "x25519" }] }
+  ],
+  "min_vers": 771,
+  "max_vers": 772
+}
+```
+
+This stable v1 subset uses native-shaped uTLS JSON, **not** ordinary Go struct
+marshaling. Files contain one valid UTF-8 object, at most **64 KiB**, depth **8**
+and **4096 tokens**. Duplicate keys, unknown fields, null required collections,
+trailing data and contradictory settings are rejected. Array order is significant.
+
+| Field                  | Accepted v1 contents                                                                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cipher_suites`        | 1–64 unique ordered names from the list below; at most one `GREASE`; require a safe usable suite for every enabled version                        |
+| `compression_methods`  | Exactly `["NULL"]`                                                                                                                                |
+| `extensions`           | 1–32 ordered extension objects; unique names except up to two `GREASE` entries; require `server_name`, `supported_groups`, `signature_algorithms` |
+| `min_vers`, `max_vers` | Optional numeric bounds `771` (TLS 1.2) or `772` (TLS 1.3), matching `supported_versions`; without that extension, only TLS 1.2                   |
+
+Safe suite names are:
+
+```text
+TLS_AES_128_GCM_SHA256
+TLS_AES_256_GCM_SHA384
+TLS_CHACHA20_POLY1305_SHA256
+TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+```
+
+`GREASE` and these eight legacy names are accepted as **advertisements only**;
+they cannot satisfy the safe-suite requirement or be negotiated:
+
+```text
+TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA
+TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA
+TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA
+TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA
+TLS_RSA_WITH_AES_128_GCM_SHA256
+TLS_RSA_WITH_AES_256_GCM_SHA384
+TLS_RSA_WITH_AES_128_CBC_SHA
+TLS_RSA_WITH_AES_256_CBC_SHA
+```
+
+Extension payloads are restricted as follows; no other payload fields are accepted:
+
+| Extension `name`                                                                                                                            | Payload                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GREASE`, `server_name`, `extended_master_secret`, `renegotiation_info`, `session_ticket`, `status_request`, `signed_certificate_timestamp` | `name` only; SNI is generated, tickets are empty first-flight advertisements                                                                                                     |
+| `supported_groups`                                                                                                                          | `named_group_list`: 1–16 unique entries from `X25519MLKEM768`, `x25519`, `secp256r1`, `secp384r1`, `secp521r1`, `GREASE`; require a real group and a classical group for TLS 1.2 |
+| `ec_point_formats`                                                                                                                          | `ec_point_format_list`: exactly `["uncompressed"]`                                                                                                                               |
+| `signature_algorithms`                                                                                                                      | `supported_signature_algorithms`: 1–32 unique names listed below; require a usable modern signature compatible with the enabled suites/versions                                  |
+| `application_layer_protocol_negotiation`                                                                                                    | `protocol_name_list`: `["http/1.1"]` or `h2` plus `http/1.1` in either order; no empty, duplicate, unknown or h2-only list; the extension may be absent                          |
+| `supported_versions`                                                                                                                        | `versions`: 1–3 unique entries from `TLS 1.2`, `TLS 1.3`, `GREASE`, with at least one real version                                                                               |
+| `key_share`                                                                                                                                 | `client_shares`: 1–3 unique shares in `supported_groups` order; at most one real classical share, with `x25519` fallback required for `X25519MLKEM768`; required for TLS 1.3     |
+| `psk_key_exchange_modes`                                                                                                                    | `ke_modes`: exactly `["psk_dhe_ke"]`, TLS 1.3 only; no imported PSK identities or sessions                                                                                       |
+| `padding`                                                                                                                                   | `len`: integer 0–4096; zero means BoringPaddingStyle rather than a fixed padding count                                                                                           |
+
+Each share is `{ "group": "<allowed-group>" }`: omit `key_exchange` for every
+real group. GREASE may use dummy `"key_exchange": [0]` only. The private
+`X25519MLKEM768` JSON symbol adapter generates fresh keys without changing uTLS
+dictionaries. MLKEM-only and multiple distinct classical shares are unsupported.
+
+Modern signature names are `ecdsa_secp256r1_sha256`, `ecdsa_secp384r1_sha384`,
+`ecdsa_secp521r1_sha512`, `rsa_pss_rsae_sha256`, `rsa_pss_rsae_sha384`,
+`rsa_pss_rsae_sha512`, `rsa_pkcs1_sha256`, `rsa_pkcs1_sha384`, `rsa_pkcs1_sha512`
+and `ed25519`. RSA-PKCS1 signature selection is TLS 1.2 only. `rsa_pkcs1_sha1` and `ecdsa_sha1`
+may be advertised but are rejected if selected. DSA, SHA-224, Ed448 and unknown
+schemes are unsupported.
+
+A synthetic-SNI dry run must fit a **16 KiB** ClientHello; its generated crypto is
+discarded. Custom raw/generic extensions, ECH, ALPS, certificate compression, NPN,
+QUIC, cookies, delegated credentials, early data and resumption-specific fields
+are rejected, not approximated. Empty ticket/PSK-mode advertisements do not enable
+resumption. Bundled profiles may advertise compatibility fields outside the custom
+subset; selected ALPS remains explicitly unsupported.
+
+Database/API/web UI providers allow **built-ins only**, including effective
+inheritance. They reject custom/file/inline data before commit for all admin roles;
+a managed derivative cannot extend a static custom base. Views expose only
+selector/effective/inherited/static-only metadata, never recipe paths/content.
+See the [admin contract](api-reference.md#provider-tls-clienthello-settings) and
+[capture, deployment and proxy limits](operations.md#local-bun-clienthello-capture)
+for the measured Bun fixture and supported transport paths.
 
 ## Upstream User-Agent
 
@@ -672,6 +852,9 @@ Startup fails on invalid configuration. Important checks include:
 - model names with invalid slash-separated segments
 - `openai-compatible` providers missing `base_url`
 - malformed provider `base_url` values, and non-loopback `http` base URLs
+- empty, wrong-type, wrong-case or unknown TLS selectors, root/local derived TLS
+  declarations, any spec-file declaration on non-custom, or missing/unreadable/
+  invalid custom recipes; disabled providers are subject to these TLS checks too
 - `opencode-zen` or `opencode-go` models missing `protocol`, using an unknown
   protocol, using `gemini` on `opencode-go`, or declaring a capability the
   protocol does not serve; `protocol` on any other provider type

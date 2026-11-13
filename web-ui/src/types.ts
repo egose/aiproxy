@@ -271,11 +271,20 @@ export const adminHealthcheckSchema = z.object({
   send_authorization: z.boolean().optional().default(false),
 });
 
+export const builtinTLSClientHelloSelectors = ['native', 'chrome', 'chrome-133', 'safari', 'safari-16.0'] as const;
+
 export const adminProviderSchema = z.object({
   name: z.string(),
   type: z.string(),
   display_name: z.string().optional().default(''),
   base_url: z.string().optional().default(''),
+  tls_client_hello: z
+    .enum([...builtinTLSClientHelloSelectors, 'custom'])
+    .optional()
+    .default('native'),
+  tls_client_hello_effective: z.enum(['native', 'chrome-133', 'safari-16.0', 'custom']).optional().default('native'),
+  tls_client_hello_inherited: z.boolean().optional().default(false),
+  tls_client_hello_static_only: z.boolean().optional().default(false),
   upstream_header_timeout: z.string().optional().default(''),
   user_agent: z.string().optional().default(''),
   forward_user_agent: z.boolean().optional().default(false),
@@ -502,6 +511,10 @@ export const providerTypeInfoSchema = z.object({
   protocols: z.array(z.string()).catch([]),
   default_capabilities: z.array(z.string()).catch([]),
   supported_capabilities: z.array(z.string()).catch([]),
+  tls_client_hello_selectors: z
+    .array(z.enum(builtinTLSClientHelloSelectors))
+    .optional()
+    .default([...builtinTLSClientHelloSelectors]),
 });
 
 export const providerTypesSchema = z.object({

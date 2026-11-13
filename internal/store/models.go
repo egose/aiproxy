@@ -49,6 +49,7 @@ type DBProvider struct {
 	Type                       string          `bun:"type,notnull"`
 	DisplayName                string          `bun:"display_name,notnull,default:''"`
 	BaseURL                    string          `bun:"base_url,notnull,default:''"`
+	TLSClientHello             string          `bun:"tls_client_hello,notnull,default:''"`
 	UpstreamTimeoutMs          *int64          `bun:"upstream_header_timeout_ms"`
 	UserAgent                  string          `bun:"user_agent,notnull,default:''"`
 	ForwardUserAgent           bool            `bun:"forward_user_agent,notnull,default:false"`

@@ -69,7 +69,19 @@ func (rt *Runtime) ApplyProviderDefaults(p Provider) Provider {
 	}
 	p.ForwardUserAgent = p.ForwardUserAgent || rt.ForwardUserAgent
 	p.ForwardHeaders = unionForwardHeaders(rt.ForwardHeaders, p.ForwardHeaders)
+	if resolved, err := ResolveDynamicProviderTLSProfile(p); err == nil {
+		p = resolved
+	}
 	return p
+}
+
+func ResolveDynamicProviderTLSProfile(p Provider) (Provider, error) {
+	profile, err := resolveProviderTLSProfile(p, false)
+	if err != nil {
+		return Provider{}, fmt.Errorf("provider %q: %w", p.Name, err)
+	}
+	p.TLSProfile = profile
+	return p, nil
 }
 
 func NormalizeAlias(a Alias) Alias {
@@ -124,6 +136,9 @@ func ValidateDynamicProvider(p Provider) error {
 		return err
 	}
 	if err := validateProviderUserAgent(p); err != nil {
+		return err
+	}
+	if _, err := ResolveDynamicProviderTLSProfile(p); err != nil {
 		return err
 	}
 	if err := ValidateForwardHeaders(p.ForwardHeaders, fmt.Sprintf("provider %q", p.Name)); err != nil {

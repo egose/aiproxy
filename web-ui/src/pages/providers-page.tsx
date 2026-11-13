@@ -52,7 +52,7 @@ import {
   updateAdminProvider,
 } from '../services/admin';
 import { errorMessage } from '../services/dashboard';
-import { copilotDeviceFlowStatusSchema } from '../types';
+import { builtinTLSClientHelloSelectors, copilotDeviceFlowStatusSchema } from '../types';
 import type { AdminProvider, CopilotDeviceFlowStatus, Provider, ProviderTypeInfo } from '../types';
 
 type SnapshotSortKey = 'name' | 'type' | 'models' | 'display';
@@ -170,6 +170,7 @@ const providerFormSchema = z
     type: z.string().min(1, 'Select a type.'),
     displayName: z.string().optional(),
     baseUrl: z.string().optional(),
+    tlsClientHello: z.enum(builtinTLSClientHelloSelectors).optional(),
     enabled: z.boolean().optional(),
     extendsName: z.string().optional(),
     userAgent: z.string().optional(),
@@ -233,6 +234,7 @@ const emptyProviderForm = (): ProviderFormValues => ({
   type: 'openai',
   displayName: '',
   baseUrl: '',
+  tlsClientHello: 'native',
   enabled: true,
   extendsName: '',
   userAgent: '',
@@ -265,6 +267,7 @@ function providerToFormValues(p: AdminProvider): ProviderFormValues {
     type: p.type,
     displayName: p.display_name ?? '',
     baseUrl: p.base_url ?? '',
+    tlsClientHello: p.tls_client_hello === 'custom' ? 'native' : p.tls_client_hello,
     enabled: p.enabled,
     extendsName: p.extends ?? '',
     userAgent: p.user_agent ?? '',
@@ -358,6 +361,8 @@ function buildProviderBody(
   if (!inherited) {
     set('models', 'models', modelPayloads);
     set('base_url', 'baseUrl', (v.baseUrl ?? '').trim(), !!v.baseUrl?.trim());
+    set('tls_client_hello', 'tlsClientHello', v.tlsClientHello ?? 'native', v.tlsClientHello !== 'native');
+    if (initial?.extendsName?.trim()) body.tls_client_hello = v.tlsClientHello ?? 'native';
     set('allow_insecure_base_url', 'allowInsecureBaseUrl', !!v.allowInsecureBaseUrl, !!v.allowInsecureBaseUrl);
     set('upstream_header_timeout', 'timeout', (v.timeout ?? '').trim(), !!v.timeout?.trim());
     set('user_agent', 'userAgent', v.userAgent ?? '', !!v.userAgent);
@@ -911,7 +916,13 @@ function ProviderForm({
         {inherited && (
           <p className="text-sm text-slate-500">
             Models, transport settings and healthcheck are inherited from the base provider. Type must match the base.
-            Enabled controls this database provider locally; a blank display name uses the base display name.
+            Enabled controls this database provider locally; a blank display name uses the base display name. TLS
+            ClientHello
+            {editProvider && editProvider.extends === form.watch('extendsName')
+              ? ` (${editProvider.tls_client_hello})`
+              : ''}{' '}
+            is inherited; no local TLS selection is submitted. Managed providers cannot extend a static custom-profile
+            base.
           </p>
         )}
 
@@ -922,6 +933,20 @@ function ProviderForm({
               label={`Base URL${typeInfo?.requires_base_url ? ' (required for this type)' : ' (optional)'}`}
               placeholder="https://..."
             />
+
+            <HookFormNativeSelect<ProviderFormValues>
+              name="tlsClientHello"
+              label="TLS ClientHello profile"
+              data={(typeInfo?.tls_client_hello_selectors ?? builtinTLSClientHelloSelectors).map((value) => ({
+                label: value === 'native' ? 'native (Go TLS default)' : value,
+                value,
+              }))}
+            />
+
+            <p className="text-sm text-slate-500">
+              Built-in profiles only. Custom JSON files are static-config-only and cannot be uploaded or referenced
+              here. This changes ClientHello only, not the full browser or Bun networking stack.
+            </p>
 
             <HookFormCheckbox<ProviderFormValues>
               name="allowInsecureBaseUrl"
@@ -1620,6 +1645,17 @@ function ManagedProviders() {
         accessorKey: 'source',
         header: 'Source',
         cell: ({ row }) => <SourceBadge source={row.original.source} />,
+      },
+      {
+        accessorKey: 'tls_client_hello',
+        header: 'TLS ClientHello',
+        cell: ({ row }) => (
+          <span className="font-mono text-sm" title={`Effective profile: ${row.original.tls_client_hello_effective}`}>
+            {row.original.tls_client_hello}
+            {row.original.tls_client_hello_inherited ? ' · inherited' : ''}
+            {row.original.tls_client_hello_static_only ? ' · static-only' : ''}
+          </span>
+        ),
       },
       {
         id: 'workspace',

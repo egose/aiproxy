@@ -11,11 +11,13 @@ import (
 
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/providerhealth"
+	"github.com/egose/aiproxy/internal/upstreamhttp"
 )
 
 type probeTransportFunc func(*http.Request) (*http.Response, error)
 
 func (f probeTransportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+func (f probeTransportFunc) CloseIdleConnections()                             {}
 
 type heldFailureBackend struct {
 	started chan struct{}
@@ -53,13 +55,15 @@ func TestProbePublicationCompletesBeforeReplacement(t *testing.T) {
 	defer m.Close()
 	var releaseOnce sync.Once
 	defer releaseOnce.Do(func() { close(b.release) })
-	m.client = &http.Client{Transport: probeTransportFunc(func(r *http.Request) (*http.Response, error) {
-		code := http.StatusOK
-		if r.URL.Path == "/old" {
-			code = http.StatusServiceUnavailable
-		}
-		return &http.Response{StatusCode: code, Body: http.NoBody, Header: make(http.Header)}, nil
-	})}
+	m.factory = func(upstreamhttp.Options) (upstreamhttp.Transport, error) {
+		return probeTransportFunc(func(r *http.Request) (*http.Response, error) {
+			code := http.StatusOK
+			if r.URL.Path == "/old" {
+				code = http.StatusServiceUnavailable
+			}
+			return &http.Response{StatusCode: code, Body: http.NoBody, Header: make(http.Header)}, nil
+		}), nil
+	}
 	old := testProvider("local", "http://probe.test", fastCheck("/old"))
 	old.Healthcheck.Interval = time.Hour
 	m.SetProviders(config.NewCatalog([]config.Provider{old}, nil, nil))
@@ -100,15 +104,17 @@ func TestReplacedProbeCannotOverwriteActiveHealth(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	var releaseOnce sync.Once
 	defer releaseOnce.Do(func() { close(release) })
-	m.client = &http.Client{Transport: probeTransportFunc(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path == "/old" {
-			close(started)
-			<-r.Context().Done()
-			<-release
-			return nil, context.Canceled
-		}
-		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Header: make(http.Header)}, nil
-	})}
+	m.factory = func(upstreamhttp.Options) (upstreamhttp.Transport, error) {
+		return probeTransportFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Path == "/old" {
+				close(started)
+				<-r.Context().Done()
+				<-release
+				return nil, context.Canceled
+			}
+			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Header: make(http.Header)}, nil
+		}), nil
+	}
 	old := testProvider("local", "http://probe.test", fastCheck("/old"))
 	old.Healthcheck.Interval = time.Hour
 	m.SetProviders(config.NewCatalog([]config.Provider{old}, nil, nil))

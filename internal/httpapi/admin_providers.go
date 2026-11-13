@@ -10,11 +10,14 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/egose/aiproxy/internal/adminauth"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/dbmerge"
 	"github.com/egose/aiproxy/internal/store"
+	"github.com/egose/aiproxy/internal/tlsprofile"
 	"github.com/google/uuid"
 )
 
@@ -40,30 +43,34 @@ type adminHealthcheckView struct {
 }
 
 type adminProviderView struct {
-	Name                    string                `json:"name"`
-	Type                    string                `json:"type"`
-	DisplayName             string                `json:"display_name,omitempty"`
-	BaseURL                 string                `json:"base_url,omitempty"`
-	UpstreamHeaderTimeout   string                `json:"upstream_header_timeout,omitempty"`
-	UserAgent               string                `json:"user_agent,omitempty"`
-	ForwardUserAgent        bool                  `json:"forward_user_agent"`
-	ForwardHeaders          []string              `json:"forward_headers,omitempty"`
-	ForwardAuthorization    bool                  `json:"forward_authorization"`
-	AllowInsecureBaseURL    bool                  `json:"allow_insecure_base_url"`
-	Extends                 string                `json:"extends,omitempty"`
-	APIKeyRefPath           string                `json:"api_key_ref_path,omitempty"`
-	APIKeyRefKey            string                `json:"api_key_ref_key,omitempty"`
-	CopilotCredentialPath   string                `json:"copilot_credential_path,omitempty"`
-	CopilotCredentialName   string                `json:"copilot_credential_name,omitempty"`
-	CopilotCredentialSource string                `json:"copilot_credential_source,omitempty"`
-	UpdatedAt               string                `json:"updated_at,omitempty"`
-	Enabled                 bool                  `json:"enabled"`
-	Source                  string                `json:"source"`
-	WorkspaceID             string                `json:"workspace_id,omitempty"`
-	WorkspaceName           string                `json:"workspace_name,omitempty"`
-	HasCredential           bool                  `json:"has_credential"`
-	Healthcheck             *adminHealthcheckView `json:"healthcheck,omitempty"`
-	Models                  []adminModelView      `json:"models"`
+	Name                     string                `json:"name"`
+	Type                     string                `json:"type"`
+	DisplayName              string                `json:"display_name,omitempty"`
+	BaseURL                  string                `json:"base_url,omitempty"`
+	TLSClientHello           string                `json:"tls_client_hello"`
+	TLSClientHelloEffective  string                `json:"tls_client_hello_effective"`
+	TLSClientHelloInherited  bool                  `json:"tls_client_hello_inherited"`
+	TLSClientHelloStaticOnly bool                  `json:"tls_client_hello_static_only"`
+	UpstreamHeaderTimeout    string                `json:"upstream_header_timeout,omitempty"`
+	UserAgent                string                `json:"user_agent,omitempty"`
+	ForwardUserAgent         bool                  `json:"forward_user_agent"`
+	ForwardHeaders           []string              `json:"forward_headers,omitempty"`
+	ForwardAuthorization     bool                  `json:"forward_authorization"`
+	AllowInsecureBaseURL     bool                  `json:"allow_insecure_base_url"`
+	Extends                  string                `json:"extends,omitempty"`
+	APIKeyRefPath            string                `json:"api_key_ref_path,omitempty"`
+	APIKeyRefKey             string                `json:"api_key_ref_key,omitempty"`
+	CopilotCredentialPath    string                `json:"copilot_credential_path,omitempty"`
+	CopilotCredentialName    string                `json:"copilot_credential_name,omitempty"`
+	CopilotCredentialSource  string                `json:"copilot_credential_source,omitempty"`
+	UpdatedAt                string                `json:"updated_at,omitempty"`
+	Enabled                  bool                  `json:"enabled"`
+	Source                   string                `json:"source"`
+	WorkspaceID              string                `json:"workspace_id,omitempty"`
+	WorkspaceName            string                `json:"workspace_name,omitempty"`
+	HasCredential            bool                  `json:"has_credential"`
+	Healthcheck              *adminHealthcheckView `json:"healthcheck,omitempty"`
+	Models                   []adminModelView      `json:"models"`
 }
 
 func copilotCredentialSource(providerType string, encrypted []byte, refPath, refName string) string {
@@ -157,6 +164,7 @@ func (h *Handler) adminProviderTypes(deps Dependencies, w http.ResponseWriter, r
 			"supports_device_authorization": info.Type == config.ProviderTypeGitHubCopilot,
 			"model_protocol_required":       info.ModelProtocolRequired, "protocols": protocols,
 			"default_capabilities": defaults, "supported_capabilities": supported,
+			"tls_client_hello_selectors": tlsprofile.BuiltinSelectors(),
 		})
 	}
 	writeAdminJSON(w, http.StatusOK, map[string]interface{}{"provider_types": out})
@@ -333,34 +341,97 @@ type adminCredentialRefUpsert struct {
 }
 
 type adminProviderUpsert struct {
-	Name                  string                    `json:"name"`
-	WorkspaceID           string                    `json:"workspace_id"`
-	Type                  *string                   `json:"type"`
-	DisplayName           *string                   `json:"display_name"`
-	BaseURL               *string                   `json:"base_url"`
-	UpstreamHeaderTimeout *string                   `json:"upstream_header_timeout"`
-	UserAgent             *string                   `json:"user_agent"`
-	ForwardUserAgent      *bool                     `json:"forward_user_agent"`
-	ForwardHeaders        []string                  `json:"forward_headers"`
-	ForwardAuthorization  *bool                     `json:"forward_authorization"`
-	AllowInsecureBaseURL  *bool                     `json:"allow_insecure_base_url"`
-	APIKey                *string                   `json:"api_key"`
-	APIKeyRef             *adminAPIKeyRefUpsert     `json:"api_key_ref"`
-	CredentialRef         *adminCredentialRefUpsert `json:"credential_ref"`
-	CopilotDeviceFlowID   *string                   `json:"copilot_device_flow_id"`
-	ExpectedUpdatedAt     *string                   `json:"expected_updated_at"`
-	Enabled               *bool                     `json:"enabled"`
-	Extends               *string                   `json:"extends"`
-	Healthcheck           *adminHealthcheckUpsert   `json:"healthcheck"`
-	Models                *[]adminModelUpsert       `json:"models"`
+	Name                      string                    `json:"name"`
+	WorkspaceID               string                    `json:"workspace_id"`
+	Type                      *string                   `json:"type"`
+	DisplayName               *string                   `json:"display_name"`
+	BaseURL                   *string                   `json:"base_url"`
+	TLSClientHello            json.RawMessage           `json:"tls_client_hello"`
+	TLSClientHelloSpecFile    json.RawMessage           `json:"tls_client_hello_spec_file"`
+	TLSClientHelloSpec        json.RawMessage           `json:"tls_client_hello_spec"`
+	UpstreamHeaderTimeout     *string                   `json:"upstream_header_timeout"`
+	UserAgent                 *string                   `json:"user_agent"`
+	ForwardUserAgent          *bool                     `json:"forward_user_agent"`
+	ForwardHeaders            []string                  `json:"forward_headers"`
+	ForwardAuthorization      *bool                     `json:"forward_authorization"`
+	AllowInsecureBaseURL      *bool                     `json:"allow_insecure_base_url"`
+	APIKey                    *string                   `json:"api_key"`
+	APIKeyRef                 *adminAPIKeyRefUpsert     `json:"api_key_ref"`
+	CredentialRef             *adminCredentialRefUpsert `json:"credential_ref"`
+	CopilotDeviceFlowID       *string                   `json:"copilot_device_flow_id"`
+	ExpectedUpdatedAt         *string                   `json:"expected_updated_at"`
+	Enabled                   *bool                     `json:"enabled"`
+	Extends                   *string                   `json:"extends"`
+	Healthcheck               *adminHealthcheckUpsert   `json:"healthcheck"`
+	Models                    *[]adminModelUpsert       `json:"models"`
+	unsupportedTLSDeclaration bool
+}
+
+func (req *adminProviderUpsert) UnmarshalJSON(raw []byte) error {
+	type plainUpsert adminProviderUpsert
+	var decoded plainUpsert
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	for name := range fields {
+		if jsonFieldHasPrefix(name, "tls_client_hello") && !strings.EqualFold(name, "tls_client_hello") {
+			decoded.unsupportedTLSDeclaration = true
+		}
+	}
+	*req = adminProviderUpsert(decoded)
+	return nil
 }
 
 type adminCredentialUpsert struct {
-	APIKey                *string `json:"api_key"`
-	APIKeyRefPath         *string `json:"api_key_ref_path"`
-	APIKeyRefKey          *string `json:"api_key_ref_key"`
-	CopilotCredentialPath *string `json:"copilot_credential_path"`
-	CopilotCredentialName *string `json:"copilot_credential_name"`
+	APIKey                    *string `json:"api_key"`
+	APIKeyRefPath             *string `json:"api_key_ref_path"`
+	APIKeyRefKey              *string `json:"api_key_ref_key"`
+	CopilotCredentialPath     *string `json:"copilot_credential_path"`
+	CopilotCredentialName     *string `json:"copilot_credential_name"`
+	unsupportedTLSDeclaration bool
+}
+
+func (req *adminCredentialUpsert) UnmarshalJSON(raw []byte) error {
+	type plainUpsert adminCredentialUpsert
+	var decoded plainUpsert
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	for name := range fields {
+		if jsonFieldHasPrefix(name, "tls_client_hello") {
+			decoded.unsupportedTLSDeclaration = true
+		}
+	}
+	*req = adminCredentialUpsert(decoded)
+	return nil
+}
+
+func jsonFieldHasPrefix(name, prefix string) bool {
+	for _, expected := range prefix {
+		actual, width := utf8.DecodeRuneInString(name)
+		if width == 0 {
+			return false
+		}
+		if actual != expected {
+			folded := unicode.SimpleFold(actual)
+			for folded != actual && folded != expected {
+				folded = unicode.SimpleFold(folded)
+			}
+			if folded != expected {
+				return false
+			}
+		}
+		name = name[width:]
+	}
+	return true
 }
 
 type dbHealthcheck struct {
@@ -387,6 +458,7 @@ func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r 
 	if h.canSeeSystemWorkspace(deps, r, claims, filterWorkspace) {
 		for _, p := range deps.Catalog.Providers() {
 			mv := adminProviderView{Name: p.Name, Type: string(p.Type), DisplayName: p.DisplayName, BaseURL: p.BaseURL, Enabled: true, Source: "config", HasCredential: true}
+			setProviderTLSView(&mv, p)
 			if p.UpstreamHeaderTimeout > 0 {
 				mv.UpstreamHeaderTimeout = p.UpstreamHeaderTimeout.String()
 			}
@@ -419,6 +491,10 @@ func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r 
 	if err != nil {
 		return nil, err
 	}
+	rowsByName := make(map[string]store.DBProvider, len(rows))
+	for _, p := range rows {
+		rowsByName[p.Name] = p
+	}
 	for _, p := range rows {
 		if filterWorkspace != "" && p.WorkspaceID.String() != filterWorkspace {
 			continue
@@ -446,6 +522,11 @@ func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r 
 			HasCredential: len(p.APIKeyEncrypted) > 0 || p.APIKeyRefKey != "" || p.CopilotCredentialName != "" || len(p.CopilotCredentialEncrypted) > 0,
 			Healthcheck:   providerHealthcheckView(p.Healthcheck),
 		}
+		tlsProvider, err := managedProviderTLSMetadata(p, rowsByName, deps.Catalog)
+		if err != nil {
+			return nil, err
+		}
+		setProviderTLSView(&mv, tlsProvider)
 		for _, m := range models {
 			mv.Models = append(mv.Models, adminModelView{Name: m.Name, DisplayName: m.DisplayName, UpstreamName: m.UpstreamName, Protocol: m.Protocol, Capabilities: append([]string(nil), m.Capabilities...), Pricing: providerModelPricingView(m.Pricing)})
 		}
@@ -453,6 +534,54 @@ func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r 
 		views[p.Name] = &v
 	}
 	return sortedProviderViews(deps, views), nil
+}
+
+func setProviderTLSView(view *adminProviderView, p config.Provider) {
+	view.TLSClientHello = p.TLSClientHello
+	if view.TLSClientHello == "" {
+		view.TLSClientHello = "native"
+	}
+	view.TLSClientHelloEffective = p.TLSProfile.CanonicalName()
+	view.TLSClientHelloInherited = p.TLSClientHelloInherited
+	view.TLSClientHelloStaticOnly = p.TLSProfile.IsCustom() || p.TLSClientHello == "custom"
+}
+
+func managedProviderTLSMetadata(row store.DBProvider, rows map[string]store.DBProvider, catalog config.Catalog) (config.Provider, error) {
+	name, inherited := row.Name, row.Extends != ""
+	visiting := make(map[string]bool)
+	for {
+		if row.Extends == "" {
+			return config.ResolveDynamicProviderTLSProfile(config.Provider{
+				Name: name, TLSClientHello: row.TLSClientHello, HasTLSClientHello: row.TLSClientHello != "", TLSClientHelloInherited: inherited,
+			})
+		}
+		if row.TLSClientHello != "" {
+			return config.Provider{}, fmt.Errorf("provider %q: derived provider cannot declare tls_client_hello", row.Name)
+		}
+		if visiting[row.Name] {
+			return config.Provider{}, fmt.Errorf("provider %q: tls_client_hello inheritance cycle", name)
+		}
+		visiting[row.Name] = true
+		if baseRow, ok := rows[row.Extends]; ok {
+			row = baseRow
+			continue
+		}
+		base, ok := catalog.Provider(row.Extends)
+		if !ok {
+			for _, disabled := range catalog.DisabledProviders() {
+				if disabled.Name == row.Extends {
+					base, ok = disabled, true
+					break
+				}
+			}
+		}
+		if !ok {
+			return config.Provider{}, fmt.Errorf("provider %q: extends %q is not defined", name, row.Extends)
+		}
+		base.Name = name
+		base.TLSClientHelloInherited = inherited
+		return config.ResolveDynamicProviderTLSProfile(base)
+	}
 }
 
 func modelPricingView(pricing *config.ModelPricing) map[string]float64 {
@@ -567,6 +696,10 @@ func (h *Handler) validateExtends(deps Dependencies, name, extends, providerType
 	}
 	if string(base.Type) != providerType {
 		return fmt.Errorf("provider %q: type %q must match base provider %q type %q", name, providerType, extends, base.Type)
+	}
+	base.Name = name
+	if _, err := config.ResolveDynamicProviderTLSProfile(base); err != nil {
+		return err
 	}
 	return nil
 }
@@ -794,6 +927,23 @@ func (h *Handler) applyProviderUpsert(name string, row *store.DBProvider, req ad
 	if extends != "" && req.AllowInsecureBaseURL != nil {
 		return fmt.Errorf("provider %q: derived provider cannot declare allow_insecure_base_url", name)
 	}
+	if req.unsupportedTLSDeclaration || len(req.TLSClientHelloSpecFile) != 0 || len(req.TLSClientHelloSpec) != 0 {
+		return fmt.Errorf("provider %q: tls_client_hello file and inline specifications are static-config-only; managed providers support built-in profiles only", name)
+	}
+	if extends != "" && len(req.TLSClientHello) != 0 {
+		return fmt.Errorf("provider %q: derived provider cannot declare tls_client_hello", name)
+	}
+	selector := row.TLSClientHello
+	if len(req.TLSClientHello) != 0 {
+		if err := json.Unmarshal(req.TLSClientHello, &selector); err != nil || selector == "" || strings.TrimSpace(string(req.TLSClientHello)) == "null" {
+			return fmt.Errorf("provider %q: tls_client_hello must be a non-null built-in selector", name)
+		}
+		if _, err := config.ResolveDynamicProviderTLSProfile(config.Provider{Name: name, TLSClientHello: selector, HasTLSClientHello: true}); err != nil {
+			return err
+		}
+	} else if row.Extends == "" && extends != "" {
+		selector = ""
+	}
 	if req.DisplayName != nil {
 		row.DisplayName = *req.DisplayName
 	}
@@ -830,6 +980,7 @@ func (h *Handler) applyProviderUpsert(name string, row *store.DBProvider, req ad
 		row.Enabled = *req.Enabled
 	}
 	row.Extends = extends
+	row.TLSClientHello = selector
 	if row.Extends != "" {
 		row.AllowInsecureBaseURL = false
 	}
@@ -981,6 +1132,9 @@ func (h *Handler) setProviderCredential(ctx context.Context, deps Dependencies, 
 	}
 	if !h.canWriteWorkspace(deps, ctx, claims, p.WorkspaceID) {
 		return errBad("workspace admin required")
+	}
+	if req.unsupportedTLSDeclaration {
+		return fmt.Errorf("provider %q: TLS settings cannot be declared on a credential update; custom files and inline specifications are static-config-only", name)
 	}
 	if req.APIKey != nil { // pragma: allowlist secret
 		if *req.APIKey == "" {

@@ -75,11 +75,15 @@ func newLifecycleTestApp(server *http.Server, backend *countingHealthBackend) *A
 	if server.Addr == "" {
 		server.Addr = "127.0.0.1:0"
 	}
+	clients, err := newUpstreamClientPool(config.Catalog{})
+	if err != nil {
+		panic(err)
+	}
 	return &App{
 		Config:  &config.Runtime{},
 		Server:  server,
 		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
-		clients: newUpstreamClientPool(),
+		clients: clients,
 		health:  providerhealth.NewWithBackend(nil, config.ProviderHealth{}, backend),
 	}
 }
@@ -1098,7 +1102,14 @@ func TestNewHTTPClientDoesNotSetWholeRequestTimeout(t *testing.T) {
 }
 
 func TestUpstreamClientPoolReusesByTimeout(t *testing.T) {
-	pool := newUpstreamClientPool()
+	pool, err := newUpstreamClientPool(config.NewCatalog([]config.Provider{
+		{Name: "first", UpstreamHeaderTimeout: 30 * time.Second},
+		{Name: "second", UpstreamHeaderTimeout: 45 * time.Second},
+	}, nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Retire()
 	c1 := pool.Client(30 * time.Second)
 	c2 := pool.Client(30 * time.Second)
 	c3 := pool.Client(45 * time.Second)

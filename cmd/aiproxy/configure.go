@@ -16,6 +16,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/configedit"
+	"github.com/egose/aiproxy/internal/tlsprofile"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/spf13/cobra"
@@ -71,51 +72,56 @@ type authOptions struct {
 }
 
 type providerOptions struct {
-	ProviderType            string
-	Name                    string
-	Extends                 string
-	DisplayName             string
-	BaseURL                 string
-	UpstreamHeaderTimeout   string
-	UserAgent               string
-	ForwardUserAgent        bool
-	HasForwardUserAgent     bool
-	ForwardHeaders          string
-	HasForwardHeaders       bool
-	ForwardAuthorization    bool
-	HasForwardAuthorization bool
-	AllowInsecureBaseURL    bool
-	HasAllowInsecureBaseURL bool
-	APIKey                  string
-	APIKeyEnv               string
-	SecretsPath             string
-	SecretsKey              string
-	Credential              string
-	CredentialPath          string
-	Models                  []string
-	ModelUpstreams          []string
-	ModelDisplayName        []string
-	ModelCaps               []string
-	ModelProtocols          []string
-	HealthcheckPath         string
-	HealthcheckMethod       string
-	HealthcheckStatus       int
-	HasHealthcheckStatus    bool
-	HealthcheckBody         string
-	HealthcheckInterval     string
-	HealthcheckTimeout      string
-	HealthcheckFailures     int
-	HasHealthcheckFailures  bool
-	HealthcheckSuccesses    int
-	HasHealthcheckSuccesses bool
-	HealthcheckSendAuth     bool
-	HasHealthcheckSendAuth  bool
-	NoHealthcheck           bool
-	Enabled                 bool
-	HasEnabled              bool
-	NonInteractive          bool
-	BaseProviderNames       []string
-	BaseProviderTypes       map[string]string
+	ProviderType              string
+	Name                      string
+	Extends                   string
+	DisplayName               string
+	BaseURL                   string
+	TLSClientHello            string
+	TLSClientHelloSpecFile    string
+	HasTLSClientHello         bool
+	HasTLSClientHelloSpecFile bool
+	ConfigFilename            string
+	UpstreamHeaderTimeout     string
+	UserAgent                 string
+	ForwardUserAgent          bool
+	HasForwardUserAgent       bool
+	ForwardHeaders            string
+	HasForwardHeaders         bool
+	ForwardAuthorization      bool
+	HasForwardAuthorization   bool
+	AllowInsecureBaseURL      bool
+	HasAllowInsecureBaseURL   bool
+	APIKey                    string
+	APIKeyEnv                 string
+	SecretsPath               string
+	SecretsKey                string
+	Credential                string
+	CredentialPath            string
+	Models                    []string
+	ModelUpstreams            []string
+	ModelDisplayName          []string
+	ModelCaps                 []string
+	ModelProtocols            []string
+	HealthcheckPath           string
+	HealthcheckMethod         string
+	HealthcheckStatus         int
+	HasHealthcheckStatus      bool
+	HealthcheckBody           string
+	HealthcheckInterval       string
+	HealthcheckTimeout        string
+	HealthcheckFailures       int
+	HasHealthcheckFailures    bool
+	HealthcheckSuccesses      int
+	HasHealthcheckSuccesses   bool
+	HealthcheckSendAuth       bool
+	HasHealthcheckSendAuth    bool
+	NoHealthcheck             bool
+	Enabled                   bool
+	HasEnabled                bool
+	NonInteractive            bool
+	BaseProviderNames         []string
+	BaseProviderTypes         map[string]string
 }
 
 func isGitHubCopilotProviderType(providerType string) bool {
@@ -306,6 +312,8 @@ func newConfigureProviderCommand() *cobra.Command {
 			options.HasForwardHeaders = cmd.Flags().Changed("forward-headers")
 			options.HasForwardAuthorization = cmd.Flags().Changed("forward-authorization")
 			options.HasAllowInsecureBaseURL = cmd.Flags().Changed("allow-insecure-base-url")
+			options.HasTLSClientHello = cmd.Flags().Changed("tls-client-hello")
+			options.HasTLSClientHelloSpecFile = cmd.Flags().Changed("tls-client-hello-spec-file")
 			options.HasHealthcheckStatus = cmd.Flags().Changed("healthcheck-expected-status")
 			options.HasHealthcheckFailures = cmd.Flags().Changed("healthcheck-failure-threshold")
 			options.HasHealthcheckSuccesses = cmd.Flags().Changed("healthcheck-success-threshold")
@@ -320,6 +328,8 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().StringVar(&options.Extends, "extends", "", "base provider name to inherit from")
 	cmd.Flags().StringVar(&options.DisplayName, "display-name", "", "provider display_name")
 	cmd.Flags().StringVar(&options.BaseURL, "base-url", "", "provider base_url")
+	cmd.Flags().StringVar(&options.TLSClientHello, "tls-client-hello", "", "provider TLS ClientHello: native, chrome, chrome-133, safari, safari-16.0, or custom (omitted preserves existing)")
+	cmd.Flags().StringVar(&options.TLSClientHelloSpecFile, "tls-client-hello-spec-file", "", "custom TLS ClientHello JSON reference, relative to the config file directory or absolute (static config only)")
 	cmd.Flags().StringVar(&options.UpstreamHeaderTimeout, "upstream-header-timeout", "", "provider upstream_header_timeout")
 	cmd.Flags().StringVar(&options.UserAgent, "user-agent", "", "provider user_agent override")
 	cmd.Flags().BoolVar(&options.ForwardUserAgent, "forward-user-agent", false, "forward the inbound User-Agent header upstream (use --forward-user-agent=false to disable; default preserves existing)")
@@ -804,6 +814,7 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 	}
 
 	options.BaseProviderNames, options.BaseProviderTypes = eligibleBaseProviders(doc.blocks)
+	options.ConfigFilename = configPath
 	input, secretsUpdate, err := promptProviderInput(prompts, existingProviderInput(doc.blocks, nameForAction), options)
 	if err != nil {
 		return err
@@ -819,6 +830,9 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 		return err
 	}
 	reviewLines := []string{"Config path: " + configPath, "Action: " + action + " provider " + input.Name}
+	if err := config.ValidateProviderTLSProfiles([]byte(updated), configPath); err != nil {
+		return err
+	}
 	if secretsUpdate.path != "" {
 		reviewLines = append(reviewLines, "Secrets update: "+secretsUpdate.path+" key "+secretsUpdate.key)
 	}
@@ -1921,6 +1935,9 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	if options.DisplayName != "" {
 		defaults.DisplayName = options.DisplayName
 	}
+	if err := applyProviderTLSOptions(&defaults, existing, options); err != nil {
+		return providerInput{}, secretsUpdate{}, err
+	}
 	if defaults.Extends != "" && (options.BaseURL != "" || options.UpstreamHeaderTimeout != "" || options.UserAgent != "" || options.HasForwardUserAgent || options.HasForwardHeaders || options.HasEnabled || hasProviderModelOptions(options) || hasProviderHealthcheckOptions(options)) {
 		return providerInput{}, secretsUpdate{}, fmt.Errorf("--extends cannot be combined with inherited-field flags")
 	}
@@ -2074,6 +2091,10 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			return providerInput{}, secretsUpdate{}, err
 		}
 		extends = extendsFromChoice(extendsChoice)
+		tlsInput, err := promptProviderTLSInput(prompts, defaults, options, extends)
+		if err != nil {
+			return providerInput{}, secretsUpdate{}, err
+		}
 		userAgent := defaults.UserAgent
 		forwardUserAgent := defaults.ForwardUserAgent
 		forwardHeaders := strings.Join(defaults.ForwardHeaders, ", ")
@@ -2173,19 +2194,23 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 				}
 			}
 			return providerInput{
-				ProviderType:          providerType,
-				Name:                  strings.TrimSpace(providerName),
-				Extends:               strings.TrimSpace(extends),
-				DisplayName:           strings.TrimSpace(displayName),
-				BaseURL:               strings.TrimSpace(baseURL),
-				UpstreamHeaderTimeout: strings.TrimSpace(upstreamHeaderTimeout),
-				UserAgent:             strings.TrimSpace(userAgent),
-				ForwardUserAgent:      forwardUserAgent,
-				ForwardHeaders:        parseForwardHeadersCSV(forwardHeaders),
-				AllowInsecureBaseURL:  allowInsecure,
-				Credential:            credential,
-				Enabled:               defaults.Enabled,
-				Models:                models,
+				ProviderType:              providerType,
+				Name:                      strings.TrimSpace(providerName),
+				Extends:                   strings.TrimSpace(extends),
+				DisplayName:               strings.TrimSpace(displayName),
+				BaseURL:                   strings.TrimSpace(baseURL),
+				TLSClientHello:            tlsInput.TLSClientHello,
+				TLSClientHelloSpecFile:    tlsInput.TLSClientHelloSpecFile,
+				HasTLSClientHello:         tlsInput.HasTLSClientHello,
+				HasTLSClientHelloSpecFile: tlsInput.HasTLSClientHelloSpecFile,
+				UpstreamHeaderTimeout:     strings.TrimSpace(upstreamHeaderTimeout),
+				UserAgent:                 strings.TrimSpace(userAgent),
+				ForwardUserAgent:          forwardUserAgent,
+				ForwardHeaders:            parseForwardHeadersCSV(forwardHeaders),
+				AllowInsecureBaseURL:      allowInsecure,
+				Credential:                credential,
+				Enabled:                   defaults.Enabled,
+				Models:                    models,
 			}, secretsUpdate{}, nil
 		}
 		credentialMode := "secrets_file"
@@ -2278,21 +2303,25 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			}
 		}
 		return providerInput{
-			ProviderType:          providerType,
-			Name:                  strings.TrimSpace(providerName),
-			Extends:               strings.TrimSpace(extends),
-			DisplayName:           strings.TrimSpace(displayName),
-			BaseURL:               strings.TrimSpace(baseURL),
-			UpstreamHeaderTimeout: strings.TrimSpace(upstreamHeaderTimeout),
-			UserAgent:             strings.TrimSpace(userAgent),
-			ForwardUserAgent:      forwardUserAgent,
-			ForwardHeaders:        parseForwardHeadersCSV(forwardHeaders),
-			ForwardAuthorization:  forwardAuthorization,
-			AllowInsecureBaseURL:  allowInsecure,
-			Credential:            credential,
-			Enabled:               defaults.Enabled,
-			Healthcheck:           preservedProviderHealthcheck(defaults.Healthcheck, extends, providerType),
-			Models:                models,
+			ProviderType:              providerType,
+			Name:                      strings.TrimSpace(providerName),
+			Extends:                   strings.TrimSpace(extends),
+			DisplayName:               strings.TrimSpace(displayName),
+			BaseURL:                   strings.TrimSpace(baseURL),
+			TLSClientHello:            tlsInput.TLSClientHello,
+			TLSClientHelloSpecFile:    tlsInput.TLSClientHelloSpecFile,
+			HasTLSClientHello:         tlsInput.HasTLSClientHello,
+			HasTLSClientHelloSpecFile: tlsInput.HasTLSClientHelloSpecFile,
+			UpstreamHeaderTimeout:     strings.TrimSpace(upstreamHeaderTimeout),
+			UserAgent:                 strings.TrimSpace(userAgent),
+			ForwardUserAgent:          forwardUserAgent,
+			ForwardHeaders:            parseForwardHeadersCSV(forwardHeaders),
+			ForwardAuthorization:      forwardAuthorization,
+			AllowInsecureBaseURL:      allowInsecure,
+			Credential:                credential,
+			Enabled:                   defaults.Enabled,
+			Healthcheck:               preservedProviderHealthcheck(defaults.Healthcheck, extends, providerType),
+			Models:                    models,
 		}, update, nil
 	}
 	providerType, err := prompts.askChoiceWithDescription("Provider type", providerTypeDescription(), []string{"openai", "openai-compatible", "anthropic", "gemini", "opencode-zen", "opencode-go", "github-copilot", "zenmux", "openrouter"}, defaults.ProviderType)
@@ -2314,6 +2343,10 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		return providerInput{}, secretsUpdate{}, err
 	}
 	extends = extendsFromChoice(extendsChoice)
+	tlsInput, err := promptProviderTLSInput(prompts, defaults, options, extends)
+	if err != nil {
+		return providerInput{}, secretsUpdate{}, err
+	}
 	upstreamHeaderTimeout := defaults.UpstreamHeaderTimeout
 	userAgent := defaults.UserAgent
 	forwardUserAgent := defaults.ForwardUserAgent
@@ -2400,19 +2433,23 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			}
 		}
 		return providerInput{
-			ProviderType:          providerType,
-			Name:                  providerName,
-			Extends:               strings.TrimSpace(extends),
-			DisplayName:           displayName,
-			BaseURL:               baseURL,
-			UpstreamHeaderTimeout: upstreamHeaderTimeout,
-			UserAgent:             userAgent,
-			ForwardUserAgent:      forwardUserAgent,
-			ForwardHeaders:        parseForwardHeadersCSV(forwardHeaders),
-			AllowInsecureBaseURL:  allowInsecure,
-			Credential:            credential,
-			Enabled:               defaults.Enabled,
-			Models:                models,
+			ProviderType:              providerType,
+			Name:                      providerName,
+			Extends:                   strings.TrimSpace(extends),
+			DisplayName:               displayName,
+			BaseURL:                   baseURL,
+			TLSClientHello:            tlsInput.TLSClientHello,
+			TLSClientHelloSpecFile:    tlsInput.TLSClientHelloSpecFile,
+			HasTLSClientHello:         tlsInput.HasTLSClientHello,
+			HasTLSClientHelloSpecFile: tlsInput.HasTLSClientHelloSpecFile,
+			UpstreamHeaderTimeout:     upstreamHeaderTimeout,
+			UserAgent:                 userAgent,
+			ForwardUserAgent:          forwardUserAgent,
+			ForwardHeaders:            parseForwardHeadersCSV(forwardHeaders),
+			AllowInsecureBaseURL:      allowInsecure,
+			Credential:                credential,
+			Enabled:                   defaults.Enabled,
+			Models:                    models,
 		}, secretsUpdate{}, nil
 	}
 	credentialDefault := "secrets_file"
@@ -2487,22 +2524,148 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		}
 	}
 	return providerInput{
-		ProviderType:          providerType,
-		Name:                  providerName,
-		Extends:               strings.TrimSpace(extends),
-		DisplayName:           displayName,
-		BaseURL:               baseURL,
-		UpstreamHeaderTimeout: upstreamHeaderTimeout,
-		UserAgent:             userAgent,
-		ForwardUserAgent:      forwardUserAgent,
-		ForwardHeaders:        parseForwardHeadersCSV(forwardHeaders),
-		ForwardAuthorization:  forwardAuthorization,
-		AllowInsecureBaseURL:  allowInsecure,
-		Credential:            credential,
-		Enabled:               defaults.Enabled,
-		Healthcheck:           preservedProviderHealthcheck(defaults.Healthcheck, extends, providerType),
-		Models:                models,
+		ProviderType:              providerType,
+		Name:                      providerName,
+		Extends:                   strings.TrimSpace(extends),
+		DisplayName:               displayName,
+		BaseURL:                   baseURL,
+		TLSClientHello:            tlsInput.TLSClientHello,
+		TLSClientHelloSpecFile:    tlsInput.TLSClientHelloSpecFile,
+		HasTLSClientHello:         tlsInput.HasTLSClientHello,
+		HasTLSClientHelloSpecFile: tlsInput.HasTLSClientHelloSpecFile,
+		UpstreamHeaderTimeout:     upstreamHeaderTimeout,
+		UserAgent:                 userAgent,
+		ForwardUserAgent:          forwardUserAgent,
+		ForwardHeaders:            parseForwardHeadersCSV(forwardHeaders),
+		ForwardAuthorization:      forwardAuthorization,
+		AllowInsecureBaseURL:      allowInsecure,
+		Credential:                credential,
+		Enabled:                   defaults.Enabled,
+		Healthcheck:               preservedProviderHealthcheck(defaults.Healthcheck, extends, providerType),
+		Models:                    models,
 	}, update, nil
+}
+
+func hasProviderTLSOptions(options providerOptions) bool {
+	return options.HasTLSClientHello || options.TLSClientHello != "" || options.HasTLSClientHelloSpecFile || options.TLSClientHelloSpecFile != ""
+}
+
+func tlsClientHelloInputValue(value string) string {
+	if envExprPattern.MatchString(value) {
+		return os.Getenv(value[5 : len(value)-2])
+	}
+	return value
+}
+
+func clearProviderTLSInput(input *providerInput) {
+	input.TLSClientHello = ""
+	input.TLSClientHelloSpecFile = ""
+	input.HasTLSClientHello = false
+	input.HasTLSClientHelloSpecFile = false
+}
+
+func applyProviderTLSOptions(input *providerInput, existing *providerInput, options providerOptions) error {
+	if input.Extends != "" && hasProviderTLSOptions(options) {
+		return fmt.Errorf("derived provider cannot declare --tls-client-hello or --tls-client-hello-spec-file; TLS profiles are inherited")
+	}
+	if options.HasTLSClientHello && options.TLSClientHello == "" {
+		return fmt.Errorf("tls-client-hello must not be empty")
+	}
+	if options.HasTLSClientHelloSpecFile && options.TLSClientHelloSpecFile == "" {
+		return fmt.Errorf("tls-client-hello-spec-file must not be empty")
+	}
+	if options.HasTLSClientHello || options.TLSClientHello != "" {
+		input.TLSClientHello = options.TLSClientHello
+		input.HasTLSClientHello = true
+		if tlsClientHelloInputValue(input.TLSClientHello) != "custom" && !options.HasTLSClientHelloSpecFile && options.TLSClientHelloSpecFile == "" {
+			input.TLSClientHelloSpecFile = ""
+			input.HasTLSClientHelloSpecFile = false
+		}
+	}
+	if options.HasTLSClientHelloSpecFile || options.TLSClientHelloSpecFile != "" {
+		input.TLSClientHelloSpecFile = options.TLSClientHelloSpecFile
+		input.HasTLSClientHelloSpecFile = true
+	}
+	if input.Extends != "" {
+		if existing != nil && existing.Extends == "" {
+			clearProviderTLSInput(input)
+		} else if input.HasTLSClientHello || input.HasTLSClientHelloSpecFile || input.TLSClientHello != "" || input.TLSClientHelloSpecFile != "" {
+			return fmt.Errorf("provider %q: derived provider cannot declare tls_client_hello or tls_client_hello_spec_file", input.Name)
+		}
+		return nil
+	}
+	selection := tlsClientHelloInputValue(input.TLSClientHello)
+	if selection == "" && !input.HasTLSClientHello {
+		selection = "native"
+	}
+	if selection != "custom" {
+		if _, err := tlsprofile.ResolveBuiltin(selection); err != nil {
+			return fmt.Errorf("provider %q: %w", input.Name, err)
+		}
+		if input.HasTLSClientHelloSpecFile || input.TLSClientHelloSpecFile != "" {
+			return fmt.Errorf("provider %q: tls_client_hello_spec_file cannot be declared unless tls_client_hello is custom", input.Name)
+		}
+	}
+	return nil
+}
+
+func promptProviderTLSInput(prompts *promptSession, input providerInput, options providerOptions, extends string) (providerInput, error) {
+	input.Extends = strings.TrimSpace(extends)
+	if strings.TrimSpace(extends) != "" {
+		if hasProviderTLSOptions(options) {
+			return providerInput{}, fmt.Errorf("derived provider cannot declare TLS profile flags; TLS profiles are inherited")
+		}
+		clearProviderTLSInput(&input)
+		_, _ = fmt.Fprintln(prompts.out, "TLS ClientHello profile and custom source are inherited from the base provider.")
+		return input, nil
+	}
+	if !options.HasTLSClientHello && options.TLSClientHello == "" {
+		choices := append([]string{"default"}, tlsprofile.BuiltinSelectors()...)
+		choices = append(choices, "custom")
+		choice := input.TLSClientHello
+		if choice == "" {
+			choice = "default"
+		} else if envExprPattern.MatchString(choice) {
+			choices = append(choices, "keep env expression")
+			choice = "keep env expression"
+		}
+		choice, err := prompts.askChoiceWithDescription("TLS ClientHello profile", "Default uses native Go TLS. Browser profiles change only ClientHello; custom loads a supplied JSON file and never detects Bun.", choices, choice)
+		if err != nil {
+			return providerInput{}, err
+		}
+		switch choice {
+		case "default":
+			if options.HasTLSClientHelloSpecFile || options.TLSClientHelloSpecFile != "" {
+				return providerInput{}, fmt.Errorf("tls_client_hello_spec_file cannot be declared unless tls_client_hello is custom")
+			}
+			clearProviderTLSInput(&input)
+		case "keep env expression":
+		default:
+			input.TLSClientHello = choice
+			input.HasTLSClientHello = true
+			if choice != "custom" && !options.HasTLSClientHelloSpecFile && options.TLSClientHelloSpecFile == "" {
+				input.TLSClientHelloSpecFile = ""
+				input.HasTLSClientHelloSpecFile = false
+			}
+		}
+	}
+	if tlsClientHelloInputValue(input.TLSClientHello) == "custom" && !options.HasTLSClientHelloSpecFile && options.TLSClientHelloSpecFile == "" {
+		reference, err := prompts.askValidated("TLS ClientHello spec file (relative to the config directory or absolute)", input.TLSClientHelloSpecFile, func(reference string) error {
+			candidate := input
+			candidate.TLSClientHelloSpecFile = reference
+			candidate.HasTLSClientHelloSpecFile = true
+			return config.ValidateProviderTLSProfiles([]byte(renderProviderBlock(candidate)), options.ConfigFilename)
+		})
+		if err != nil {
+			return providerInput{}, err
+		}
+		input.TLSClientHelloSpecFile = reference
+		input.HasTLSClientHelloSpecFile = true
+	}
+	if err := config.ValidateProviderTLSProfiles([]byte(renderProviderBlock(input)), options.ConfigFilename); err != nil {
+		return providerInput{}, err
+	}
+	return input, nil
 }
 
 func promptProviderModels(prompts *promptSession, providerType string, existing []providerModelInput) ([]providerModelInput, error) {
@@ -4222,6 +4385,10 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 	input.DisplayName = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "display_name"))
 	input.Extends = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "extends"))
 	input.BaseURL = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "base_url"))
+	input.TLSClientHello = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "tls_client_hello"))
+	input.TLSClientHelloSpecFile = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "tls_client_hello_spec_file"))
+	input.HasTLSClientHello = parsed.Body.Attributes["tls_client_hello"] != nil
+	input.HasTLSClientHelloSpecFile = parsed.Body.Attributes["tls_client_hello_spec_file"] != nil
 	input.UpstreamHeaderTimeout = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "upstream_header_timeout"))
 	input.UserAgent = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "user_agent"))
 	if fwdExpr := parseLiteralOrExpression(attributeExpr(src, parsed.Body, "forward_user_agent")); fwdExpr != "" {

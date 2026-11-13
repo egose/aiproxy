@@ -30,7 +30,23 @@ const config: Config = {
     defaultLocale,
     locales: [defaultLocale],
   },
-  plugins: [],
+  plugins: [
+    function canonicalThemeCommon() {
+      return {
+        name: 'website-theme-common-resolution',
+        configureWebpack() {
+          return {
+            resolve: {
+              alias: {
+                '@docusaurus/theme-common$': require.resolve('@docusaurus/theme-common'),
+                '@docusaurus/theme-common/internal$': require.resolve('@docusaurus/theme-common/internal'),
+              },
+            },
+          };
+        },
+      };
+    },
+  ],
   presets: [
     [
       'classic',

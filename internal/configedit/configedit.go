@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/filestore"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
@@ -54,21 +55,25 @@ type AuthClientInput struct {
 }
 
 type ProviderInput struct {
-	ProviderType          string
-	Name                  string
-	Extends               string
-	DisplayName           string
-	BaseURL               string
-	UpstreamHeaderTimeout string
-	UserAgent             string
-	ForwardUserAgent      bool
-	ForwardHeaders        []string
-	ForwardAuthorization  bool
-	AllowInsecureBaseURL  bool
-	Credential            ProviderCredentialInput
-	Enabled               *bool
-	Healthcheck           *ProviderHealthcheckInput
-	Models                []ProviderModelInput
+	ProviderType              string
+	Name                      string
+	Extends                   string
+	DisplayName               string
+	BaseURL                   string
+	TLSClientHello            string
+	TLSClientHelloSpecFile    string
+	HasTLSClientHello         bool
+	HasTLSClientHelloSpecFile bool
+	UpstreamHeaderTimeout     string
+	UserAgent                 string
+	ForwardUserAgent          bool
+	ForwardHeaders            []string
+	ForwardAuthorization      bool
+	AllowInsecureBaseURL      bool
+	Credential                ProviderCredentialInput
+	Enabled                   *bool
+	Healthcheck               *ProviderHealthcheckInput
+	Models                    []ProviderModelInput
 }
 
 func (i ProviderInput) IsExplicitlyDisabled() bool {
@@ -300,6 +305,16 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 	if input.DisplayName != "" {
 		b.WriteString("  display_name = ")
 		b.WriteString(strconv.Quote(input.DisplayName))
+		b.WriteString("\n")
+	}
+	if input.HasTLSClientHello || input.TLSClientHello != "" {
+		b.WriteString("  tls_client_hello = ")
+		b.WriteString(RenderStringOrExpression(input.TLSClientHello))
+		b.WriteString("\n")
+	}
+	if input.HasTLSClientHelloSpecFile || input.TLSClientHelloSpecFile != "" {
+		b.WriteString("  tls_client_hello_spec_file = ")
+		b.WriteString(RenderStringOrExpression(input.TLSClientHelloSpecFile))
 		b.WriteString("\n")
 	}
 	if input.Extends != "" {
@@ -759,11 +774,7 @@ func WriteFile(path string, body []byte, mode os.FileMode) error {
 }
 
 func ValidateGeneratedConfig(source []byte, filename string) error {
-	_, diags := hclsyntax.ParseConfig(source, filename, hcl.Pos{Line: 1, Column: 1})
-	if diags.HasErrors() {
-		return fmt.Errorf("parse config %s: %s", filename, diags.Error())
-	}
-	return nil
+	return config.ValidateProviderTLSProfiles(source, filename)
 }
 
 func UpsertBlock(source, blockText string, match func(TopLevelBlock) bool) (string, error) {

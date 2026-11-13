@@ -481,6 +481,47 @@ alias "nvidia_chat" {
 
 The derived provider must use the same type label as the base and must declare its own `api_key` or `api_key_ref`. It cannot override `base_url`, timeout, enabled state, or models. Aliases still list each derived provider target explicitly.
 
+## Provider TLS ClientHello Profiles
+
+This complete illustrative config selects the frozen bundled Chrome 133 profile.
+The derivative inherits its endpoint, models and TLS settings without local TLS
+declarations. Omitting the selector on the base would preserve native Go TLS.
+See [configuration](configuration.md#upstream-tls-clienthello) for the exact allowlist
+and [proxy/reload limits](operations.md#provider-tls-transport-limits).
+
+```hcl
+listener "http" "public" {
+  address = "127.0.0.1:8080"
+}
+
+auth "main" {
+  mode = "none"
+}
+
+provider "openai-compatible" "profiled" {
+  base_url         = "https://api.example.test/v1"
+  api_key          = env("UPSTREAM_API_KEY")
+  tls_client_hello = "chrome-133"
+
+  model "example-model" {}
+}
+
+provider "openai-compatible" "profiled-backup" {
+  extends = "profiled"
+  api_key = env("BACKUP_UPSTREAM_API_KEY")
+}
+```
+
+The repository's complete
+[`examples/tls-client-hello.hcl`](https://github.com/egose/aiproxy/blob/main/examples/tls-client-hello.hcl)
+also demonstrates the **measured Bun 1.4.4 fetch** custom recipe, static inheritance
+and explicit alias targets. That file resolves `tls/bun-1.4.4-fetch.json` from its
+own `examples/` directory. When relocating a config, first
+[copy the recipe into its config directory](operations.md#using-a-recipe-with-static-configuration);
+do not assume a repository-relative reference still works. Metadata is not loaded
+as recipe JSON. The measured fixture covers Linux x64 fresh h1-only ClientHellos,
+not other Bun versions/APIs, full HTTP-stack fidelity or provider/WAF acceptance.
+
 ## Tips
 
 - keep provider names stable because they appear in public model strings

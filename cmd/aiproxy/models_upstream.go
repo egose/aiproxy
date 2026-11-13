@@ -40,9 +40,18 @@ type upstreamModelDiscovery struct {
 }
 
 func listUpstreamModels(ctx context.Context, provider config.Provider) ([]upstreamModel, error) {
+	return listUpstreamModelsWithTransportFactory(ctx, provider, upstreamhttp.NewTransport)
+}
+
+func listUpstreamModelsWithTransportFactory(ctx context.Context, provider config.Provider, factory func(upstreamhttp.Options) (upstreamhttp.Transport, error)) ([]upstreamModel, error) {
 	ctx, cancel := context.WithTimeout(ctx, upstreamModelListTimeout)
 	defer cancel()
-	discovery := &upstreamModelDiscovery{client: upstreamHTTPClient(provider), cursors: make(map[string]struct{})}
+	client, transport, err := upstreamHTTPClient(provider, factory)
+	if err != nil {
+		return nil, fmt.Errorf("upstream model discovery incomplete: %w", err)
+	}
+	defer transport.Retire()
+	discovery := &upstreamModelDiscovery{client: client, cursors: make(map[string]struct{})}
 	models, err := discovery.list(ctx, provider)
 	if err != nil {
 		return nil, fmt.Errorf("upstream model discovery incomplete: %w", err)
@@ -71,6 +80,11 @@ func (d *upstreamModelDiscovery) list(ctx context.Context, provider config.Provi
 }
 
 func (d *upstreamModelDiscovery) readPage(req *http.Request, provider config.Provider) ([]byte, error) {
+	if d.client.Timeout > 0 {
+		ctx, cancel := context.WithTimeout(req.Context(), d.client.Timeout)
+		defer cancel()
+		req = req.WithContext(ctx)
+	}
 	if err := req.Context().Err(); err != nil {
 		return nil, err
 	}
@@ -89,6 +103,9 @@ func (d *upstreamModelDiscovery) readPage(req *http.Request, provider config.Pro
 	defer resp.Body.Close()
 	limit := min(int64(upstreamModelMaxPageBytes), remaining)
 	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if contextErr := req.Context().Err(); contextErr != nil {
+		return nil, fmt.Errorf("read upstream body: %w", contextErr)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}
@@ -125,12 +142,30 @@ func (d *upstreamModelDiscovery) continueWith(cursor string) error {
 	return nil
 }
 
-func upstreamHTTPClient(provider config.Provider) *http.Client {
+func upstreamHTTPClient(provider config.Provider, factory func(upstreamhttp.Options) (upstreamhttp.Transport, error)) (*http.Client, *upstreamhttp.RetiringTransport, error) {
+	profile, err := upstreamhttp.ProfileForProvider(provider)
+	if err != nil {
+		return nil, nil, err
+	}
+	if factory == nil {
+		factory = upstreamhttp.NewTransport
+	}
+	transport, err := factory(upstreamhttp.Options{Profile: profile, ResponseHeaderTimeout: 0})
+	if err != nil {
+		if transport != nil {
+			transport.CloseIdleConnections()
+		}
+		return nil, nil, err
+	}
+	if transport == nil {
+		return nil, nil, fmt.Errorf("upstream model transport factory returned no transport")
+	}
+	retiring := upstreamhttp.NewRetiringTransport(transport)
 	timeout := provider.UpstreamHeaderTimeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	return &http.Client{Timeout: timeout, CheckRedirect: upstreamhttp.CheckRedirect}
+	return &http.Client{Transport: retiring, Timeout: timeout, CheckRedirect: upstreamhttp.CheckRedirect}, retiring, nil
 }
 
 func upstreamBaseURL(provider config.Provider) string {

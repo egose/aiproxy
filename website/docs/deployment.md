@@ -24,6 +24,12 @@ The container image:
 - runs as non-root
 - starts with `aiproxy serve --config /etc/aiproxy/config.hcl`
 
+The image also includes `*-fetch.json` ClientHello recipes in
+`/usr/local/share/aiproxy/tls/`. For example, a provider can set
+`tls_client_hello = "custom"` and
+`tls_client_hello_spec_file = "/usr/local/share/aiproxy/tls/bun-1.4.4-fetch.json"`.
+This is a measured Bun 1.4.4 `fetch` profile, not automatic Bun detection.
+
 ## Local Binary
 
 Build the binary:

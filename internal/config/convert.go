@@ -58,6 +58,9 @@ func Convert(src []byte, filename string, compact bool) ([]byte, string, string,
 		if err != nil {
 			return nil, "", "", err
 		}
+		if err := resolveConvertedTLSProfileReferences(obj, filename); err != nil {
+			return nil, "", "", err
+		}
 		var out []byte
 		if compact {
 			out, err = json.Marshal(obj)
@@ -74,7 +77,7 @@ func Convert(src []byte, filename string, compact bool) ([]byte, string, string,
 		return out, FormatHCL, FormatJSON, nil
 	}
 	if _, jsonDiags := hcljson.Parse(expanded, filename); !jsonDiags.HasErrors() {
-		out, err := decodeJSONConfig(expanded)
+		out, err := decodeJSONConfig(expanded, filename)
 		if err != nil {
 			return nil, "", "", err
 		}
@@ -88,7 +91,11 @@ func Convert(src []byte, filename string, compact bool) ([]byte, string, string,
 }
 
 func checkConverted(out []byte, filename, format string) error {
-	if _, err := Load(out, filename+".converted."+format); err != nil {
+	source := filename + ".converted." + format
+	if filename == "" || filename == EnvConfigFilename {
+		source = filename
+	}
+	if _, err := Load(out, source); err != nil {
 		return fmt.Errorf("converted config is invalid: %w", err)
 	}
 	return nil
@@ -181,7 +188,7 @@ func ctyToJSON(val cty.Value) (interface{}, error) {
 	}
 }
 
-func decodeJSONConfig(src []byte) ([]byte, error) {
+func decodeJSONConfig(src []byte, filename string) ([]byte, error) {
 	var root interface{}
 	if err := json.Unmarshal(src, &root); err != nil {
 		return nil, err
@@ -189,6 +196,9 @@ func decodeJSONConfig(src []byte) ([]byte, error) {
 	obj, ok := root.(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("JSON config must be an object")
+	}
+	if err := resolveConvertedTLSProfileReferences(obj, filename); err != nil {
+		return nil, err
 	}
 	f := hclwrite.NewEmptyFile()
 	if err := writeHCLBody(f.Body(), obj, 0); err != nil {
@@ -199,6 +209,64 @@ func decodeJSONConfig(src []byte) ([]byte, error) {
 		out = append(out, '\n')
 	}
 	return out, nil
+}
+
+func resolveConvertedTLSProfileReferences(root map[string]interface{}, filename string) error {
+	providers, _ := root["provider"].(map[string]interface{})
+	for _, providerType := range sortedJSONKeys(providers) {
+		byName, _ := providers[providerType].(map[string]interface{})
+		for _, name := range sortedJSONKeys(byName) {
+			entries := []interface{}{byName[name]}
+			if array, ok := byName[name].([]interface{}); ok {
+				entries = array
+			}
+			for _, entry := range entries {
+				object, ok := entry.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				p := Provider{Name: name}
+				selector, hasSelector := object["tls_client_hello"]
+				reference, hasReference := object["tls_client_hello_spec_file"]
+				if !hasSelector && !hasReference {
+					continue
+				}
+				if extends, _ := object["extends"].(string); extends != "" {
+					field := "tls_client_hello"
+					if !hasSelector {
+						field = "tls_client_hello_spec_file"
+					}
+					return fmt.Errorf("provider %q: derived provider cannot declare %s", name, field)
+				}
+				if hasSelector {
+					value, ok := selector.(string)
+					if !ok {
+						return fmt.Errorf("provider %q: tls_client_hello must be a non-null string", name)
+					}
+					p.TLSClientHello, p.HasTLSClientHello = value, true
+				}
+				if hasReference {
+					value, ok := reference.(string)
+					if !ok {
+						return fmt.Errorf("provider %q: tls_client_hello_spec_file must be a non-null string", name)
+					}
+					p.TLSClientHelloSpecFile, p.HasTLSClientHelloSpecFile = value, true
+				}
+				selection, err := providerTLSSelection(p)
+				if err != nil {
+					return fmt.Errorf("provider %q: %w", name, err)
+				}
+				if selection == "custom" {
+					path, err := resolveTLSProfileReference(p.TLSClientHelloSpecFile, filename)
+					if err != nil {
+						return fmt.Errorf("provider %q: %w", name, err)
+					}
+					object["tls_client_hello_spec_file"] = path
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func writeHCLBody(body *hclwrite.Body, obj map[string]interface{}, depth int) error {

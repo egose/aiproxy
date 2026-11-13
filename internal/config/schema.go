@@ -127,23 +127,25 @@ type rawProviderHealth struct {
 }
 
 type rawProvider struct {
-	Type                  string            `hcl:"type,label"`
-	Name                  string            `hcl:"name,label"`
-	Extends               string            `hcl:"extends,optional"`
-	DisplayName           string            `hcl:"display_name,optional"`
-	BaseURL               string            `hcl:"base_url,optional"`
-	UpstreamHeaderTimeout string            `hcl:"upstream_header_timeout,optional"`
-	UserAgent             string            `hcl:"user_agent,optional"`
-	ForwardUserAgent      bool              `hcl:"forward_user_agent,optional"`
-	ForwardHeaders        []string          `hcl:"forward_headers,optional"`
-	ForwardAuthorization  bool              `hcl:"forward_authorization,optional"`
-	AllowInsecureBaseURL  *bool             `hcl:"allow_insecure_base_url,optional"`
-	APIKey                string            `hcl:"api_key,optional"`
-	APIKeyRef             *rawAPIKeyRef     `hcl:"api_key_ref,block"`
-	CredentialRef         *rawCredentialRef `hcl:"credential_ref,block"`
-	Enabled               *bool             `hcl:"enabled,optional"`
-	Healthcheck           *rawHealthcheck   `hcl:"healthcheck,block"`
-	Models                []rawModel        `hcl:"model,block"`
+	Type                   string            `hcl:"type,label"`
+	Name                   string            `hcl:"name,label"`
+	Extends                string            `hcl:"extends,optional"`
+	DisplayName            string            `hcl:"display_name,optional"`
+	BaseURL                string            `hcl:"base_url,optional"`
+	UpstreamHeaderTimeout  string            `hcl:"upstream_header_timeout,optional"`
+	UserAgent              string            `hcl:"user_agent,optional"`
+	ForwardUserAgent       bool              `hcl:"forward_user_agent,optional"`
+	ForwardHeaders         []string          `hcl:"forward_headers,optional"`
+	ForwardAuthorization   bool              `hcl:"forward_authorization,optional"`
+	AllowInsecureBaseURL   *bool             `hcl:"allow_insecure_base_url,optional"`
+	TLSClientHello         string            `hcl:"tls_client_hello,optional"`
+	TLSClientHelloSpecFile string            `hcl:"tls_client_hello_spec_file,optional"`
+	APIKey                 string            `hcl:"api_key,optional"`
+	APIKeyRef              *rawAPIKeyRef     `hcl:"api_key_ref,block"`
+	CredentialRef          *rawCredentialRef `hcl:"credential_ref,block"`
+	Enabled                *bool             `hcl:"enabled,optional"`
+	Healthcheck            *rawHealthcheck   `hcl:"healthcheck,block"`
+	Models                 []rawModel        `hcl:"model,block"`
 }
 
 type rawHealthcheck struct {
