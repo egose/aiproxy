@@ -11,7 +11,7 @@ RUN pnpm install --frozen-lockfile
 COPY web-ui ./web-ui
 RUN pnpm --filter @aiproxy/web-ui build
 
-FROM golang:1.27.1@sha256:512690a5660563b57d37ecc31129e7f136e831db2aed24a1dbeb8ad7380dc0fa AS builder
+FROM golang:1.27.4@sha256:5e8afd493a7124a8586e134d9b532731161d4b9becf9dee5a5956b107426f93d AS builder
 
 WORKDIR /src
 COPY go.mod go.sum ./
