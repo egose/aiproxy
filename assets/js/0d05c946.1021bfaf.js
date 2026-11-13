@@ -78,6 +78,10 @@ const toc = [{
   "id": "repeated-credentials-with-extends",
   "level": 2
 }, {
+  "value": "Provider TLS ClientHello Profiles",
+  "id": "provider-tls-clienthello-profiles",
+  "level": 2
+}, {
   "value": "Tips",
   "id": "tips",
   "level": 2
@@ -402,6 +406,38 @@ function _createMdxContent(props) {
       }), ". It cannot override ", (0,jsx_runtime.jsx)(_components.code, {
         children: "base_url"
       }), ", timeout, enabled state, or models. Aliases still list each derived provider target explicitly."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "provider-tls-clienthello-profiles",
+      children: "Provider TLS ClientHello Profiles"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["This complete illustrative config selects the frozen bundled Chrome 133 profile.\nThe derivative inherits its endpoint, models and TLS settings without local TLS\ndeclarations. Omitting the selector on the base would preserve native Go TLS.\nSee ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#upstream-tls-clienthello",
+        children: "configuration"
+      }), " for the exact allowlist\nand ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#provider-tls-transport-limits",
+        children: "proxy/reload limits"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "listener \"http\" \"public\" {\n  address = \"127.0.0.1:8080\"\n}\n\nauth \"main\" {\n  mode = \"none\"\n}\n\nprovider \"openai-compatible\" \"profiled\" {\n  base_url         = \"https://api.example.test/v1\"\n  api_key          = env(\"UPSTREAM_API_KEY\")\n  tls_client_hello = \"chrome-133\"\n\n  model \"example-model\" {}\n}\n\nprovider \"openai-compatible\" \"profiled-backup\" {\n  extends = \"profiled\"\n  api_key = env(\"BACKUP_UPSTREAM_API_KEY\")\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The repository's complete\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "https://github.com/egose/aiproxy/blob/main/examples/tls-client-hello.hcl",
+        children: (0,jsx_runtime.jsx)(_components.code, {
+          children: "examples/tls-client-hello.hcl"
+        })
+      }), "\nalso demonstrates the ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "measured Bun 1.4.4 fetch"
+      }), " custom recipe, static inheritance\nand explicit alias targets. That file resolves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tls/bun-1.4.4-fetch.json"
+      }), " from its\nown ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "examples/"
+      }), " directory. When relocating a config, first\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#using-a-recipe-with-static-configuration",
+        children: "copy the recipe into its config directory"
+      }), ";\ndo not assume a repository-relative reference still works. Metadata is not loaded\nas recipe JSON. The measured fixture covers Linux x64 fresh h1-only ClientHellos,\nnot other Bun versions/APIs, full HTTP-stack fidelity or provider/WAF acceptance."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "tips",
       children: "Tips"

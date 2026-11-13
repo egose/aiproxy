@@ -82,6 +82,10 @@ const toc = [{
   "id": "administrative-provider-and-alias-saves",
   "level": 2
 }, {
+  "value": "Provider TLS ClientHello Settings",
+  "id": "provider-tls-clienthello-settings",
+  "level": 3
+}, {
   "value": "GitHub Copilot Device Authorization",
   "id": "github-copilot-device-authorization",
   "level": 2
@@ -1152,6 +1156,120 @@ function _createMdxContent(props) {
       children: ["After each valid commit, activation is requested once before response-view reads.\nOperational failure responses omit storage and credential details. Persistence and\nruntime activation are separate: later reloads can activate a complete saved edit\nafter an activation failure. The concurrency check protects the edited aggregate,\nnot an atomic snapshot of every catalog dependency or another proxy's runtime.\nSuccessful provider POST/PUT and credential PUT responses carry\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "X-Aiproxy-Catalog-Saved: true"
       }), " once the database commit is durable, including\nwhen activation itself fails."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "provider-tls-clienthello-settings",
+      children: "Provider TLS ClientHello Settings"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Provider POST/PUT accepts ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tls_client_hello"
+      }), " for ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "built-ins only"
+      }), ":\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "native"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chrome"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chrome-133"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "safari"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "safari-16.0"
+      }), ". Browser aliases resolve\nto the frozen bundled Chrome 133/Safari 16.0 presets in uTLS v1.8.2, not live/latest\nbrowser profiles. This adds no inference capability or new authorization surface."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Input on a concrete provider"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Behavior"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Field omitted on create"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Native Go TLS"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Field omitted on update"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Preserve the saved selection"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "\"tls_client_hello\": \"native\""
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Explicitly reset to native"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Empty, null, wrong-type, wrong-case or unknown selection"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "400"
+            }), "; no commit or activation"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "custom"
+            }), ", any spec-file or inline-spec declaration"]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "400"
+            }), "; static-config-only, no commit or profile-file access"]
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Derived providers inherit the effective profile with their base transport. Every\nlocal TLS declaration, including ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "native"
+      }), ", is rejected. Changing a concrete\nprovider to a derived one clears its previous local selection ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "only if the incoming\nTLS field is omitted"
+      }), ". A managed derivative cannot extend a static custom-profile\nbase. Invalid stored selectors or inheritance also reject catalog startup/reload.\nExisting databases require ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy migrate up"
+      }), "; the additive selector column's\nempty default means omitted, preserving existing native/inheritance behavior."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "tls_client_hello_spec_file"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tls_client_hello_spec"
+      }), " and other custom TLS-prefixed\nfields are forbidden, even empty or null, for both workspace and system\nadministrators. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "PUT /_internal/admin/providers/{name}/credential"
+      }), " rejects ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "all"
+      }), "\nTLS declarations, including built-in selection, without saving a replacement\ncredential. Use provider PUT to change a concrete provider's built-in profile.\nStatic custom configuration requires a file reference; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tls_client_hello_spec"
+      }), "\nis not a supported inline recipe or upload option on either surface."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Provider views expose these metadata fields, never profile paths or recipe contents:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-json",
+        children: "{\n  \"tls_client_hello\": \"chrome\",\n  \"tls_client_hello_effective\": \"chrome-133\",\n  \"tls_client_hello_inherited\": false,\n  \"tls_client_hello_static_only\": false\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "tls_client_hello"
+      }), " describes the selected or inherited base selector (omitted native\nis presented as ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "native"
+      }), "); ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tls_client_hello_effective"
+      }), " is canonical. The booleans\nidentify inheritance and static-only custom profiles. Effective/inherited/static-only\nfields are view metadata, not writable configuration. Each provider-type entry from\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "GET /_internal/admin/provider-types"
+      }), " supplies ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tls_client_hello_selectors"
+      }), " with the\napproved built-in list. The UI uses that list, shows inheritance and displays static\ncustom profiles read-only. Do not send a derived view's inherited selector back as\na local update. See ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#upstream-tls-clienthello",
+        children: "configuration"
+      }), " and\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#reload-behavior",
+        children: "reload behavior"
+      }), "; the saved-versus-activated outcomes\nabove and receiving-instance-only activation remain unchanged."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "github-copilot-device-authorization",
       children: "GitHub Copilot Device Authorization"

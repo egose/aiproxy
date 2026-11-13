@@ -50,9 +50,25 @@ const toc = [{
   "id": "configure-wizard",
   "level": 2
 }, {
+  "value": "Configuring Provider TLS Profiles",
+  "id": "configuring-provider-tls-profiles",
+  "level": 3
+}, {
   "value": "Docker",
   "id": "docker",
   "level": 2
+}, {
+  "value": "Local Bun ClientHello Capture",
+  "id": "local-bun-clienthello-capture",
+  "level": 2
+}, {
+  "value": "Using A Recipe With Static Configuration",
+  "id": "using-a-recipe-with-static-configuration",
+  "level": 3
+}, {
+  "value": "Provider TLS Transport Limits",
+  "id": "provider-tls-transport-limits",
+  "level": 3
 }, {
   "value": "Tests",
   "id": "tests",
@@ -410,6 +426,36 @@ function _createMdxContent(props) {
         className: "language-sh",
         children: "aiproxy configure provider --config /etc/aiproxy/config.hcl --delete --name backup\naiproxy configure alias --config /etc/aiproxy/config.hcl --delete --name chat_default\n"
       })
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "configuring-provider-tls-profiles",
+      children: "Configuring Provider TLS Profiles"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The wizard and scripted provider edits support the\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#upstream-tls-clienthello",
+        children: "provider-only ClientHello settings"
+      }), ".\nWith an existing ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "config/config.hcl"
+      }), " and the measured recipe copied as described\nin the ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "#using-a-recipe-with-static-configuration",
+        children: "local capture workflow"
+      }), ":"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "aiproxy configure provider \\\n  --config config/config.hcl \\\n  --non-interactive \\\n  --name measured-bun \\\n  --type openai-compatible \\\n  --base-url https://api.example.test/v1 \\\n  --api-key-env UPSTREAM_API_KEY \\\n  --tls-client-hello custom \\\n  --tls-client-hello-spec-file tls/bun-1.4.4-fetch.json \\\n  --model example-model\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Omitting TLS flags preserves existing selections, custom references and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env()"
+      }), "\nspelling. Explicit ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--tls-client-hello native"
+      }), " resets a concrete provider; choosing\na non-custom profile removes an old custom reference when the file flag is omitted.\nExplicit empty flags or a file flag with a non-custom selector are rejected.\nDerived providers inherit both fields and cannot declare either flag. A scripted\nconcrete-to-derived transition clears old local TLS settings when both are omitted.\nThe interactive ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "default"
+      }), " choice removes the declaration; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "default"
+      }), " is not a config\nselector. Editing/validation performs no provider networking and does not activate\nthe running server until restart or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), ". Conversion resolves custom paths to\nabsolute host-local references; it does not copy profile files."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "docker",
       children: "Docker"
@@ -424,6 +470,110 @@ function _createMdxContent(props) {
       children: ["In containerized deployments, mount the config file read-only and inject secrets through environment variables or the key file used by ", (0,jsx_runtime.jsx)(_components.code, {
         children: "api_key_ref"
       }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "local-bun-clienthello-capture",
+      children: "Local Bun ClientHello Capture"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The optional standalone developer tool requires the repository Go toolchain and\nan ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "already installed"
+      }), " Bun. It does not install tools or become a dependency of\nthe serving binary. Initially only Bun ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "fetch"
+      }), ", fresh first-flight TLS and default\nexperimental HTTP/2/HTTP/3 flags off are supported; there is no automatic Bun profile.\nRun from the repository root:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "mkdir -p tls\ngo run ./scripts/tls-clienthello capture --bun bun --api fetch --samples 3 --out tls/bun-fetch.json --metadata tls/bun-fetch.metadata.json\ngo run ./scripts/tls-clienthello compare --bun bun --api fetch --samples 3 --spec tls/bun-fetch.json\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Output directories must exist and recipe/metadata paths must be different.\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--samples"
+      }), " accepts 2–16 (default 3). Capture publishes only after the recipe passes\nvalidation and all structural comparisons match. Existing regular outputs require\nexplicit ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--force"
+      }), "; symlink/special-file destinations are rejected even with it.\nOutputs use ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "0600"
+      }), ". The two publications are not one filesystem-wide transaction;\nsee ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "https://github.com/egose/aiproxy/blob/main/scripts/tls-clienthello/README.md",
+        children: "tool usage and limits"
+      }), "\nfor failure/partial-publication semantics. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "compare"
+      }), " prints a separate JSON report\nand exits nonzero on mismatch. It does not rewrite the supplied spec."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "--bun bun"
+      }), " resolves a recognized asdf shim safely to the direct installed binary\nwithout inheriting provider secrets; other wrappers fail with guidance. Selecting\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "--bun \"$(asdf which bun)\""
+      }), " explicitly is also supported. The executable is trusted\noperator input, not sandboxed hostile code. Each fresh child uses a minimal explicit\nenvironment, isolated HOME/cwd, empty Bun config, no dotenv or auto-install, disabled\nproxies and a literal loopback URL with synthetic ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "localhost"
+      }), " SNI. The parent\nenvironment is unchanged. The listener stops after ClientHello: no provider\ncredentials, external application traffic, HTTP body, certificate-verification\nbypass or privileged packet capture is needed. Capture/compare is ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "not a complete\nTLS handshake"
+      }), ". Accept/read is bounded to three seconds, child execution to five;\nsockets close and canceled children are reaped. Record/handshake and child-output\nbounds are documented with the tool."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The exporter emits the accepted native-shaped JSON, not ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "json.Marshal(ClientHelloSpec)"
+      }), ".\nMetadata separately records runtime version/revision/platform/API, conditions,\ndependency/schema/policy pins, digests and comparison results, without machine paths,\ncredentials or session secrets. Comparison checks actual byte structure, ordering,\nrecord framing/lengths, SNI, ALPN, GREASE and share groups/lengths, normalizing ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "only"
+      }), "\nrandom, session-ID bytes and real key-exchange bytes. JA3/JA4 alone is insufficient.\nUnsupported/resumption-dependent data and padding policies that cannot be inferred\nare rejected rather than approximated."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The committed\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "https://github.com/egose/aiproxy/blob/main/examples/tls/bun-1.4.4-fetch.json",
+        children: "Bun 1.4.4 fetch recipe"
+      }), "\nand ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "https://github.com/egose/aiproxy/blob/main/examples/tls/bun-1.4.4-fetch.metadata.json",
+        children: "metadata"
+      }), "\nare ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "measured"
+      }), ", not an illustrative Chrome preset: Linux x64, three fresh Bun and\nthree uTLS samples, matching 1500-byte initial records, HTTP/1.1-only ALPN and\nMLKEM/X25519 shares, with no GREASE, ALPS, padding or residual structural differences.\nSeparate local synthetic-trust tests verified materialized TLS 1.2/1.3 handshakes.\nThis does not verify other Bun versions/APIs/options, SNI lengths, resumed TLS, the\nfull HTTP/TCP stack, live providers or WAF/bot acceptance, and is not new TLS-specific\nbinary integration evidence. Use version/API-specific output names for new captures."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "using-a-recipe-with-static-configuration",
+      children: "Using A Recipe With Static Configuration"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Copy a recipe into the ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "config directory"
+      }), ", not merely the shell's working\ndirectory. For example, from the repository root with an existing\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "config/config.hcl"
+      }), ", create a new recipe destination:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "mkdir -p config/tls\ncp -- examples/tls/bun-1.4.4-fetch.json config/tls/bun-1.4.4-fetch.json\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Then add this provider to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "config/config.hcl"
+      }), " (replace the illustrative endpoint,\nmodel and secret source for real use):"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "provider \"openai-compatible\" \"measured-bun\" {\n  base_url                  = \"https://api.example.test/v1\"\n  api_key                   = env(\"UPSTREAM_API_KEY\")\n  tls_client_hello           = \"custom\"\n  tls_client_hello_spec_file = \"tls/bun-1.4.4-fetch.json\"\n\n  model \"example-model\" {}\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The relative reference now resolves to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "config/tls/bun-1.4.4-fetch.json"
+      }), ".\nDo not use a repository-relative ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "examples/tls/..."
+      }), " reference in an unrelated\nconfig directory. Only the recipe is loaded; metadata is documentation.\nFor a complete checkout example, with synthetic credentials and no provider calls:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "UPSTREAM_API_KEY=test-placeholder-key BACKUP_UPSTREAM_API_KEY=test-placeholder-key aiproxy validate --config examples/tls-client-hello.hcl\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Mount custom recipes read-only alongside the config in containers, and ensure\nreferences resolve in that container's filesystem. Inline ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "AIPROXY_CONFIG"
+      }), " requires\nabsolute references. Conversion output contains resolved absolute host-local paths;\ncopy/mount recipes and adjust references when relocating to a different host.\nReplacing recipe files requires a successful reload to affect new work."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "provider-tls-transport-limits",
+      children: "Provider TLS Transport Limits"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Native keeps Go's standard transport. For non-native HTTPS profiles, direct TLS and\nHTTP/1.1 CONNECT through HTTP or HTTPS environment proxies support HTTP/1.1/HTTP/2\naccording to ALPN. HTTPS proxy TLS is separately verified standard Go TLS with h1\nCONNECT, not the provider profile; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "NO_PROXY"
+      }), " remains effective. Non-native SOCKS5/\nSOCKS5h, HTTP/2 CONNECT and QUIC/HTTP/3 are explicitly unsupported, with no native\nor protocol fallback. Actual HTTP upstream requests still use standard HTTP."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["TCP dial/keepalive is 30 seconds, TLS handshake 10 seconds and CONNECT one minute,\nsubject to earlier cancellation/deadlines. CONNECT response headers are bounded to\n10 MiB, with at most eight cached TLS route entries including direct. Provider\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "upstream_header_timeout"
+      }), " remains header-only, with no added whole-inference or\nstream-read timeout. Health and discovery retain their separate operation deadlines\nand discovery pagination/aggregate limits. OAuth/device/dashboard clients and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "User-Agent"
+      }), " behavior are unaffected. Fix unsupported proxy or upstream negotiation\ninstead of disabling verification or cycling profiles."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "tests",
       children: "Tests"
@@ -470,6 +620,8 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "root and provider upstream header timeouts"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "provider TLS ClientHello selections and custom recipe contents"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "alias routing state"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "access-log enablement"
@@ -484,6 +636,8 @@ function _createMdxContent(props) {
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "If rate-limit settings are unchanged, reload preserves existing limiter buckets.\nChanging rate-limit settings creates a fresh limiter and resets bucket state."
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "TLS recipes and transport generations are prepared before activation. Successful\nreloads select new profile identities (including custom content changes at the same\npath) for new work and retire old idle connections. Already-admitted requests,\ntheir later alias attempts and streams finish against their admitted runtime;\nretired connections close as their bodies finish. Changed profile identities restart\nprobe-owned clients, while discovery owns and retires a client per listing operation.\nA failed candidate leaves old clients, probes and cached recipe bytes intact,\neven if the source file was replaced. No custom-file reads occur on requests."
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Alias cooldown deadlines survive reload only for fingerprint-unchanged targets\n(resolved ", (0,jsx_runtime.jsx)(_components.code, {
         children: "base_url"
@@ -537,6 +691,10 @@ function _createMdxContent(props) {
       children: "Blank URL, user-agent and header-timeout overrides restore the applicable provider\nor root defaults; provider types without a default URL still require one. Turning\noff local user-agent forwarding or clearing local forwarded headers cannot opt out\nof independently enabled root forwarding. The form displays local database values,\nnot the merged effective root settings.\nThese defaults apply to database providers on startup and every successful reload;\nchanging a root setting does not rewrite the saved local fields."
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "For inherited database providers, the editor uses the base provider's models,\ntransport and healthcheck rather than asking for local model rows. Type must match\nthe static base; display name and credentials remain local, with a blank display\nname falling back to the base. The database provider's Enabled flag remains local.\nClearing Extends requires valid local settings and models before saving."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["TLS ClientHello choices come from provider-type ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tls_client_hello_selectors"
+      }), "\nmetadata: native, bundled Chrome 133/Safari 16.0 and their approved aliases.\nOmitting the field preserves a concrete provider's selection; choosing Native\nexplicitly resets it. Inherited profiles are displayed without a local selector\noverride, and a concrete-to-derived save omits the TLS field to clear its old local\nselection. Static custom profiles are labeled static-only/read-only, with no file\npath or contents shown. Database providers cannot use custom files/inline recipes\nor inherit a static custom base, even for system administrators. Invalid TLS edits\nsave nothing; otherwise the existing saved-versus-activated outcomes still apply."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["An existing custom healthcheck remains selected because the current API cannot\nremove its block. Its path must stay nonempty. Clearing other scalar fields resets\nthem to the defaults shown in the form (GET, status 200, body ", (0,jsx_runtime.jsx)(_components.code, {
         children: "*"
@@ -1467,6 +1625,8 @@ function _createMdxContent(props) {
         children: "keep provider secrets out of the HCL file when possible"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "mount config and key files read-only"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "when using static custom TLS profiles, mount recipe files read-only at their\nconfig-relative paths and validate replacements before reload; do not rely on\nClientHello matching as a provider/WAF-acceptance guarantee"
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["declare ", (0,jsx_runtime.jsx)(_components.code, {
           children: "metrics { token = env(\"AIPROXY_METRICS_TOKEN\") }"

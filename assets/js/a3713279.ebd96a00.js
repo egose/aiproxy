@@ -141,6 +141,18 @@ function _createMdxContent(props) {
           children: "aiproxy serve --config /etc/aiproxy/config.hcl"
         })]
       }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The image also includes ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "*-fetch.json"
+      }), " ClientHello recipes in\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/usr/local/share/aiproxy/tls/"
+      }), ". For example, a provider can set\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tls_client_hello = \"custom\""
+      }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tls_client_hello_spec_file = \"/usr/local/share/aiproxy/tls/bun-1.4.4-fetch.json\""
+      }), ".\nThis is a measured Bun 1.4.4 ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "fetch"
+      }), " profile, not automatic Bun detection."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "local-binary",
       children: "Local Binary"

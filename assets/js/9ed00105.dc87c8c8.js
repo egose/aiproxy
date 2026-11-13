@@ -82,6 +82,14 @@ const toc = [{
   "id": "upstream-header-timeout",
   "level": 2
 }, {
+  "value": "Upstream TLS ClientHello",
+  "id": "upstream-tls-clienthello",
+  "level": 2
+}, {
+  "value": "Custom Specification Files",
+  "id": "custom-specification-files",
+  "level": 3
+}, {
   "value": "Upstream User-Agent",
   "id": "upstream-user-agent",
   "level": 2
@@ -143,6 +151,12 @@ function _createMdxContent(props) {
     p: "p",
     pre: "pre",
     strong: "strong",
+    table: "table",
+    tbody: "tbody",
+    td: "td",
+    th: "th",
+    thead: "thead",
+    tr: "tr",
     ul: "ul",
     ...(0,lib/* useMDXComponents */.R)(),
     ...props.components
@@ -546,6 +560,16 @@ function _createMdxContent(props) {
         })
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "tls_client_hello"
+        }), " (provider-only upstream TLS profile; see below)"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "tls_client_hello_spec_file"
+        }), " (required only for static ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "custom"
+        }), " profiles)"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "enabled"
         }), " (optional, default ", (0,jsx_runtime.jsx)(_components.code, {
           children: "true"
@@ -570,7 +594,7 @@ function _createMdxContent(props) {
         children: "Authorization"
       }), "\nheader. To\nintentionally disable a provider, declare ", (0,jsx_runtime.jsx)(_components.code, {
         children: "enabled = false"
-      }), "; disabled\nproviders are still validated for structure, URL, models, and capabilities,\nbut they do not require a usable credential."]
+      }), "; disabled\nproviders are still validated for structure, URL, models, capabilities and TLS profiles,\nbut they do not require a usable credential."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "forwarding-client-authorization",
       children: "Forwarding Client Authorization"
@@ -860,7 +884,7 @@ function _createMdxContent(props) {
         children: "api_key_ref"
       }), ". It inherits the base provider type, ", (0,jsx_runtime.jsx)(_components.code, {
         children: "base_url"
-      }), ", effective upstream header timeout, enabled state, and all model blocks."]
+      }), ", effective upstream header timeout, TLS ClientHello settings/profile, enabled state, and all model blocks."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.code, {
         children: "github-copilot"
@@ -883,10 +907,14 @@ function _createMdxContent(props) {
       }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "upstream_header_timeout"
       }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tls_client_hello"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tls_client_hello_spec_file"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "enabled"
       }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "model"
-      }), " declarations are rejected instead of ignored."]
+      }), " declarations are rejected instead of ignored, including explicit TLS defaults."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Derived providers are flattened during config loading and reload. After a successful load, direct model strings, health, metrics, billing, and dashboard inventory use the derived provider's own name. Aliases still list each provider target explicitly."
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
@@ -913,6 +941,429 @@ function _createMdxContent(props) {
       children: ["Precedence is provider value, then root value, then the 90-second default. The timeout applies only until response headers arrive; JSON and streaming response bodies can continue for any duration after headers are received. Root and provider timeout changes apply on a successful ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
       }), " reload."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "upstream-tls-clienthello",
+      children: "Upstream TLS ClientHello"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "tls_client_hello"
+      }), " is an optional ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "provider-only"
+      }), " selector for upstream HTTPS.\nThere is no root default or bypass setting. Values are strict, case-sensitive\nstrings; empty, null, wrong-type, wrong-case and unknown selections fail validation."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Selection"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Effective behavior"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Omitted or ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "native"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Standard Go 1.27 TLS (the default)"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chrome"
+            }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "chrome-133"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Bundled Chrome 133; canonical selector ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "chrome-133"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "safari"
+            }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "safari-16.0"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Bundled Safari 16.0; canonical selector ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "safari-16.0"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "custom"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Supplied static JSON recipe; requires ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "tls_client_hello_spec_file"
+            })]
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Browser presets come from pinned uTLS ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "v1.8.2"
+      }), ". Aliases are frozen bundled\nmappings, not live/latest browser downloads. Firefox, Bun, generic BoringSSL/iOS,\nrandomized, draft and PSK selectors are not supported. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "custom"
+      }), " never detects Bun."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "provider \"openai-compatible\" \"profiled\" {\n  base_url         = \"https://api.example.test/v1\"\n  api_key          = env(\"UPSTREAM_API_KEY\")\n  tls_client_hello = \"chrome-133\"\n\n  model \"example-model\" {}\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The effective profile applies to HTTPS inference, each alias target, provider health\nprobes and CLI upstream model discovery. Plain-HTTP requests perform no upstream TLS;\nan absolute HTTPS health URL still uses the profile even when ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " is HTTP.\nStatic derived providers inherit both TLS attributes/profile with the base endpoint\nand reject all local declarations. Disabled profiles are validated too."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Profiles change ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "ClientHello only"
+      }), ", not HTTP headers, HTTP/2 settings, the TCP stack,\ninbound listener transport or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "user_agent"
+      }), ". Certificate and hostname verification\nremain enabled. Bundled compatibility advertisements do not enable weak negotiation:\nnon-native connections require TLS 1.2/1.3 with strong ECDHE/AEAD or TLS 1.3 AEAD,\nreject SHA-1/weak server selections, and never rewrite, fall back or cycle profiles.\nResumed/PSK handshakes, renegotiation and selected ALPS (even empty settings) are\nunsupported. A ClientHello match does not guarantee provider, WAF or bot acceptance."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "custom-specification-files",
+      children: "Custom Specification Files"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "custom"
+      }), " requires a nonempty ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tls_client_hello_spec_file"
+      }), ". Declaring that attribute\nwith any non-custom selector is invalid ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "even when the file value is empty"
+      }), ".\nCustom recipes are file-based only; inline recipe fields/uploads are unsupported."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        children: "provider \"openai-compatible\" \"custom-profile\" {\n  base_url                  = \"https://api.example.test/v1\"\n  api_key                   = env(\"UPSTREAM_API_KEY\")\n  tls_client_hello           = \"custom\"\n  tls_client_hello_spec_file = \"tls/custom-clienthello.json\"\n\n  model \"example-model\" {}\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["If the config is ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "config/config.hcl"
+      }), ", create ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "config/tls/custom-clienthello.json"
+      }), ".\nRelative paths resolve against the config file's absolute ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "lexical directory"
+      }), ",\nnot the shell cwd. Inline ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "AIPROXY_CONFIG"
+      }), " or source-less loading requires an\nabsolute host-local reference. References are at most 4096 UTF-8 bytes without\ncontrol characters/NUL. Regular-file symlinks are allowed; directories, devices\nand FIFOs are rejected. There is no tilde, shell or URL expansion, and recipe JSON\ndoes not expand ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env()"
+      }), "; config-level ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env()"
+      }), " inlining remains available."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Recipes are read, strictly validated and cached immutably during candidate\nconfiguration validation. Requests and runtime validators never reopen files;\neach connection gets fresh mutable extension objects, randomness, session bytes\nand real key shares, with SNI from the actual upstream hostname. Replacing a file\nalone does not change a running server. Successful ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), " reload picks up new\ncontents; a failed reload preserves old cached bytes, even at the same path.\nIn-place CLI edits preserve reference and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env()"
+      }), " spelling. HCL/JSON conversion\nemits resolved absolute references without copying recipes: this preserves\nhost-local usability, not portability across machines or container mounts."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The following ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "illustrative"
+      }), ", unmeasured recipe is a minimal TLS 1.2/1.3 example,\nnot a Chrome or Bun fingerprint. Save it at the path above. Capture metadata is\nseparate and must not be added to this object."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-json",
+        children: "{\n  \"cipher_suites\": [\"TLS_AES_128_GCM_SHA256\", \"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256\"],\n  \"compression_methods\": [\"NULL\"],\n  \"extensions\": [\n    { \"name\": \"server_name\" },\n    { \"name\": \"supported_groups\", \"named_group_list\": [\"x25519\", \"secp256r1\"] },\n    { \"name\": \"signature_algorithms\", \"supported_signature_algorithms\": [\"rsa_pss_rsae_sha256\"] },\n    { \"name\": \"application_layer_protocol_negotiation\", \"protocol_name_list\": [\"h2\", \"http/1.1\"] },\n    { \"name\": \"supported_versions\", \"versions\": [\"TLS 1.3\", \"TLS 1.2\"] },\n    { \"name\": \"key_share\", \"client_shares\": [{ \"group\": \"x25519\" }] }\n  ],\n  \"min_vers\": 771,\n  \"max_vers\": 772\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["This stable v1 subset uses native-shaped uTLS JSON, ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "not"
+      }), " ordinary Go struct\nmarshaling. Files contain one valid UTF-8 object, at most ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "64 KiB"
+      }), ", depth ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "8"
+      }), "\nand ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "4096 tokens"
+      }), ". Duplicate keys, unknown fields, null required collections,\ntrailing data and contradictory settings are rejected. Array order is significant."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Field"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Accepted v1 contents"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "cipher_suites"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["1–64 unique ordered names from the list below; at most one ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "GREASE"
+            }), "; require a safe usable suite for every enabled version"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "compression_methods"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Exactly ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "[\"NULL\"]"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "extensions"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["1–32 ordered extension objects; unique names except up to two ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "GREASE"
+            }), " entries; require ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "server_name"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "supported_groups"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "signature_algorithms"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "min_vers"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_vers"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Optional numeric bounds ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "771"
+            }), " (TLS 1.2) or ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "772"
+            }), " (TLS 1.3), matching ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "supported_versions"
+            }), "; without that extension, only TLS 1.2"]
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Safe suite names are:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-text",
+        children: "TLS_AES_128_GCM_SHA256\nTLS_AES_256_GCM_SHA384\nTLS_CHACHA20_POLY1305_SHA256\nTLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256\nTLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256\nTLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384\nTLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384\nTLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256\nTLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "GREASE"
+      }), " and these eight legacy names are accepted as ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "advertisements only"
+      }), ";\nthey cannot satisfy the safe-suite requirement or be negotiated:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-text",
+        children: "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA\nTLS_ECDHE_RSA_WITH_AES_128_CBC_SHA\nTLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA\nTLS_ECDHE_RSA_WITH_AES_256_CBC_SHA\nTLS_RSA_WITH_AES_128_GCM_SHA256\nTLS_RSA_WITH_AES_256_GCM_SHA384\nTLS_RSA_WITH_AES_128_CBC_SHA\nTLS_RSA_WITH_AES_256_CBC_SHA\n"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Extension payloads are restricted as follows; no other payload fields are accepted:"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.th, {
+            children: ["Extension ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "name"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Payload"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "GREASE"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "server_name"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "extended_master_secret"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "renegotiation_info"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "session_ticket"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "status_request"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "signed_certificate_timestamp"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "name"
+            }), " only; SNI is generated, tickets are empty first-flight advertisements"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "supported_groups"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "named_group_list"
+            }), ": 1–16 unique entries from ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "X25519MLKEM768"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "x25519"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "secp256r1"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "secp384r1"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "secp521r1"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "GREASE"
+            }), "; require a real group and a classical group for TLS 1.2"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "ec_point_formats"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "ec_point_format_list"
+            }), ": exactly ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "[\"uncompressed\"]"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "signature_algorithms"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "supported_signature_algorithms"
+            }), ": 1–32 unique names listed below; require a usable modern signature compatible with the enabled suites/versions"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "application_layer_protocol_negotiation"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "protocol_name_list"
+            }), ": ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "[\"http/1.1\"]"
+            }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "h2"
+            }), " plus ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "http/1.1"
+            }), " in either order; no empty, duplicate, unknown or h2-only list; the extension may be absent"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "supported_versions"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "versions"
+            }), ": 1–3 unique entries from ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "TLS 1.2"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "TLS 1.3"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "GREASE"
+            }), ", with at least one real version"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "key_share"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "client_shares"
+            }), ": 1–3 unique shares in ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "supported_groups"
+            }), " order; at most one real classical share, with ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "x25519"
+            }), " fallback required for ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "X25519MLKEM768"
+            }), "; required for TLS 1.3"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "psk_key_exchange_modes"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "ke_modes"
+            }), ": exactly ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "[\"psk_dhe_ke\"]"
+            }), ", TLS 1.3 only; no imported PSK identities or sessions"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "padding"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "len"
+            }), ": integer 0–4096; zero means BoringPaddingStyle rather than a fixed padding count"]
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Each share is ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "{ \"group\": \"<allowed-group>\" }"
+      }), ": omit ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "key_exchange"
+      }), " for every\nreal group. GREASE may use dummy ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"key_exchange\": [0]"
+      }), " only. The private\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X25519MLKEM768"
+      }), " JSON symbol adapter generates fresh keys without changing uTLS\ndictionaries. MLKEM-only and multiple distinct classical shares are unsupported."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Modern signature names are ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "ecdsa_secp256r1_sha256"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "ecdsa_secp384r1_sha384"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "ecdsa_secp521r1_sha512"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "rsa_pss_rsae_sha256"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "rsa_pss_rsae_sha384"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "rsa_pss_rsae_sha512"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "rsa_pkcs1_sha256"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "rsa_pkcs1_sha384"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "rsa_pkcs1_sha512"
+      }), "\nand ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "ed25519"
+      }), ". RSA-PKCS1 signature selection is TLS 1.2 only. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "rsa_pkcs1_sha1"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "ecdsa_sha1"
+      }), "\nmay be advertised but are rejected if selected. DSA, SHA-224, Ed448 and unknown\nschemes are unsupported."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["A synthetic-SNI dry run must fit a ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "16 KiB"
+      }), " ClientHello; its generated crypto is\ndiscarded. Custom raw/generic extensions, ECH, ALPS, certificate compression, NPN,\nQUIC, cookies, delegated credentials, early data and resumption-specific fields\nare rejected, not approximated. Empty ticket/PSK-mode advertisements do not enable\nresumption. Bundled profiles may advertise compatibility fields outside the custom\nsubset; selected ALPS remains explicitly unsupported."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Database/API/web UI providers allow ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "built-ins only"
+      }), ", including effective\ninheritance. They reject custom/file/inline data before commit for all admin roles;\na managed derivative cannot extend a static custom base. Views expose only\nselector/effective/inherited/static-only metadata, never recipe paths/content.\nSee the ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/api-reference#provider-tls-clienthello-settings",
+        children: "admin contract"
+      }), " and\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#local-bun-clienthello-capture",
+        children: "capture, deployment and proxy limits"
+      }), "\nfor the measured Bun fixture and supported transport paths."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "upstream-user-agent",
       children: "Upstream User-Agent"
@@ -1276,6 +1727,8 @@ function _createMdxContent(props) {
         }), " values, and non-loopback ", (0,jsx_runtime.jsx)(_components.code, {
           children: "http"
         }), " base URLs"]
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "empty, wrong-type, wrong-case or unknown TLS selectors, root/local derived TLS\ndeclarations, any spec-file declaration on non-custom, or missing/unreadable/\ninvalid custom recipes; disabled providers are subject to these TLS checks too"
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "opencode-zen"

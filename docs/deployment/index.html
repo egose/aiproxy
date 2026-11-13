@@ -5,9 +5,9 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Deployment | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/deployment/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Deployment | aiproxy"><meta data-rh="true" name="description" content="This page covers practical ways to run aiproxy in local, containerized, and service-managed environments."><meta data-rh="true" property="og:description" content="This page covers practical ways to run aiproxy in local, containerized, and service-managed environments."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/deployment/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/deployment/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/deployment/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Deployment","item":"https://aiproxy.pages.dev/docs/deployment"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
-<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.55e2a745.css">
-<script src="/assets/js/runtime~main.012ee0f1.js" defer="defer"></script>
-<script src="/assets/js/main.8b8c49ad.js" defer="defer"></script>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.418b09e0.css">
+<script src="/assets/js/runtime~main.3be09d62.js" defer="defer"></script>
+<script src="/assets/js/main.f0042d1c.js" defer="defer"></script>
 </head>
 <body>
 <svg style="display: none;"><defs>
@@ -30,6 +30,11 @@ Linux-only; on other platforms they return <code>daemon lifecycle is unsupported
 <li class="">runs as non-root</li>
 <li class="">starts with <code>aiproxy serve --config /etc/aiproxy/config.hcl</code></li>
 </ul>
+<p>The image also includes <code>*-fetch.json</code> ClientHello recipes in
+<code>/usr/local/share/aiproxy/tls/</code>. For example, a provider can set
+<code>tls_client_hello = &quot;custom&quot;</code> and
+<code>tls_client_hello_spec_file = &quot;/usr/local/share/aiproxy/tls/bun-1.4.4-fetch.json&quot;</code>.
+This is a measured Bun 1.4.4 <code>fetch</code> profile, not automatic Bun detection.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="local-binary">Local Binary<a href="#local-binary" class="hash-link" aria-label="Direct link to Local Binary" title="Direct link to Local Binary" translate="no">​</a></h2>
 <p>Build the binary:</p>
 <div class="language-sh mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-sh codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">make build</span><br></div></code></pre></div></div>

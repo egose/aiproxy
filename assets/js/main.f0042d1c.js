@@ -474,7 +474,7 @@ const i18n_namespaceObject = /*#__PURE__*/JSON.parse('{"defaultLocale":"en","loc
 // EXTERNAL MODULE: ./.docusaurus/codeTranslations.json
 var codeTranslations = __webpack_require__(2654);
 ;// ./.docusaurus/site-metadata.json
-const site_metadata_namespaceObject = /*#__PURE__*/JSON.parse('{"docusaurusVersion":"3.10.1","siteVersion":"0.0.0","pluginVersions":{"docusaurus-plugin-content-docs":{"type":"package","name":"@docusaurus/plugin-content-docs","version":"3.10.1"},"docusaurus-plugin-content-pages":{"type":"package","name":"@docusaurus/plugin-content-pages","version":"3.10.1"},"docusaurus-plugin-sitemap":{"type":"package","name":"@docusaurus/plugin-sitemap","version":"3.10.1"},"docusaurus-plugin-svgr":{"type":"package","name":"@docusaurus/plugin-svgr","version":"3.10.1"},"docusaurus-theme-classic":{"type":"package","name":"@docusaurus/theme-classic","version":"3.10.1"}}}');
+const site_metadata_namespaceObject = /*#__PURE__*/JSON.parse('{"docusaurusVersion":"3.10.1","siteVersion":"0.0.0","pluginVersions":{"docusaurus-plugin-content-docs":{"type":"package","name":"@docusaurus/plugin-content-docs","version":"3.10.1"},"docusaurus-plugin-content-pages":{"type":"package","name":"@docusaurus/plugin-content-pages","version":"3.10.1"},"docusaurus-plugin-sitemap":{"type":"package","name":"@docusaurus/plugin-sitemap","version":"3.10.1"},"docusaurus-plugin-svgr":{"type":"package","name":"@docusaurus/plugin-svgr","version":"3.10.1"},"docusaurus-theme-classic":{"type":"package","name":"@docusaurus/theme-classic","version":"3.10.1"},"website-theme-common-resolution":{"type":"local"}}}');
 // EXTERNAL MODULE: ./node_modules/.pnpm/react@19.2.6/node_modules/react/jsx-runtime.js
 var jsx_runtime = __webpack_require__(1325);
 ;// ./node_modules/.pnpm/@docusaurus+core@3.10.1_@mdx-js+react@3.1.1_@types+react@19.2.14_react@19.2.6__clean-cs_c6bb8a92892675e531eb6c2d31c3baf0/node_modules/@docusaurus/core/lib/client/docusaurusContext.js
@@ -24740,7 +24740,9 @@ __webpack_require__.r(__webpack_exports__);
     "path": "i18n",
     "localeConfigs": {}
   },
-  "plugins": [],
+  "plugins": [
+    null
+  ],
   "presets": [
     [
       "classic",
