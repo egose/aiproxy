@@ -871,7 +871,7 @@ func TestBinaryTLSProfileHealthAndModelDiscovery(t *testing.T) {
 		writeBinaryTLSFile(t, path, []byte(text))
 		start := time.Now()
 		out, err := runBinaryTLSCLI(t, t.TempDir(), binaryTLSChildEnv(t, trust, guard.URL(), nil), "models", "--config", path, "--provider", "local", "--upstream")
-		if err == nil || !strings.Contains(out, "Client.Timeout") || !strings.Contains(out, "read upstream body") || strings.Contains(out, "partial-model") || time.Since(start) > 3*time.Second {
+		if err == nil || !strings.Contains(out, "context deadline exceeded") || !strings.Contains(out, "read upstream body") || strings.Contains(out, "partial-model") || time.Since(start) > 3*time.Second {
 			t.Fatalf("profile discovery lost whole-operation timeout or printed partial results: %v\n%s", err, out)
 		}
 		calls := fixture.observed.Calls("/v1/models")
