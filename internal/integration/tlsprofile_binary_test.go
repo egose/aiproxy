@@ -756,6 +756,38 @@ func TestBinaryTLSProfileSelectedSignatureGuard(t *testing.T) {
 	}
 }
 
+func binaryTLSDiscoveryBodyTimeout(output string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "read upstream body:") &&
+			(strings.Contains(line, context.DeadlineExceeded.Error()) ||
+				strings.Contains(line, "Client.Timeout or context cancellation while reading body")) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBinaryTLSDiscoveryBodyTimeoutDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{"deadline", "read upstream body: context deadline exceeded", true},
+		{"client-timeout", "read upstream body: net/http: request canceled (Client.Timeout or context cancellation while reading body)", true},
+		{"canceled", "read upstream body: context canceled", false},
+		{"unexpected-eof", "read upstream body: unexpected EOF", false},
+		{"unrelated-timeout", "read upstream body: unexpected EOF\ncontext deadline exceeded", false},
+		{"headers-timeout", "upstream call: context deadline exceeded", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := binaryTLSDiscoveryBodyTimeout(tc.output); got != tc.want {
+				t.Fatalf("timeout diagnostic = %t, want %t: %s", got, tc.want, tc.output)
+			}
+		})
+	}
+}
+
 func TestBinaryTLSProfileHealthAndModelDiscovery(t *testing.T) {
 	trust := newBinaryTLSCertificate(t)
 	guard := newBinaryTLSProxy(t, nil)
@@ -871,7 +903,7 @@ func TestBinaryTLSProfileHealthAndModelDiscovery(t *testing.T) {
 		writeBinaryTLSFile(t, path, []byte(text))
 		start := time.Now()
 		out, err := runBinaryTLSCLI(t, t.TempDir(), binaryTLSChildEnv(t, trust, guard.URL(), nil), "models", "--config", path, "--provider", "local", "--upstream")
-		if err == nil || !strings.Contains(out, "context deadline exceeded") || !strings.Contains(out, "read upstream body") || strings.Contains(out, "partial-model") || time.Since(start) > 3*time.Second {
+		if err == nil || !binaryTLSDiscoveryBodyTimeout(out) || strings.Contains(out, "partial-model") || time.Since(start) > 3*time.Second {
 			t.Fatalf("profile discovery lost whole-operation timeout or printed partial results: %v\n%s", err, out)
 		}
 		calls := fixture.observed.Calls("/v1/models")
