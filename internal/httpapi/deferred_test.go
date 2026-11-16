@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -248,6 +250,13 @@ func (f *deferredHTTPFixture) read(t *testing.T, receipt deferred.Receipt, curso
 }
 
 func TestDeferredRoutingVersionsMethodsDisabledAndWebUI(t *testing.T) {
+	const uiHTML = "<html>deferred-ui</html>"
+	uiDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(uiDir, "index.html"), []byte(uiHTML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AIPROXY_WEBUI_DIR", uiDir)
+
 	f := newDeferredHTTPFixture(t, nil)
 	deps := f.h.current()
 	deps.WebUI = config.WebUI{Enabled: true}
@@ -297,8 +306,8 @@ func TestDeferredRoutingVersionsMethodsDisabledAndWebUI(t *testing.T) {
 	r.Header.Set("Accept", "text/html")
 	w = httptest.NewRecorder()
 	f.h.ServeHTTP(w, r)
-	if w.Code != 200 || !strings.Contains(w.Header().Get("Content-Type"), "text/html") {
-		t.Fatal("ordinary UI root stopped working alongside private routes")
+	if w.Code != http.StatusOK || !strings.Contains(w.Header().Get("Content-Type"), "text/html") || w.Body.String() != uiHTML {
+		t.Fatalf("UI root: status=%d content-type=%q body=%q", w.Code, w.Header().Get("Content-Type"), w.Body.String())
 	}
 	if len(f.accounting.Events()) != 0 || f.rate.calls.Load() != 0 {
 		t.Fatal("private negotiation/control traffic was charged as inference")
