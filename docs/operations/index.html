@@ -6,7 +6,7 @@
 <title data-rh="true">Operations | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/operations/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Operations | aiproxy"><meta data-rh="true" name="description" content="This page covers the commands and operational behavior that matter most for local development and production deployment."><meta data-rh="true" property="og:description" content="This page covers the commands and operational behavior that matter most for local development and production deployment."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/operations/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/operations/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/operations/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Operations","item":"https://aiproxy.pages.dev/docs/operations"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
 <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.6e844cd5.css">
-<script src="/assets/js/runtime~main.0eb21314.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.51fcd565.js" defer="defer"></script>
 <script src="/assets/js/main.f0042d1c.js" defer="defer"></script>
 </head>
 <body>
@@ -370,6 +370,14 @@ The only replaced leg is:</p>
 <p>The end-client and executor–upstream connections still have their own deadlines
 and intermediary idle limits. This is not durable job scheduling, Batch, or
 Responses background mode.</p>
+<p>Caller transport is selected per resolved model, including each alias attempt.
+Use model-level <code>deferred_transport</code> to keep ordinary and deferred chat models
+under one provider/credential. An explicit local provider block remains a
+compatibility default; a model block replaces it wholesale using standard defaults
+for omitted fields. There is no model opt-out from a provider default: remove that
+default when migrating to mixed models. Receiver eligibility stays provider-only
+and additive; it does <strong>not</strong> turn ordinary requests for its models into jobs.
+See the <a class="" href="/docs/configuration/#caller-policy">mixed-model pair and migration rules</a>.</p>
 <h3 class="anchor anchorTargetStickyNavbar_T7vg" id="streaming-and-deployment">Streaming And Deployment<a href="#streaming-and-deployment" class="hash-link" aria-label="Direct link to Streaming And Deployment" title="Direct link to Streaming And Deployment" translate="no">​</a></h3>
 <p>The executor keeps the original <code>stream</code> flag. Reads are immediate, finite byte
 snapshots, <strong>not long polls</strong>. JSON delivery waits for the complete terminal
@@ -388,7 +396,10 @@ cursor recovery is not an end-client reconnect/resume session.</p>
 version-1 capability for the configured executor public model is required before
 submission. Missing capabilities or wrong versions mean zero submissions; opted-in
 chat never silently falls back to ordinary transport. An ordinary upstream <code>202</code>
-is not a job acknowledgment.</p>
+is not a job acknowledgment.
+Models without an effective caller opt-in continue to call ordinary routes,
+even if that executor/model also accepts private jobs. Responses and embeddings
+remain ordinary even on opted-in caller models.</p>
 <p>Route capability discovery, submit/replay, reads, status, result and DELETE to
 the <strong>same executing process</strong>, using sticky routing or a dedicated executor.
 Expose the versioned private routes through the trusted TLS edge without caching
@@ -486,6 +497,12 @@ owners can be reclaimed after one minute, not evicted to reset live limits.</p>
 transports, alias attempts and completion resources through a runtime lease.
 Per-job deadlines/limits stay frozen; current auth/model policy still governs
 controls. Failed reloads leave jobs and resources intact.</p>
+<p>Caller model policy also reloads on <code>SIGHUP</code>. New requests use the activated
+model opt-ins, provider compatibility defaults, endpoint and credentials.
+Already admitted jobs and committed streams keep their original peer,
+credential, caller options and runtime resources through delivery/cleanup.
+Moving or removing a caller model block changes new requests only; it never
+converts an admitted attempt into synchronous inference or a fresh alias attempt.</p>
 <p>To disable new execution, remove the root <code>deferred</code> block <strong>and all receiver
 blocks</strong> in a valid reload. Capabilities/new admissions then stop, while existing
 authenticated status/read/result/DELETE and protected submit replay drain under

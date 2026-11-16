@@ -800,6 +800,15 @@ function _createMdxContent(props) {
       })
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "The end-client and executor–upstream connections still have their own deadlines\nand intermediary idle limits. This is not durable job scheduling, Batch, or\nResponses background mode."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Caller transport is selected per resolved model, including each alias attempt.\nUse model-level ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred_transport"
+      }), " to keep ordinary and deferred chat models\nunder one provider/credential. An explicit local provider block remains a\ncompatibility default; a model block replaces it wholesale using standard defaults\nfor omitted fields. There is no model opt-out from a provider default: remove that\ndefault when migrating to mixed models. Receiver eligibility stays provider-only\nand additive; it does ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "not"
+      }), " turn ordinary requests for its models into jobs.\nSee the ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#caller-policy",
+        children: "mixed-model pair and migration rules"
+      }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "streaming-and-deployment",
       children: "Streaming And Deployment"
@@ -818,7 +827,7 @@ function _createMdxContent(props) {
         children: "before enabling caller opt-ins"
       }), ". A positive,\nversion-1 capability for the configured executor public model is required before\nsubmission. Missing capabilities or wrong versions mean zero submissions; opted-in\nchat never silently falls back to ordinary transport. An ordinary upstream ", (0,jsx_runtime.jsx)(_components.code, {
         children: "202"
-      }), "\nis not a job acknowledgment."]
+      }), "\nis not a job acknowledgment.\nModels without an effective caller opt-in continue to call ordinary routes,\neven if that executor/model also accepts private jobs. Responses and embeddings\nremain ordinary even on opted-in caller models."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Route capability discovery, submit/replay, reads, status, result and DELETE to\nthe ", (0,jsx_runtime.jsx)(_components.strong, {
         children: "same executing process"
@@ -997,6 +1006,10 @@ function _createMdxContent(props) {
       children: "Peer Reload And Finalization"
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Accepted execution retains its admitted catalog, credentials, endpoint,\ntransports, alias attempts and completion resources through a runtime lease.\nPer-job deadlines/limits stay frozen; current auth/model policy still governs\ncontrols. Failed reloads leave jobs and resources intact."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Caller model policy also reloads on ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), ". New requests use the activated\nmodel opt-ins, provider compatibility defaults, endpoint and credentials.\nAlready admitted jobs and committed streams keep their original peer,\ncredential, caller options and runtime resources through delivery/cleanup.\nMoving or removing a caller model block changes new requests only; it never\nconverts an admitted attempt into synchronous inference or a fresh alias attempt."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["To disable new execution, remove the root ", (0,jsx_runtime.jsx)(_components.code, {
         children: "deferred"

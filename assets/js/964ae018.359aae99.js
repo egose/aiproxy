@@ -694,6 +694,12 @@ function _createMdxContent(props) {
         href: "/docs/operations#peer-deferred-transport-v1",
         children: "operational limits"
       }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Caller chat transport follows the resolved model's local ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred_transport"
+      }), ",\notherwise its provider's local compatibility default, otherwise ordinary\ntransport. A model block replaces the whole default, including when empty or\npartial. Direct and alias-target requests use the same precedence. The executor's\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred_receiver"
+      }), " is provider-only and additive: it permits private admission\nwithout forcing ordinary calls for the same models into jobs. Model placement\nchanges neither these v1 routes/schema nor the public support/capability matrices."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "peer-routes-and-recognition",
       children: "Peer Routes And Recognition"
@@ -1907,7 +1913,7 @@ function _createMdxContent(props) {
         children: "deferred_transport"
       }), " and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "deferred_receiver"
-      }), " are static-config-only.\nAdministrative provider POST/PUT and credential PUT reject either field before\ncommit, including null/empty objects and case variants, for every admin role.\nManaged derivatives cannot extend a static base carrying either opt-in.\nThere are no writable managed/web transport fields; see\n", (0,jsx_runtime.jsx)(_components.a, {
+      }), " are static-config-only.\nAdministrative provider POST/PUT and credential PUT reject either field before\ncommit, including nested model declarations, null/empty objects and case variants,\nfor every admin role. Managed derivatives cannot extend a static base carrying\nany provider/model caller setting or receiver opt-in.\nThere are no writable managed/web transport fields; see\n", (0,jsx_runtime.jsx)(_components.a, {
         href: "/docs/configuration#peer-deferred-transport-v1",
         children: "peer configuration"
       }), "."]

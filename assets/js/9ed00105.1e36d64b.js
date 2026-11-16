@@ -94,8 +94,20 @@ const toc = [{
   "id": "caller-policy",
   "level": 3
 }, {
+  "value": "Compatibility Defaults And Migration",
+  "id": "compatibility-defaults-and-migration",
+  "level": 3
+}, {
   "value": "Receiver Limits",
   "id": "receiver-limits",
+  "level": 3
+}, {
+  "value": "Mixed Models: Full Caller And Executor",
+  "id": "mixed-models-full-caller-and-executor",
+  "level": 3
+}, {
+  "value": "Local Static Derivative Overlays",
+  "id": "local-static-derivative-overlays",
   "level": 3
 }, {
   "value": "Full Caller Configuration",
@@ -599,9 +611,9 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "deferred_transport"
-        }), " / ", (0,jsx_runtime.jsx)(_components.code, {
+        }), " (static-only caller compatibility default; prefer a\nmodel-level block) / ", (0,jsx_runtime.jsx)(_components.code, {
           children: "deferred_receiver"
-        }), " (static-only peer transport opt-ins;\nsee ", (0,jsx_runtime.jsx)(_components.a, {
+        }), " (provider-only executor opt-in;\nsee ", (0,jsx_runtime.jsx)(_components.a, {
           href: "#peer-deferred-transport-v1",
           children: "Peer Deferred Transport v1"
         }), ")"]
@@ -633,11 +645,11 @@ function _createMdxContent(props) {
         children: "enabled = false"
       }), "; disabled\nproviders are still validated for structure, URL, models, capabilities and TLS profiles,\nbut they normally do not require a usable credential. A declared\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "deferred_transport"
-      }), " still requires a configured ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " on a provider or any of its models still requires a\nconfigured ", (0,jsx_runtime.jsx)(_components.code, {
         children: "api_key"
       }), " or ", (0,jsx_runtime.jsx)(_components.code, {
         children: "api_key_ref"
-      }), ",\nincluding on a disabled provider."]
+      }), ", including on a disabled provider."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "forwarding-client-authorization",
       children: "Forwarding Client Authorization"
@@ -953,21 +965,38 @@ function _createMdxContent(props) {
         children: "tls_client_hello"
       }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "tls_client_hello_spec_file"
-      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "enabled"
       }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "enabled"
+      }), " declarations are rejected instead of ignored, including explicit TLS defaults. Local ", (0,jsx_runtime.jsx)(_components.code, {
         children: "model"
-      }), " declarations are rejected instead of ignored, including explicit TLS defaults."]
+      }), " declarations are also rejected except for the static transport-only overlays described below."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Derived providers are flattened during config loading and reload. After a successful load, direct model strings, health, metrics, billing, and dashboard inventory use the derived provider's own name. Aliases still list each provider target explicitly."
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Static derivatives may also declare a ", (0,jsx_runtime.jsx)(_components.strong, {
-        children: "local"
-      }), " ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Static derivatives inherit model definitions, ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "not"
+      }), " base provider or model\ncaller opt-ins, nor receiver opt-ins/limits. A derivative may declare an existing\ninherited model name with ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "only"
+      }), " a local ", (0,jsx_runtime.jsx)(_components.code, {
         children: "deferred_transport"
-      }), " or\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), " block. New model\nnames, definition fields (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "upstream_name"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "display_name"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "protocol"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "capabilities"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "pricing"
+      }), "), empty model overlays and duplicate overlays are\nrejected, even if a forbidden field is empty, null or a default value."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["A local provider caller compatibility default is still supported on a static\nderivative. With no local model block or provider default, the inherited model\nuses ordinary transport. Local caller blocks use standard caller defaults;\nlocal provider-only ", (0,jsx_runtime.jsx)(_components.code, {
         children: "deferred_receiver"
-      }), " block. Neither opt-in nor its provider-level limits are\ninherited; an omitted block means ordinary transport. Local caller blocks use\ncaller defaults, and local receiver blocks use root defaults. Managed derivatives\ncannot extend a base with either opt-in."]
+      }), " blocks use root defaults. See the\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "#local-static-derivative-overlays",
+        children: "exact-tested overlay example"
+      }), ".\nManaged derivatives cannot extend a base carrying any provider/model caller\nsetting or receiver opt-in."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "upstream-header-timeout",
       children: "Upstream Header Timeout"
@@ -1021,9 +1050,9 @@ function _createMdxContent(props) {
           }), (0,jsx_runtime.jsxs)(_components.td, {
             children: ["Static ", (0,jsx_runtime.jsx)(_components.code, {
               children: "openai-compatible"
-            }), " provider with ", (0,jsx_runtime.jsx)(_components.code, {
+            }), " model with local ", (0,jsx_runtime.jsx)(_components.code, {
               children: "deferred_transport"
-            }), "; chat JSON/SSE only"]
+            }), ", or its provider's local compatibility default; chat JSON/SSE only"]
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -1051,7 +1080,7 @@ function _createMdxContent(props) {
           children: [(0,jsx_runtime.jsx)(_components.td, {
             children: "Other operations"
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Use ordinary transport and existing capability checks, even on a caller-opted-in provider"
+            children: "Use ordinary transport and existing capability checks, even on a caller-opted-in model"
           })]
         })]
       })]
@@ -1074,13 +1103,17 @@ function _createMdxContent(props) {
         children: "deferred"
       }), " block. An executor requires ", (0,jsx_runtime.jsx)(_components.code, {
         children: "auth.mode = \"bearer_static\""
-      }), ".\nOpt-ins require at least one chat-capable model and are validated even on disabled\nproviders. A provider cannot declare both roles or combine either with\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), ".\nEach directly opted-in caller model must support chat; provider compatibility\ndefaults and receivers require at least one chat-capable model. Settings are\nvalidated even on disabled providers. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred_receiver"
+      }), " remains\n", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "provider-only"
+      }), " and additive: eligible models still accept ordinary requests.\nIt does not force ordinary calls into deferral. A receiver cannot coexist with\nany caller model setting or provider caller default on the same provider, and\nneither role can combine with ", (0,jsx_runtime.jsx)(_components.code, {
         children: "forward_authorization"
       }), "."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["These settings are ", (0,jsx_runtime.jsx)(_components.strong, {
         children: "static-config-only"
-      }), ". Managed provider/credential writes\nreject either declaration, including empty/null and case-variant fields, before\ncommit; managed providers cannot inherit an opted-in base. There are no new\ninteractive or non-interactive CLI creation flags or web form fields. Existing\nCLI edits preserve the blocks and supported ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ". Managed provider/credential writes\nreject either declaration, including nested model declarations and empty/null\nor case-variant fields, before commit; managed providers cannot inherit an\nopted-in base. There are no new\ninteractive or non-interactive CLI creation flags or web form fields. Existing\nCLI edits preserve the blocks and supported ", (0,jsx_runtime.jsx)(_components.code, {
         children: "env()"
       }), " spelling."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
@@ -1299,6 +1332,58 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "caller-policy",
       children: "Caller Policy"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The caller selects transport for the ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "resolved model"
+      }), " on direct requests and\nfor each selected alias target. Models sharing a provider share its endpoint and\ncredential, not necessarily its chat transport."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.th, {
+            children: ["Local model ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "deferred_transport"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.th, {
+            children: ["Local provider ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "deferred_transport"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Effective chat transport"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Present, including ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "{}"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Present or absent"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Model block, replacing the whole provider block"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Absent"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Present"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Provider compatibility default"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Absent"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Absent"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Ordinary request"
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["An empty model block opts in with all standard caller defaults below. A partial\nmodel block uses those same defaults for every omitted field, ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "never values\nfrom the provider block"
+      }), ". Omitting a model block is not an opt-out when a\nprovider default exists."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
       children: [(0,jsx_runtime.jsx)(_components.thead, {
         children: (0,jsx_runtime.jsxs)(_components.tr, {
@@ -1384,6 +1469,41 @@ function _createMdxContent(props) {
         children: "api_key_ref"
       }), " to authenticate to the executor, not the end client's\ntoken."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "compatibility-defaults-and-migration",
+      children: "Compatibility Defaults And Migration"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Existing provider-level caller blocks remain supported as ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "local compatibility\ndefaults"
+      }), "; they are never silently ignored. This compatibility example can be\nappended to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "peer-model-caller.hcl"
+      }), " below:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        metastring: "title=\"peer-compatibility-default.hcl\"",
+        children: "provider \"openai-compatible\" \"legacy\" {\n  base_url = \"https://executor.example/v1\"\n  api_key  = env(\"AIPROXY_PEER_TOKEN\")\n  deferred_transport {\n    control_timeout     = \"20s\"\n    max_wait            = \"1h\"\n    poll_interval       = \"1s\"\n    max_control_calls   = 2048\n    max_control_retries = 20\n  }\n\n  model \"model-1\" {\n    upstream_name = \"b/model-1\"\n  }\n  model \"model-2\" {\n    upstream_name = \"b/model-2\"\n    deferred_transport {}\n  }\n  model \"model-3\" {\n    upstream_name = \"b/model-2\"\n    deferred_transport {\n      max_wait = \"20m\"\n    }\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Here all three chat models defer: ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model-1"
+      }), " uses the provider values, ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model-2"
+      }), "\nuses all standard defaults, and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model-3"
+      }), " uses ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "20m"
+      }), " plus standard defaults for\nthe other four fields. Add their ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "legacy/..."
+      }), " names to the application's\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allowed_models"
+      }), " if exposing this compatibility example. There is no\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "enabled = false"
+      }), " or other caller opt-out.\nTo mix ordinary and deferred models, ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "remove the provider-wide default"
+      }), " and\nmove the desired full policy into each intended model block. Copy all fields\nwhose old nonstandard values must survive; partial blocks do not merge."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Unsupported provider types, non-chat-only model opt-ins, labeled/duplicate\nblocks, unknown attributes, null declarations, model-level receivers and\nout-of-range settings fail validation rather than reverting to ordinary\ntransport. Correct the declaration; do not rely on a silent fallback."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "receiver-limits",
       children: "Receiver Limits"
     }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
@@ -1427,6 +1547,77 @@ function _createMdxContent(props) {
         })]
       })]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "mixed-models-full-caller-and-executor",
+      children: "Mixed Models: Full Caller And Executor"
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "These complete configurations demonstrate the single-provider case:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-text",
+        children: "client → a/model-1 → b/model-1: ordinary chat\nclient → a/model-2 → b/model-2: deferred chat\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Set ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "AIPROXY_CLIENT_TOKEN"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "AIPROXY_PEER_TOKEN"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "UPSTREAM_API_KEY"
+      }), " to distinct\nnonempty secrets and replace the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ".example"
+      }), " hosts. The HTTPS executor address\nassumes a TLS edge forwarding to its HTTP listener. The caller needs no root\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred"
+      }), " block."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        metastring: "title=\"peer-model-caller.hcl\"",
+        children: "listener \"http\" \"public\" {\n  address = \":8080\"\n  timeouts {\n    read_header = \"10s\"\n    idle        = \"60s\"\n    write       = \"0s\"\n  }\n}\n\nauth \"main\" {\n  mode = \"bearer_static\"\n  client \"application\" {\n    token          = env(\"AIPROXY_CLIENT_TOKEN\")\n    allowed_models = [\"a/model-1\", \"a/model-2\"]\n  }\n}\n\nprovider \"openai-compatible\" \"a\" {\n  base_url = \"https://executor.example/v1\"\n  api_key  = env(\"AIPROXY_PEER_TOKEN\")\n\n  model \"model-1\" {\n    upstream_name = \"b/model-1\"\n  }\n  model \"model-2\" {\n    upstream_name = \"b/model-2\"\n    deferred_transport {\n      max_wait      = \"20m\"\n      poll_interval = \"500ms\"\n    }\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        metastring: "title=\"peer-model-executor.hcl\"",
+        children: "listener \"http\" \"public\" {\n  address = \":8081\"\n  timeouts {\n    read_header = \"10s\"\n    idle        = \"60s\"\n    write       = \"0s\"\n  }\n}\n\nupstream_header_timeout = \"10m\"\n\nauth \"main\" {\n  mode = \"bearer_static\"\n  client \"peer-caller\" {\n    token          = env(\"AIPROXY_PEER_TOKEN\")\n    tenant         = \"peer\"\n    allowed_models = [\"b/model-1\", \"b/model-2\"]\n  }\n}\n\ndeferred {}\n\nprovider \"openai-compatible\" \"b\" {\n  base_url = \"https://upstream.example/v1\"\n  api_key  = env(\"UPSTREAM_API_KEY\")\n  deferred_receiver {}\n\n  model \"model-1\" {\n    upstream_name = \"upstream-model-1\"\n  }\n  model \"model-2\" {\n    upstream_name = \"upstream-model-2\"\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Both models belong to the ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "same receiver provider"
+      }), ". Its receiver block permits\nprivate admission for either chat model but does not change ordinary\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/chat/completions"
+      }), " calls into jobs. Only the caller's ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model-2"
+      }), " chat\nrequests use capability discovery, submit and finite reads. Responses and\nembeddings on either model use ordinary routes and normal capability checks."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "local-static-derivative-overlays",
+      children: "Local Static Derivative Overlays"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Append this exact-tested snippet to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "peer-model-caller.hcl"
+      }), ". The local credential\nis required even when reusing the same peer token (and thus executor owner):"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        metastring: "title=\"peer-model-derived.hcl\"",
+        children: "provider \"openai-compatible\" \"derived\" {\n  extends = \"a\"\n  api_key = env(\"AIPROXY_PEER_TOKEN\")\n  model \"model-2\" {\n    deferred_transport {}\n  }\n}\n\nprovider \"openai-compatible\" \"ordinary-derived\" {\n  extends = \"a\"\n  api_key = env(\"AIPROXY_PEER_TOKEN\")\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "derived/model-2"
+      }), " inherits its model definition but uses standard caller defaults,\nnot the base's ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "20m"
+      }), " / ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "500ms"
+      }), ". ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "derived/model-1"
+      }), " is ordinary. Both models on\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "ordinary-derived"
+      }), " are ordinary because base caller opt-ins are not inherited.\nTo expose these derivative names to the application, add them to its\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allowed_models"
+      }), ". Overlays must name an existing inherited model and contain only\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred_transport"
+      }), "; change model definitions on the concrete base, not here."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "full-caller-configuration",
       children: "Full Caller Configuration"
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
@@ -1441,7 +1632,7 @@ function _createMdxContent(props) {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
         metastring: "title=\"peer-caller.hcl\"",
-        children: "listener \"http\" \"public\" {\n  address = \":8080\"\n  timeouts {\n    read_header = \"10s\"\n    idle        = \"60s\"\n    write       = \"0s\"\n  }\n}\n\nauth \"main\" {\n  mode = \"bearer_static\"\n  client \"application\" {\n    token          = env(\"AIPROXY_CLIENT_TOKEN\")\n    allowed_models = [\"peer/chat\"]\n  }\n}\n\nlogging {\n  level      = \"info\"\n  access_log = true\n}\n\nmetrics {\n  token = env(\"AIPROXY_CALLER_METRICS_TOKEN\")\n}\n\nprovider \"openai-compatible\" \"peer\" {\n  base_url = \"https://executor.example/v1\"\n  api_key  = env(\"AIPROXY_PEER_TOKEN\")\n\n  deferred_transport {\n    control_timeout     = \"5s\"\n    max_wait            = \"15m\"\n    poll_interval       = \"250ms\"\n    max_control_calls   = 4096\n    max_control_retries = 8\n  }\n\n  model \"chat\" {\n    upstream_name = \"alias/peer_chat\"\n    capabilities  = [\"chat\", \"responses\"]\n  }\n}\n"
+        children: "listener \"http\" \"public\" {\n  address = \":8080\"\n  timeouts {\n    read_header = \"10s\"\n    idle        = \"60s\"\n    write       = \"0s\"\n  }\n}\n\nauth \"main\" {\n  mode = \"bearer_static\"\n  client \"application\" {\n    token          = env(\"AIPROXY_CLIENT_TOKEN\")\n    allowed_models = [\"peer/chat\"]\n  }\n}\n\nlogging {\n  level      = \"info\"\n  access_log = true\n}\n\nmetrics {\n  token = env(\"AIPROXY_CALLER_METRICS_TOKEN\")\n}\n\nprovider \"openai-compatible\" \"peer\" {\n  base_url = \"https://executor.example/v1\"\n  api_key  = env(\"AIPROXY_PEER_TOKEN\")\n\n  model \"chat\" {\n    upstream_name = \"alias/peer_chat\"\n    capabilities  = [\"chat\", \"responses\"]\n    deferred_transport {\n      control_timeout     = \"5s\"\n      max_wait            = \"15m\"\n      poll_interval       = \"250ms\"\n      max_control_calls   = 4096\n      max_control_retries = 8\n    }\n  }\n}\n"
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.code, {
@@ -1467,16 +1658,16 @@ function _createMdxContent(props) {
         children: "listener \"http\" \"public\" {\n  address = \":8081\"\n  timeouts {\n    read_header = \"10s\"\n    idle        = \"60s\"\n    write       = \"0s\"\n  }\n}\n\nupstream_header_timeout = \"10m\"\n\nauth \"main\" {\n  mode = \"bearer_static\"\n  client \"peer-caller\" {\n    token          = env(\"AIPROXY_PEER_TOKEN\")\n    tenant         = \"peer\"\n    allowed_models = [\"alias/peer_chat\"]\n  }\n}\n\nlogging {\n  level      = \"info\"\n  access_log = true\n}\n\nmetrics {\n  token = env(\"AIPROXY_EXECUTOR_METRICS_TOKEN\")\n}\n\ndeferred {\n  max_jobs             = 64\n  max_running          = 8\n  max_admissions       = 4\n  max_entries          = 256\n  max_memory_bytes     = 268435456\n  max_request_bytes    = 1048576\n  max_result_bytes     = 8388608\n  max_work_bytes       = 67108864\n  per_owner_jobs       = 8\n  per_owner_running    = 2\n  max_control_inflight = 16\n  execution_timeout    = \"10m\"\n  retention            = \"2m\"\n  control_timeout      = \"5s\"\n  finalization_timeout = \"5s\"\n}\n\nprovider \"openai-compatible\" \"primary\" {\n  base_url = \"https://upstream.example/v1\"\n  api_key  = env(\"UPSTREAM_API_KEY\")\n  deferred_receiver {}\n\n  model \"chat\" {\n    upstream_name = \"chat-model\"\n    capabilities  = [\"chat\", \"responses\"]\n  }\n}\n\nprovider \"openai-compatible\" \"secondary\" {\n  extends = \"primary\"\n  api_key = env(\"SECONDARY_UPSTREAM_API_KEY\")\n  deferred_receiver {\n    execution_timeout = \"5m\"\n    max_result_bytes  = 4194304\n  }\n}\n\nalias \"peer_chat\" {\n  algorithm = \"round_robin\"\n  target {\n    provider = \"primary\"\n    model    = \"chat\"\n  }\n  target {\n    provider = \"secondary\"\n    model    = \"chat\"\n  }\n}\n"
       })
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
-      children: "With the environment variables set, validate both files without dialing a peer\nor upstream:"
+      children: "With the environment variables set, validate each full file without dialing a peer\nor upstream:"
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-sh",
-        children: "aiproxy validate --config peer-caller.hcl\naiproxy validate --config peer-executor.hcl\n"
+        children: "aiproxy validate --config peer-caller.hcl\naiproxy validate --config peer-executor.hcl\naiproxy validate --config peer-model-caller.hcl\naiproxy validate --config peer-model-executor.hcl\n"
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["The repository's ", (0,jsx_runtime.jsx)(_components.code, {
         children: "go test ./internal/config -run DocumentedDeferred -count=1"
-      }), "\nloads these exact code blocks with non-secret fixture values and checks HCL/JSON\nconversion and inline loading. See the ", (0,jsx_runtime.jsx)(_components.a, {
+      }), "\nloads both exact full pairs and the appended compatibility/derivative snippets\nwith non-secret fixture values and checks HCL/JSON conversion, file and inline/env\nloading. See the ", (0,jsx_runtime.jsx)(_components.a, {
         href: "/docs/api-reference#peer-deferred-transport-v1",
         children: "wire API"
       }), "\nand ", (0,jsx_runtime.jsx)(_components.a, {
@@ -1985,6 +2176,17 @@ function _createMdxContent(props) {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "capabilities"
         }), " narrows the operations exposed through the proxy"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "deferred_transport"
+        }), " opts a static ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "openai-compatible"
+        }), " chat model into\n", (0,jsx_runtime.jsx)(_components.a, {
+          href: "#caller-policy",
+          children: "peer caller transport"
+        }), "; ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "deferred_receiver"
+        }), " is provider-only"]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Use ", (0,jsx_runtime.jsx)(_components.code, {
