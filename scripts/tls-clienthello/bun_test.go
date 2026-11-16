@@ -15,7 +15,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/egose/aiproxy/internal/tlsprofile"
@@ -349,6 +351,89 @@ func TestBunCaptureCancellation(t *testing.T) {
 	if time.Since(start) > time.Second {
 		t.Fatal("cancellation did not close/reap capture resources promptly")
 	}
+}
+
+type captureCloseGate struct {
+	started  chan struct{}
+	release  chan struct{}
+	finished chan struct{}
+}
+
+func (g *captureCloseGate) Close() error {
+	close(g.started)
+	<-g.release
+	close(g.finished)
+	return nil
+}
+
+func TestCloseOnContextDoneWaitsForInFlightClose(t *testing.T) {
+	for _, alreadyCanceled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("already-canceled=%t", alreadyCanceled), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				gate := &captureCloseGate{started: make(chan struct{}), release: make(chan struct{}), finished: make(chan struct{})}
+				release := sync.OnceFunc(func() { close(gate.release) })
+				defer release()
+				if alreadyCanceled {
+					cancel()
+				}
+				stop := closeOnContextDone(ctx, gate)
+				if !alreadyCanceled {
+					cancel()
+				}
+				synctest.Wait()
+				select {
+				case <-gate.started:
+				default:
+					t.Fatal("cancellation did not start closing the resource")
+				}
+				stopped := make(chan struct{})
+				go func() {
+					stop()
+					close(stopped)
+				}()
+				synctest.Wait()
+				select {
+				case <-stopped:
+					t.Fatal("cleanup returned before the cancellation callback finished closing")
+				default:
+				}
+				release()
+				synctest.Wait()
+				select {
+				case <-stopped:
+				default:
+					t.Fatal("cleanup did not finish after the resource closed")
+				}
+				select {
+				case <-gate.finished:
+				default:
+					t.Fatal("cleanup did not wait for the resource to close")
+				}
+				stop()
+			})
+		})
+	}
+}
+
+func TestCloseOnContextDoneStoppedBeforeCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		gate := &captureCloseGate{started: make(chan struct{}), release: make(chan struct{}), finished: make(chan struct{})}
+		defer close(gate.release)
+		stop := closeOnContextDone(ctx, gate)
+		stop()
+		stop()
+		cancel()
+		synctest.Wait()
+		select {
+		case <-gate.started:
+			t.Fatal("stopped cancellation callback closed the resource")
+		default:
+		}
+	})
 }
 
 type delayedDeadlineContext struct {
