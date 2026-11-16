@@ -153,13 +153,21 @@ The optional standalone Bun capture tool is documented in
   `forward_authorization = true` which must omit it); the base must be enabled,
   concrete, and the same type.
 - Peer Deferred Transport v1 uses unlabeled root `deferred`, static
-  `openai-compatible` caller `deferred_transport`, and static chat
-  `deferred_receiver` blocks. Only chat JSON/SSE uses peer transport; other
-  operations remain ordinary, and peer control failures never authorize fresh
-  inference. Opt-ins are local to each static derivative, incompatible with
-  `forward_authorization`, and rejected on managed provider/credential writes
-  and managed inheritance. Callers require configured `api_key`/`api_key_ref`
-  even when disabled. There are no CLI creation flags. Full configurations
+  `openai-compatible` model-level caller `deferred_transport`, and provider-only
+  static chat `deferred_receiver` blocks. A local provider caller block remains
+  a compatibility default: a model block replaces it wholesale, with standard
+  caller defaults for omitted fields; without a model caller block, use the local
+  provider default or ordinary transport when neither exists. There is no opt-out flag;
+  remove the provider default to mix ordinary and deferred models. Only chat
+  JSON/SSE uses peer transport; other operations remain ordinary. Receiver
+  eligibility is additive and does not defer ordinary calls, but a receiver
+  cannot coexist with any caller setting on the same provider. Static derivatives
+  inherit model definitions, never base caller/receiver opt-ins; local existing-name
+  model overlays may contain only `deferred_transport`. Opt-ins are incompatible
+  with `forward_authorization` and rejected on managed provider/credential writes
+  (including nested models) and managed inheritance. Callers require configured
+  `api_key`/`api_key_ref` even when disabled. Peer control failures never authorize
+  fresh inference. There are no CLI/web creation controls. Full configurations
   in `website/docs/configuration.md#peer-deferred-transport-v1` are checked by
   `go test ./internal/config -run DocumentedDeferred -count=1`; API and limits are
   in `website/docs/api-reference.md` and `website/docs/operations.md`.

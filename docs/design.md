@@ -1599,9 +1599,9 @@ blocks with non-secret environment values, including conversion and inline loadi
 
 | Boundary         | v1 contract                                                                                                                                                |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Caller           | Static `openai-compatible` provider with `deferred_transport`; chat completions only, JSON and SSE                                                         |
-| Executor         | Static `deferred_receiver` provider/model supporting chat completions through its existing adapter                                                         |
-| Other operations | Keep ordinary transport, even on a caller-opted-in provider; no synchronous fallback for opted-in chat                                                     |
+| Caller           | Static `openai-compatible` model with local `deferred_transport`, or its provider's local compatibility default; chat completions only, JSON and SSE       |
+| Executor         | Static provider-only `deferred_receiver` and chat-capable models through the existing adapter; ordinary calls remain ordinary                              |
+| Other operations | Keep ordinary transport, even on a caller-opted-in model; no synchronous fallback for opted-in chat                                                        |
 | Caller aliases   | Ordinary/deferred targets may mix; acceptance or indeterminate acceptance pins that attempt to its peer                                                    |
 | Executor aliases | Every configured target must be receiver-opted-in, chat-capable, and have no caller opt-in; reject mixed pools before selection, never filter/reorder them |
 | Streaming        | Keep the original `stream` choice and exact body bytes after existing adapter processing; no synthetic SSE IDs, events, heartbeats, or `[DONE]`            |
@@ -1610,9 +1610,12 @@ blocks with non-secret environment values, including conversion and inline loadi
 ### Configuration And Shared Types
 
 `config.Runtime.Deferred` has type `config.Deferred`.
-`config.Provider.DeferredTransport` and `DeferredReceiver` are pointers to the
+`config.Model.DeferredTransport` stores a local caller opt-in;
+`config.Provider.DeferredTransport` stores a local compatibility default, and
+`config.Provider.DeferredReceiver` remains provider-only. All are pointers to the
 corresponding types below. Root/block presence enables the feature; `Enabled`
-is derived, not an HCL attribute. Omitted provider blocks are nil.
+is derived on root policy, not an HCL caller/receiver attribute. Omitted blocks
+are nil.
 
 ```go
 type Deferred struct {
@@ -1665,13 +1668,37 @@ one maximum output, one work reservation, and submit decoding scratch. Configure
 concurrency is an upper bound; memory may admit fewer simultaneous jobs.
 
 Caller blocks require configured `api_key`/`api_key_ref`. Both opt-ins exclude
-`forward_authorization`, cannot coexist on one provider, and are validated even on
-disabled providers. Root enablement requires `auth.mode = "bearer_static"`;
-receiver blocks require that root block. Executor aliases use the minimum execution/output
-limits of their target pool. Static derivatives clear both inherited opt-ins and
-may declare their own local blocks. Managed declarations, including null/empty
-forms and case variants on provider or credential updates, are rejected before
-commit; managed derivatives cannot extend an opted-in base.
+`forward_authorization` and are validated even on disabled providers. A receiver
+cannot coexist with any model caller setting or provider caller default on that
+provider. A model opt-in requires that model to support chat; compatibility
+defaults and receivers retain the at-least-one-chat-model rule. Root enablement
+requires `auth.mode = "bearer_static"`; receiver blocks require that root block.
+Executor aliases use the minimum execution/output limits of their target pool.
+Receiver eligibility is additive, never a requirement that ordinary calls defer.
+
+`EffectiveDeferredTransport(Provider, Model)` returns an independent copy of the
+model's local caller options when present, otherwise the provider's local
+compatibility default, otherwise nil. An empty or partial model block replaces
+the whole provider block; omitted fields use standard caller defaults, never
+provider values. This avoids hidden cross-model policy merging. Existing
+provider-level configs remain supported, not silently ignored. There is no
+caller `enabled`/opt-out flag: to mix ordinary and deferred models, remove the
+provider default and copy the desired policy into each opted-in model.
+Direct dispatch and each resolved alias attempt use this lookup; non-chat
+operations still use ordinary adapter paths.
+
+Static derivatives inherit model definitions but clear base provider and model
+caller opt-ins and receiver opt-ins/limits in both ordered/indexed model views.
+They may declare a local provider compatibility default or provider receiver,
+or local existing-name model overlays containing only `deferred_transport`.
+New model names, empty/duplicate overlays and definition fields are rejected by
+declaration presence, including explicit empty/null/default values.
+`HasCallerDeferredTransport` inspects provider storage and both model collections
+for validation, receiver and managed guards. Catalog clones independently copy
+caller options across all model views and effective lookups. Managed declarations,
+including nested models and null/empty/case-variant fields on provider or
+credential updates, fail before commit; managed derivatives cannot extend a base
+carrying any caller or receiver opt-in.
 
 HCL, JSON, conversion, and inline configuration support these three unlabeled
 blocks. Existing CLI edits preserve them and supported `env()` spelling; v1 adds
@@ -2051,6 +2078,12 @@ credentials, endpoint, transports, and completion resources. Reference-count sha
 health/payload resources across runtime generations; retire only after the last
 lease, including pending finalization. Terminal storage does not retain full runtime
 snapshots after finalization. Failed reload leaves jobs/resources untouched.
+
+Caller model policy reloads through the same activated catalog. New requests use
+the new effective model options, peer and credentials. Admitted caller jobs and
+streams retain the resolved model's original options and transport/credential
+snapshot through delivery and best-effort cleanup; removal or movement of a model
+opt-in cannot trigger ordinary fallback or another alias attempt.
 
 Valid root removal also removes receiver declarations. It disables capability/new
 admission but retains the last resource/control policy for draining: authenticated

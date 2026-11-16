@@ -103,6 +103,10 @@ and [alias cooldowns](20260907-104451-alias-upstream-retry-cooldown.md).
 These are preservation constraints, not duplicate feature tasks. Focused backlog
 search found no other peer-deferred implementation plan.
 
+Follow-up phase: [caller model-level deferred transport](20261116-090334-caller-model-level-deferred-transport.md)
+tracks model-level caller opt-ins while keeping receiver configuration
+provider-level. It does not change the original v1 completion statuses.
+
 This is a source/design review, not a cluster diagnosis or exhaustive audit.
 Actual intermediary settings, packet-level timings, live providers, and new
 protocol behavior have not been tested. Runtime baseline tests were not run for

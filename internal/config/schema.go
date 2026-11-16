@@ -24,6 +24,12 @@ type rawFile struct {
 type rawProviderSyntax struct {
 	Attrs  map[string]bool
 	Blocks map[string]int
+	Models []rawModelSyntax
+}
+
+type rawModelSyntax struct {
+	Attrs  map[string]bool
+	Blocks map[string]int
 }
 
 type rawDeferred struct {
@@ -205,12 +211,13 @@ type rawCredentialRef struct {
 }
 
 type rawModel struct {
-	Name         string      `hcl:"name,label"`
-	DisplayName  string      `hcl:"display_name,optional"`
-	UpstreamName string      `hcl:"upstream_name,optional"`
-	Protocol     string      `hcl:"protocol,optional"`
-	Capabilities []string    `hcl:"capabilities,optional"`
-	Pricing      *rawPricing `hcl:"pricing,block"`
+	Name              string                `hcl:"name,label"`
+	DisplayName       string                `hcl:"display_name,optional"`
+	UpstreamName      string                `hcl:"upstream_name,optional"`
+	Protocol          string                `hcl:"protocol,optional"`
+	Capabilities      []string              `hcl:"capabilities,optional"`
+	Pricing           *rawPricing           `hcl:"pricing,block"`
+	DeferredTransport *rawDeferredTransport `hcl:"deferred_transport,block"`
 }
 
 type rawPricing struct {

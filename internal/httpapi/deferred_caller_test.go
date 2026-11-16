@@ -28,7 +28,7 @@ func callerDispatchRuntime(peer, backup string) *config.Runtime {
 	options.ControlTimeout, options.MaxWait, options.PollInterval = 200*time.Millisecond, 3*time.Second, 50*time.Millisecond
 	return &config.Runtime{Catalog: config.NewCatalog([]config.Provider{
 		{Type: config.ProviderTypeOpenAICompatible, Name: "p1", BaseURL: peer + "/v1", APIKey: "peer-token",
-			DeferredTransport: &options, Models: []config.Model{{Name: "m", UpstreamName: "p/m"}}},
+			Models: []config.Model{{Name: "m", UpstreamName: "p/m", DeferredTransport: &options}}},
 		{Type: config.ProviderTypeOpenAICompatible, Name: "p2", BaseURL: backup + "/v1", APIKey: "backup-token",
 			Models: []config.Model{{Name: "m", UpstreamName: "backup-model"}}},
 	}, nil, []config.Alias{{

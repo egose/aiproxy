@@ -2006,7 +2006,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if options.APIKey != "" || options.APIKeyEnv != "" || options.SecretsKey != "" || options.SecretsPath != "" || options.Credential != "" || options.CredentialPath != "" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("--enabled=false cannot be combined with credential flags")
 		}
-		if defaults.DeferredTransportBlock == "" {
+		if !defaults.HasCallerDeferredTransport() {
 			defaults.Credential = providerCredentialInput{Mode: "disabled"}
 		}
 		enabled := false
@@ -2020,7 +2020,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
-		defaults.Models = models
+		defaults.Models = preserveProviderModelDeferredTransports(models, defaults.Models)
 	}
 	if options.NonInteractive {
 		if err := validateProviderModelProtocols(defaults.ProviderType, defaults.Models); err != nil {
@@ -2045,7 +2045,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			defaults.ForwardUserAgent = false
 			defaults.ForwardHeaders = nil
 			defaults.Enabled = nil
-			defaults.Models = nil
+			defaults.Models = preservedProviderDeferredModelOverlays(existing, defaults.Extends)
 			defaults.Healthcheck = nil
 			return defaults, providerSecretsUpdate(defaults, options), nil
 		}
@@ -2202,7 +2202,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			if err != nil {
 				return providerInput{}, secretsUpdate{}, err
 			}
-			var models []providerModelInput
+			models := preservedProviderDeferredModelOverlays(existing, extends)
 			if strings.TrimSpace(extends) == "" {
 				models, err = promptProviderModels(prompts, providerType, defaults.Models)
 				if err != nil {
@@ -2313,7 +2313,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			}
 			credential.APIKeyValue = strings.TrimSpace(apiKey)
 		}
-		var models []providerModelInput
+		models := preservedProviderDeferredModelOverlays(existing, extends)
 		if strings.TrimSpace(extends) == "" {
 			models, err = promptProviderModels(prompts, providerType, defaults.Models)
 			if err != nil {
@@ -2445,7 +2445,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
-		var models []providerModelInput
+		models := preservedProviderDeferredModelOverlays(existing, extends)
 		if strings.TrimSpace(extends) == "" {
 			models, err = promptProviderModels(prompts, providerType, defaults.Models)
 			if err != nil {
@@ -2538,7 +2538,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			return providerInput{}, secretsUpdate{}, err
 		}
 	}
-	var models []providerModelInput
+	models := preservedProviderDeferredModelOverlays(existing, extends)
 	if strings.TrimSpace(extends) == "" {
 		models, err = promptProviderModels(prompts, providerType, defaults.Models)
 		if err != nil {
@@ -2746,7 +2746,7 @@ func promptProviderModels(prompts *promptSession, providerType string, existing 
 			break
 		}
 	}
-	return models, nil
+	return preserveProviderModelDeferredTransports(models, existing), nil
 }
 
 func promptProviderModelsInteractive(prompts *promptSession, providerType string, existing []providerModelInput) ([]providerModelInput, error) {
@@ -2816,12 +2816,14 @@ func promptProviderModelInteractive(prompts *promptSession, providerType string,
 	upstreamName := ""
 	protocol := ""
 	capabilities := defaultCapabilities(providerType)
+	deferredTransportBlock := ""
 	if existing != nil {
 		name = existing.Name
 		displayName = existing.DisplayName
 		upstreamName = existing.UpstreamName
 		protocol = existing.Protocol
 		capabilities = append([]string(nil), existing.Capabilities...)
+		deferredTransportBlock = existing.DeferredTransportBlock
 	}
 	if err := prompts.runHuhForm(
 		huh.NewGroup(
@@ -2850,11 +2852,12 @@ func promptProviderModelInteractive(prompts *promptSession, providerType string,
 		return providerModelInput{}, err
 	}
 	return providerModelInput{
-		Name:         strings.TrimSpace(name),
-		DisplayName:  strings.TrimSpace(displayName),
-		UpstreamName: strings.TrimSpace(upstreamName),
-		Protocol:     protocol,
-		Capabilities: selectedCaps,
+		Name:                   strings.TrimSpace(name),
+		DisplayName:            strings.TrimSpace(displayName),
+		UpstreamName:           strings.TrimSpace(upstreamName),
+		Protocol:               protocol,
+		Capabilities:           selectedCaps,
+		DeferredTransportBlock: deferredTransportBlock,
 	}, nil
 }
 
@@ -4461,6 +4464,7 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 		model.Protocol = parseLiteralOrExpression(attributeExpr(src, modelBlock.Body, "protocol"))
 		model.Capabilities = parseQuotedListExpr(attributeExpr(src, modelBlock.Body, "capabilities"))
 		model.Pricing = parseModelPricingInput(src, modelBlock)
+		model.DeferredTransportBlock = nestedBlockSource(src, modelBlock.Body, "deferred_transport")
 		input.Models = append(input.Models, model)
 	}
 	if hcBlock := findNestedBlock(parsed.Body, "healthcheck"); hcBlock != nil {

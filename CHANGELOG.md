@@ -11,6 +11,11 @@
   [operational limits](website/docs/operations.md#peer-deferred-transport-v1)
   describe single-process/sticky routing, restart/rolling loss and cancellation
   limits; this is not Batch or Responses background mode.
+- Allow model-level caller `deferred_transport` so ordinary and deferred chat
+  models can share one static `openai-compatible` provider. Provider-level blocks
+  remain compatibility defaults; model blocks replace them rather than merge.
+  Static derivatives support local transport-only overlays on inherited models.
+  Receiver configuration stays provider-only and ordinary calls remain ordinary.
 - Add provider-only upstream TLS ClientHello profiles: native Go TLS by default,
   frozen bundled Chrome 133/Safari 16.0 presets from uTLS v1.8.2, and strictly
   validated static custom JSON recipes. Profiles cover inference, health and model

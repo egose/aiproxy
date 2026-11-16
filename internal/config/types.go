@@ -325,12 +325,13 @@ type ProviderHealthcheck struct {
 }
 
 type Model struct {
-	Name         string
-	DisplayName  string
-	UpstreamName string
-	Protocol     ModelProtocol
-	Capabilities []Capability
-	Pricing      *ModelPricing
+	Name              string
+	DisplayName       string
+	UpstreamName      string
+	Protocol          ModelProtocol
+	Capabilities      []Capability
+	Pricing           *ModelPricing
+	DeferredTransport *DeferredTransport
 }
 
 type ModelPricing struct {

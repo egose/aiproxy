@@ -82,6 +82,18 @@ func (i ProviderInput) IsExplicitlyDisabled() bool {
 	return i.Enabled != nil && !*i.Enabled
 }
 
+func (i ProviderInput) HasCallerDeferredTransport() bool {
+	if strings.TrimSpace(i.DeferredTransportBlock) != "" {
+		return true
+	}
+	for _, model := range i.Models {
+		if strings.TrimSpace(model.DeferredTransportBlock) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 type ProviderCredentialInput struct {
 	Mode        string
 	APIKeyValue string
@@ -92,12 +104,13 @@ type ProviderCredentialInput struct {
 }
 
 type ProviderModelInput struct {
-	Name         string
-	DisplayName  string
-	UpstreamName string
-	Protocol     string
-	Capabilities []string
-	Pricing      *ModelPricingInput
+	Name                   string
+	DisplayName            string
+	UpstreamName           string
+	Protocol               string
+	Capabilities           []string
+	Pricing                *ModelPricingInput
+	DeferredTransportBlock string
 }
 
 type ModelPricingInput struct {
@@ -326,6 +339,7 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 		b.WriteString("\n")
 		renderProviderCredential(&b, input, defaultSecretsPath)
 		renderProviderDeferredBlocks(&b, input)
+		renderProviderModelBlocks(&b, input)
 		b.WriteString("}\n")
 		return b.String()
 	}
@@ -357,7 +371,7 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 	}
 	if input.IsExplicitlyDisabled() {
 		b.WriteString("  enabled = false\n")
-		if input.DeferredTransportBlock != "" {
+		if input.HasCallerDeferredTransport() {
 			renderProviderCredential(&b, input, defaultSecretsPath)
 		}
 	} else {
@@ -368,37 +382,51 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 	if input.Healthcheck != nil {
 		b.WriteString(renderProviderHealthcheckBlock(input.Healthcheck))
 	}
+	renderProviderModelBlocks(&b, input)
+	b.WriteString("}\n")
+	return b.String()
+}
+
+func renderProviderModelBlocks(b *strings.Builder, input ProviderInput) {
 	for _, model := range input.Models {
+		if input.Extends != "" && strings.TrimSpace(model.DeferredTransportBlock) == "" {
+			continue
+		}
 		b.WriteString("\n  model ")
 		b.WriteString(strconv.Quote(model.Name))
 		b.WriteString(" {\n")
-		if model.DisplayName != "" {
-			b.WriteString("    display_name = ")
-			b.WriteString(strconv.Quote(model.DisplayName))
-			b.WriteString("\n")
+		if input.Extends == "" {
+			if model.DisplayName != "" {
+				b.WriteString("    display_name = ")
+				b.WriteString(strconv.Quote(model.DisplayName))
+				b.WriteString("\n")
+			}
+			if model.UpstreamName != "" && model.UpstreamName != model.Name {
+				b.WriteString("    upstream_name = ")
+				b.WriteString(strconv.Quote(model.UpstreamName))
+				b.WriteString("\n")
+			}
+			if model.Protocol != "" {
+				b.WriteString("    protocol = ")
+				b.WriteString(strconv.Quote(model.Protocol))
+				b.WriteString("\n")
+			}
+			if len(model.Capabilities) > 0 {
+				b.WriteString("    capabilities = ")
+				b.WriteString(RenderQuotedList(model.Capabilities))
+				b.WriteString("\n")
+			}
+			if model.Pricing != nil {
+				b.WriteString(renderModelPricingBlock(model.Pricing))
+			}
 		}
-		if model.UpstreamName != "" && model.UpstreamName != model.Name {
-			b.WriteString("    upstream_name = ")
-			b.WriteString(strconv.Quote(model.UpstreamName))
+		if block := strings.TrimSpace(model.DeferredTransportBlock); block != "" {
+			b.WriteString("    ")
+			b.WriteString(block)
 			b.WriteString("\n")
-		}
-		if model.Protocol != "" {
-			b.WriteString("    protocol = ")
-			b.WriteString(strconv.Quote(model.Protocol))
-			b.WriteString("\n")
-		}
-		if len(model.Capabilities) > 0 {
-			b.WriteString("    capabilities = ")
-			b.WriteString(RenderQuotedList(model.Capabilities))
-			b.WriteString("\n")
-		}
-		if model.Pricing != nil {
-			b.WriteString(renderModelPricingBlock(model.Pricing))
 		}
 		b.WriteString("  }\n")
 	}
-	b.WriteString("}\n")
-	return b.String()
 }
 
 func renderModelPricingBlock(pricing *ModelPricingInput) string {
@@ -1165,10 +1193,8 @@ func AvailableProviderModels(blocks []TopLevelBlock) []string {
 		}
 		providerName := block.Labels[1]
 		modelNames := modelsByProvider[providerName]
-		if len(modelNames) == 0 {
-			if baseName := ProviderExtendsFromBlock(block.Text); baseName != "" {
-				modelNames = modelsByProvider[baseName]
-			}
+		if baseName := ProviderExtendsFromBlock(block.Text); baseName != "" {
+			modelNames = modelsByProvider[baseName]
 		}
 		for _, modelName := range modelNames {
 			out = append(out, providerName+"/"+modelName)

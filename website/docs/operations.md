@@ -622,6 +622,15 @@ The end-client and executor–upstream connections still have their own deadline
 and intermediary idle limits. This is not durable job scheduling, Batch, or
 Responses background mode.
 
+Caller transport is selected per resolved model, including each alias attempt.
+Use model-level `deferred_transport` to keep ordinary and deferred chat models
+under one provider/credential. An explicit local provider block remains a
+compatibility default; a model block replaces it wholesale using standard defaults
+for omitted fields. There is no model opt-out from a provider default: remove that
+default when migrating to mixed models. Receiver eligibility stays provider-only
+and additive; it does **not** turn ordinary requests for its models into jobs.
+See the [mixed-model pair and migration rules](configuration.md#caller-policy).
+
 ### Streaming And Deployment
 
 The executor keeps the original `stream` flag. Reads are immediate, finite byte
@@ -644,6 +653,9 @@ version-1 capability for the configured executor public model is required before
 submission. Missing capabilities or wrong versions mean zero submissions; opted-in
 chat never silently falls back to ordinary transport. An ordinary upstream `202`
 is not a job acknowledgment.
+Models without an effective caller opt-in continue to call ordinary routes,
+even if that executor/model also accepts private jobs. Responses and embeddings
+remain ordinary even on opted-in caller models.
 
 Route capability discovery, submit/replay, reads, status, result and DELETE to
 the **same executing process**, using sticky routing or a dedicated executor.
@@ -770,6 +782,13 @@ Accepted execution retains its admitted catalog, credentials, endpoint,
 transports, alias attempts and completion resources through a runtime lease.
 Per-job deadlines/limits stay frozen; current auth/model policy still governs
 controls. Failed reloads leave jobs and resources intact.
+
+Caller model policy also reloads on `SIGHUP`. New requests use the activated
+model opt-ins, provider compatibility defaults, endpoint and credentials.
+Already admitted jobs and committed streams keep their original peer,
+credential, caller options and runtime resources through delivery/cleanup.
+Moving or removing a caller model block changes new requests only; it never
+converts an admitted attempt into synchronous inference or a fresh alias attempt.
 
 To disable new execution, remove the root `deferred` block **and all receiver
 blocks** in a valid reload. Capabilities/new admissions then stop, while existing
