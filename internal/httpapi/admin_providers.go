@@ -341,30 +341,31 @@ type adminCredentialRefUpsert struct {
 }
 
 type adminProviderUpsert struct {
-	Name                      string                    `json:"name"`
-	WorkspaceID               string                    `json:"workspace_id"`
-	Type                      *string                   `json:"type"`
-	DisplayName               *string                   `json:"display_name"`
-	BaseURL                   *string                   `json:"base_url"`
-	TLSClientHello            json.RawMessage           `json:"tls_client_hello"`
-	TLSClientHelloSpecFile    json.RawMessage           `json:"tls_client_hello_spec_file"`
-	TLSClientHelloSpec        json.RawMessage           `json:"tls_client_hello_spec"`
-	UpstreamHeaderTimeout     *string                   `json:"upstream_header_timeout"`
-	UserAgent                 *string                   `json:"user_agent"`
-	ForwardUserAgent          *bool                     `json:"forward_user_agent"`
-	ForwardHeaders            []string                  `json:"forward_headers"`
-	ForwardAuthorization      *bool                     `json:"forward_authorization"`
-	AllowInsecureBaseURL      *bool                     `json:"allow_insecure_base_url"`
-	APIKey                    *string                   `json:"api_key"`
-	APIKeyRef                 *adminAPIKeyRefUpsert     `json:"api_key_ref"`
-	CredentialRef             *adminCredentialRefUpsert `json:"credential_ref"`
-	CopilotDeviceFlowID       *string                   `json:"copilot_device_flow_id"`
-	ExpectedUpdatedAt         *string                   `json:"expected_updated_at"`
-	Enabled                   *bool                     `json:"enabled"`
-	Extends                   *string                   `json:"extends"`
-	Healthcheck               *adminHealthcheckUpsert   `json:"healthcheck"`
-	Models                    *[]adminModelUpsert       `json:"models"`
-	unsupportedTLSDeclaration bool
+	Name                           string                    `json:"name"`
+	WorkspaceID                    string                    `json:"workspace_id"`
+	Type                           *string                   `json:"type"`
+	DisplayName                    *string                   `json:"display_name"`
+	BaseURL                        *string                   `json:"base_url"`
+	TLSClientHello                 json.RawMessage           `json:"tls_client_hello"`
+	TLSClientHelloSpecFile         json.RawMessage           `json:"tls_client_hello_spec_file"`
+	TLSClientHelloSpec             json.RawMessage           `json:"tls_client_hello_spec"`
+	UpstreamHeaderTimeout          *string                   `json:"upstream_header_timeout"`
+	UserAgent                      *string                   `json:"user_agent"`
+	ForwardUserAgent               *bool                     `json:"forward_user_agent"`
+	ForwardHeaders                 []string                  `json:"forward_headers"`
+	ForwardAuthorization           *bool                     `json:"forward_authorization"`
+	AllowInsecureBaseURL           *bool                     `json:"allow_insecure_base_url"`
+	APIKey                         *string                   `json:"api_key"`
+	APIKeyRef                      *adminAPIKeyRefUpsert     `json:"api_key_ref"`
+	CredentialRef                  *adminCredentialRefUpsert `json:"credential_ref"`
+	CopilotDeviceFlowID            *string                   `json:"copilot_device_flow_id"`
+	ExpectedUpdatedAt              *string                   `json:"expected_updated_at"`
+	Enabled                        *bool                     `json:"enabled"`
+	Extends                        *string                   `json:"extends"`
+	Healthcheck                    *adminHealthcheckUpsert   `json:"healthcheck"`
+	Models                         *[]adminModelUpsert       `json:"models"`
+	unsupportedTLSDeclaration      bool
+	unsupportedDeferredDeclaration bool
 }
 
 func (req *adminProviderUpsert) UnmarshalJSON(raw []byte) error {
@@ -381,18 +382,22 @@ func (req *adminProviderUpsert) UnmarshalJSON(raw []byte) error {
 		if jsonFieldHasPrefix(name, "tls_client_hello") && !strings.EqualFold(name, "tls_client_hello") {
 			decoded.unsupportedTLSDeclaration = true
 		}
+		if isDeferredJSONDeclaration(name) {
+			decoded.unsupportedDeferredDeclaration = true
+		}
 	}
 	*req = adminProviderUpsert(decoded)
 	return nil
 }
 
 type adminCredentialUpsert struct {
-	APIKey                    *string `json:"api_key"`
-	APIKeyRefPath             *string `json:"api_key_ref_path"`
-	APIKeyRefKey              *string `json:"api_key_ref_key"`
-	CopilotCredentialPath     *string `json:"copilot_credential_path"`
-	CopilotCredentialName     *string `json:"copilot_credential_name"`
-	unsupportedTLSDeclaration bool
+	APIKey                         *string `json:"api_key"`
+	APIKeyRefPath                  *string `json:"api_key_ref_path"`
+	APIKeyRefKey                   *string `json:"api_key_ref_key"`
+	CopilotCredentialPath          *string `json:"copilot_credential_path"`
+	CopilotCredentialName          *string `json:"copilot_credential_name"`
+	unsupportedTLSDeclaration      bool
+	unsupportedDeferredDeclaration bool
 }
 
 func (req *adminCredentialUpsert) UnmarshalJSON(raw []byte) error {
@@ -408,6 +413,9 @@ func (req *adminCredentialUpsert) UnmarshalJSON(raw []byte) error {
 	for name := range fields {
 		if jsonFieldHasPrefix(name, "tls_client_hello") {
 			decoded.unsupportedTLSDeclaration = true
+		}
+		if isDeferredJSONDeclaration(name) {
+			decoded.unsupportedDeferredDeclaration = true
 		}
 	}
 	*req = adminCredentialUpsert(decoded)
@@ -432,6 +440,19 @@ func jsonFieldHasPrefix(name, prefix string) bool {
 		name = name[width:]
 	}
 	return true
+}
+
+func isDeferredJSONDeclaration(name string) bool {
+	return strings.EqualFold(name, "deferred") ||
+		jsonFieldHasPrefix(name, "deferred_transport") ||
+		jsonFieldHasPrefix(name, "deferred_receiver")
+}
+
+func validateManagedDeferredDeclarations(name string, declared bool) error {
+	if declared {
+		return fmt.Errorf("provider %q: deferred_transport and deferred_receiver are static-config-only; edit the static config file", name)
+	}
+	return nil
 }
 
 type dbHealthcheck struct {
@@ -579,6 +600,9 @@ func managedProviderTLSMetadata(row store.DBProvider, rows map[string]store.DBPr
 			return config.Provider{}, fmt.Errorf("provider %q: extends %q is not defined", name, row.Extends)
 		}
 		base.Name = name
+		if err := config.ValidateManagedProviderDeferred(base); err != nil {
+			return config.Provider{}, err
+		}
 		base.TLSClientHelloInherited = inherited
 		return config.ResolveDynamicProviderTLSProfile(base)
 	}
@@ -698,6 +722,9 @@ func (h *Handler) validateExtends(deps Dependencies, name, extends, providerType
 		return fmt.Errorf("provider %q: type %q must match base provider %q type %q", name, providerType, extends, base.Type)
 	}
 	base.Name = name
+	if err := config.ValidateManagedProviderDeferred(base); err != nil {
+		return err
+	}
 	if _, err := config.ResolveDynamicProviderTLSProfile(base); err != nil {
 		return err
 	}
@@ -714,6 +741,9 @@ func (h *Handler) buildConfigProvider(deps Dependencies, row store.DBProvider, m
 
 func (h *Handler) createDBProvider(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, workspace store.Workspace, req adminProviderUpsert) (adminProviderView, error) {
 	name := strings.TrimSpace(req.Name)
+	if err := validateManagedDeferredDeclarations(name, req.unsupportedDeferredDeclaration); err != nil {
+		return adminProviderView{}, err
+	}
 	if !config.IsLowercaseName(name) {
 		return adminProviderView{}, errBad("invalid provider name: must be lowercase, no spaces, no '/', and start with [a-z0-9]")
 	}
@@ -920,6 +950,9 @@ func (h *Handler) updateDBProviderWithFlow(ctx context.Context, deps Dependencie
 }
 
 func (h *Handler) applyProviderUpsert(name string, row *store.DBProvider, req adminProviderUpsert) error {
+	if err := validateManagedDeferredDeclarations(name, req.unsupportedDeferredDeclaration); err != nil {
+		return err
+	}
 	extends := row.Extends
 	if req.Extends != nil {
 		extends = strings.TrimSpace(*req.Extends)
@@ -1049,6 +1082,9 @@ func (h *Handler) buildDBModels(name string, reqModels *[]adminModelUpsert) ([]s
 
 func (h *Handler) updateDBProvider(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, req adminProviderUpsert) (adminProviderView, error) {
 	name := strings.TrimSpace(req.Name)
+	if err := validateManagedDeferredDeclarations(name, req.unsupportedDeferredDeclaration); err != nil {
+		return adminProviderView{}, err
+	}
 	p, err := deps.AdminStore.GetProvider(ctx, name)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -1120,6 +1156,9 @@ func (h *Handler) providerViewByName(ctx context.Context, deps Dependencies, r *
 }
 
 func (h *Handler) setProviderCredential(ctx context.Context, deps Dependencies, claims *adminauth.Claims, name string, req adminCredentialUpsert) error {
+	if err := validateManagedDeferredDeclarations(name, req.unsupportedDeferredDeclaration); err != nil {
+		return err
+	}
 	p, err := deps.AdminStore.GetProvider(ctx, name)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {

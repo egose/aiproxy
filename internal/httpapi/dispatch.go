@@ -14,6 +14,7 @@ import (
 
 	"github.com/egose/aiproxy/internal/alias"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/deferred"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/provider"
 )
@@ -33,6 +34,7 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		inbound = cloneRequestWithBody(ctx, inbound, body)
 	}
 	start := time.Now()
+	execution := deferredExecutionFromContext(ctx)
 	result, err := deps.Adapter.Do(ctx, provider.Request{
 		Operation:            op,
 		ProviderType:         r.Provider.Type,
@@ -50,12 +52,15 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		Body:                 body,
 		Inbound:              inbound,
 		Client:               clientForProvider(deps, r.Provider),
+		DeferredTransport:    r.Provider.DeferredTransport,
+		ExecutionLimits:      execution.executionLimits(),
+		ObserveBody:          execution.bodyObserver(),
 	})
 	if result != nil {
 		result.Provider = r.Provider.Name
 		result.UpstreamModel = r.Model.Name
 	}
-	if deps.Metrics != nil && (result == nil || !result.Streaming) {
+	if deps.Metrics != nil && !provider.IsPeerControlOutcome(result, err) && (result == nil || !result.Streaming) {
 		status := 0
 		if result != nil {
 			status = result.StatusCode
@@ -163,17 +168,23 @@ func coolingExclusions(cooldowns *modelresolver.CooldownStore, pool []aliasPoolT
 }
 
 func observeCooldownResult(cooldowns *modelresolver.CooldownStore, ctx context.Context, fp modelresolver.CooldownFingerprint, result *provider.Result) {
-	if cooldowns == nil || result == nil || !result.HasRetryDelay {
+	if cooldowns == nil || result == nil || !result.HasRetryDelay || provider.IsPeerControlOutcome(result, nil) {
 		return
 	}
 	if ctx != nil && ctx.Err() != nil {
 		return
 	}
-	cooldowns.Observe(fp, result.RetryDelay)
+	delay := result.RetryDelay
+	if !result.RetryDeadline.IsZero() {
+		delay = time.Until(result.RetryDeadline)
+	}
+	if delay > 0 {
+		cooldowns.Observe(fp, delay)
+	}
 }
 
 func observeCooldownError(cooldowns *modelresolver.CooldownStore, ctx context.Context, fp modelresolver.CooldownFingerprint, err error) {
-	if cooldowns == nil || err == nil {
+	if cooldowns == nil || err == nil || provider.IsPeerControlOutcome(nil, err) {
 		return
 	}
 	if ctx != nil && ctx.Err() != nil {
@@ -194,6 +205,7 @@ func observeCooldownError(cooldowns *modelresolver.CooldownStore, ctx context.Co
 
 func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provider.Operation, r modelresolver.ResolveResult, inbound *http.Request, body []byte, logger *slog.Logger) (*provider.Result, error) {
 	var lastErr error
+	var lastErrorResult *provider.Result
 	tried := make(map[alias.Target]bool, len(r.Alias.Targets))
 	retryCodes := make(map[int]bool, len(r.Alias.RetryStatusCodes))
 	for _, code := range r.Alias.RetryStatusCodes {
@@ -205,7 +217,11 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 	conditionalRetry := stripApplies && er.Passthrough && er.OnCallerMismatch == config.EncryptedReasoningStripAndRetry
 	strippedAttempted := false
 	if stripApplies && !er.Passthrough {
-		if stripped, ok := stripOpaqueBlocks(op, body); ok {
+		stripped, ok, err := stripDispatchOpaqueBlocks(ctx, op, body)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			body = stripped
 			strippedAttempted = true
 		}
@@ -302,6 +318,7 @@ targetLoop:
 			continue
 		}
 		commitPending()
+		lastErrorResult = nil
 		targetLogger := logger.With("target", t.Provider+"/"+t.Model)
 		if deps.AccessLog {
 			targetLogger.Info("upstream request started",
@@ -328,6 +345,7 @@ targetLoop:
 		for {
 			req := cloneRequestWithBody(ctx, inbound, currentBody)
 			start := time.Now()
+			execution := deferredExecutionFromContext(ctx)
 			result, err := deps.Adapter.Do(ctx, provider.Request{
 				Operation:            op,
 				ProviderType:         prov.Type,
@@ -345,12 +363,15 @@ targetLoop:
 				Body:                 currentBody,
 				Inbound:              req,
 				Client:               clientForProvider(deps, prov),
+				DeferredTransport:    prov.DeferredTransport,
+				ExecutionLimits:      execution.executionLimits(),
+				ObserveBody:          execution.bodyObserver(),
 			})
 			if result != nil {
 				result.Provider = t.Provider
 				result.UpstreamModel = model.Name
 			}
-			if deps.Metrics != nil && (result == nil || !result.Streaming) {
+			if deps.Metrics != nil && !provider.IsPeerControlOutcome(result, err) && (result == nil || !result.Streaming) {
 				status := 0
 				if result != nil {
 					status = result.StatusCode
@@ -386,30 +407,59 @@ targetLoop:
 			h.instrumentUpstreamResponseSize(deps, op, t.Provider, result, err)
 			if err != nil {
 				releaseTarget()
+				if provider.IsPeerControlOutcome(result, err) {
+					if pending != nil {
+						closeResult(pending)
+					}
+					return result, err
+				}
+				closeResult(result)
+				var unsupported provider.ErrUnsupportedOperation
+				if execution != nil && (ctx.Err() != nil || errors.Is(err, deferred.ErrBudgetExceeded) || errors.Is(err, deferred.ErrBudgetClosed) || errors.As(err, &unsupported)) {
+					if pending != nil {
+						closeResult(pending)
+					}
+					return nil, err
+				}
 				var invalid provider.ErrInvalidRequest
 				if errors.As(err, &invalid) {
 					if pending != nil {
 						closeResult(pending)
 						pending = nil
 					}
-					return nil, err
+					return result, err
 				}
 				observeCooldownError(cooldowns, ctx, fp, err)
 				lastErr = err
+				lastErrorResult = result
 				pendingRetryProvider, pendingRetryModel, pendingRetryReason = t.Provider, t.Model, "error"
 				hasPendingRetry = true
 				targetLogger.Warn("alias target failed", "error", err)
 				continue targetLoop
 			}
 			observeCooldownResult(cooldowns, ctx, fp, result)
-			if !strippedAttempted && conditionalRetry && isEncodedCallerMismatch(result, currentBody, er.MatchMessages) {
-				if stripped, ok := stripOpaqueBlocks(op, currentBody); ok {
+			if !provider.IsPeerControlOutcome(result, nil) && !strippedAttempted && conditionalRetry {
+				mismatch, err := isDispatchCallerMismatch(ctx, result, currentBody, er.MatchMessages)
+				if err != nil {
 					closeResult(result)
-					strippedAttempted = true
-					body = stripped
-					currentBody = stripped
-					targetLogger.Warn("alias target rejected encrypted reasoning, retrying stripped")
-					continue
+					releaseTarget()
+					return nil, err
+				}
+				if mismatch {
+					stripped, ok, err := stripDispatchOpaqueBlocks(ctx, op, currentBody)
+					if err != nil {
+						closeResult(result)
+						releaseTarget()
+						return nil, err
+					}
+					if ok {
+						closeResult(result)
+						strippedAttempted = true
+						body = stripped
+						currentBody = stripped
+						targetLogger.Warn("alias target rejected encrypted reasoning, retrying stripped")
+						continue
+					}
 				}
 			}
 			existingClose := result.OnClose
@@ -419,7 +469,7 @@ targetLoop:
 				}
 				releaseTarget()
 			}
-			if retryCodes[result.StatusCode] {
+			if !provider.IsPeerControlOutcome(result, nil) && retryCodes[result.StatusCode] {
 				if remaining, ok := allCoolingRemaining(cooldowns, pool); ok {
 					if pending != nil {
 						closeResult(pending)
@@ -445,7 +495,7 @@ targetLoop:
 	if lastErr == nil {
 		lastErr = errors.New("alias has no healthy targets")
 	}
-	return nil, lastErr
+	return lastErrorResult, lastErr
 }
 
 func clientForProvider(deps Dependencies, provider config.Provider) *http.Client {
@@ -456,10 +506,14 @@ func clientForProvider(deps Dependencies, provider config.Provider) *http.Client
 }
 
 func (h *Handler) recordProviderHealth(deps Dependencies, ctx context.Context, providerName string, result *provider.Result, err error, downstreamCanceled bool) {
-	if deps.Health == nil || providerName == "" {
+	if deps.Health == nil || providerName == "" || provider.IsPeerControlOutcome(result, err) {
 		return
 	}
 	if downstreamCanceled {
+		return
+	}
+	if execution := deferredExecutionFromContext(ctx); execution != nil {
+		execution.recordHealth(ctx, providerName, result, err)
 		return
 	}
 	if ctx != nil && ctx.Err() != nil {
@@ -499,7 +553,7 @@ func (h *Handler) attachStreamFinalizers(deps Dependencies, ctx context.Context,
 		if outcome.DownstreamCanceled {
 			streamErr = nil
 		}
-		if deps.Metrics != nil {
+		if deps.Metrics != nil && !provider.IsPeerControlOutcome(result, streamErr) {
 			deps.Metrics.RecordUpstream(op, providerName, result.StatusCode, streamErr, time.Since(start).Seconds())
 		}
 		if deps.AccessLog && logger != nil {
@@ -518,7 +572,7 @@ func (h *Handler) attachStreamFinalizers(deps Dependencies, ctx context.Context,
 }
 
 func (h *Handler) instrumentUpstreamResponseSize(deps Dependencies, op provider.Operation, providerName string, result *provider.Result, err error) {
-	if deps.Metrics == nil || result == nil {
+	if deps.Metrics == nil || result == nil || provider.IsPeerControlOutcome(result, err) {
 		return
 	}
 	if result.Streaming && result.StreamBody != nil {
@@ -536,7 +590,9 @@ func (h *Handler) instrumentUpstreamResponseSize(deps Dependencies, op provider.
 					err = outcome.Err
 				}
 			}
-			deps.Metrics.RecordUpstreamResponseSize(op, providerName, result.StatusCode, err, counter.BytesRead())
+			if !provider.IsPeerControlOutcome(result, err) {
+				deps.Metrics.RecordUpstreamResponseSize(op, providerName, result.StatusCode, err, counter.BytesRead())
+			}
 		}
 		return
 	}

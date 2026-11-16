@@ -79,7 +79,7 @@ func (runner bunCapture) capture(parent context.Context) ([]byte, bunRuntime, er
 		return nil, bunRuntime{}, err
 	}
 	defer listener.Close()
-	stopListener := context.AfterFunc(ctx, func() { listener.Close() })
+	stopListener := closeOnContextDone(ctx, listener)
 	defer stopListener()
 	target := "https://" + listener.Addr().String() + "/"
 	arguments := []string{"--config=" + configPath, "--no-env-file", "--no-install", "run", scriptPath, target}
@@ -107,7 +107,7 @@ func (runner bunCapture) capture(parent context.Context) ([]byte, bunRuntime, er
 		return nil, bunRuntime{}, fmt.Errorf("Bun exited without a loopback ClientHello; select an installed binary with --bun")
 	}
 	defer connection.Close()
-	stopConnection := context.AfterFunc(ctx, func() { connection.Close() })
+	stopConnection := closeOnContextDone(ctx, connection)
 	defer stopConnection()
 	if err := connection.SetReadDeadline(captureDeadline(ctx, runner.limits.read)); err != nil {
 		operationErr := captureContextError(ctx)
@@ -377,6 +377,19 @@ func (child *childProcess) result() error {
 func (child *childProcess) close() {
 	child.cancel()
 	<-child.done
+}
+
+func closeOnContextDone(ctx context.Context, resource io.Closer) func() {
+	closed := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(closed)
+		_ = resource.Close()
+	})
+	return sync.OnceFunc(func() {
+		if !stop() {
+			<-closed
+		}
+	})
 }
 
 func listenLoopback(ctx context.Context, timeout time.Duration) (*net.TCPListener, error) {

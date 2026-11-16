@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/egose/aiproxy/internal/deferred"
 	"github.com/egose/aiproxy/internal/guardrails"
 	"github.com/egose/aiproxy/internal/provider"
 )
@@ -37,6 +38,8 @@ type guardrailTextCollector struct {
 	maxStrings int
 	maxBytes   int
 	reason     string
+	limits     *provider.ExecutionLimits
+	jsonTokens int
 }
 
 func (c *guardrailTextCollector) add(s string) {
@@ -55,7 +58,7 @@ func (c *guardrailTextCollector) add(s string) {
 	c.total += len(s)
 }
 
-func extractGuardrailTexts(contentType string, op provider.Operation, body []byte, maxStrings, maxBytes int) ([]string, string) {
+func extractGuardrailTexts(contentType string, op provider.Operation, body []byte, maxStrings, maxBytes int, limits ...*provider.ExecutionLimits) ([]string, string) {
 	if strings.HasPrefix(contentType, "multipart/form-data;") {
 		return nil, guardrailReasonMultipart
 	}
@@ -68,6 +71,16 @@ func extractGuardrailTexts(contentType string, op provider.Operation, body []byt
 		return nil, guardrailReasonUnparsed
 	}
 	c := &guardrailTextCollector{maxStrings: maxStrings, maxBytes: maxBytes}
+	if len(limits) > 0 {
+		c.limits = limits[0]
+		if c.limits != nil {
+			shape, err := deferred.InspectJSON(body, deferred.JSONDepth, deferred.JSONTokens)
+			if err != nil {
+				return nil, guardrailReasonUnparsed
+			}
+			c.jsonTokens = shape.Tokens
+		}
+	}
 	switch op {
 	case provider.OpChatCompletions:
 		collectChatTexts(c, root)
@@ -239,6 +252,14 @@ func collectJSONStringLeaves(c *guardrailTextCollector, s string) {
 		return
 	}
 	var doc any
+	if c.limits != nil {
+		shape, err := deferred.InspectJSON([]byte(trimmed), deferred.JSONDepth, deferred.JSONTokens)
+		if err != nil || shape.Tokens > deferred.JSONTokens-c.jsonTokens {
+			c.reason = guardrailReasonUnparsed
+			return
+		}
+		c.jsonTokens += shape.Tokens
+	}
 	if err := json.Unmarshal([]byte(trimmed), &doc); err != nil {
 		return
 	}
@@ -266,10 +287,10 @@ func collectStringLeaves(c *guardrailTextCollector, v any) {
 	}
 }
 
-func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *http.Request, op provider.Operation, body []byte, scanner *guardrails.Scanner, publicModel string, logger *slog.Logger, logRedactions bool) (bool, []byte, *guardrailLogState) {
+func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *http.Request, op provider.Operation, body []byte, scanner *guardrails.Scanner, publicModel string, logger *slog.Logger, logRedactions bool, executionLimits ...*provider.ExecutionLimits) (bool, []byte, *guardrailLogState) {
 	policy := scanner.Policy()
 	mode := string(policy.Mode)
-	texts, reason := extractGuardrailTexts(r.Header.Get("Content-Type"), op, body, policy.MaxStrings, policy.MaxTextBytes)
+	texts, reason := extractGuardrailTexts(r.Header.Get("Content-Type"), op, body, policy.MaxStrings, policy.MaxTextBytes, executionLimits...)
 	var res guardrails.Result
 	var captured []guardrails.CapturedFinding
 	var secrets []string
@@ -320,7 +341,7 @@ func (h *Handler) checkGuardrails(deps Dependencies, w http.ResponseWriter, r *h
 				out := body
 				extra := []any{}
 				if len(redactions) > 0 {
-					out = rewriteGuardrailBody(body, redactions)
+					out = rewriteGuardrailBody(body, redactions, executionLimits...)
 					if out == nil {
 						if logState != nil {
 							logState.incomplete = true
@@ -435,7 +456,7 @@ func partitionGuardrailFindings(exceptions *guardrails.Exceptions, captured []gu
 	return blocking, redactions
 }
 
-func rewriteGuardrailBody(body []byte, redactions map[string]string) []byte {
+func rewriteGuardrailBody(body []byte, redactions map[string]string, executionLimits ...*provider.ExecutionLimits) []byte {
 	keys := make([]string, 0, len(redactions))
 	for value := range redactions {
 		if value != "" {
@@ -462,6 +483,16 @@ func rewriteGuardrailBody(body []byte, redactions map[string]string) []byte {
 		remaining[value] = struct{}{}
 	}
 	redactor := guardrailBodyRedactor{replacer: strings.NewReplacer(pairs...), remaining: remaining}
+	if len(executionLimits) > 0 {
+		redactor.limits = executionLimits[0]
+		if redactor.limits != nil {
+			shape, err := deferred.InspectJSON(body, deferred.JSONDepth, deferred.JSONTokens)
+			if err != nil {
+				return nil
+			}
+			redactor.jsonTokens = shape.Tokens
+		}
+	}
 	out, changed := redactor.rewrite(value, 0)
 	if redactor.incomplete || len(redactor.remaining) > 0 {
 		return nil
@@ -469,7 +500,7 @@ func rewriteGuardrailBody(body []byte, redactions map[string]string) []byte {
 	if !changed {
 		return body
 	}
-	data, err := json.Marshal(out)
+	data, err := marshalGuardrailJSON(out, redactor.limits)
 	if err != nil {
 		return nil
 	}
@@ -490,6 +521,32 @@ type guardrailBodyRedactor struct {
 	replacer   *strings.Replacer
 	remaining  map[string]struct{}
 	incomplete bool
+	limits     *provider.ExecutionLimits
+	jsonTokens int
+	textBytes  int64
+}
+
+type guardrailSizeWriter struct {
+	bytes int64
+}
+
+func (w *guardrailSizeWriter) Write(p []byte) (int, error) {
+	w.bytes += int64(len(p))
+	return len(p), nil
+}
+
+func (w *guardrailSizeWriter) WriteString(s string) (int, error) {
+	w.bytes += int64(len(s))
+	return len(s), nil
+}
+
+func marshalGuardrailJSON(value any, limits *provider.ExecutionLimits) ([]byte, error) {
+	if limits != nil {
+		if _, err := deferred.JSONEncodedSize(value, limits.RequestBytes, deferred.JSONDepth, deferred.JSONTokens); err != nil {
+			return nil, err
+		}
+	}
+	return json.Marshal(value)
 }
 
 func (r *guardrailBodyRedactor) replace(text string) string {
@@ -498,11 +555,20 @@ func (r *guardrailBodyRedactor) replace(text string) string {
 			delete(r.remaining, value)
 		}
 	}
+	if r.limits != nil {
+		var size guardrailSizeWriter
+		_, _ = r.replacer.WriteString(&size, text)
+		if size.bytes > r.limits.RequestBytes-r.textBytes {
+			r.incomplete = true
+			return text
+		}
+		r.textBytes += size.bytes
+	}
 	return r.replacer.Replace(text)
 }
 
 func (r *guardrailBodyRedactor) rewrite(value any, depth int) (any, bool) {
-	if depth > maxGuardrailRedactionDepth {
+	if depth > maxGuardrailRedactionDepth || r.limits != nil && depth > deferred.JSONDepth {
 		r.incomplete = true
 		return value, false
 	}
@@ -510,9 +576,17 @@ func (r *guardrailBodyRedactor) rewrite(value any, depth int) (any, bool) {
 	case string:
 		trimmed := strings.TrimSpace(v)
 		if len(trimmed) >= 2 && (trimmed[0] == '{' || trimmed[0] == '[') {
+			if r.limits != nil {
+				shape, err := deferred.InspectJSON([]byte(trimmed), deferred.JSONDepth, deferred.JSONTokens)
+				if err != nil || shape.Tokens > deferred.JSONTokens-r.jsonTokens {
+					r.incomplete = true
+					return value, false
+				}
+				r.jsonTokens += shape.Tokens
+			}
 			if nested, ok := decodeGuardrailJSON([]byte(trimmed)); ok {
 				if out, changed := r.rewrite(nested, depth+1); changed {
-					data, err := json.Marshal(out)
+					data, err := marshalGuardrailJSON(out, r.limits)
 					if err != nil {
 						r.incomplete = true
 						return value, false

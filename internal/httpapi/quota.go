@@ -41,13 +41,30 @@ type cachedSpend struct {
 
 type QuotaTracker struct {
 	mu      sync.Mutex
-	store   *store.Store
+	store   QuotaStore
 	windows map[string][]tpmSample
 	spend   map[string]cachedSpend
 }
 
+type QuotaStore interface {
+	GetScopeQuota(context.Context, uuid.UUID, string, uuid.UUID, string) (store.ScopeQuota, error)
+	SumScopeSpend(context.Context, uuid.UUID, string, uuid.UUID) (int64, error)
+	InsertSpendEntry(context.Context, *store.SpendEntry) error
+}
+
 func NewQuotaTracker(st *store.Store) *QuotaTracker {
+	if st == nil {
+		return NewQuotaTrackerWithStore(nil)
+	}
+	return NewQuotaTrackerWithStore(st)
+}
+
+func NewQuotaTrackerWithStore(st QuotaStore) *QuotaTracker {
 	return &QuotaTracker{store: st, windows: map[string][]tpmSample{}, spend: map[string]cachedSpend{}}
+}
+
+func (q *QuotaTracker) HasStore() bool {
+	return q != nil && q.store != nil
 }
 
 func quotaWindowKey(workspaceID uuid.UUID, scope quotaScope, model string) string {
@@ -156,7 +173,7 @@ func quotaScopes(principal *auth.Principal) []quotaScope {
 }
 
 func (h *Handler) allowQuota(deps Dependencies, w http.ResponseWriter, r *http.Request, principal *auth.Principal, model string) bool {
-	if deps.AdminStore == nil || !deps.MultiTenancy.Enabled || deps.Quota == nil || principal == nil || principal.KeyID == uuid.Nil {
+	if !deps.Quota.HasStore() || !deps.MultiTenancy.Enabled || principal == nil || principal.KeyID == uuid.Nil {
 		return true
 	}
 	ctx := r.Context()
@@ -222,17 +239,40 @@ func quotaTokens(usage provider.Usage) int64 {
 }
 
 func (h *Handler) recordQuotaUsage(deps Dependencies, principal *auth.Principal, publicModel, upstreamModel, providerName string, usage provider.Usage) {
-	if deps.AdminStore == nil || !deps.MultiTenancy.Enabled || principal == nil || principal.KeyID == uuid.Nil {
+	if err := h.persistQuotaUsageContext(context.Background(), deps, principal, publicModel, upstreamModel, providerName, usage); err != nil {
+		deps.Logger.Warn("quota ledger insert failed", "error", err)
+	}
+	h.recordLocalQuotaUsage(deps, principal, publicModel, usage)
+}
+
+func (h *Handler) recordLocalQuotaUsage(deps Dependencies, principal *auth.Principal, publicModel string, usage provider.Usage) {
+	if !deps.Quota.HasStore() || !deps.MultiTenancy.Enabled || principal == nil || principal.KeyID == uuid.Nil {
 		return
 	}
 	tokens := quotaTokens(usage)
-	if tokens <= 0 && !usage.Has() {
+	if tokens <= 0 {
 		return
 	}
-	ctx := context.Background()
+	for _, scope := range quotaScopes(principal) {
+		deps.Quota.recordTokens(principal.WorkspaceID, scope, publicModel, tokens)
+	}
+}
+
+func (h *Handler) persistQuotaUsageContext(ctx context.Context, deps Dependencies, principal *auth.Principal, publicModel, upstreamModel, providerName string, usage provider.Usage) error {
+	if !deps.Quota.HasStore() || !deps.MultiTenancy.Enabled || principal == nil || principal.KeyID == uuid.Nil {
+		return nil
+	}
+	tokens := quotaTokens(usage)
+	if tokens <= 0 && !usage.Has() {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var costMicros int64
-	if prices := billingPrices(deps.Catalog); upstreamModel != "" {
-		if p := prices[providerName+"/"+upstreamModel]; p != nil {
+	if upstreamModel != "" {
+		if _, model, ok := deps.Catalog.Model(providerName, upstreamModel); ok && model.Pricing != nil {
+			p := model.Pricing
 			if cost, ok := p.Cost(usage.PromptTokens, usage.CompletionTokens, usage.CachedTokens, usage.CacheCreationTokens, usage.CacheReadTokens); ok {
 				costMicros = int64(cost * 1e6)
 			}
@@ -252,12 +292,5 @@ func (h *Handler) recordQuotaUsage(deps Dependencies, principal *auth.Principal,
 		UserID: userID, TeamID: teamID,
 		Model: publicModel, Tokens: tokens, CostMicros: costMicros,
 	}
-	if err := deps.AdminStore.InsertSpendEntry(ctx, entry); err != nil {
-		deps.Logger.Warn("quota ledger insert failed", "error", err)
-	}
-	if deps.Quota != nil {
-		for _, scope := range quotaScopes(principal) {
-			deps.Quota.recordTokens(principal.WorkspaceID, scope, publicModel, tokens)
-		}
-	}
+	return deps.Quota.store.InsertSpendEntry(ctx, entry)
 }

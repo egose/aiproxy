@@ -18,6 +18,14 @@ func Validate(rt *Runtime) error {
 	if err := validateAuth(rt.Auth); err != nil {
 		return err
 	}
+	if rt.Deferred.Enabled {
+		if rt.Auth.Mode != AuthModeBearerStatic {
+			return fmt.Errorf("deferred requires auth mode bearer_static")
+		}
+		if err := ValidateDeferred(rt.Deferred); err != nil {
+			return err
+		}
+	}
 	if err := validateLogging(rt.Logging); err != nil {
 		return err
 	}
@@ -38,6 +46,11 @@ func Validate(rt *Runtime) error {
 	}
 	if err := validateProviders(rt.Catalog.DisabledProviders(), false); err != nil {
 		return err
+	}
+	for _, p := range append(rt.Catalog.Providers(), rt.Catalog.DisabledProviders()...) {
+		if err := validateProviderDeferred(p, rt.Deferred); err != nil {
+			return err
+		}
 	}
 	if err := validateAliases(rt.Catalog.Aliases(), rt.Catalog); err != nil {
 		return err
@@ -533,7 +546,8 @@ func ValidateForwardHeaders(names []string, owner string) error {
 		if !isValidHeaderName(name) {
 			return fmt.Errorf("%s: forward_headers entry %q is not a valid header name", owner, name)
 		}
-		if _, denied := deniedForwardHeaders[strings.ToLower(name)]; denied {
+		_, denied := deniedForwardHeaders[strings.ToLower(name)]
+		if denied || IsDeferredHeader(name) {
 			if strings.EqualFold(name, "user-agent") {
 				return fmt.Errorf("%s: forward_headers entry %q is managed by the proxy, use forward_user_agent instead", owner, name)
 			}

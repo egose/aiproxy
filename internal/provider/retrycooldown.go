@@ -9,9 +9,10 @@ import (
 )
 
 type CooldownError struct {
-	Err   error
-	Delay time.Duration
-	OK    bool
+	Err      error
+	Delay    time.Duration
+	OK       bool
+	Deadline time.Time
 }
 
 func (e *CooldownError) Error() string {
@@ -29,9 +30,18 @@ func (e *CooldownError) Unwrap() error {
 }
 
 func CooldownDelayFromError(err error) (time.Duration, bool) {
+	if IsPeerControlOutcome(nil, err) {
+		return 0, false
+	}
 	var cooldown *CooldownError
 	if errors.As(err, &cooldown) && cooldown != nil && cooldown.OK && cooldown.Delay > 0 {
-		return cooldown.Delay, true
+		delay := cooldown.Delay
+		if !cooldown.Deadline.IsZero() {
+			delay = time.Until(cooldown.Deadline)
+		}
+		if delay > 0 {
+			return delay, true
+		}
 	}
 	return 0, false
 }
@@ -43,12 +53,32 @@ func withCooldownError(err error, delay time.Duration, ok bool) error {
 	return &CooldownError{Err: err, Delay: delay, OK: true}
 }
 
+func withCooldownObservationError(err error, delay time.Duration, ok bool, observedAt time.Time) error {
+	if err == nil || !ok || delay <= 0 {
+		return err
+	}
+	return &CooldownError{Err: err, Delay: delay, OK: true, Deadline: observedAt.Add(delay)}
+}
+
 func attachCooldownDelay(res *Result, delay time.Duration, ok bool) *Result {
 	if res == nil || !ok || delay <= 0 {
 		return res
 	}
 	res.RetryDelay = delay
 	res.HasRetryDelay = true
+	return res
+}
+
+func attachCooldownObservation(res *Result, delay time.Duration, ok bool, observedAt time.Time) *Result {
+	if res == nil {
+		return nil
+	}
+	res.Origin = OriginInference
+	attachCooldownDelay(res, delay, ok)
+	if ok && delay > 0 {
+		res.RetryObservedAt = observedAt
+		res.RetryDeadline = observedAt.Add(delay)
+	}
 	return res
 }
 
@@ -209,5 +239,5 @@ func SyntheticCooldownResult(remaining time.Duration) *Result {
 		"Retry-After-Ms": []string{strconv.FormatInt(millis, 10)},
 	}
 	body := []byte(`{"error":{"type":"upstream_rate_limited","message":"all alias targets cooling, retry after ` + strconv.FormatInt(millis, 10) + `ms"}}`)
-	return &Result{StatusCode: http.StatusTooManyRequests, Header: header, Body: body}
+	return attachCooldownObservation(&Result{StatusCode: http.StatusTooManyRequests, Header: header, Body: body}, remaining, true, time.Now())
 }

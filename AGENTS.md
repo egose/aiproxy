@@ -86,6 +86,11 @@ automatically after admin API mutations); invalid rows fail the reload with
 the old runtime intact. Listener address, listener timeout, logging level, and enabling the
 dashboard after startup require restart.
 
+Peer deferred policy also reloads subject to live reservation checks. Removing
+root `deferred` and receiver declarations stops new admission but preserves
+authenticated controls/replay for draining existing jobs; restart loses the
+process-local store. See `website/docs/operations.md#peer-reload-and-finalization`.
+
 ## Lint / typecheck / test
 
 | Command              | Effect                                                  |
@@ -141,12 +146,23 @@ The optional standalone Bun capture tool is documented in
   back to `~/.config/aiproxy/keys.json`.
 - Providers may declare `extends = "<base-provider-name>"` to inherit the base
   provider type, endpoint, timeout, enabled state, and models while using their
-  own provider name and local credential. Derived providers may only declare
+  own provider name and local credential. Derived providers normally declare
   `extends`, optional `display_name`, and at most one local `api_key` or
   `api_key_ref` (exactly one, except `opencode-zen` derivatives which may omit
   it for keyless access, or derivatives explicitly setting
   `forward_authorization = true` which must omit it); the base must be enabled,
   concrete, and the same type.
+- Peer Deferred Transport v1 uses unlabeled root `deferred`, static
+  `openai-compatible` caller `deferred_transport`, and static chat
+  `deferred_receiver` blocks. Only chat JSON/SSE uses peer transport; other
+  operations remain ordinary, and peer control failures never authorize fresh
+  inference. Opt-ins are local to each static derivative, incompatible with
+  `forward_authorization`, and rejected on managed provider/credential writes
+  and managed inheritance. Callers require configured `api_key`/`api_key_ref`
+  even when disabled. There are no CLI creation flags. Full configurations
+  in `website/docs/configuration.md#peer-deferred-transport-v1` are checked by
+  `go test ./internal/config -run DocumentedDeferred -count=1`; API and limits are
+  in `website/docs/api-reference.md` and `website/docs/operations.md`.
 - Any provider may declare an optional `user_agent` override (1-256 printable
   ASCII characters, no newlines). It replaces the default `aiproxy/<version>`
   upstream `User-Agent` on every proxy-initiated request for that provider

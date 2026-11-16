@@ -19,6 +19,7 @@ import (
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/copilotlogin"
 	"github.com/egose/aiproxy/internal/dashrpc"
+	"github.com/egose/aiproxy/internal/deferred"
 	"github.com/egose/aiproxy/internal/guardrails"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
@@ -61,6 +62,9 @@ type Dependencies struct {
 	Guardrails            *guardrails.Scanner
 	Quarantine            *guardrails.Quarantine
 	Exceptions            *guardrails.Exceptions
+	DeferredStore         *deferred.Store
+	RuntimeResources      *RuntimeResources
+	revision              uint64
 }
 
 const maxRequestBodyBytes int64 = 8 << 20
@@ -75,6 +79,7 @@ const metricsDashboardUnknownPath = "/_internal/dashboard/unknown"
 
 func NewHandler(deps Dependencies) *Handler {
 	deps = normalizeDependencies(deps)
+	deps.revision = 1
 	return &Handler{deps: deps}
 }
 
@@ -110,12 +115,16 @@ func normalizeDependencies(deps Dependencies) Dependencies {
 	if !deps.HasAccessLog {
 		deps.AccessLog = true
 	}
+	if deps.DeferredStore != nil && deps.Metrics != nil {
+		deps.Metrics.SetDeferredSource(deps.DeferredStore.Stats)
+	}
 	return deps
 }
 
 func (h *Handler) UpdateDependencies(deps Dependencies) {
 	deps = normalizeDependencies(deps)
 	h.mu.Lock()
+	deps.revision = h.deps.revision + 1
 	h.deps = deps
 	h.mu.Unlock()
 }
@@ -141,7 +150,7 @@ func payloadUpstreamRequest(result *provider.Result, maxBody int, omitBody bool)
 	}
 	return payloadlog.EntrySide{
 		Headers: payloadlog.RedactHeaders(result.UpstreamRequestHeaders),
-		Body:    payloadlog.EncodeBodyWithContentType(body, maxBody, result.UpstreamRequestHeaders.Get("Content-Type")),
+		Body:    payloadlog.EncodeSnapshot(body, maxBody, result.UpstreamRequestHeaders.Get("Content-Type"), result.UpstreamRequestBodyTruncated),
 	}, true
 }
 
@@ -155,7 +164,16 @@ func dashboardAuthLimiterFor(h *Handler) *dashboardAuthLimiter {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	deps := h.current()
+	deps, release, available := h.SnapshotDependenciesWithLease()
+	if !available {
+		http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
 	rw := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
 	start := time.Now()
 	requestID := observability.RequestID(r.Header.Get("X-Request-Id"))
@@ -255,6 +273,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	if handled, transferred := h.handleDeferred(deps, rw, r, logger, requestID, start, release); handled {
+		if transferred {
+			release = nil
+		}
+		return
+	}
 	if h.handleHealth(deps, rw, r) {
 		return
 	}
@@ -287,25 +311,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logger = logger.With("operation", op.String())
 
 	var err error
-	principal, err = deps.Auth.Authenticate(r)
+	principal, err = h.authenticateInference(deps, r)
 	if err != nil {
 		logger.Warn("auth failed", "error", err)
 		h.writeRequestError(deps.Metrics, rw, r, http.StatusUnauthorized, "auth_failed", err.Error())
 		return
 	}
-	if !h.allowRequest(deps, rw, r, principal) {
-		return
-	}
-
-	r.Body = http.MaxBytesReader(rw, r.Body, maxRequestBodyBytes)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			h.writeRequestError(deps.Metrics, rw, r, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds 8 MiB limit")
-			return
-		}
-		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadRequest, "invalid_body", err.Error())
+	body, admitted := h.readInferenceInput(deps, rw, r, principal, nil, maxRequestBodyBytes)
+	if !admitted {
 		return
 	}
 	requestBytes = len(body)
@@ -380,58 +393,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_ = deps.PayloadLog.Record(entry)
 		}()
 	}
-	publicModel = extractModelForRequest(r.Header.Get("Content-Type"), body)
-	if publicModel == "" {
-		accountingModel = accountingModelInvalidBody
-		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadRequest, "invalid_model", "model field is required")
+	admission, admitted := h.admitInferenceBody(deps, rw, r, op, principal, body, logger, nil, nil)
+	publicModel, accountingModel, reasoningEffort = admission.PublicModel, admission.AccountingModel, admission.ReasoningEffort
+	grLogState, body, logger = admission.GuardrailLog, admission.Body, admission.Logger
+	if !admitted {
 		return
 	}
-	logger = logger.With("public_model", publicModel)
-	if effort := extractReasoningEffort(body); effort != "" {
-		reasoningEffort = effort
-		logger = logger.With("reasoning_effort", effort)
-	} else if op == provider.OpMessages {
-		if effort := extractMessagesEffort(body); effort != "" {
-			reasoningEffort = effort
-			logger = logger.With("reasoning_effort", effort)
-		}
-	}
-	if principal != nil {
-		logger = logger.With("client", principalName(principal), "tenant", principalTenant(principal))
-	}
-	if deps.AccessLog {
-		logger.Info("request received", "method", r.Method, "path", r.URL.Path, "request_bytes", requestBytes)
-	}
-	if !deps.Authorizer.Allow(principal, publicModel) {
-		accountingModel = accountingModelForbidden
-		h.writeRequestError(deps.Metrics, rw, r, http.StatusForbidden, "forbidden", "client is not allowed to access this model")
-		return
-	}
-
-	resolved, err := deps.Resolver.Resolve(publicModel)
-	if err != nil {
-		accountingModel = accountingModelNotFound
-		logger.Info("resolve failed", "error", err)
-		h.writeRequestError(deps.Metrics, rw, r, http.StatusNotFound, "model_not_found", err.Error())
-		return
-	}
-	accountingModel = publicModel
-	if !h.allowQuota(deps, rw, r, principal, publicModel) {
-		return
-	}
-	if err := ensureOperationSupported(op, resolved, deps.Catalog); err != nil {
-		h.writeRequestError(deps.Metrics, rw, r, http.StatusBadRequest, "unsupported_operation", err.Error())
-		return
-	}
-
-	if deps.Guardrails != nil && guardrailCovered(op) {
-		blocked, outBody, logState := h.checkGuardrails(deps, rw, r, op, body, deps.Guardrails, publicModel, logger, redactGuardrailBodies)
-		grLogState = logState
-		if blocked {
-			return
-		}
-		body = outBody
-	}
+	resolved := admission.Resolved
 
 	if resolved.Kind == modelresolver.KindDirect {
 		result, err = h.dispatchDirect(deps, r.Context(), op, resolved, r, body, logger)
@@ -439,7 +407,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		result, err = h.dispatchAlias(deps, r.Context(), op, resolved, r, body, logger)
 	}
 	if err != nil {
+		if result != nil {
+			accountingProvider, accountingUpstream = result.Provider, result.UpstreamModel
+			defer closeResult(result)
+		}
 		logger.Error("upstream failed", "error", err)
+		var control *provider.DeferredControlError
+		if errors.As(err, &control) {
+			status := http.StatusBadGateway
+			if control.Code == "deferred_wait_timeout" || control.Code == "deferred_execution_timeout" {
+				status = http.StatusGatewayTimeout
+			}
+			h.writeRequestError(deps.Metrics, rw, r, status, control.Code, "deferred request could not be delivered")
+			return
+		}
 		var unsupported provider.ErrUnsupportedOperation
 		if errors.As(err, &unsupported) {
 			h.writeRequestError(deps.Metrics, rw, r, http.StatusBadRequest, "unsupported_operation", err.Error())
@@ -475,6 +456,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if deps.Metrics != nil {
 			deps.Metrics.RecordHTTPStream(r.Method, metricsPathLabel(r), rw.statusCode, time.Since(streamStart).Seconds())
 		}
+		if streamOutcome.Err != nil && !streamOutcome.DownstreamCanceled &&
+			(result.AbortOnStreamError || provider.IsPeerControlOutcome(nil, streamOutcome.Err)) {
+			panic(http.ErrAbortHandler)
+		}
 		return
 	}
 	h.writeResult(rw, r, result)
@@ -501,12 +486,21 @@ func (w *statusRecorder) Write(p []byte) (int, error) {
 }
 
 func (w *statusRecorder) Flush() {
-	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
-		flusher.Flush()
-	}
+	_ = w.FlushError()
+}
+
+func (w *statusRecorder) FlushError() error {
+	return http.NewResponseController(w.ResponseWriter).Flush()
+}
+
+func (w *statusRecorder) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 func metricsPathLabel(r *http.Request) string {
+	if isDeferredPath(r.URL.Path) {
+		return deferredMetricsPath(r.URL.Path, r.Method)
+	}
 	switch r.URL.Path {
 	case "/healthz", "/readyz", "/metrics", "/v1/models", "/v1/billing/usage":
 		return r.URL.Path

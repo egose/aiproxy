@@ -177,12 +177,17 @@ func newConfigureCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "configure",
 		Short: "Interactively create or update config blocks",
-		Long:  "Create, update, or delete top-level config blocks. Run `aiproxy configure` for a guided selector, or call a specific subcommand such as `aiproxy configure provider`. Use `--non-interactive` on block subcommands to script changes in CI or provisioning workflows.",
+		Long:  "Create, update, or delete top-level config blocks. Run `aiproxy configure` for a guided selector, or call a specific subcommand such as `aiproxy configure provider`. Use `--non-interactive` on block subcommands to script changes in CI or provisioning workflows. Peer deferred blocks have no CLI creation flags in v1: edit the config file directly; existing blocks are preserved by other edits.",
 		Example: "aiproxy configure\n" +
 			"aiproxy configure provider\n" +
 			"aiproxy configure provider --config /etc/aiproxy/config.hcl --non-interactive --name backup --type openai-compatible --base-url https://llm.internal/v1 --secrets-key localai --api-key \"$LOCALAI_API_KEY\" --model qwen3-32b\n" +
 			"aiproxy configure alias --config /etc/aiproxy/config.hcl --non-interactive --name chat_default --target primary/gpt-4o-mini --target backup/qwen3-32b",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			for _, arg := range args {
+				if strings.HasPrefix(strings.ToLower(arg), "deferred") {
+					return deferredConfigureUnsupported()
+				}
+			}
 			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			choice, err := prompts.askChoice("Block to configure", []string{"provider", "alias", "auth", "listener", "upstream", "logging", "provider-health"}, "provider")
 			if err != nil {
@@ -210,6 +215,12 @@ func newConfigureCommand() *cobra.Command {
 			}
 		},
 	}
+	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		if strings.Contains(strings.ToLower(err.Error()), "unknown flag: --deferred") {
+			return deferredConfigureUnsupported()
+		}
+		return err
+	})
 	cmd.PersistentFlags().StringVar(&cfgPath, "config", "", "path to config file")
 	cmd.AddCommand(newConfigureListenerCommand())
 	cmd.AddCommand(newConfigureUpstreamCommand())
@@ -815,6 +826,9 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 
 	options.BaseProviderNames, options.BaseProviderTypes = eligibleBaseProviders(doc.blocks)
 	options.ConfigFilename = configPath
+	if err := config.ValidateDeferredConfig([]byte(doc.source), configPath); err != nil {
+		return err
+	}
 	input, secretsUpdate, err := promptProviderInput(prompts, existingProviderInput(doc.blocks, nameForAction), options)
 	if err != nil {
 		return err
@@ -1992,7 +2006,9 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if options.APIKey != "" || options.APIKeyEnv != "" || options.SecretsKey != "" || options.SecretsPath != "" || options.Credential != "" || options.CredentialPath != "" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("--enabled=false cannot be combined with credential flags")
 		}
-		defaults.Credential = providerCredentialInput{Mode: "disabled"}
+		if defaults.DeferredTransportBlock == "" {
+			defaults.Credential = providerCredentialInput{Mode: "disabled"}
+		}
 		enabled := false
 		defaults.Enabled = &enabled
 	} else if options.HasEnabled {
@@ -2207,6 +2223,8 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 				UserAgent:                 strings.TrimSpace(userAgent),
 				ForwardUserAgent:          forwardUserAgent,
 				ForwardHeaders:            parseForwardHeadersCSV(forwardHeaders),
+				DeferredTransportBlock:    defaults.DeferredTransportBlock,
+				DeferredReceiverBlock:     defaults.DeferredReceiverBlock,
 				AllowInsecureBaseURL:      allowInsecure,
 				Credential:                credential,
 				Enabled:                   defaults.Enabled,
@@ -2317,6 +2335,8 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			ForwardUserAgent:          forwardUserAgent,
 			ForwardHeaders:            parseForwardHeadersCSV(forwardHeaders),
 			ForwardAuthorization:      forwardAuthorization,
+			DeferredTransportBlock:    defaults.DeferredTransportBlock,
+			DeferredReceiverBlock:     defaults.DeferredReceiverBlock,
 			AllowInsecureBaseURL:      allowInsecure,
 			Credential:                credential,
 			Enabled:                   defaults.Enabled,
@@ -2446,6 +2466,8 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			UserAgent:                 userAgent,
 			ForwardUserAgent:          forwardUserAgent,
 			ForwardHeaders:            parseForwardHeadersCSV(forwardHeaders),
+			DeferredTransportBlock:    defaults.DeferredTransportBlock,
+			DeferredReceiverBlock:     defaults.DeferredReceiverBlock,
 			AllowInsecureBaseURL:      allowInsecure,
 			Credential:                credential,
 			Enabled:                   defaults.Enabled,
@@ -2538,6 +2560,8 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		ForwardUserAgent:          forwardUserAgent,
 		ForwardHeaders:            parseForwardHeadersCSV(forwardHeaders),
 		ForwardAuthorization:      forwardAuthorization,
+		DeferredTransportBlock:    defaults.DeferredTransportBlock,
+		DeferredReceiverBlock:     defaults.DeferredReceiverBlock,
 		AllowInsecureBaseURL:      allowInsecure,
 		Credential:                credential,
 		Enabled:                   defaults.Enabled,
@@ -4398,6 +4422,8 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 	input.ForwardHeaders = parseQuotedListExpr(attributeExpr(src, parsed.Body, "forward_headers"))
 	input.ForwardAuthorization = parseBoolExpr(attributeExpr(src, parsed.Body, "forward_authorization"), false)
 	input.AllowInsecureBaseURL = parseBoolExpr(attributeExpr(src, parsed.Body, "allow_insecure_base_url"), false)
+	input.DeferredTransportBlock = nestedBlockSource(src, parsed.Body, "deferred_transport")
+	input.DeferredReceiverBlock = nestedBlockSource(src, parsed.Body, "deferred_receiver")
 	if enabledExpr := parseLiteralOrExpression(attributeExpr(src, parsed.Body, "enabled")); enabledExpr != "" {
 		boolVal := enabledExpr == "true" || enabledExpr == "1"
 		input.Enabled = &boolVal
@@ -4692,6 +4718,18 @@ func findNestedBlock(body *hclsyntax.Body, blockType string) *hclsyntax.Block {
 		}
 	}
 	return nil
+}
+
+func nestedBlockSource(src []byte, body *hclsyntax.Body, blockType string) string {
+	block := findNestedBlock(body, blockType)
+	if block == nil {
+		return ""
+	}
+	rng := block.Range()
+	if rng.Start.Byte < 0 || rng.End.Byte > len(src) || rng.End.Byte < rng.Start.Byte {
+		return ""
+	}
+	return string(src[rng.Start.Byte:rng.End.Byte])
 }
 
 func findNestedBlocks(body *hclsyntax.Body, blockType string) []*hclsyntax.Block {

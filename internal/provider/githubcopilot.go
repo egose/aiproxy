@@ -20,9 +20,9 @@ func (a *adapter) doGitHubCopilot(ctx context.Context, r Request) (*Result, erro
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
-	rewritten, err := rewriteModel(body, r.UpstreamModel)
+	rewritten, err := rewriteModel(body, r.UpstreamModel, r.execution)
 	if err != nil {
-		return nil, ErrInvalidRequest{Message: fmt.Sprintf("rewrite model: %v", err)}
+		return nil, executionRequestError(r, "rewrite model", err)
 	}
 	base := r.BaseURL
 	if base == "" {

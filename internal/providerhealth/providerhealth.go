@@ -186,6 +186,48 @@ func (t *Tracker) MarkFailureContext(ctx context.Context, name string) {
 	}
 }
 
+func (t *Tracker) RecordLocal(name string, healthy bool) {
+	if t == nil || name == "" {
+		return
+	}
+	if memory, ok := t.backend.(*memoryBackend); ok {
+		if healthy {
+			_ = memory.MarkSuccess(nil, name)
+		} else {
+			_ = memory.MarkFailure(nil, name, t.cooldown)
+		}
+	}
+	t.writeCache(name, healthy)
+	if t.metrics != nil {
+		t.metrics.SetProviderHealthy(name, healthy)
+	}
+}
+
+func (t *Tracker) PersistContext(ctx context.Context, name string, healthy bool) error {
+	if t == nil || name == "" {
+		return nil
+	}
+	if _, ok := t.backend.(*memoryBackend); ok {
+		return nil
+	}
+	err := ctx.Err()
+	operation := "mark_failure"
+	if healthy {
+		operation = "mark_success"
+	}
+	if err == nil {
+		if healthy {
+			err = t.backend.MarkSuccess(ctx, name)
+		} else {
+			err = t.backend.MarkFailure(ctx, name, t.cooldown)
+		}
+	}
+	if err != nil {
+		t.recordBackendError(operation)
+	}
+	return err
+}
+
 func (t *Tracker) IsHealthy(name string) bool {
 	return t.IsHealthyContext(context.Background(), name)
 }

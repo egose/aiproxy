@@ -6,6 +6,9 @@ import (
 )
 
 func writeOpenAIChunk(w io.Writer, chunk openAIChunk) error {
+	if limited, ok := w.(*executionStreamWriter); ok {
+		return limited.writeChunk(chunk)
+	}
 	encoded, err := json.Marshal(chunk)
 	if err != nil {
 		return err

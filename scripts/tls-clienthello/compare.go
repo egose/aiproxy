@@ -83,7 +83,7 @@ func captureProfile(parent context.Context, profile tlsprofile.Profile, limits c
 		return nil, err
 	}
 	defer listener.Close()
-	stopListener := context.AfterFunc(ctx, func() { listener.Close() })
+	stopListener := closeOnContextDone(ctx, listener)
 	defer stopListener()
 	done := make(chan struct{})
 	go func() {
@@ -94,7 +94,7 @@ func captureProfile(parent context.Context, profile tlsprofile.Profile, limits c
 			return
 		}
 		defer connection.Close()
-		stopConnection := context.AfterFunc(ctx, func() { connection.Close() })
+		stopConnection := closeOnContextDone(ctx, connection)
 		defer stopConnection()
 		config := &utls.Config{ServerName: "localhost", MinVersion: utls.VersionTLS12, MaxVersion: utls.VersionTLS13}
 		client := utls.UClient(connection, config, utls.HelloCustom)
@@ -121,7 +121,7 @@ func captureProfile(parent context.Context, profile tlsprofile.Profile, limits c
 		return nil, fmt.Errorf("materialized profile did not connect to the loopback listener")
 	}
 	defer connection.Close()
-	stopConnection := context.AfterFunc(ctx, func() { connection.Close() })
+	stopConnection := closeOnContextDone(ctx, connection)
 	defer stopConnection()
 	if err := connection.SetReadDeadline(captureDeadline(ctx, limits.read)); err != nil {
 		if contextErr := captureContextError(ctx); contextErr != nil {

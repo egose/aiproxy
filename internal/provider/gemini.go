@@ -134,9 +134,9 @@ func (a *adapter) doGeminiChat(ctx context.Context, r Request) (*Result, error) 
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
-	translated, streaming, err := translateOpenAIToGemini(body)
+	translated, streaming, err := translateOpenAIToGemini(body, r.execution)
 	if err != nil {
-		return nil, ErrInvalidRequest{Message: fmt.Sprintf("translate request: %v", err)}
+		return nil, executionRequestError(r, "translate request", err)
 	}
 	path := "/v1beta/models/" + r.UpstreamModel + ":generateContent"
 	if streaming {
@@ -153,18 +153,24 @@ func (a *adapter) doGeminiChat(ctx context.Context, r Request) (*Result, error) 
 		req.Header.Set("Accept", "text/event-stream")
 	}
 	return executeUpstream(r, req, upstreamResponseHandlers{
+		RequireJSON: true,
 		IsStreaming: func(*http.Response) bool {
 			return streaming
 		},
 		OnStream: func(resp *http.Response) (*Result, error) {
 			stream := NewStreamCompletion()
-			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: translateGeminiStream(resp.Body, r.PublicModel, stream), Streaming: true, Stream: stream}, nil
+			body, err := geminiChatStreamWithLimits(resp.Body, r.PublicModel, stream, r.execution)
+			if err != nil {
+				return nil, err
+			}
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: body, Streaming: true, Stream: stream}, nil
 		},
 		OnError: func(resp *http.Response, body []byte) (*Result, error) {
-			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translateGeminiError(body)}, nil
+			translated, err := translatedErrorWithLimits(body, r.execution, false)
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translated}, err
 		},
 		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
-			translatedBody, err := translateGeminiResponse(body, r.PublicModel)
+			translatedBody, err := translateGeminiResponse(body, r.PublicModel, r.execution)
 			if err != nil {
 				return nil, fmt.Errorf("translate response: %w", err)
 			}
@@ -256,7 +262,8 @@ func (a *adapter) doGeminiResponses(ctx context.Context, r Request) (*Result, er
 	})
 }
 
-func translateOpenAIToGemini(body []byte) ([]byte, bool, error) {
+func translateOpenAIToGemini(body []byte, states ...*executionState) ([]byte, bool, error) {
+	state := executionArgument(states)
 	if err := rejectUnsupportedTopLevelFields(body, openAIChatRequestFields); err != nil {
 		return nil, false, err
 	}
@@ -280,7 +287,7 @@ func translateOpenAIToGemini(body []byte) ([]byte, bool, error) {
 
 	var systemParts []geminiPart
 	for _, msg := range req.Messages {
-		parts, joined, err := parseOpenAITextParts(msg.Content)
+		parts, joined, err := parseOpenAITextParts(msg.Content, state)
 		if err != nil {
 			return nil, false, fmt.Errorf("message role %q: %w", msg.Role, err)
 		}
@@ -300,7 +307,7 @@ func translateOpenAIToGemini(body []byte) ([]byte, bool, error) {
 	if len(systemParts) > 0 {
 		out.SystemInstruction = &geminiContent{Parts: systemParts}
 	}
-	translated, err := json.Marshal(out)
+	translated, err := marshalExecutionJSON(out, state, true)
 	if err != nil {
 		return nil, false, err
 	}
@@ -361,7 +368,7 @@ func parseOpenAIEmbeddingInputs(raw json.RawMessage) ([]string, error) {
 	return nil, fmt.Errorf("input must be a string or array of strings")
 }
 
-func parseOpenAITextParts(raw json.RawMessage) ([]geminiPart, string, error) {
+func parseOpenAITextParts(raw json.RawMessage, states ...*executionState) ([]geminiPart, string, error) {
 	if len(raw) == 0 {
 		return nil, "", nil
 	}
@@ -385,10 +392,15 @@ func parseOpenAITextParts(raw json.RawMessage) ([]geminiPart, string, error) {
 		out = append(out, geminiPart{Text: part.Text})
 		joined = append(joined, part.Text)
 	}
+	if state := executionArgument(states); state != nil {
+		text, err := state.joinStrings(joined, "", true)
+		return out, text, err
+	}
 	return out, strings.Join(joined, ""), nil
 }
 
-func translateGeminiResponse(body []byte, publicModel string) ([]byte, error) {
+func translateGeminiResponse(body []byte, publicModel string, states ...*executionState) ([]byte, error) {
+	state := executionArgument(states)
 	var resp geminiResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, err
@@ -396,7 +408,19 @@ func translateGeminiResponse(body []byte, publicModel string) ([]byte, error) {
 	content := ""
 	finish := ""
 	if len(resp.Candidates) > 0 {
-		content = joinGeminiText(resp.Candidates[0].Content.Parts)
+		if state == nil {
+			content = joinGeminiText(resp.Candidates[0].Content.Parts)
+		} else {
+			parts := make([]string, 0, len(resp.Candidates[0].Content.Parts))
+			for _, part := range resp.Candidates[0].Content.Parts {
+				parts = append(parts, part.Text)
+			}
+			var err error
+			content, err = state.joinStrings(parts, "", false)
+			if err != nil {
+				return nil, err
+			}
+		}
 		finish = mapGeminiFinishReason(resp.Candidates[0].FinishReason)
 	}
 	out := openAIResponse{
@@ -427,7 +451,7 @@ func translateGeminiResponse(body []byte, publicModel string) ([]byte, error) {
 		}
 		out.Usage.PromptTokensDetails = &openAIPromptTokensDetails{CachedTokens: cached}
 	}
-	return json.Marshal(out)
+	return marshalExecutionJSON(out, state, false)
 }
 
 func translateGeminiResponsesResponse(body []byte, publicModel string) ([]byte, error) {
@@ -655,7 +679,20 @@ func processGeminiPayload(w io.Writer, payload, publicModel string, sentRole *bo
 		*sentRole = true
 		wrote = true
 	}
-	text := joinGeminiText(candidate.Content.Parts)
+	var text string
+	if limited, ok := w.(*executionStreamWriter); ok {
+		parts := make([]string, 0, len(candidate.Content.Parts))
+		for _, part := range candidate.Content.Parts {
+			parts = append(parts, part.Text)
+		}
+		var err error
+		text, err = limited.state.joinStrings(parts, "", false)
+		if err != nil {
+			return wrote, false, err
+		}
+	} else {
+		text = joinGeminiText(candidate.Content.Parts)
+	}
 	if text != "" {
 		if err := writeOpenAIChunk(w, openAIChunk{
 			ID:      "chatcmpl-gemini",

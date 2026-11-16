@@ -16,6 +16,7 @@ import (
 	"github.com/andybalholm/brotli"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/copilotlogin"
+	"github.com/egose/aiproxy/internal/deferred"
 	"github.com/egose/aiproxy/internal/upstreamhttp"
 	"github.com/klauspost/compress/zstd"
 )
@@ -49,23 +50,39 @@ type Request struct {
 	Body                 []byte
 	Inbound              *http.Request
 	Client               *http.Client
+	DeferredTransport    *config.DeferredTransport
+	ExecutionLimits      *ExecutionLimits
+	ObserveBody          func(io.ReadCloser) io.ReadCloser
+	execution            *executionState
 }
 
+type ResultOrigin string
+
+const (
+	OriginInference   ResultOrigin = "inference"
+	OriginPeerControl ResultOrigin = "peer_control"
+)
+
 type Result struct {
-	StatusCode             int
-	Header                 http.Header
-	Body                   []byte
-	StreamBody             io.ReadCloser
-	Streaming              bool
-	OnClose                func()
-	Usage                  Usage
-	Stream                 *StreamCompletion
-	RetryDelay             time.Duration
-	HasRetryDelay          bool
-	Provider               string
-	UpstreamModel          string
-	UpstreamRequestHeaders http.Header
-	UpstreamRequestBody    []byte
+	StatusCode                   int
+	Header                       http.Header
+	Body                         []byte
+	StreamBody                   io.ReadCloser
+	Streaming                    bool
+	AbortOnStreamError           bool
+	OnClose                      func()
+	Usage                        Usage
+	Stream                       *StreamCompletion
+	RetryDelay                   time.Duration
+	HasRetryDelay                bool
+	Origin                       ResultOrigin
+	RetryObservedAt              time.Time
+	RetryDeadline                time.Time
+	Provider                     string
+	UpstreamModel                string
+	UpstreamRequestHeaders       http.Header
+	UpstreamRequestBody          []byte
+	UpstreamRequestBodyTruncated bool
 }
 
 type Usage struct {
@@ -149,6 +166,19 @@ func (s *StreamCompletion) Wait() StreamOutcome {
 	outcome := s.outcome
 	s.mu.Unlock()
 	return outcome
+}
+
+func (s *StreamCompletion) Done() <-chan struct{} {
+	return s.done
+}
+
+func (s *StreamCompletion) Snapshot() StreamOutcome {
+	if s == nil {
+		return StreamOutcome{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.outcome
 }
 
 type Adapter interface {
@@ -278,6 +308,13 @@ func (a *adapter) Do(ctx context.Context, r Request) (*Result, error) {
 	}
 	if r.BaseURL == "" {
 		r.BaseURL = desc.defaultBaseURL
+	}
+	if r.DeferredTransport != nil && r.Operation == OpChatCompletions &&
+		(r.ProviderType != config.ProviderTypeOpenAICompatible || r.ForwardAuthorization || r.ExecutionLimits != nil) {
+		return nil, &DeferredControlError{Code: "deferred_protocol_error", Acceptance: deferred.AcceptanceNotAccepted, Err: fmt.Errorf("ineligible deferred caller")}
+	}
+	if r.ExecutionLimits != nil {
+		return a.doWithExecutionLimits(ctx, r, desc)
 	}
 	return desc.do(a, ctx, r)
 }
@@ -484,6 +521,7 @@ func requestBody(r Request) ([]byte, error) {
 }
 
 type upstreamResponseHandlers struct {
+	RequireJSON     bool
 	PreferStreaming bool
 	StreamSuccess   bool
 	IsStreaming     func(*http.Response) bool
@@ -524,6 +562,9 @@ func defaultVersion(version string) string {
 }
 
 func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHandlers) (*Result, error) {
+	if r.execution != nil {
+		return executeUpstreamLimited(r, req, handlers)
+	}
 	if r.ForwardAuthorization {
 		authorization, err := forwardedAuthorization(r)
 		if err != nil {
@@ -549,7 +590,8 @@ func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHand
 	if err != nil {
 		return nil, fmt.Errorf("upstream call: %w", err)
 	}
-	delay, hasDelay := ParseRetryCooldown(resp.Header, time.Now())
+	observedAt := time.Now()
+	delay, hasDelay := ParseRetryCooldown(resp.Header, observedAt)
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
 		body, err := readUpstreamBody(resp.Body)
@@ -557,22 +599,22 @@ func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHand
 			return nil, withCooldownError(fmt.Errorf("read error body: %w", err), delay, hasDelay)
 		}
 		if handlers.OnError == nil {
-			return attachCooldownDelay(attachSent(&Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}), delay, hasDelay), nil
+			return attachCooldownObservation(attachSent(&Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}), delay, hasDelay, observedAt), nil
 		}
 		res, handlerErr := handlers.OnError(resp, body)
-		return attachCooldownDelay(attachSent(res), delay, hasDelay), withCooldownError(handlerErr, delay, hasDelay)
+		return attachCooldownObservation(attachSent(res), delay, hasDelay, observedAt), withCooldownError(handlerErr, delay, hasDelay)
 	}
 	isStreaming := handlers.IsStreaming != nil && handlers.IsStreaming(resp)
 	if handlers.PreferStreaming && isStreaming {
 		res, streamErr := handlers.OnStream(resp)
-		return attachCooldownDelay(attachSent(res), delay, hasDelay), withCooldownError(streamErr, delay, hasDelay)
+		return attachCooldownObservation(attachSent(res), delay, hasDelay, observedAt), withCooldownError(streamErr, delay, hasDelay)
 	}
 	if isStreaming {
 		res, streamErr := handlers.OnStream(resp)
-		return attachCooldownDelay(attachSent(res), delay, hasDelay), withCooldownError(streamErr, delay, hasDelay)
+		return attachCooldownObservation(attachSent(res), delay, hasDelay, observedAt), withCooldownError(streamErr, delay, hasDelay)
 	}
 	if handlers.StreamSuccess {
-		return attachCooldownDelay(attachSent(&Result{StatusCode: resp.StatusCode, Header: resp.Header, StreamBody: resp.Body, Streaming: true}), delay, hasDelay), nil
+		return attachCooldownObservation(attachSent(&Result{StatusCode: resp.StatusCode, Header: resp.Header, StreamBody: resp.Body, Streaming: true}), delay, hasDelay, observedAt), nil
 	}
 	defer resp.Body.Close()
 	body, err := readUpstreamBody(resp.Body)
@@ -580,10 +622,10 @@ func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHand
 		return nil, withCooldownError(fmt.Errorf("read upstream body: %w", err), delay, hasDelay)
 	}
 	if handlers.OnSuccess == nil {
-		return attachCooldownDelay(attachSent(&Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}), delay, hasDelay), nil
+		return attachCooldownObservation(attachSent(&Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}), delay, hasDelay, observedAt), nil
 	}
 	res, handlerErr := handlers.OnSuccess(resp, body)
-	return attachCooldownDelay(attachSent(res), delay, hasDelay), withCooldownError(handlerErr, delay, hasDelay)
+	return attachCooldownObservation(attachSent(res), delay, hasDelay, observedAt), withCooldownError(handlerErr, delay, hasDelay)
 }
 
 const (
@@ -607,6 +649,9 @@ func applyForwardedHeaders(r Request, req *http.Request) {
 		return
 	}
 	for _, name := range r.ForwardHeaders {
+		if config.IsDeferredHeader(name) {
+			continue
+		}
 		if req.Header.Get(name) != "" {
 			continue
 		}

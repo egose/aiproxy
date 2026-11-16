@@ -19,11 +19,44 @@ type Runtime struct {
 	Database              Database
 	MultiTenancy          MultiTenancy
 	IngressGuardrails     IngressGuardrails
+	Deferred              Deferred
 	UpstreamHeaderTimeout time.Duration
 	UserAgent             string
 	ForwardUserAgent      bool
 	ForwardHeaders        []string
 	Catalog               Catalog
+}
+
+type Deferred struct {
+	Enabled             bool
+	MaxJobs             int
+	MaxRunning          int
+	MaxAdmissions       int
+	MaxEntries          int
+	MaxMemoryBytes      int64
+	MaxRequestBytes     int64
+	MaxResultBytes      int64
+	MaxWorkBytes        int64
+	PerOwnerJobs        int
+	PerOwnerRunning     int
+	MaxControlInflight  int
+	ExecutionTimeout    time.Duration
+	Retention           time.Duration
+	ControlTimeout      time.Duration
+	FinalizationTimeout time.Duration
+}
+
+type DeferredTransport struct {
+	ControlTimeout    time.Duration
+	MaxWait           time.Duration
+	PollInterval      time.Duration
+	MaxControlCalls   int
+	MaxControlRetries int
+}
+
+type DeferredReceiver struct {
+	ExecutionTimeout time.Duration
+	MaxResultBytes   int64
 }
 
 type Metrics struct {
@@ -247,6 +280,8 @@ type Provider struct {
 	ForwardUserAgent          bool
 	ForwardHeaders            []string
 	ForwardAuthorization      bool
+	DeferredTransport         *DeferredTransport
+	DeferredReceiver          *DeferredReceiver
 	AllowInsecureBaseURL      bool
 	TLSClientHello            string
 	TLSClientHelloSpecFile    string

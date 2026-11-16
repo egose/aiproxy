@@ -1582,6 +1582,525 @@ Streaming rules:
 - the proxy should flush chunks promptly and avoid buffering the full stream in memory
 - if an upstream stream fails after partial output, the client receives a terminated stream rather than a synthetic full JSON response
 
+## Peer Deferred Transport v1
+
+This is the delivered contract for [long-wait upstream resilience](tasks/20261114-104925-long-wait-upstream-resilience.md).
+An explicitly configured caller submits one chat-completions job to an executor
+and retrieves bounded finite polls. The ordinary client never sees peer envelopes,
+receipts, cursors, or private headers. This extension is separate from provider
+capabilities; it is not Batch or Responses background-mode compatibility.
+
+Operator-facing documentation includes
+[validated two-role configurations](../website/docs/configuration.md#peer-deferred-transport-v1),
+the [versioned API/schema](../website/docs/api-reference.md#peer-deferred-transport-v1),
+and [deployment, deadlines and diagnostics](../website/docs/operations.md#peer-deferred-transport-v1).
+`TestDocumentedDeferredConfigurations` loads the exact full configuration code
+blocks with non-secret environment values, including conversion and inline loading.
+
+| Boundary         | v1 contract                                                                                                                                                |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Caller           | Static `openai-compatible` provider with `deferred_transport`; chat completions only, JSON and SSE                                                         |
+| Executor         | Static `deferred_receiver` provider/model supporting chat completions through its existing adapter                                                         |
+| Other operations | Keep ordinary transport, even on a caller-opted-in provider; no synchronous fallback for opted-in chat                                                     |
+| Caller aliases   | Ordinary/deferred targets may mix; acceptance or indeterminate acceptance pins that attempt to its peer                                                    |
+| Executor aliases | Every configured target must be receiver-opted-in, chat-capable, and have no caller opt-in; reject mixed pools before selection, never filter/reorder them |
+| Streaming        | Keep the original `stream` choice and exact body bytes after existing adapter processing; no synthetic SSE IDs, events, heartbeats, or `[DONE]`            |
+| Deployment       | One executing process; all controls must reach it. No persistence, replica failover, restart recovery, or exactly-once external inference/billing          |
+
+### Configuration And Shared Types
+
+`config.Runtime.Deferred` has type `config.Deferred`.
+`config.Provider.DeferredTransport` and `DeferredReceiver` are pointers to the
+corresponding types below. Root/block presence enables the feature; `Enabled`
+is derived, not an HCL attribute. Omitted provider blocks are nil.
+
+```go
+type Deferred struct {
+    Enabled bool
+    MaxJobs, MaxRunning, MaxAdmissions, MaxEntries int
+    MaxMemoryBytes, MaxRequestBytes, MaxResultBytes, MaxWorkBytes int64
+    PerOwnerJobs, PerOwnerRunning, MaxControlInflight int
+    ExecutionTimeout, Retention, ControlTimeout, FinalizationTimeout time.Duration
+}
+type DeferredTransport struct {
+    ControlTimeout, MaxWait, PollInterval time.Duration
+    MaxControlCalls, MaxControlRetries int
+}
+type DeferredReceiver struct {
+    ExecutionTimeout time.Duration
+    MaxResultBytes int64
+}
+```
+
+Durations are HCL/JSON duration strings, bytes/counts integer attributes. All
+declared values must be positive except `max_control_retries`, which permits zero.
+
+| Block                | Attribute              | Default             | Inclusive range / rule                                                     |
+| -------------------- | ---------------------- | ------------------- | -------------------------------------------------------------------------- |
+| `deferred`           | `max_jobs`             | 64                  | 1–4096; accepted/retained jobs and outstanding finalization ownership      |
+|                      | `max_running`          | 8                   | 1–256, at most `max_jobs`; preparation reserves a running slot             |
+|                      | `max_admissions`       | 4                   | 1–64; bounded submit readers/preparations                                  |
+|                      | `max_entries`          | 256                 | `max_jobs`–65536; includes preparing/rejected records and tombstones       |
+|                      | `max_memory_bytes`     | 268435456 (256 MiB) | 16 MiB–4 GiB; checked `int64` accounting, including reservations           |
+|                      | `max_request_bytes`    | 1048576 (1 MiB)     | 1 KiB–8 MiB; decoded inference input, not base64 wire size                 |
+|                      | `max_result_bytes`     | 8388608 (8 MiB)     | 1 KiB–32 MiB; retained output and buffered upstream body ceiling           |
+|                      | `max_work_bytes`       | 67108864 (64 MiB)   | 4–256 MiB per admitted job; temporary work reservation                     |
+|                      | `per_owner_jobs`       | 8                   | 1–`max_jobs`                                                               |
+|                      | `per_owner_running`    | 2                   | 1–`max_running`                                                            |
+|                      | `max_control_inflight` | 16                  | 4–128; two slots reserved for deletion                                     |
+|                      | `execution_timeout`    | `"10m"`             | 1s–1h                                                                      |
+|                      | `retention`            | `"2m"`              | 10s–1h; terminal retention, not renewed by reads                           |
+|                      | `control_timeout`      | `"5s"`              | 100ms–30s; headers, body read, and write                                   |
+|                      | `finalization_timeout` | `"5s"`              | 100ms–30s; completion deadline from terminal sealing, including queue wait |
+| `deferred_transport` | `control_timeout`      | `"5s"`              | 100ms–30s                                                                  |
+|                      | `max_wait`             | `"15m"`             | 1s–2h; starts before capability discovery                                  |
+|                      | `poll_interval`        | `"250ms"`           | 50ms–5s                                                                    |
+|                      | `max_control_calls`    | 4096                | 4–65536; discovery, submit, and retrieval calls combined                   |
+|                      | `max_control_retries`  | 8                   | 0–32 failed-call retries total, not per poll                               |
+| `deferred_receiver`  | `execution_timeout`    | Root value          | May narrow, never increase root value                                      |
+|                      | `max_result_bytes`     | Root value          | May narrow, never increase root value                                      |
+
+Validate enough memory for fixed metadata/control allowances, one maximum input,
+one maximum output, one work reservation, and submit decoding scratch. Configured
+concurrency is an upper bound; memory may admit fewer simultaneous jobs.
+
+Caller blocks require configured `api_key`/`api_key_ref`. Both opt-ins exclude
+`forward_authorization`, cannot coexist on one provider, and are validated even on
+disabled providers. Root enablement requires `auth.mode = "bearer_static"`;
+receiver blocks require that root block. Executor aliases use the minimum execution/output
+limits of their target pool. Static derivatives clear both inherited opt-ins and
+may declare their own local blocks. Managed declarations, including null/empty
+forms and case variants on provider or credential updates, are rejected before
+commit; managed derivatives cannot extend an opted-in base.
+
+HCL, JSON, conversion, and inline configuration support these three unlabeled
+blocks. Existing CLI edits preserve them and supported `env()` spelling; v1 adds
+no interactive/scripted creation flags or writable managed/web form fields.
+Inference user-agent, TLS profile, proxy, credentials, and ordinary redirect
+policies otherwise retain their existing contracts. Discovery/health never submit
+jobs. Reject and defensively strip case-insensitive `X-Aiproxy-Deferred` and the
+entire `X-Aiproxy-Deferred-` namespace from generic forwarding and inference header bags.
+
+### Wire Schema And Routing
+
+`internal/deferred` owns neutral wire/store types; it must not import `provider`
+or `httpapi`. JSON field names below are authoritative. Optional fields use
+`omitempty`; timestamps are Unix milliseconds, durations integer milliseconds,
+byte cursors canonical unsigned decimal strings (no signs/leading zeros except
+`"0"`). Reject unknown/duplicate envelope fields and checked numeric overflow.
+
+```go
+const (
+    Protocol = "aiproxy-deferred"
+    Version = 1
+    Prefix = "/_internal/deferred/v1"
+    MediaType = "application/vnd.aiproxy.deferred+json"
+    SubmitWindow = 30 * time.Second
+    MaxReadBytes = 64 << 10
+    MaxControlBodyBytes = 128 << 10
+    MaxMetadataBytes = 16 << 10
+    MaxErrorBytes = 1 << 10
+    MaxSubmitTokenBytes = 512
+    ControlScratchBytes = 512 << 10
+    ResultSlabBytes = 32 << 10
+)
+type State string
+type OutcomeKind string
+type Acceptance string
+type Envelope struct {
+    Protocol string `json:"protocol"`
+    Version int `json:"version"`
+}
+type Limits struct {
+    RequestBytes int64 `json:"request_bytes"`
+    ResultBytes int64 `json:"result_bytes"`
+    ExecutionTimeoutMS int64 `json:"execution_timeout_ms"`
+    RetentionMS int64 `json:"retention_ms"`
+    ControlTimeoutMS int64 `json:"control_timeout_ms"`
+    FinalizationTimeoutMS int64 `json:"finalization_timeout_ms"`
+    ReadBytes int `json:"read_bytes"`
+}
+type Capability struct {
+    Envelope
+    Generation string `json:"generation"`
+    PublicModel string `json:"public_model"`
+    SubmitToken string `json:"submit_token"`
+    SubmitUntilMS int64 `json:"submit_until_ms"`
+    Limits Limits `json:"limits"`
+    PollAfterMS int64 `json:"poll_after_ms"`
+}
+type SubmitRequest struct {
+    Envelope
+    Generation string `json:"generation"`
+    SubmitToken string `json:"submit_token"`
+    AttemptKey string `json:"attempt_key"`
+    Headers http.Header `json:"headers"`
+    Body []byte `json:"body"`
+}
+type Receipt struct {
+    Envelope
+    Generation string `json:"generation"`
+    ID string `json:"id"`
+    PublicModel string `json:"public_model"`
+    AttemptKey string `json:"attempt_key"`
+    ScopeDigest string `json:"scope_digest"`
+    Fingerprint string `json:"fingerprint"`
+    State State `json:"state"`
+    ExecutionDeadlineMS int64 `json:"execution_deadline_ms"`
+    DedupUntilMS int64 `json:"dedup_until_ms"`
+    PollAfterMS int64 `json:"poll_after_ms"`
+    Replayed bool `json:"replayed"`
+}
+type RetryAdvice struct {
+    ObservedAtMS int64 `json:"observed_at_ms"`
+    DeadlineMS int64 `json:"deadline_ms"`
+    RemainingMS int64 `json:"remaining_ms"`
+}
+type ResponseHead struct {
+    StatusCode int `json:"status_code"`
+    Headers http.Header `json:"headers"`
+    Streaming bool `json:"streaming"`
+    Retry *RetryAdvice `json:"retry,omitempty"`
+}
+type Usage struct {
+    PromptTokens int64 `json:"prompt_tokens"`
+    CompletionTokens int64 `json:"completion_tokens"`
+    TotalTokens int64 `json:"total_tokens"`
+    CachedTokens int64 `json:"cached_tokens"`
+    CacheCreationTokens int64 `json:"cache_creation_tokens"`
+    CacheReadTokens int64 `json:"cache_read_tokens"`
+}
+type ErrorDetail struct {
+    Type string `json:"type"`
+    Message string `json:"message"`
+    BlockID string `json:"block_id,omitempty"`
+}
+type Outcome struct {
+    Kind OutcomeKind `json:"kind"`
+    Usage Usage `json:"usage"`
+    Error *ErrorDetail `json:"error,omitempty"`
+}
+type JobInfo struct {
+    Receipt
+    Response *ResponseHead `json:"response,omitempty"`
+    Outcome *Outcome `json:"outcome,omitempty"`
+    AvailableBytes uint64 `json:"available_bytes,string"`
+    RetainUntilMS int64 `json:"retain_until_ms,omitempty"`
+}
+type ResultManifest struct {
+    JobInfo
+    BodySHA256 string `json:"body_sha256"`
+}
+type ReadFrame struct {
+    JobInfo
+    Cursor uint64 `json:"cursor,string"`
+    NextCursor uint64 `json:"next_cursor,string"`
+    Data []byte `json:"data"`
+    Done bool `json:"done"`
+}
+type ControlError struct {
+    Envelope
+    Error ErrorDetail `json:"error"`
+    Acceptance Acceptance `json:"acceptance"`
+    PollAfterMS int64 `json:"poll_after_ms,omitempty"`
+}
+```
+
+`Body`/`Data` are non-null standard JSON base64 byte strings; empty data is `""`.
+`ResponseHead` uses existing hop-by-hop filtering and non-JSON error normalization,
+additionally stripping private headers; final status is 200–599. Usage is
+nonnegative observed usage only, never estimated. The submit header bag is the
+normal caller adapter's model-rewritten request metadata (`Accept`, chosen
+user-agent, configured forwarded headers), never credentials/cookies/hop-by-hop
+headers. Its content type is `application/json`. Generation/job IDs are
+canonical base64url encodings of 16 cryptographically random bytes. Caller attempt
+keys contain 22–64 base64url characters and are generated with at least 128 random
+bits. Scope/fingerprint/body hashes are lowercase SHA-256 hex. Public models are
+at most 512 bytes; owner ID/tenant at most 256 bytes each. Header bags have at most
+64 case-insensitively distinct names, 128 values total, and 4096 bytes/value;
+aggregate serialized non-data metadata is at most 16 KiB and error text at most
+1 KiB. Validate head metadata with space for the worst terminal outcome before
+publishing it; later errors must not require changing the already published head.
+
+Every recognized response carries `Content-Type: application/vnd.aiproxy.deferred+json`,
+`X-Aiproxy-Deferred-Version: 1`, `Cache-Control: private, no-store`,
+`Pragma: no-cache`, and `Vary: Authorization`; empty `204` responses still carry
+the marker/cache headers. Controls send bearer authentication and the version
+header; job controls also send `X-Aiproxy-Deferred-Generation`. Recognition requires
+the dedicated path, marker, and matching envelope/version/identity, not just `202`.
+Validate a positive capability for the configured model before any submit.
+Missing/wrong-version capabilities cause zero submits; an ordinary provider `202`
+is never an acknowledgment. An unrecognized submit reply is indeterminate, not
+permission to fall back or start another attempt.
+
+For caller `base_url`, remove one terminal `/v1` path segment, then append `Prefix`:
+`https://peer.example/mount/v1` becomes
+`https://peer.example/mount/_internal/deferred/v1`. Require no query, fragment,
+dot segments, or encoded path separators. The executor routes the unmounted prefix;
+an external mount must strip its prefix. Derive control URLs locally; any submit
+`Location` must exactly match the expected origin, mount, and job path.
+All caller control redirects are forbidden, including same-origin redirects.
+
+| Method / suffix under `Prefix`                      | Control response                                                                                        |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `GET /capabilities?model=<public-model>`            | `200 Capability` after current auth/model/receiver eligibility; no inference quota charge               |
+| `POST /submit`                                      | `202 Receipt` only after bounded admission and scheduling, or accepted dedup replay                     |
+| `GET /jobs/{id}`                                    | `200 JobInfo`                                                                                           |
+| `GET /jobs/{id}/result`                             | `202 JobInfo` while active; `200 ResultManifest` when terminal; body comes only from finite reads       |
+| `GET /jobs/{id}/read?cursor=<offset>&limit=<bytes>` | `200 ReadFrame`, immediate snapshot; required cursor, optional limit defaults to 64 KiB, range 1–64 KiB |
+| `DELETE /jobs/{id}`                                 | `204`, cancel-if-running and release; repeat known release is also `204`                                |
+
+Intercept all private paths before UI fallback. Unsupported methods return
+`405`/`Allow`; wrong versions `426 unsupported_deferred_version`. These and other
+errors use `ControlError`, with acceptance `not_accepted`, `accepted`, or
+`indeterminate`. A later auth/control failure never downgrades an already accepted
+or indeterminate logical attempt to `not_accepted`.
+
+### State, Ownership, And Replay
+
+```text
+preparing (internal) --reject
+    `--commit--> running --> headers_ready --> completed
+                    `-----------------------> failed/cancelled
+active --DELETE--> cancellation + released tombstone
+terminal --DELETE/retention--> released/expired tombstone
+```
+
+There is no execution queue. The state/terminal outcome table is authoritative:
+
+| State                      | `Outcome.Kind`      | Meaning / ordinary caller response before commitment                                                    |
+| -------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------- |
+| `running`                  | Absent              | No selected response yet; pending reads return empty data                                               |
+| `headers_ready`            | Absent              | Final selected adapter head and available bytes, never an intermediate alias attempt                    |
+| `completed`                | `response`          | Complete adapter result, including provider HTTP errors; required head, original normalized status/body |
+| `failed`                   | `upstream_error`    | Known transport/translation/native-stream failure; `502 upstream_error` before commitment               |
+| `failed`                   | `invalid_request`   | Adapter rejection; `400 invalid_request` or `unsupported_operation`                                     |
+| `failed`                   | `execution_timeout` | Fixed job deadline; `504 deferred_execution_timeout`                                                    |
+| `failed`                   | `limit_exceeded`    | Input/work/result/metadata failure; `502 deferred_limit_exceeded`, never truncated success              |
+| `cancelled`                | `cancelled`         | Local cancellation, not proof external work/billing stopped; `502 deferred_cancelled` if observable     |
+| Released/expired tombstone | Not a result        | `410`; no retained body/head                                                                            |
+
+A failed streaming job may retain its exact prefix and error outcome. Terminal
+manifests hash those final retained bytes, including the empty body.
+
+| Condition                                                   | Control status/type                                                               |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Invalid envelope/body/policy                                | `400`; oversized decoded input `413 request_too_large`                            |
+| Current authentication / admitted-model authorization fails | `401 auth_failed` / `403 forbidden`; disclose no result                           |
+| Unknown or different-owner ID                               | `404 job_unavailable`, including unknown deletes                                  |
+| Protected release / expiry                                  | `410 job_released` / `410 job_expired`                                            |
+| Old generation / absent expired submit scope                | `410 generation_mismatch` / `410 submit_scope_expired`; zero dispatch             |
+| Conflicting qualified attempt / preparation still running   | `409 attempt_conflict` / `409 submission_in_progress`                             |
+| Owner admission / control pressure                          | `429 deferred_owner_limit` / `429 deferred_control_limited`                       |
+| Global admission saturation / disabled new admission        | `503 deferred_saturated` / `404 deferred_disabled`                                |
+| Existing ordinary admission rejection                       | Preserve its status/error type/block ID; do not classify it as a provider outcome |
+
+`Owner{Kind, ID, Tenant, Workspace string}` is internal, never a wire identity.
+Every control authorizes its admitted public model using current activated auth,
+including delete; never re-resolve/select its target. Revocation does not undo work.
+
+| Identity                               | Ownership / control rule                                                                                                                                    |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Static bearer                          | `Kind="static"`, ID=named client, Tenant=declared tenant, Workspace empty; rotation retains ownership but rejects the old token; name reuse reuses identity |
+| Dynamic inbound key                    | `Kind="key"`, ID=canonical `KeyID`, Workspace=canonical `WorkspaceID`, Tenant empty; replacement keys are different owners                                  |
+| Anonymous / dashboard-admin JWT        | No admission/control access; only ordinary inference authentication is accepted                                                                             |
+| Different owner / current model denial | No result disclosure or deletion; expiry/deadline remains cleanup backstop                                                                                  |
+| Shared peer credential                 | Identifies the caller proxy, not end users behind it; identity headers are untrusted                                                                        |
+
+The store owns a random process generation and 256-bit HMAC key. Capability issues
+a stateless signed 30-second submission ticket binding version, generation,
+owner/model digests, random scope nonce, expiry, and all advertised limits.
+Dedup identity is `(generation, SHA256(ticket), owner, attempt_key)`. Fingerprint
+the fixed operation, model, exact decoded body, and canonical header bag using
+length-prefixed components; sort lowercase header names, retain value order.
+Do not fingerprint mutable catalog credentials or post-guardrail output.
+
+Under one admission lock, same fingerprint replays the accepted receipt, conflict
+fails, and preparing duplicates return `submission_in_progress`. Only an absent
+entry with a valid, unexpired ticket and current enablement/policy can reserve work.
+Replay never reruns rate/quota/guardrails. Cache preparation rejection through the
+submission window. Protect accepted records/tombstones through fixed
+`dedup_until = submit_until + execution_timeout + retention + finalization_timeout`;
+never evict them early to admit another job. Existing accepted entries may replay
+after ticket expiry; absent expired scopes and old generations never dispatch.
+
+The caller keeps one generation/ticket/key/prepared request once submit begins.
+A lost reply retries only that qualified submit; never refresh its scope or key.
+Restart may leave external work/billing but loses in-memory evidence. Without a
+tombstone report unavailable, not an invented expired/deleted classification.
+
+### Delivery, Retry, And Accounting
+
+Read captures state/head/outcome/tail and at most one bounded byte slice atomically.
+`next_cursor = cursor + len(decoded_data)`; cursor beyond the captured tail is
+`400 invalid_cursor`. `done` requires terminal state and reaching its final byte;
+transport EOF or an empty pending frame is not completion. Finish the bounded HTTP
+body, decode/validate the entire frame and identity, then deliver bytes and advance
+the cursor. Discard incomplete transfers and retry the unchanged cursor. A failed
+downstream write terminates that client response; it cannot reconnect as a session.
+Unary delivery accumulates at most the result ceiling and waits for a complete
+manifest; streaming returns an ordinary `provider.Result` once its head is known,
+then reads the same retained bytes incrementally. After commitment, errors terminate
+the stream through existing finalizers, never splice another inference.
+
+Control timeout is the minimum of caller configuration, advertised receiver bound,
+and remaining overall wait. Polls never wait for generation. Empty-poll delay is
+the greater of configured `poll_interval` and peer advice clamped to 50ms–2s.
+Transient transport/transfer errors and control `429`/`503` may retry within both
+call/retry budgets, using full-jitter exponential backoff from 100ms capped at 2s.
+Other control errors fail closed. Control `Retry-After` is bounded poll advice,
+never model cooldown. Reserve one separate, deadline-bound best-effort delete on
+cancellation or successful delivery, independent of the canceled request context.
+
+Control admission uses fixed global 100/s burst 200 and owner 20/s burst 40
+buckets, with at most four non-delete calls per owner and one per logical caller
+job. Delete has its own two slots, global 8/s burst 16 and owner 2/s burst 4 buckets.
+Bound owner tables by `max_entries`; reclaim idle, job-free buckets after one minute,
+reject new owners on table saturation rather than reset live rate limits by eviction.
+Enforce private-handler read/write deadlines, not contexts alone; provide
+`statusRecorder.Unwrap() http.ResponseWriter` for `http.ResponseController`.
+
+| Outcome                                                                                   | Alias retry / health / cooldown                                                   |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Definite terminal provider HTTP/transport outcome, before client commitment               | Existing configured inference retry/health rules; direct requests never fail over |
+| Peer negotiation, admission/control pressure or failure                                   | No inference retry, provider-health mutation, or model cooldown                   |
+| Accepted/indeterminate retrieval loss, expiry, overflow, execution/caller-wait exhaustion | No fresh submit or alias target; explicit lost/indeterminate/limit/timeout error  |
+| After client commitment                                                                   | Retrieve only the same job/cursor; no new inference                               |
+
+Add `provider.Request.DeferredTransport *config.DeferredTransport` and
+`ExecutionLimits *provider.ExecutionLimits` (nil preserves ordinary paths).
+`ExecutionLimits` has `RequestBytes, ResponseBytes, SnapshotBytes int64`,
+`SSELineBytes, SSEEventBytes, SSEDataLines, JSONDepth, JSONTokens int`, and
+`Work deferred.ByteBudget`; `ByteBudget.Reserve(int64) (release func(), err error)`
+meters temporary ownership before allocation.
+`provider.Result.Origin` distinguishes inference from peer control, and
+`RetryDeadline time.Time` preserves retry timing. Typed
+`provider.DeferredControlError{Code string; Acceptance deferred.Acceptance; Err error}`
+must bypass generic alias/encrypted-reasoning retries, cooldown parsing, and health.
+`deferred.Acceptance` is a string type with the three wire values above.
+Known admission rejections return ordinary error objects without protocol fields;
+capability/version mismatch maps to `502 deferred_protocol_error`;
+unavailable accepted work maps to `502 deferred_request_lost`, unacknowledged
+uncertainty to `502 deferred_submit_indeterminate`, exhausted control recovery to
+`502 deferred_control_error`, and overall wait to `504 deferred_wait_timeout`.
+
+Capture model retry advice once at upstream-header observation, store its deadline,
+and sample remaining delay in each response. The caller fixes a local deadline
+from control request start plus remaining delay, retaining the earliest observation;
+never parse original retry headers again or restart their duration on replay.
+Original filtered inference headers remain distinct from private polling advice.
+
+Reuse shared admission exactly once (auth, rate, body/model validation, resolution,
+quota, capability, guardrails), preserving rewrites and identity. Validate JSON
+object, one required model string, and zero/one boolean `stream` before accepting;
+retain other request fields. Provider-specific adapter rejections
+may still become retained `400` outcomes. Record one inference completion/known
+usage at the receiver and one client completion at the caller; polls, replay, and
+`202` are control traffic, not inference successes. Payload completion preserves
+guardrail redaction/capture limits and contains inference bodies, not private
+envelopes/credentials. Correlate IDs in logs, never metric labels; normalize routes
+and use bounded admission/state/bytes/cancellation/expiry/control-failure labels.
+
+### Memory And Lifecycle Obligations
+
+The app owns `*deferred.Store` across reloads. Reserve job/running/owner/dedup
+capacity, full output allowance, input ownership, work allowance, and finalization
+credit before committing; `202` means scheduling succeeded, not inference success.
+Admission uses the bounded control context; committed execution uses an app-owned
+deadline context independent of the submit connection. Keep only a minimal synthetic
+inference request, bounded body/header/identity data, and its runtime lease, never
+the submitting response writer, HTTP body, or request context.
+Bound submit scratch before reading/decoding base64; wire input cannot exceed the
+8 MiB hard input ceiling after base64 expansion plus metadata. Apply current input
+policy only to new admission after dedup lookup so smaller reload limits do not
+misclassify accepted replays. Replays still consume bounded control/ingress capacity.
+
+All feature-owned allocations/reservations share the root memory budget: input
+and redacted/rewritten/snapshot copies, buffered provider responses, parser objects,
+slab capacity, encoded/decoded frames, readers, and queued completion records.
+Account capacity, not just length; releasing a map entry does not release memory
+still owned by a reader/worker. Reserve 512 KiB/control slot, 64 KiB/job metadata,
+4 KiB/dedup entry and 1 KiB/owner bucket. Results use 32 KiB
+slabs, never a growing monolithic replay buffer. A read copies at most 64 KiB into
+its reserved scratch rather than pinning an entire deleted result.
+
+Deferred execution alone requires input/output/structural limits and work
+preallocation: JSON depth 64/tokens 16384; SSE line 256 KiB/event 1 MiB/data lines
+1024; control metadata depth 8/tokens 2048. Guard before buffering, decoding,
+translation/encoding, joins, and outgoing snapshot copies, not after an oversized
+allocation or final store append. Buffered upstream bodies obey the effective
+result ceiling. Optional passthrough usage observation may stop inspecting oversized
+events without changing delivered bytes; required translated parsing fails explicitly.
+Limit snapshots to permitted capture prefixes (none when logging is off);
+`payload_log.max_body_bytes = 0` is still bounded by effective request/result
+ceilings. Keep normal adapter paths unchanged. No comprehensive adapter-schema
+rewrite is required.
+The budget bounds live feature ownership/reservations, not total Go heap/RSS or
+ordinary HTTP connections/configuration; structural limits also bound bookkeeping.
+
+On growth failure, seal failed output, cancel/close its source, and finalize once;
+never silently evict active work or return a truncated success. Delete seals/revokes
+future appends promptly, releases data, and leaves dedup protection while local
+source cleanup finishes. Execution deadline starts at commit; retention starts at
+terminal sealing. Polls renew neither. Abandoned work is bounded by execution plus
+retention, regardless of whether a delete arrives.
+
+Snapshot dependencies and acquire `RuntimeResources.Acquire() (release func(), ok bool)`
+under the handler dependency lock. Accepted work keeps its selected catalog,
+credentials, endpoint, transports, and completion resources. Reference-count shared
+health/payload resources across runtime generations; retire only after the last
+lease, including pending finalization. Terminal storage does not retain full runtime
+snapshots after finalization. Failed reload leaves jobs/resources untouched.
+
+Valid root removal also removes receiver declarations. It disables capability/new
+admission but retains the last resource/control policy for draining: authenticated
+existing status/read/result/delete
+and protected submit replay still work, even if provider opt-ins disappeared.
+They use current auth/model authorization; anonymous auth never grants ownership.
+New admission rechecks enablement at commit. Per-job deadlines/limits remain frozen;
+reject reductions of global/owner capacities below live reservations, never evict
+jobs to satisfy a reload. Admission and dependency activation must serialize the
+final capacity validation/publication; failed activation cannot mutate store policy.
+Re-enablement validates against remaining ownership.
+
+Finalization uses two app-owned workers and at most `max_jobs` outstanding records,
+with credit reserved on admission and snapshots still memory-accounted. Publish
+known in-memory completion once; remote health/quota/payload work has a context
+deadline from terminal completion plus `finalization_timeout`, including queue wait.
+Expired/failed remote persistence is reported, not retried into duplicate accounting.
+There is no goroutine-per-timeout workaround. Existing local filesystem payload I/O
+has **no hard cancellation guarantee**; a blocked local call may occupy a bounded
+worker/resource lease and apply admission backpressure, not spawn more workers.
+
+Shutdown closes admission and cancels sources before waiting for handlers/jobs and
+completion workers within the app's existing shutdown budget (default 10s). Close
+shared resources only after owners release them; report incomplete cleanup rather
+than falsely freeing live accounting. The local OS-I/O assumption still applies.
+Provider header timeouts, client cancellation, caller listener write deadlines,
+and intermediaries elsewhere in the chain remain limits: v1 removes silent
+long-lived HTTP only from the caller–executor leg.
+
+### Delivered Diagnostics
+
+`internal/observability/deferred.go` exports the bounded-label counters
+`aiproxy_deferred_admissions_total{outcome}`,
+`aiproxy_deferred_controls_total{route,outcome}` and
+`aiproxy_deferred_delivery_errors_total{route}`. Store-backed series are
+`aiproxy_deferred_jobs{state}`, `aiproxy_deferred_bytes{kind}`,
+`aiproxy_deferred_ownership{kind}`, `aiproxy_deferred_enabled`,
+`aiproxy_deferred_cancellations_total`, `aiproxy_deferred_expirations_total` and
+`aiproxy_deferred_finalization_failures_total`. The bytes gauge includes overlapping
+aggregate `reserved` and available-data `retained` categories, not independently
+additive heap measurements. IDs/owners/tickets/credentials are never labels.
+
+Controls may appear in bounded-route access/diagnostic logs, but payload entries
+and completion accounting describe inference, not envelopes, frames or `202`
+successes. Retained job bytes remain inference data, separate from optional
+payload-log redaction. Receiver inference completion and caller client completion
+must not be summed as two external executions. Operational series/labels and
+failure interpretation are documented in
+[peer diagnostics](../website/docs/operations.md#peer-diagnostics-and-metrics).
+
 ## Credential Resolution
 
 Provider credentials are configured per provider.

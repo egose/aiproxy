@@ -86,9 +86,9 @@ func (a *adapter) doAnthropicChat(ctx context.Context, r Request) (*Result, erro
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
-	translated, streaming, err := translateOpenAIToAnthropic(body, r.UpstreamModel)
+	translated, streaming, err := translateOpenAIToAnthropic(body, r.UpstreamModel, r.execution)
 	if err != nil {
-		return nil, ErrInvalidRequest{Message: fmt.Sprintf("translate request: %v", err)}
+		return nil, executionRequestError(r, "translate request", err)
 	}
 
 	target := strings.TrimRight(r.BaseURL, "/") + "/v1/messages"
@@ -103,18 +103,24 @@ func (a *adapter) doAnthropicChat(ctx context.Context, r Request) (*Result, erro
 		req.Header.Set("Accept", "text/event-stream")
 	}
 	return executeUpstream(r, req, upstreamResponseHandlers{
+		RequireJSON: true,
 		IsStreaming: func(*http.Response) bool {
 			return streaming
 		},
 		OnStream: func(resp *http.Response) (*Result, error) {
 			stream := NewStreamCompletion()
-			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: translateAnthropicStream(resp.Body, r.PublicModel, stream), Streaming: true, Stream: stream}, nil
+			body, err := anthropicChatStreamWithLimits(resp.Body, r.PublicModel, stream, r.execution)
+			if err != nil {
+				return nil, err
+			}
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: body, Streaming: true, Stream: stream}, nil
 		},
 		OnError: func(resp *http.Response, body []byte) (*Result, error) {
-			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translateAnthropicError(body)}, nil
+			translated, err := translatedErrorWithLimits(body, r.execution, true)
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translated}, err
 		},
 		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
-			translatedBody, usageTokens, err := translateAnthropicResponse(body, r.PublicModel)
+			translatedBody, usageTokens, err := translateAnthropicResponse(body, r.PublicModel, r.execution)
 			if err != nil {
 				return nil, fmt.Errorf("translate response: %w", err)
 			}
@@ -208,7 +214,8 @@ func (a *adapter) doAnthropicMessages(ctx context.Context, r Request) (*Result, 
 	})
 }
 
-func translateOpenAIToAnthropic(body []byte, upstreamModel string) ([]byte, bool, error) {
+func translateOpenAIToAnthropic(body []byte, upstreamModel string, states ...*executionState) ([]byte, bool, error) {
+	state := executionArgument(states)
 	if err := rejectUnsupportedTopLevelFields(body, openAIChatRequestFields); err != nil {
 		return nil, false, err
 	}
@@ -229,7 +236,7 @@ func translateOpenAIToAnthropic(body []byte, upstreamModel string) ([]byte, bool
 
 	var systemParts []string
 	for _, msg := range req.Messages {
-		blocks, joined, err := parseOpenAIContent(msg.Content)
+		blocks, joined, err := parseOpenAIContent(msg.Content, state)
 		if err != nil {
 			return nil, false, fmt.Errorf("message role %q: %w", msg.Role, err)
 		}
@@ -244,15 +251,23 @@ func translateOpenAIToAnthropic(body []byte, upstreamModel string) ([]byte, bool
 			return nil, false, fmt.Errorf("unsupported message role %q", msg.Role)
 		}
 	}
-	out.System = strings.Join(systemParts, "\n\n")
-	translated, err := json.Marshal(out)
+	if state == nil {
+		out.System = strings.Join(systemParts, "\n\n")
+	} else {
+		var err error
+		out.System, err = state.joinStrings(systemParts, "\n\n", true)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	translated, err := marshalExecutionJSON(out, state, true)
 	if err != nil {
 		return nil, false, err
 	}
 	return translated, out.Stream, nil
 }
 
-func parseOpenAIContent(raw json.RawMessage) ([]anthropicContentBlock, string, error) {
+func parseOpenAIContent(raw json.RawMessage, states ...*executionState) ([]anthropicContentBlock, string, error) {
 	if len(raw) == 0 {
 		return nil, "", nil
 	}
@@ -276,10 +291,15 @@ func parseOpenAIContent(raw json.RawMessage) ([]anthropicContentBlock, string, e
 		blocks = append(blocks, anthropicContentBlock{Type: "text", Text: part.Text})
 		joined = append(joined, part.Text)
 	}
+	if state := executionArgument(states); state != nil {
+		text, err := state.joinStrings(joined, "", true)
+		return blocks, text, err
+	}
 	return blocks, strings.Join(joined, ""), nil
 }
 
-func translateAnthropicResponse(body []byte, publicModel string) ([]byte, Usage, error) {
+func translateAnthropicResponse(body []byte, publicModel string, states ...*executionState) ([]byte, Usage, error) {
+	state := executionArgument(states)
 	var resp anthropicResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, Usage{}, err
@@ -293,6 +313,22 @@ func translateAnthropicResponse(body []byte, publicModel string) ([]byte, Usage,
 	if usage.CachedTokens > 0 {
 		wire.PromptTokensDetails = &openAIPromptTokensDetails{CachedTokens: int(usage.CachedTokens)}
 	}
+	var content string
+	if state == nil {
+		content = joinAnthropicText(resp.Content)
+	} else {
+		parts := make([]string, 0, len(resp.Content))
+		for _, block := range resp.Content {
+			if block.Type == "text" {
+				parts = append(parts, block.Text)
+			}
+		}
+		var err error
+		content, err = state.joinStrings(parts, "", false)
+		if err != nil {
+			return nil, Usage{}, err
+		}
+	}
 	out := openAIResponse{
 		ID:      resp.ID,
 		Object:  "chat.completion",
@@ -302,13 +338,13 @@ func translateAnthropicResponse(body []byte, publicModel string) ([]byte, Usage,
 			Index: 0,
 			Message: openAIMessageOut{
 				Role:    "assistant",
-				Content: joinAnthropicText(resp.Content),
+				Content: content,
 			},
 			FinishReason: mapAnthropicStopReason(resp.StopReason),
 		}},
 		Usage: wire,
 	}
-	encoded, err := json.Marshal(out)
+	encoded, err := marshalExecutionJSON(out, state, false)
 	if err != nil {
 		return nil, Usage{}, err
 	}

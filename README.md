@@ -295,6 +295,22 @@ Linux x64, three matching fresh Bun/uTLS 1500-byte, HTTP/1.1-only ClientHellos.
 They do not establish other Bun versions/APIs, SNI lengths, a full browser/Bun
 fingerprint, or live-provider, WAF or bot-detector acceptance.
 
+### Peer Deferred Transport v1
+
+Static `openai-compatible` callers can opt chat JSON/SSE into one peer submission
+and incremental finite byte polls; static chat receivers/whole eligible aliases
+opt in separately. Other operations stay ordinary. This is not a model capability,
+Batch or Responses background mode, and peer control failures never silently
+start fresh inference. Storage is bounded and process-local: sticky routing is
+required, restart/rolling replacement loses jobs, and cancellation cannot
+guarantee external work or billing stopped.
+
+See the [validated two-role configurations](website/docs/configuration.md#peer-deferred-transport-v1),
+[versioned API](website/docs/api-reference.md#peer-deferred-transport-v1) and
+[deadlines, drain and diagnostics](website/docs/operations.md#peer-deferred-transport-v1).
+Opt-ins are static-only and local to each derivative; there are no CLI creation
+flags or writable managed/web fields.
+
 ### Routing
 
 - Direct model addressing: `<provider-name>/<model-name>`
@@ -331,6 +347,8 @@ profiles and custom recipes, access-log enablement,
 payload-log configuration, metrics config, provider-health config,
 ingress-guardrail policy, and
 metrics-backed inventory state.
+Peer deferred policy can reload subject to live reservation checks; removing its
+root and receiver blocks disables new admission while existing controls drain.
 Listener address, listener timeout, logging level, and enabling the dashboard
 after startup require a restart. Unchanged rate-limit settings preserve existing
 buckets; changed rate-limit settings reset limiter state.
@@ -552,7 +570,7 @@ aiproxy configure alias \
   --target backup/qwen3-32b
 ```
 
-Use `upstream_header_timeout` to control how long the proxy waits for upstream response headers. Provider values override the root value; otherwise the default is 90 seconds. This timeout does not cap response bodies or SSE streams after headers arrive.
+Use `upstream_header_timeout` to control how long the proxy waits for upstream response headers. Provider values override the root value; otherwise the default is 90 seconds. This timeout does not cap response bodies or SSE streams after headers arrive; deferred execution has a separate whole-job deadline.
 
 Upstream inference, health probes, and CLI model discovery follow at most 10 redirects, all within
 the original request's origin (same scheme, case-insensitive hostname, and effective
@@ -566,7 +584,7 @@ error. OAuth login continues to refuse all redirects.
 
 Use root `user_agent` and `forward_user_agent` attributes as defaults for all providers. A provider-level `user_agent` overrides the root value, while `forward_user_agent` is effective when set at either level (there is no per-provider opt-out when the root enables it; set the flag per provider instead).
 
-Use `extends` when several credentials share one provider type, endpoint, timeout, and model inventory. A derived provider keeps the two-label provider form and may declare only `extends`, optional `display_name`, and exactly one local credential (`api_key` or `api_key_ref`):
+Use `extends` when several credentials share one provider type, endpoint, timeout, and model inventory. A derived provider keeps the two-label provider form and normally declares `extends`, optional `display_name`, and exactly one local credential (`api_key` or `api_key_ref`):
 
 ```hcl
 provider "openai-compatible" "nvidia-1" {
@@ -590,6 +608,10 @@ provider "openai-compatible" "nvidia-2" {
 ```
 
 Derived providers may appear before or after the base. The base must be enabled, concrete, and the same provider type; inheritance chains are rejected. Aliases still enumerate each provider target explicitly, for example `nvidia-1/z-ai/glm-5.2` and `nvidia-2/z-ai/glm-5.2`.
+
+Static derivatives may also declare local peer deferred opt-ins; neither opt-in
+nor provider-level limits are inherited. Managed derivatives cannot extend an
+opted-in base. See [peer configuration](website/docs/configuration.md#peer-deferred-transport-v1).
 
 Delete existing blocks with `--delete`:
 
@@ -871,6 +893,9 @@ URL, models, capabilities, TLS profiles) but do not require a usable `api_key` o
 credential fail validation, except `opencode-zen` providers, which may omit
 the credential for keyless upstream access (no `Authorization` header is sent).
 
+A declared `deferred_transport` still requires configured `api_key`/`api_key_ref`
+even when disabled; its opt-in/limits are validated too.
+
 ```hcl
 provider "openai" "backup" {
   enabled = false
@@ -896,8 +921,9 @@ provider "openai" "backup" {
 - A provider with no resolved credential, including an empty `api_key = env("...")`,
   fails validation when the provider is enabled. To intentionally disable a
   provider, set `enabled = false`; disabled providers are still structurally
-  validated (name, type, base URL, models, capabilities, TLS profiles) but do not require a
-  usable credential.
+  validated (name, type, base URL, models, capabilities, TLS profiles) but normally
+  do not require a usable credential; a declared peer caller opt-in still requires
+  configured `api_key`/`api_key_ref`.
 - `/v1/models` returns effective capabilities for both direct models and
   aliases. Alias capabilities are the safe intersection of their target models.
 - `/v1/models` also includes richer metadata:

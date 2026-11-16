@@ -119,6 +119,9 @@ func NormalizeAlias(a Alias) Alias {
 }
 
 func ValidateDynamicProvider(p Provider) error {
+	if err := ValidateManagedProviderDeferred(p); err != nil {
+		return err
+	}
 	if !IsLowercaseName(p.Name) {
 		return fmt.Errorf("provider %q: name must be lowercase, no spaces, no '/', and start with [a-z0-9]", p.Name)
 	}

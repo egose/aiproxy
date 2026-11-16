@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"encoding/json"
 )
 
@@ -50,6 +51,7 @@ type openAIResponsesUsageShape struct {
 }
 
 func usageFromBody(body []byte) Usage {
+	body = bytes.TrimSpace(body)
 	if len(body) == 0 || body[0] != '{' {
 		return Usage{}
 	}

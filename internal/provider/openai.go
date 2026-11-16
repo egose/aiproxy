@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/deferred"
 )
 
 func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
@@ -25,9 +26,9 @@ func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
-	rewritten, err := rewriteModel(body, r.UpstreamModel)
+	rewritten, err := rewriteModel(body, r.UpstreamModel, r.execution)
 	if err != nil {
-		return nil, ErrInvalidRequest{Message: fmt.Sprintf("rewrite model: %v", err)}
+		return nil, executionRequestError(r, "rewrite model", err)
 	}
 
 	path, err := openAIPathForOperation(r.Operation)
@@ -45,11 +46,19 @@ func (a *adapter) doOpenAI(ctx context.Context, r Request) (*Result, error) {
 		req.Header.Set("HTTP-Referer", "https://opencode.ai/")
 		req.Header.Set("X-Title", "opencode")
 	}
-	if accept := r.Inbound.Header.Get("Accept"); accept != "" {
-		req.Header.Set("Accept", accept)
+	if r.Inbound != nil {
+		if accept := r.Inbound.Header.Get("Accept"); accept != "" {
+			req.Header.Set("Accept", accept)
+		}
 	}
 
 	streaming := (r.Operation == OpChatCompletions || r.Operation == OpResponses) && isStream(body)
+	if r.DeferredTransport != nil && r.Operation == OpChatCompletions {
+		if r.ProviderType != config.ProviderTypeOpenAICompatible || r.ForwardAuthorization || r.ExecutionLimits != nil {
+			return nil, &DeferredControlError{Code: "deferred_protocol_error", Acceptance: deferred.AcceptanceNotAccepted, Err: fmt.Errorf("ineligible deferred caller")}
+		}
+		return a.doDeferred(ctx, r, req, rewritten)
+	}
 	return executeUpstream(r, req, openAIPassthroughHandlers(r, streaming))
 }
 
@@ -62,10 +71,14 @@ func openAIPassthroughHandlers(r Request, streaming bool) upstreamResponseHandle
 		},
 		OnStream: func(resp *http.Response) (*Result, error) {
 			stream := NewStreamCompletion()
-			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, StreamBody: newOpenAIStreamUsageReadCloser(resp.Body, stream), Streaming: true, Stream: stream}, nil
+			body, err := openAIStreamWithLimits(resp.Body, stream, r.execution)
+			if err != nil {
+				return nil, err
+			}
+			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, StreamBody: body, Streaming: true, Stream: stream}, nil
 		},
 		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
-			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body, Usage: usageFromBody(body)}, nil
+			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body, Usage: usageFromBodyWithLimits(body, r.execution)}, nil
 		},
 		OnError: func(resp *http.Response, body []byte) (*Result, error) {
 			return &Result{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil
@@ -257,8 +270,8 @@ func joinBaseURLAndPath(baseURL, path string) string {
 	return baseURL + path
 }
 
-func rewriteModel(body []byte, upstreamModel string) (json.RawMessage, error) {
-	return rewriteTopLevelModel(body, upstreamModel)
+func rewriteModel(body []byte, upstreamModel string, states ...*executionState) (json.RawMessage, error) {
+	return rewriteTopLevelModel(body, upstreamModel, states...)
 }
 
 func isStream(body []byte) bool {

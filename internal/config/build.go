@@ -10,6 +10,7 @@ import (
 func buildRuntime(raw *rawFile, filename string) (*Runtime, error) {
 	rt := &Runtime{
 		Logging:               Logging{Level: LogLevelInfo, AccessLog: true},
+		Deferred:              DefaultDeferred(),
 		UpstreamHeaderTimeout: DefaultUpstreamHeaderTimeout,
 	}
 	seenProviderNames := make(map[string]bool)
@@ -31,6 +32,15 @@ func buildRuntime(raw *rawFile, filename string) (*Runtime, error) {
 		return nil, err
 	}
 	rt.Auth = auth
+	if len(raw.Deferred) > 0 {
+		if len(raw.Deferred) > 1 {
+			return nil, fmt.Errorf("only one deferred block is supported")
+		}
+		rt.Deferred, err = buildDeferred(raw.Deferred[0])
+		if err != nil {
+			return nil, err
+		}
+	}
 	if raw.Logging != nil {
 		logging, err := buildLogging(raw.Logging)
 		if err != nil {
@@ -138,7 +148,7 @@ func buildRuntime(raw *rawFile, filename string) (*Runtime, error) {
 		if p.Extends != "" {
 			continue
 		}
-		provider, err := buildProvider(p, providerSyntaxByName[p.Name], filename, rt.UpstreamHeaderTimeout, rt.UserAgent, rt.ForwardUserAgent, rt.ForwardHeaders)
+		provider, err := buildProvider(p, providerSyntaxByName[p.Name], filename, rt.UpstreamHeaderTimeout, rt.UserAgent, rt.ForwardUserAgent, rt.ForwardHeaders, rt.Deferred)
 		if err != nil {
 			return nil, fmt.Errorf("provider %q: %w", p.Name, err)
 		}
@@ -154,7 +164,7 @@ func buildRuntime(raw *rawFile, filename string) (*Runtime, error) {
 		if p.Extends == "" {
 			continue
 		}
-		provider, err := buildDerivedProvider(p, providerByRawName, providerSyntaxByName, providerByName)
+		provider, err := buildDerivedProvider(p, providerByRawName, providerSyntaxByName, providerByName, rt.Deferred)
 		if err != nil {
 			return nil, fmt.Errorf("provider %q: %w", p.Name, err)
 		}
@@ -237,7 +247,7 @@ func buildRuntime(raw *rawFile, filename string) (*Runtime, error) {
 	return rt, nil
 }
 
-func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvider, syntaxByName map[string]rawProviderSyntax, builtByName map[string]Provider) (Provider, error) {
+func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvider, syntaxByName map[string]rawProviderSyntax, builtByName map[string]Provider, deferred Deferred) (Provider, error) {
 	if rawProvider.Extends == rawProvider.Name {
 		return Provider{}, fmt.Errorf("extends %q references itself", rawProvider.Extends)
 	}
@@ -262,6 +272,8 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 	provider.Name = rawProvider.Name
 	provider.TLSClientHelloInherited = true
 	provider.ForwardAuthorization = rawProvider.ForwardAuthorization
+	provider.DeferredTransport = nil
+	provider.DeferredReceiver = nil
 	if rawProvider.DisplayName != "" {
 		provider.DisplayName = rawProvider.DisplayName
 	}
@@ -291,6 +303,9 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 		if err := resolveCopilotCredential(&provider); err != nil {
 			return Provider{}, err
 		}
+	}
+	if err := buildProviderDeferred(&provider, rawProvider, deferred); err != nil {
+		return Provider{}, err
 	}
 	return provider, nil
 }
@@ -529,7 +544,7 @@ func buildAuth(rawAuths []rawAuth) (Auth, error) {
 	return auth, nil
 }
 
-func buildProvider(rawProvider rawProvider, syntax rawProviderSyntax, filename string, rootUpstreamHeaderTimeout time.Duration, rootUserAgent string, rootForwardUserAgent bool, rootForwardHeaders []string) (Provider, error) {
+func buildProvider(rawProvider rawProvider, syntax rawProviderSyntax, filename string, rootUpstreamHeaderTimeout time.Duration, rootUserAgent string, rootForwardUserAgent bool, rootForwardHeaders []string, deferred Deferred) (Provider, error) {
 	provider := Provider{
 		Type:                      ProviderType(rawProvider.Type),
 		Name:                      rawProvider.Name,
@@ -621,6 +636,9 @@ func buildProvider(rawProvider rawProvider, syntax rawProviderSyntax, filename s
 		}
 		provider.Models = append(provider.Models, model)
 		provider.ModelByName[m.Name] = model
+	}
+	if err := buildProviderDeferred(&provider, rawProvider, deferred); err != nil {
+		return Provider{}, err
 	}
 	return provider, nil
 }

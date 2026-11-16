@@ -2,6 +2,15 @@
 
 ### Features
 
+- Add opt-in Peer Deferred Transport v1 for static `openai-compatible` chat
+  callers and static chat receivers/eligible aliases. Versioned, authenticated
+  submissions and incremental finite polls preserve JSON/native SSE output,
+  with bounded in-memory execution/retention, protected submit replay and reload
+  draining. Peer control failures never silently start new inference.
+  [Configuration](website/docs/configuration.md#peer-deferred-transport-v1) and
+  [operational limits](website/docs/operations.md#peer-deferred-transport-v1)
+  describe single-process/sticky routing, restart/rolling loss and cancellation
+  limits; this is not Batch or Responses background mode.
 - Add provider-only upstream TLS ClientHello profiles: native Go TLS by default,
   frozen bundled Chrome 133/Safari 16.0 presets from uTLS v1.8.2, and strictly
   validated static custom JSON recipes. Profiles cover inference, health and model

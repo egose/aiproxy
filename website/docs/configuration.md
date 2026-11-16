@@ -11,6 +11,7 @@ sidebar_position: 3
 - `logging`
 - `provider "<type>" "<name>"`
 - `alias "<name>"`
+- optional `deferred` executor policy
 
 ## Mental Model
 
@@ -242,6 +243,8 @@ Common attributes:
 - `upstream_header_timeout`
 - `tls_client_hello` (provider-only upstream TLS profile; see below)
 - `tls_client_hello_spec_file` (required only for static `custom` profiles)
+- `deferred_transport` / `deferred_receiver` (static-only peer transport opt-ins;
+  see [Peer Deferred Transport v1](#peer-deferred-transport-v1))
 - `enabled` (optional, default `true`)
 - nested `model` blocks (OpenCode models additionally require `protocol`)
 
@@ -253,7 +256,9 @@ keyless upstream access, in which case the proxy sends no `Authorization`
 header. To
 intentionally disable a provider, declare `enabled = false`; disabled
 providers are still validated for structure, URL, models, capabilities and TLS profiles,
-but they do not require a usable credential.
+but they normally do not require a usable credential. A declared
+`deferred_transport` still requires a configured `api_key` or `api_key_ref`,
+including on a disabled provider.
 
 ### Forwarding Client Authorization
 
@@ -452,13 +457,19 @@ provider "openai-compatible" "nvidia-2" {
 }
 ```
 
-A derived provider may be declared before or after its base. It may declare only `extends`, optional `display_name`, and exactly one local credential, either `api_key` or `api_key_ref`. It inherits the base provider type, `base_url`, effective upstream header timeout, TLS ClientHello settings/profile, enabled state, and all model blocks.
+A derived provider may be declared before or after its base. It normally declares `extends`, optional `display_name`, and exactly one local credential, either `api_key` or `api_key_ref`. It inherits the base provider type, `base_url`, effective upstream header timeout, TLS ClientHello settings/profile, enabled state, and all model blocks.
 
 `github-copilot` derivatives instead require a local `credential_ref` and stay compact (no `base_url`/models); `credential_ref` is rejected on all other types, and `api_key`/`api_key_ref` are rejected on Copilot blocks.
 
 The type label remains required and must match the base. The base must exist, be enabled, and must not itself use `extends`; inheritance chains are rejected. Local `base_url`, `upstream_header_timeout`, `tls_client_hello`, `tls_client_hello_spec_file`, `enabled`, and `model` declarations are rejected instead of ignored, including explicit TLS defaults.
 
 Derived providers are flattened during config loading and reload. After a successful load, direct model strings, health, metrics, billing, and dashboard inventory use the derived provider's own name. Aliases still list each provider target explicitly.
+
+Static derivatives may also declare a **local** `deferred_transport` or
+`deferred_receiver` block. Neither opt-in nor its provider-level limits are
+inherited; an omitted block means ordinary transport. Local caller blocks use
+caller defaults, and local receiver blocks use root defaults. Managed derivatives
+cannot extend a base with either opt-in.
 
 ## Upstream Header Timeout
 
@@ -474,7 +485,252 @@ provider "openai" "openai" {
 }
 ```
 
-Precedence is provider value, then root value, then the 90-second default. The timeout applies only until response headers arrive; JSON and streaming response bodies can continue for any duration after headers are received. Root and provider timeout changes apply on a successful `SIGHUP` reload.
+Precedence is provider value, then root value, then the 90-second default. The timeout applies only until response headers arrive; it does not cap JSON or streaming response bodies after headers are received. Deferred execution has a separate whole-job deadline. Root and provider timeout changes apply on a successful `SIGHUP` reload.
+
+## Peer Deferred Transport v1
+
+This opt-in replaces a silent, long-lived **caller proxy → executor proxy** chat
+request with one submission and bounded finite polls. End clients still call
+`POST /v1/chat/completions` with their original `stream` choice and receive ordinary
+JSON or SSE. It is a transport extension, **not a model capability, Batch API, or
+Responses background mode**.
+
+| Role / operation | Opt-in and behavior                                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Caller           | Static `openai-compatible` provider with `deferred_transport`; chat JSON/SSE only                                                                      |
+| Executor         | Root `deferred` plus a static `deferred_receiver` provider and a chat-capable model; uses the existing adapter                                         |
+| Caller aliases   | May mix ordinary and deferred targets; peer control failures never authorize a new inference attempt                                                   |
+| Executor aliases | Every configured target must be static, receiver-opted-in and chat-capable, with no caller opt-in; mixed pools are rejected, not filtered or reordered |
+| Other operations | Use ordinary transport and existing capability checks, even on a caller-opted-in provider                                                              |
+
+The caller's `upstream_name` names the executor's **public** model, such as
+`primary/chat` or `alias/peer_chat`. Executor aliases advertise the minimum
+execution timeout and result limit of the entire target pool.
+
+All three settings are unlabeled blocks, supported in HCL, JSON and inline
+`AIPROXY_CONFIG`. Block presence enables the opt-in; there is no `enabled`
+attribute, and null declarations are invalid. A caller-only proxy does not need a
+root `deferred` block. An executor requires `auth.mode = "bearer_static"`.
+Opt-ins require at least one chat-capable model and are validated even on disabled
+providers. A provider cannot declare both roles or combine either with
+`forward_authorization`.
+
+These settings are **static-config-only**. Managed provider/credential writes
+reject either declaration, including empty/null and case-variant fields, before
+commit; managed providers cannot inherit an opted-in base. There are no new
+interactive or non-interactive CLI creation flags or web form fields. Existing
+CLI edits preserve the blocks and supported `env()` spelling.
+
+### Executor Policy
+
+Defaults below apply when `deferred {}` is declared. Durations are Go duration
+strings; byte sizes and counts are integers. Ranges are inclusive.
+
+| `deferred` attribute   | Default               | Range / rule                                                         |
+| ---------------------- | --------------------- | -------------------------------------------------------------------- |
+| `max_jobs`             | `64`                  | 1–4096; retained jobs and outstanding finalization ownership         |
+| `max_running`          | `8`                   | 1–256, at most `max_jobs`; preparation reserves a slot               |
+| `max_admissions`       | `4`                   | 1–64 concurrent submit readers/preparations                          |
+| `max_entries`          | `256`                 | `max_jobs`–65536; dedup records, including rejections and tombstones |
+| `max_memory_bytes`     | `268435456` (256 MiB) | 16 MiB–4 GiB; feature-owned reservations, not total process RSS      |
+| `max_request_bytes`    | `1048576` (1 MiB)     | 1 KiB–8 MiB decoded inference input, before base64 expansion         |
+| `max_result_bytes`     | `8388608` (8 MiB)     | 1 KiB–32 MiB retained output / buffered upstream body ceiling        |
+| `max_work_bytes`       | `67108864` (64 MiB)   | 4–256 MiB temporary work reservation per job                         |
+| `per_owner_jobs`       | `8`                   | 1–`max_jobs`                                                         |
+| `per_owner_running`    | `2`                   | 1–`max_running`                                                      |
+| `max_control_inflight` | `16`                  | 4–128; two slots reserved for DELETE                                 |
+| `execution_timeout`    | `"10m"`               | 1s–1h, starting at commit                                            |
+| `retention`            | `"2m"`                | 10s–1h, starting at terminal sealing; reads do not renew it          |
+| `control_timeout`      | `"5s"`                | 100ms–30s, finite control read/write deadline                        |
+| `finalization_timeout` | `"5s"`                | 100ms–30s, completion deadline including queue wait                  |
+
+Validation requires enough memory for fixed metadata/control allowances, submit
+decoding scratch, and at least one maximum input, output and work reservation.
+Concurrency settings are upper bounds: memory pressure may admit fewer jobs.
+There is no inference execution queue.
+
+### Caller Policy
+
+| `deferred_transport` attribute | Default   | Inclusive range / rule                                       |
+| ------------------------------ | --------- | ------------------------------------------------------------ |
+| `control_timeout`              | `"5s"`    | 100ms–30s; each complete HTTP control transfer               |
+| `max_wait`                     | `"15m"`   | 1s–2h; total wait starts before capability discovery         |
+| `poll_interval`                | `"250ms"` | 50ms–5s; minimum empty-poll delay, combined with peer advice |
+| `max_control_calls`            | `4096`    | 4–65536; discovery, submission and retrieval calls combined  |
+| `max_control_retries`          | `8`       | 0–32 failed-call retries total, not per poll                 |
+
+The effective call timeout is bounded by the caller setting, advertised executor
+setting and remaining `max_wait`. One separate, deadline-bound best-effort DELETE
+is outside the retrieval call/retry budgets. The caller uses its configured
+`api_key` or `api_key_ref` to authenticate to the executor, not the end client's
+token.
+
+### Receiver Limits
+
+| `deferred_receiver` attribute | Default                  | Inclusive range / rule                         |
+| ----------------------------- | ------------------------ | ---------------------------------------------- |
+| `execution_timeout`           | Root `execution_timeout` | 1s–root value; may narrow, never increase it   |
+| `max_result_bytes`            | Root `max_result_bytes`  | 1024–root value; may narrow, never increase it |
+
+### Full Caller Configuration
+
+Copy the following into `peer-caller.hcl`. Set each referenced environment
+variable to a nonempty secret, and replace the reserved `.example` hosts for
+deployment. The executor example below uses the same `AIPROXY_PEER_TOKEN`;
+application and metrics credentials are separate. The HTTPS executor address
+assumes a TLS edge forwarding to its HTTP listener.
+
+```hcl title="peer-caller.hcl"
+listener "http" "public" {
+  address = ":8080"
+  timeouts {
+    read_header = "10s"
+    idle        = "60s"
+    write       = "0s"
+  }
+}
+
+auth "main" {
+  mode = "bearer_static"
+  client "application" {
+    token          = env("AIPROXY_CLIENT_TOKEN")
+    allowed_models = ["peer/chat"]
+  }
+}
+
+logging {
+  level      = "info"
+  access_log = true
+}
+
+metrics {
+  token = env("AIPROXY_CALLER_METRICS_TOKEN")
+}
+
+provider "openai-compatible" "peer" {
+  base_url = "https://executor.example/v1"
+  api_key  = env("AIPROXY_PEER_TOKEN")
+
+  deferred_transport {
+    control_timeout     = "5s"
+    max_wait            = "15m"
+    poll_interval       = "250ms"
+    max_control_calls   = 4096
+    max_control_retries = 8
+  }
+
+  model "chat" {
+    upstream_name = "alias/peer_chat"
+    capabilities  = ["chat", "responses"]
+  }
+}
+```
+
+`peer/chat` chat requests use deferred transport. Responses requests to the same
+model still use the executor's ordinary `/v1/responses` route; they are not
+background jobs.
+
+### Full Executor Configuration
+
+Copy this into `peer-executor.hcl`. The upstream credentials are distinct from
+the peer credential. The secondary provider demonstrates the required **local**
+derivative receiver opt-in; this alias advertises **5m / 4 MiB**, not the larger
+root limits.
+
+```hcl title="peer-executor.hcl"
+listener "http" "public" {
+  address = ":8081"
+  timeouts {
+    read_header = "10s"
+    idle        = "60s"
+    write       = "0s"
+  }
+}
+
+upstream_header_timeout = "10m"
+
+auth "main" {
+  mode = "bearer_static"
+  client "peer-caller" {
+    token          = env("AIPROXY_PEER_TOKEN")
+    tenant         = "peer"
+    allowed_models = ["alias/peer_chat"]
+  }
+}
+
+logging {
+  level      = "info"
+  access_log = true
+}
+
+metrics {
+  token = env("AIPROXY_EXECUTOR_METRICS_TOKEN")
+}
+
+deferred {
+  max_jobs             = 64
+  max_running          = 8
+  max_admissions       = 4
+  max_entries          = 256
+  max_memory_bytes     = 268435456
+  max_request_bytes    = 1048576
+  max_result_bytes     = 8388608
+  max_work_bytes       = 67108864
+  per_owner_jobs       = 8
+  per_owner_running    = 2
+  max_control_inflight = 16
+  execution_timeout    = "10m"
+  retention            = "2m"
+  control_timeout      = "5s"
+  finalization_timeout = "5s"
+}
+
+provider "openai-compatible" "primary" {
+  base_url = "https://upstream.example/v1"
+  api_key  = env("UPSTREAM_API_KEY")
+  deferred_receiver {}
+
+  model "chat" {
+    upstream_name = "chat-model"
+    capabilities  = ["chat", "responses"]
+  }
+}
+
+provider "openai-compatible" "secondary" {
+  extends = "primary"
+  api_key = env("SECONDARY_UPSTREAM_API_KEY")
+  deferred_receiver {
+    execution_timeout = "5m"
+    max_result_bytes  = 4194304
+  }
+}
+
+alias "peer_chat" {
+  algorithm = "round_robin"
+  target {
+    provider = "primary"
+    model    = "chat"
+  }
+  target {
+    provider = "secondary"
+    model    = "chat"
+  }
+}
+```
+
+With the environment variables set, validate both files without dialing a peer
+or upstream:
+
+```sh
+aiproxy validate --config peer-caller.hcl
+aiproxy validate --config peer-executor.hcl
+```
+
+The repository's `go test ./internal/config -run DocumentedDeferred -count=1`
+loads these exact code blocks with non-secret fixture values and checks HCL/JSON
+conversion and inline loading. See the [wire API](api-reference.md#peer-deferred-transport-v1)
+and [deployment, deadlines and diagnostics](operations.md#peer-deferred-transport-v1)
+before enabling traffic.
 
 ## Upstream TLS ClientHello
 

@@ -52,6 +52,7 @@ type Metrics struct {
 	readyReason            *prometheus.GaugeVec
 	configMu               sync.Mutex
 	lastConfig             *config.Runtime
+	deferred               *deferredMetrics
 }
 
 func NewMetrics() *Metrics {
@@ -190,7 +191,9 @@ func NewMetrics() *Metrics {
 			Help: "Static gauge describing the current readiness reason.",
 		}, []string{"reason"}),
 	}
+	m.deferred = newDeferredMetrics()
 	registry.MustRegister(
+		m.deferred,
 		m.httpRequests,
 		m.httpLatency,
 		m.httpRequestBytes,

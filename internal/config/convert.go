@@ -29,6 +29,9 @@ var jsonBlockLabels = map[string]int{
 	"database":           0,
 	"multi_tenancy":      0,
 	"ingress_guardrails": 0,
+	"deferred":           0,
+	"deferred_transport": 0,
+	"deferred_receiver":  0,
 	"quarantine":         0,
 	"provider":           2,
 	"alias":              1,
@@ -50,6 +53,9 @@ func Convert(src []byte, filename string, compact bool) ([]byte, string, string,
 	src = trimLeadingWhitespace(src)
 	expanded := expandEnvCalls(src)
 	if file, diags := hclsyntax.ParseConfig(expanded, filename, hcl.Pos{Line: 1, Column: 1}); !diags.HasErrors() {
+		if err := validateDeferredConfigBody(file.Body); err != nil {
+			return nil, "", "", err
+		}
 		syntaxBody, ok := file.Body.(*hclsyntax.Body)
 		if !ok {
 			return nil, "", "", fmt.Errorf("parse config %s: unsupported body", filename)
@@ -76,7 +82,10 @@ func Convert(src []byte, filename string, compact bool) ([]byte, string, string,
 		}
 		return out, FormatHCL, FormatJSON, nil
 	}
-	if _, jsonDiags := hcljson.Parse(expanded, filename); !jsonDiags.HasErrors() {
+	if file, jsonDiags := hcljson.Parse(expanded, filename); !jsonDiags.HasErrors() {
+		if err := validateDeferredConfigBody(file.Body); err != nil {
+			return nil, "", "", err
+		}
 		out, err := decodeJSONConfig(expanded, filename)
 		if err != nil {
 			return nil, "", "", err
