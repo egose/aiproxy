@@ -152,10 +152,14 @@ func annotateProviderSyntax(body hcl.Body, raw *rawFile) {
 				attrs[name] = true
 			}
 			blocks := make(map[string]int)
+			models := []rawModelSyntax(nil)
 			for _, nested := range block.Body.Blocks {
 				blocks[nested.Type]++
+				if nested.Type == "model" {
+					models = append(models, annotateModelSyntax(nested.Body))
+				}
 			}
-			raw.providerSyntax = append(raw.providerSyntax, rawProviderSyntax{Attrs: attrs, Blocks: blocks})
+			raw.providerSyntax = append(raw.providerSyntax, rawProviderSyntax{Attrs: attrs, Blocks: blocks, Models: models})
 		}
 		return
 	}
@@ -177,6 +181,7 @@ func annotateProviderSyntax(body hcl.Body, raw *rawFile) {
 				{Name: "tls_client_hello_spec_file"},
 				{Name: "upstream_header_timeout"},
 				{Name: "user_agent"},
+				{Name: "forward_user_agent"},
 				{Name: "forward_headers"},
 				{Name: "api_key"},
 				{Name: "enabled"},
@@ -187,6 +192,7 @@ func annotateProviderSyntax(body hcl.Body, raw *rawFile) {
 			}
 		}
 		blocks := make(map[string]int)
+		models := []rawModelSyntax(nil)
 		if blockContent, _, blockDiags := block.Body.PartialContent(&hcl.BodySchema{
 			Blocks: []hcl.BlockHeaderSchema{
 				{Type: "api_key_ref"},
@@ -199,10 +205,39 @@ func annotateProviderSyntax(body hcl.Body, raw *rawFile) {
 		}); !blockDiags.HasErrors() {
 			for _, nested := range blockContent.Blocks {
 				blocks[nested.Type]++
+				if nested.Type == "model" {
+					models = append(models, annotateModelSyntax(nested.Body))
+				}
 			}
 		}
-		raw.providerSyntax = append(raw.providerSyntax, rawProviderSyntax{Attrs: attrs, Blocks: blocks})
+		raw.providerSyntax = append(raw.providerSyntax, rawProviderSyntax{Attrs: attrs, Blocks: blocks, Models: models})
 	}
+}
+
+func annotateModelSyntax(body hcl.Body) rawModelSyntax {
+	syntax := rawModelSyntax{Attrs: make(map[string]bool), Blocks: make(map[string]int)}
+	if native, ok := body.(*hclsyntax.Body); ok {
+		for name := range native.Attributes {
+			syntax.Attrs[name] = true
+		}
+		for _, block := range native.Blocks {
+			syntax.Blocks[block.Type]++
+		}
+		return syntax
+	}
+	attrs, diags := body.JustAttributes()
+	if diags.HasErrors() {
+		return syntax
+	}
+	for name := range attrs {
+		switch name {
+		case "pricing", "deferred_transport", "deferred_receiver":
+			syntax.Blocks[name]++
+		default:
+			syntax.Attrs[name] = true
+		}
+	}
+	return syntax
 }
 
 func validateProviderTLSAttributes(body hcl.Body) error {

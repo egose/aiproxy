@@ -243,7 +243,8 @@ Common attributes:
 - `upstream_header_timeout`
 - `tls_client_hello` (provider-only upstream TLS profile; see below)
 - `tls_client_hello_spec_file` (required only for static `custom` profiles)
-- `deferred_transport` / `deferred_receiver` (static-only peer transport opt-ins;
+- `deferred_transport` (static-only caller compatibility default; prefer a
+  model-level block) / `deferred_receiver` (provider-only executor opt-in;
   see [Peer Deferred Transport v1](#peer-deferred-transport-v1))
 - `enabled` (optional, default `true`)
 - nested `model` blocks (OpenCode models additionally require `protocol`)
@@ -257,8 +258,8 @@ header. To
 intentionally disable a provider, declare `enabled = false`; disabled
 providers are still validated for structure, URL, models, capabilities and TLS profiles,
 but they normally do not require a usable credential. A declared
-`deferred_transport` still requires a configured `api_key` or `api_key_ref`,
-including on a disabled provider.
+`deferred_transport` on a provider or any of its models still requires a
+configured `api_key` or `api_key_ref`, including on a disabled provider.
 
 ### Forwarding Client Authorization
 
@@ -461,15 +462,24 @@ A derived provider may be declared before or after its base. It normally declare
 
 `github-copilot` derivatives instead require a local `credential_ref` and stay compact (no `base_url`/models); `credential_ref` is rejected on all other types, and `api_key`/`api_key_ref` are rejected on Copilot blocks.
 
-The type label remains required and must match the base. The base must exist, be enabled, and must not itself use `extends`; inheritance chains are rejected. Local `base_url`, `upstream_header_timeout`, `tls_client_hello`, `tls_client_hello_spec_file`, `enabled`, and `model` declarations are rejected instead of ignored, including explicit TLS defaults.
+The type label remains required and must match the base. The base must exist, be enabled, and must not itself use `extends`; inheritance chains are rejected. Local `base_url`, `upstream_header_timeout`, `tls_client_hello`, `tls_client_hello_spec_file`, and `enabled` declarations are rejected instead of ignored, including explicit TLS defaults. Local `model` declarations are also rejected except for the static transport-only overlays described below.
 
 Derived providers are flattened during config loading and reload. After a successful load, direct model strings, health, metrics, billing, and dashboard inventory use the derived provider's own name. Aliases still list each provider target explicitly.
 
-Static derivatives may also declare a **local** `deferred_transport` or
-`deferred_receiver` block. Neither opt-in nor its provider-level limits are
-inherited; an omitted block means ordinary transport. Local caller blocks use
-caller defaults, and local receiver blocks use root defaults. Managed derivatives
-cannot extend a base with either opt-in.
+Static derivatives inherit model definitions, **not** base provider or model
+caller opt-ins, nor receiver opt-ins/limits. A derivative may declare an existing
+inherited model name with **only** a local `deferred_transport` block. New model
+names, definition fields (`upstream_name`, `display_name`, `protocol`,
+`capabilities`, `pricing`), empty model overlays and duplicate overlays are
+rejected, even if a forbidden field is empty, null or a default value.
+
+A local provider caller compatibility default is still supported on a static
+derivative. With no local model block or provider default, the inherited model
+uses ordinary transport. Local caller blocks use standard caller defaults;
+local provider-only `deferred_receiver` blocks use root defaults. See the
+[exact-tested overlay example](#local-static-derivative-overlays).
+Managed derivatives cannot extend a base carrying any provider/model caller
+setting or receiver opt-in.
 
 ## Upstream Header Timeout
 
@@ -497,11 +507,11 @@ Responses background mode**.
 
 | Role / operation | Opt-in and behavior                                                                                                                                    |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Caller           | Static `openai-compatible` provider with `deferred_transport`; chat JSON/SSE only                                                                      |
+| Caller           | Static `openai-compatible` model with local `deferred_transport`, or its provider's local compatibility default; chat JSON/SSE only                    |
 | Executor         | Root `deferred` plus a static `deferred_receiver` provider and a chat-capable model; uses the existing adapter                                         |
 | Caller aliases   | May mix ordinary and deferred targets; peer control failures never authorize a new inference attempt                                                   |
 | Executor aliases | Every configured target must be static, receiver-opted-in and chat-capable, with no caller opt-in; mixed pools are rejected, not filtered or reordered |
-| Other operations | Use ordinary transport and existing capability checks, even on a caller-opted-in provider                                                              |
+| Other operations | Use ordinary transport and existing capability checks, even on a caller-opted-in model                                                                 |
 
 The caller's `upstream_name` names the executor's **public** model, such as
 `primary/chat` or `alias/peer_chat`. Executor aliases advertise the minimum
@@ -511,13 +521,18 @@ All three settings are unlabeled blocks, supported in HCL, JSON and inline
 `AIPROXY_CONFIG`. Block presence enables the opt-in; there is no `enabled`
 attribute, and null declarations are invalid. A caller-only proxy does not need a
 root `deferred` block. An executor requires `auth.mode = "bearer_static"`.
-Opt-ins require at least one chat-capable model and are validated even on disabled
-providers. A provider cannot declare both roles or combine either with
-`forward_authorization`.
+Each directly opted-in caller model must support chat; provider compatibility
+defaults and receivers require at least one chat-capable model. Settings are
+validated even on disabled providers. `deferred_receiver` remains
+**provider-only** and additive: eligible models still accept ordinary requests.
+It does not force ordinary calls into deferral. A receiver cannot coexist with
+any caller model setting or provider caller default on the same provider, and
+neither role can combine with `forward_authorization`.
 
 These settings are **static-config-only**. Managed provider/credential writes
-reject either declaration, including empty/null and case-variant fields, before
-commit; managed providers cannot inherit an opted-in base. There are no new
+reject either declaration, including nested model declarations and empty/null
+or case-variant fields, before commit; managed providers cannot inherit an
+opted-in base. There are no new
 interactive or non-interactive CLI creation flags or web form fields. Existing
 CLI edits preserve the blocks and supported `env()` spelling.
 
@@ -551,6 +566,21 @@ There is no inference execution queue.
 
 ### Caller Policy
 
+The caller selects transport for the **resolved model** on direct requests and
+for each selected alias target. Models sharing a provider share its endpoint and
+credential, not necessarily its chat transport.
+
+| Local model `deferred_transport` | Local provider `deferred_transport` | Effective chat transport                        |
+| -------------------------------- | ----------------------------------- | ----------------------------------------------- |
+| Present, including `{}`          | Present or absent                   | Model block, replacing the whole provider block |
+| Absent                           | Present                             | Provider compatibility default                  |
+| Absent                           | Absent                              | Ordinary request                                |
+
+An empty model block opts in with all standard caller defaults below. A partial
+model block uses those same defaults for every omitted field, **never values
+from the provider block**. Omitting a model block is not an opt-out when a
+provider default exists.
+
 | `deferred_transport` attribute | Default   | Inclusive range / rule                                       |
 | ------------------------------ | --------- | ------------------------------------------------------------ |
 | `control_timeout`              | `"5s"`    | 100ms–30s; each complete HTTP control transfer               |
@@ -565,12 +595,179 @@ is outside the retrieval call/retry budgets. The caller uses its configured
 `api_key` or `api_key_ref` to authenticate to the executor, not the end client's
 token.
 
+### Compatibility Defaults And Migration
+
+Existing provider-level caller blocks remain supported as **local compatibility
+defaults**; they are never silently ignored. This compatibility example can be
+appended to `peer-model-caller.hcl` below:
+
+```hcl title="peer-compatibility-default.hcl"
+provider "openai-compatible" "legacy" {
+  base_url = "https://executor.example/v1"
+  api_key  = env("AIPROXY_PEER_TOKEN")
+  deferred_transport {
+    control_timeout     = "20s"
+    max_wait            = "1h"
+    poll_interval       = "1s"
+    max_control_calls   = 2048
+    max_control_retries = 20
+  }
+
+  model "model-1" {
+    upstream_name = "b/model-1"
+  }
+  model "model-2" {
+    upstream_name = "b/model-2"
+    deferred_transport {}
+  }
+  model "model-3" {
+    upstream_name = "b/model-2"
+    deferred_transport {
+      max_wait = "20m"
+    }
+  }
+}
+```
+
+Here all three chat models defer: `model-1` uses the provider values, `model-2`
+uses all standard defaults, and `model-3` uses `20m` plus standard defaults for
+the other four fields. Add their `legacy/...` names to the application's
+`allowed_models` if exposing this compatibility example. There is no
+`enabled = false` or other caller opt-out.
+To mix ordinary and deferred models, **remove the provider-wide default** and
+move the desired full policy into each intended model block. Copy all fields
+whose old nonstandard values must survive; partial blocks do not merge.
+
+Unsupported provider types, non-chat-only model opt-ins, labeled/duplicate
+blocks, unknown attributes, null declarations, model-level receivers and
+out-of-range settings fail validation rather than reverting to ordinary
+transport. Correct the declaration; do not rely on a silent fallback.
+
 ### Receiver Limits
 
 | `deferred_receiver` attribute | Default                  | Inclusive range / rule                         |
 | ----------------------------- | ------------------------ | ---------------------------------------------- |
 | `execution_timeout`           | Root `execution_timeout` | 1s–root value; may narrow, never increase it   |
 | `max_result_bytes`            | Root `max_result_bytes`  | 1024–root value; may narrow, never increase it |
+
+### Mixed Models: Full Caller And Executor
+
+These complete configurations demonstrate the single-provider case:
+
+```text
+client → a/model-1 → b/model-1: ordinary chat
+client → a/model-2 → b/model-2: deferred chat
+```
+
+Set `AIPROXY_CLIENT_TOKEN`, `AIPROXY_PEER_TOKEN` and `UPSTREAM_API_KEY` to distinct
+nonempty secrets and replace the `.example` hosts. The HTTPS executor address
+assumes a TLS edge forwarding to its HTTP listener. The caller needs no root
+`deferred` block.
+
+```hcl title="peer-model-caller.hcl"
+listener "http" "public" {
+  address = ":8080"
+  timeouts {
+    read_header = "10s"
+    idle        = "60s"
+    write       = "0s"
+  }
+}
+
+auth "main" {
+  mode = "bearer_static"
+  client "application" {
+    token          = env("AIPROXY_CLIENT_TOKEN")
+    allowed_models = ["a/model-1", "a/model-2"]
+  }
+}
+
+provider "openai-compatible" "a" {
+  base_url = "https://executor.example/v1"
+  api_key  = env("AIPROXY_PEER_TOKEN")
+
+  model "model-1" {
+    upstream_name = "b/model-1"
+  }
+  model "model-2" {
+    upstream_name = "b/model-2"
+    deferred_transport {
+      max_wait      = "20m"
+      poll_interval = "500ms"
+    }
+  }
+}
+```
+
+```hcl title="peer-model-executor.hcl"
+listener "http" "public" {
+  address = ":8081"
+  timeouts {
+    read_header = "10s"
+    idle        = "60s"
+    write       = "0s"
+  }
+}
+
+upstream_header_timeout = "10m"
+
+auth "main" {
+  mode = "bearer_static"
+  client "peer-caller" {
+    token          = env("AIPROXY_PEER_TOKEN")
+    tenant         = "peer"
+    allowed_models = ["b/model-1", "b/model-2"]
+  }
+}
+
+deferred {}
+
+provider "openai-compatible" "b" {
+  base_url = "https://upstream.example/v1"
+  api_key  = env("UPSTREAM_API_KEY")
+  deferred_receiver {}
+
+  model "model-1" {
+    upstream_name = "upstream-model-1"
+  }
+  model "model-2" {
+    upstream_name = "upstream-model-2"
+  }
+}
+```
+
+Both models belong to the **same receiver provider**. Its receiver block permits
+private admission for either chat model but does not change ordinary
+`POST /v1/chat/completions` calls into jobs. Only the caller's `model-2` chat
+requests use capability discovery, submit and finite reads. Responses and
+embeddings on either model use ordinary routes and normal capability checks.
+
+### Local Static Derivative Overlays
+
+Append this exact-tested snippet to `peer-model-caller.hcl`. The local credential
+is required even when reusing the same peer token (and thus executor owner):
+
+```hcl title="peer-model-derived.hcl"
+provider "openai-compatible" "derived" {
+  extends = "a"
+  api_key = env("AIPROXY_PEER_TOKEN")
+  model "model-2" {
+    deferred_transport {}
+  }
+}
+
+provider "openai-compatible" "ordinary-derived" {
+  extends = "a"
+  api_key = env("AIPROXY_PEER_TOKEN")
+}
+```
+
+`derived/model-2` inherits its model definition but uses standard caller defaults,
+not the base's `20m` / `500ms`. `derived/model-1` is ordinary. Both models on
+`ordinary-derived` are ordinary because base caller opt-ins are not inherited.
+To expose these derivative names to the application, add them to its
+`allowed_models`. Overlays must name an existing inherited model and contain only
+`deferred_transport`; change model definitions on the concrete base, not here.
 
 ### Full Caller Configuration
 
@@ -611,17 +808,16 @@ provider "openai-compatible" "peer" {
   base_url = "https://executor.example/v1"
   api_key  = env("AIPROXY_PEER_TOKEN")
 
-  deferred_transport {
-    control_timeout     = "5s"
-    max_wait            = "15m"
-    poll_interval       = "250ms"
-    max_control_calls   = 4096
-    max_control_retries = 8
-  }
-
   model "chat" {
     upstream_name = "alias/peer_chat"
     capabilities  = ["chat", "responses"]
+    deferred_transport {
+      control_timeout     = "5s"
+      max_wait            = "15m"
+      poll_interval       = "250ms"
+      max_control_calls   = 4096
+      max_control_retries = 8
+    }
   }
 }
 ```
@@ -718,17 +914,20 @@ alias "peer_chat" {
 }
 ```
 
-With the environment variables set, validate both files without dialing a peer
+With the environment variables set, validate each full file without dialing a peer
 or upstream:
 
 ```sh
 aiproxy validate --config peer-caller.hcl
 aiproxy validate --config peer-executor.hcl
+aiproxy validate --config peer-model-caller.hcl
+aiproxy validate --config peer-model-executor.hcl
 ```
 
 The repository's `go test ./internal/config -run DocumentedDeferred -count=1`
-loads these exact code blocks with non-secret fixture values and checks HCL/JSON
-conversion and inline loading. See the [wire API](api-reference.md#peer-deferred-transport-v1)
+loads both exact full pairs and the appended compatibility/derivative snippets
+with non-secret fixture values and checks HCL/JSON conversion, file and inline/env
+loading. See the [wire API](api-reference.md#peer-deferred-transport-v1)
 and [deployment, deadlines and diagnostics](operations.md#peer-deferred-transport-v1)
 before enabling traffic.
 
@@ -947,6 +1146,8 @@ model "gpt-4.1" {
   `responses`, `messages`, or `gemini`; `gemini` is Zen-only) and rejected on
   other provider types
 - `capabilities` narrows the operations exposed through the proxy
+- `deferred_transport` opts a static `openai-compatible` chat model into
+  [peer caller transport](#caller-policy); `deferred_receiver` is provider-only
 
 Use `upstream_name` when you want a cleaner or more stable public model name than the exact upstream identifier.
 

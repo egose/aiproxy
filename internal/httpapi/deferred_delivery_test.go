@@ -138,6 +138,8 @@ func TestDeferredCallerCommittedInferenceFailureDelivery(t *testing.T) {
 				if !optedIn {
 					providers := rt.Catalog.Providers()
 					providers[0].DeferredTransport, providers[0].BaseURL = nil, upstream.URL+"/v1"
+					providers[0].Models[0].DeferredTransport = nil
+					providers[0].ModelByName = nil
 					rt.Catalog = config.NewCatalog(providers, nil, rt.Catalog.Aliases())
 				}
 				callerProbe := &deferredDeliveryProbe{Adapter: provider.New()}

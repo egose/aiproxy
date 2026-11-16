@@ -265,7 +265,7 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 	if rawProvider.Type != baseRaw.Type {
 		return Provider{}, fmt.Errorf("type %q must match base provider %q type %q", rawProvider.Type, rawProvider.Extends, baseRaw.Type)
 	}
-	if err := validateDerivedProviderSurface(rawProvider, syntaxByName[rawProvider.Name]); err != nil {
+	if err := validateDerivedProviderSurface(rawProvider, syntaxByName[rawProvider.Name], baseRaw); err != nil {
 		return Provider{}, err
 	}
 	provider := cloneProvider(base)
@@ -274,6 +274,13 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 	provider.ForwardAuthorization = rawProvider.ForwardAuthorization
 	provider.DeferredTransport = nil
 	provider.DeferredReceiver = nil
+	for i := range provider.Models {
+		provider.Models[i].DeferredTransport = nil
+	}
+	for name, model := range provider.ModelByName {
+		model.DeferredTransport = nil
+		provider.ModelByName[name] = model
+	}
 	if rawProvider.DisplayName != "" {
 		provider.DisplayName = rawProvider.DisplayName
 	}
@@ -310,14 +317,14 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 	return provider, nil
 }
 
-func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderSyntax) error {
+func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderSyntax, base rawProvider) error {
 	for _, name := range []string{"base_url", "allow_insecure_base_url", "tls_client_hello", "tls_client_hello_spec_file", "upstream_header_timeout", "user_agent", "forward_user_agent", "forward_headers", "enabled"} {
 		if syntax.Attrs[name] {
 			return fmt.Errorf("derived provider cannot declare %s", name)
 		}
 	}
-	if syntax.Blocks["model"] > 0 {
-		return fmt.Errorf("derived provider cannot declare model blocks")
+	if err := validateDerivedModelOverlays(rawProvider, syntax.Models, base); err != nil {
+		return err
 	}
 	if syntax.Blocks["healthcheck"] > 0 {
 		return fmt.Errorf("derived provider cannot declare healthcheck block")
@@ -341,6 +348,48 @@ func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderS
 	}
 	if !hasAPIKey && !hasAPIKeyRef && !rawProvider.ForwardAuthorization && rawProvider.Type != string(ProviderTypeOpenCodeZen) {
 		return fmt.Errorf("derived provider requires exactly one local credential: api_key or api_key_ref")
+	}
+	return nil
+}
+
+func validateDerivedModelOverlays(local rawProvider, syntax []rawModelSyntax, base rawProvider) error {
+	if len(local.Models) != len(syntax) {
+		return fmt.Errorf("derived provider cannot inspect model overlay declarations")
+	}
+	inherited := make(map[string]bool, len(base.Models))
+	for _, model := range base.Models {
+		inherited[model.Name] = true
+	}
+	seen := make(map[string]bool, len(local.Models))
+	for i, model := range local.Models {
+		if seen[model.Name] {
+			return fmt.Errorf("derived provider has duplicate model %q deferred_transport overlays", model.Name)
+		}
+		seen[model.Name] = true
+		if err := validateDerivedModelOverlaySyntax(model.Name, syntax[i]); err != nil {
+			return err
+		}
+		if model.DeferredTransport == nil {
+			return fmt.Errorf("derived provider cannot declare model blocks without exactly one deferred_transport block; model %q requires a transport-only overlay", model.Name)
+		}
+		if !inherited[model.Name] {
+			return fmt.Errorf("derived provider cannot declare new model %q; deferred_transport overlays require an existing inherited model name", model.Name)
+		}
+	}
+	return nil
+}
+
+func validateDerivedModelOverlaySyntax(modelName string, syntax rawModelSyntax) error {
+	for name := range syntax.Attrs {
+		return fmt.Errorf("derived provider cannot declare model blocks with %s; model %q supports only deferred_transport overlays", name, modelName)
+	}
+	for name, count := range syntax.Blocks {
+		if name != "deferred_transport" && count > 0 {
+			return fmt.Errorf("derived provider cannot declare model blocks with %s; model %q supports only deferred_transport overlays", name, modelName)
+		}
+	}
+	if syntax.Blocks["deferred_transport"] != 1 {
+		return fmt.Errorf("derived provider cannot declare model blocks without exactly one deferred_transport block; model %q requires a transport-only overlay", modelName)
 	}
 	return nil
 }
@@ -635,7 +684,7 @@ func buildProvider(rawProvider rawProvider, syntax rawProviderSyntax, filename s
 			model.Pricing = pricing
 		}
 		provider.Models = append(provider.Models, model)
-		provider.ModelByName[m.Name] = model
+		provider.ModelByName[m.Name] = cloneModel(model)
 	}
 	if err := buildProviderDeferred(&provider, rawProvider, deferred); err != nil {
 		return Provider{}, err

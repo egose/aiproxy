@@ -74,6 +74,14 @@ not receive peer receipts, cursors or private headers. Other operations keep
 ordinary transport. See [configuration](configuration.md#peer-deferred-transport-v1)
 and [operational limits](operations.md#peer-deferred-transport-v1).
 
+Caller chat transport follows the resolved model's local `deferred_transport`,
+otherwise its provider's local compatibility default, otherwise ordinary
+transport. A model block replaces the whole default, including when empty or
+partial. Direct and alias-target requests use the same precedence. The executor's
+`deferred_receiver` is provider-only and additive: it permits private admission
+without forcing ordinary calls for the same models into jobs. Model placement
+changes neither these v1 routes/schema nor the public support/capability matrices.
+
 ### Peer Routes And Recognition
 
 The executor serves the unmounted prefix `/_internal/deferred/v1`. Private paths
@@ -519,8 +527,9 @@ for supported types and credential-exposure warnings.
 
 `deferred_transport` and `deferred_receiver` are static-config-only.
 Administrative provider POST/PUT and credential PUT reject either field before
-commit, including null/empty objects and case variants, for every admin role.
-Managed derivatives cannot extend a static base carrying either opt-in.
+commit, including nested model declarations, null/empty objects and case variants,
+for every admin role. Managed derivatives cannot extend a static base carrying
+any provider/model caller setting or receiver opt-in.
 There are no writable managed/web transport fields; see
 [peer configuration](configuration.md#peer-deferred-transport-v1).
 

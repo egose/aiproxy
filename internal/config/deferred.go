@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
+	"github.com/zclconf/go-cty/cty"
 )
 
 func DefaultDeferred() Deferred {
@@ -40,6 +41,30 @@ func DefaultDeferredTransport() DeferredTransport {
 		MaxControlCalls:   4096,
 		MaxControlRetries: 8,
 	}
+}
+
+func EffectiveDeferredTransport(p Provider, model Model) *DeferredTransport {
+	if model.DeferredTransport != nil {
+		return cloneDeferredTransport(model.DeferredTransport)
+	}
+	return cloneDeferredTransport(p.DeferredTransport)
+}
+
+func HasCallerDeferredTransport(p Provider) bool {
+	if p.DeferredTransport != nil {
+		return true
+	}
+	for _, model := range p.Models {
+		if model.DeferredTransport != nil {
+			return true
+		}
+	}
+	for _, model := range p.ModelByName {
+		if model.DeferredTransport != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func buildDeferred(raw *rawDeferred) (Deferred, error) {
@@ -101,36 +126,71 @@ func buildDeferred(raw *rawDeferred) (Deferred, error) {
 	return out, nil
 }
 
+func buildDeferredTransport(raw *rawDeferredTransport) (*DeferredTransport, error) {
+	out := DefaultDeferredTransport()
+	for _, field := range []struct {
+		name string
+		raw  *string
+		out  *time.Duration
+		min  time.Duration
+		max  time.Duration
+	}{
+		{"control_timeout", raw.ControlTimeout, &out.ControlTimeout, 100 * time.Millisecond, 30 * time.Second},
+		{"max_wait", raw.MaxWait, &out.MaxWait, time.Second, 2 * time.Hour},
+		{"poll_interval", raw.PollInterval, &out.PollInterval, 50 * time.Millisecond, 5 * time.Second},
+	} {
+		if field.raw == nil {
+			continue
+		}
+		value, err := parseDeferredDuration("deferred_transport."+field.name, *field.raw, field.min, field.max)
+		if err != nil {
+			return nil, err
+		}
+		*field.out = value
+	}
+	if raw.MaxControlCalls != nil {
+		out.MaxControlCalls = *raw.MaxControlCalls
+	}
+	if raw.MaxControlRetries != nil {
+		out.MaxControlRetries = *raw.MaxControlRetries
+	}
+	if err := validateDeferredTransport(out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func buildProviderDeferred(p *Provider, raw rawProvider, root Deferred) error {
 	if raw.DeferredTransport != nil {
-		out := DefaultDeferredTransport()
-		for _, field := range []struct {
-			name string
-			raw  *string
-			out  *time.Duration
-			min  time.Duration
-			max  time.Duration
-		}{
-			{"control_timeout", raw.DeferredTransport.ControlTimeout, &out.ControlTimeout, 100 * time.Millisecond, 30 * time.Second},
-			{"max_wait", raw.DeferredTransport.MaxWait, &out.MaxWait, time.Second, 2 * time.Hour},
-			{"poll_interval", raw.DeferredTransport.PollInterval, &out.PollInterval, 50 * time.Millisecond, 5 * time.Second},
-		} {
-			if field.raw == nil {
-				continue
+		out, err := buildDeferredTransport(raw.DeferredTransport)
+		if err != nil {
+			return err
+		}
+		p.DeferredTransport = out
+	}
+	for _, local := range raw.Models {
+		if local.DeferredTransport == nil {
+			continue
+		}
+		out, err := buildDeferredTransport(local.DeferredTransport)
+		if err != nil {
+			return fmt.Errorf("model %q: %w", local.Name, err)
+		}
+		found := false
+		for i := range p.Models {
+			if p.Models[i].Name == local.Name {
+				p.Models[i].DeferredTransport = cloneDeferredTransport(out)
+				found = true
 			}
-			value, err := parseDeferredDuration("deferred_transport."+field.name, *field.raw, field.min, field.max)
-			if err != nil {
-				return err
-			}
-			*field.out = value
 		}
-		if raw.DeferredTransport.MaxControlCalls != nil {
-			out.MaxControlCalls = *raw.DeferredTransport.MaxControlCalls
+		if model, ok := p.ModelByName[local.Name]; ok {
+			model.DeferredTransport = cloneDeferredTransport(out)
+			p.ModelByName[local.Name] = model
+			found = true
 		}
-		if raw.DeferredTransport.MaxControlRetries != nil {
-			out.MaxControlRetries = *raw.DeferredTransport.MaxControlRetries
+		if !found {
+			return fmt.Errorf("model %q: deferred_transport requires an existing model", local.Name)
 		}
-		p.DeferredTransport = &out
 	}
 	if raw.DeferredReceiver != nil {
 		out := DeferredReceiver{ExecutionTimeout: root.ExecutionTimeout, MaxResultBytes: root.MaxResultBytes}
@@ -234,44 +294,40 @@ func deferredMinimumMemory(d Deferred) (int64, error) {
 }
 
 func validateProviderDeferred(p Provider, root Deferred) error {
-	if p.DeferredTransport == nil && p.DeferredReceiver == nil {
+	caller := HasCallerDeferredTransport(p)
+	if !caller && p.DeferredReceiver == nil {
 		return nil
 	}
-	if p.DeferredTransport != nil && p.DeferredReceiver != nil {
+	if caller && p.DeferredReceiver != nil {
 		return fmt.Errorf("provider %q: deferred_transport and deferred_receiver cannot be combined", p.Name)
 	}
 	if p.ForwardAuthorization {
 		return fmt.Errorf("provider %q: forward_authorization cannot be combined with deferred_transport or deferred_receiver", p.Name)
 	}
-	if d := p.DeferredTransport; d != nil {
+	if caller {
 		if p.Type != ProviderTypeOpenAICompatible {
 			return fmt.Errorf("provider %q: deferred_transport is only supported by static openai-compatible providers", p.Name)
 		}
 		if p.APIKey == "" && (p.APIKeyRef == nil || p.APIKeyRef.Key == "") { // pragma: allowlist secret
 			return fmt.Errorf("provider %q: deferred_transport requires a configured api_key or api_key_ref, including on disabled providers", p.Name)
 		}
-		for _, field := range []struct {
-			name string
-			val  time.Duration
-			min  time.Duration
-			max  time.Duration
-		}{
-			{"control_timeout", d.ControlTimeout, 100 * time.Millisecond, 30 * time.Second},
-			{"max_wait", d.MaxWait, time.Second, 2 * time.Hour},
-			{"poll_interval", d.PollInterval, 50 * time.Millisecond, 5 * time.Second},
-		} {
-			if field.val < field.min || field.val > field.max {
-				return fmt.Errorf("provider %q: deferred_transport.%s must be between %s and %s", p.Name, field.name, field.min, field.max)
+		if p.DeferredTransport != nil {
+			if err := validateDeferredTransport(*p.DeferredTransport); err != nil {
+				return fmt.Errorf("provider %q: %w", p.Name, err)
 			}
-		}
-		if d.MaxControlCalls < 4 || d.MaxControlCalls > 65536 {
-			return fmt.Errorf("provider %q: deferred_transport.max_control_calls must be between 4 and 65536", p.Name)
-		}
-		if d.MaxControlRetries < 0 || d.MaxControlRetries > 32 {
-			return fmt.Errorf("provider %q: deferred_transport.max_control_retries must be between 0 and 32", p.Name)
 		}
 		if err := validateDeferredBaseURL(p); err != nil {
 			return err
+		}
+		for _, model := range p.Models {
+			if err := validateModelDeferredTransport(p, model); err != nil {
+				return err
+			}
+		}
+		for _, model := range p.ModelByName {
+			if err := validateModelDeferredTransport(p, model); err != nil {
+				return err
+			}
 		}
 	}
 	if d := p.DeferredReceiver; d != nil {
@@ -285,7 +341,15 @@ func validateProviderDeferred(p Provider, root Deferred) error {
 			return fmt.Errorf("provider %q: deferred_receiver.max_result_bytes must be between 1024 and the root max_result_bytes", p.Name)
 		}
 	}
+	if p.DeferredTransport == nil && p.DeferredReceiver == nil {
+		return nil
+	}
 	for _, model := range p.Models {
+		if HasCapability(EffectiveCapabilities(p.Type, model), CapabilityChat) {
+			return nil
+		}
+	}
+	for _, model := range p.ModelByName {
 		if HasCapability(EffectiveCapabilities(p.Type, model), CapabilityChat) {
 			return nil
 		}
@@ -293,8 +357,45 @@ func validateProviderDeferred(p Provider, root Deferred) error {
 	return fmt.Errorf("provider %q: deferred opt-ins require at least one chat-capable model", p.Name)
 }
 
+func validateDeferredTransport(d DeferredTransport) error {
+	for _, field := range []struct {
+		name string
+		val  time.Duration
+		min  time.Duration
+		max  time.Duration
+	}{
+		{"control_timeout", d.ControlTimeout, 100 * time.Millisecond, 30 * time.Second},
+		{"max_wait", d.MaxWait, time.Second, 2 * time.Hour},
+		{"poll_interval", d.PollInterval, 50 * time.Millisecond, 5 * time.Second},
+	} {
+		if field.val < field.min || field.val > field.max {
+			return fmt.Errorf("deferred_transport.%s must be between %s and %s", field.name, field.min, field.max)
+		}
+	}
+	if d.MaxControlCalls < 4 || d.MaxControlCalls > 65536 {
+		return fmt.Errorf("deferred_transport.max_control_calls must be between 4 and 65536")
+	}
+	if d.MaxControlRetries < 0 || d.MaxControlRetries > 32 {
+		return fmt.Errorf("deferred_transport.max_control_retries must be between 0 and 32")
+	}
+	return nil
+}
+
+func validateModelDeferredTransport(p Provider, model Model) error {
+	if model.DeferredTransport == nil {
+		return nil
+	}
+	if !HasCapability(EffectiveCapabilities(p.Type, model), CapabilityChat) {
+		return fmt.Errorf("provider %q: model %q: deferred_transport requires a chat-capable model", p.Name, model.Name)
+	}
+	if err := validateDeferredTransport(*model.DeferredTransport); err != nil {
+		return fmt.Errorf("provider %q: model %q: %w", p.Name, model.Name, err)
+	}
+	return nil
+}
+
 func ValidateManagedProviderDeferred(p Provider) error {
-	if p.DeferredTransport != nil || p.DeferredReceiver != nil {
+	if HasCallerDeferredTransport(p) || p.DeferredReceiver != nil {
 		return fmt.Errorf("provider %q: deferred_transport and deferred_receiver are static-config-only; managed providers cannot declare or inherit deferred opt-ins", p.Name)
 	}
 	return nil
@@ -387,6 +488,20 @@ func deferredDeclarationBlocks(body hcl.Body, owner string, names ...string) ([]
 				return nil, fmt.Errorf("%s: %s.%s must not be null or unknown", owner, block.Type, name)
 			}
 		}
+		var raw any
+		switch block.Type {
+		case "deferred":
+			raw = &rawDeferred{}
+		case "deferred_transport":
+			raw = &rawDeferredTransport{}
+		case "deferred_receiver":
+			raw = &rawDeferredReceiver{}
+		default:
+			return nil, fmt.Errorf("%s: unsupported deferred block %q", owner, block.Type)
+		}
+		if diags := gohcl.DecodeBody(block.Body, nil, raw); diags.HasErrors() {
+			return nil, fmt.Errorf("%s: %s: %s", owner, block.Type, diags.Error())
+		}
 	}
 	return content.Blocks, nil
 }
@@ -404,13 +519,112 @@ func validateDeferredDeclarations(body hcl.Body) (bool, error) {
 		return false, fmt.Errorf("cannot inspect deferred provider declarations")
 	}
 	for _, provider := range content.Blocks {
-		blocks, err := deferredDeclarationBlocks(provider.Body, fmt.Sprintf("provider %q", provider.Labels[1]), "deferred_transport", "deferred_receiver")
+		owner := fmt.Sprintf("provider %q", provider.Labels[1])
+		blocks, err := deferredDeclarationBlocks(provider.Body, owner, "deferred_transport", "deferred_receiver")
 		if err != nil {
 			return false, err
 		}
 		found = found || len(blocks) != 0
+		models, _, diags := provider.Body.PartialContent(&hcl.BodySchema{
+			Attributes: []hcl.AttributeSchema{{Name: "extends"}},
+			Blocks:     []hcl.BlockHeaderSchema{{Type: "model", LabelNames: []string{"name"}}},
+		})
+		if diags.HasErrors() {
+			return false, fmt.Errorf("%s: cannot inspect deferred model declarations", owner)
+		}
+		derived := false
+		if attr := models.Attributes["extends"]; attr != nil {
+			extends, err := providerTLSAttributeString(attr, provider.Labels[1], true)
+			if err != nil {
+				return false, err
+			}
+			derived = extends != ""
+		}
+		if derived {
+			if err := validateDerivedModelObjects(provider.Body, owner); err != nil {
+				return false, err
+			}
+		}
+		seenModels := make(map[string]bool, len(models.Blocks))
+		for _, model := range models.Blocks {
+			modelOwner := fmt.Sprintf("%s: model %q", owner, model.Labels[0])
+			blocks, err := deferredDeclarationBlocks(model.Body, modelOwner, "deferred_transport", "deferred_receiver")
+			if err != nil {
+				return false, err
+			}
+			for _, block := range blocks {
+				if block.Type == "deferred_receiver" {
+					return false, fmt.Errorf("%s: deferred_receiver is provider-only", modelOwner)
+				}
+			}
+			if derived {
+				if seenModels[model.Labels[0]] {
+					return false, fmt.Errorf("%s: duplicate model %q deferred_transport overlays", owner, model.Labels[0])
+				}
+				if err := validateDerivedModelOverlaySyntax(model.Labels[0], annotateModelSyntax(model.Body)); err != nil {
+					return false, fmt.Errorf("%s: %w", owner, err)
+				}
+			}
+			seenModels[model.Labels[0]] = true
+			found = found || len(blocks) != 0
+		}
 	}
 	return found, nil
+}
+
+func validateDerivedModelObjects(body hcl.Body, owner string) error {
+	if _, native := body.(*hclsyntax.Body); native {
+		return nil
+	}
+	content, _, diags := body.PartialContent(&hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "model"}}})
+	if diags.HasErrors() {
+		return fmt.Errorf("%s: cannot inspect model overlay objects", owner)
+	}
+	attr := content.Attributes["model"]
+	if attr == nil {
+		return nil
+	}
+	value, diags := attr.Expr.Value(nil)
+	if diags.HasErrors() || !value.IsKnown() || value.IsNull() {
+		return fmt.Errorf("%s: model overlays must be non-null block objects", owner)
+	}
+	containers := []cty.Value{value}
+	if value.Type().IsTupleType() || value.Type().IsListType() {
+		containers = nil
+		for it := value.ElementIterator(); it.Next(); {
+			_, entry := it.Element()
+			containers = append(containers, entry)
+		}
+	}
+	for _, container := range containers {
+		if !container.IsKnown() || container.IsNull() || !container.Type().IsObjectType() {
+			return fmt.Errorf("%s: model overlays require model-name block objects", owner)
+		}
+		for it := container.ElementIterator(); it.Next(); {
+			name, value := it.Element()
+			modelOwner := fmt.Sprintf("%s: model %q", owner, name.AsString())
+			if !value.IsKnown() || value.IsNull() {
+				return fmt.Errorf("%s: overlay must be a non-null block object", modelOwner)
+			}
+			objects := []cty.Value{value}
+			if value.Type().IsTupleType() || value.Type().IsListType() {
+				if value.LengthInt() == 0 {
+					return fmt.Errorf("%s: overlay must not be an empty block array", modelOwner)
+				}
+				objects = nil
+				for it := value.ElementIterator(); it.Next(); {
+					_, entry := it.Element()
+					objects = append(objects, entry)
+				}
+			}
+			for _, object := range objects {
+				if !object.IsKnown() || object.IsNull() || !object.Type().IsObjectType() {
+					return fmt.Errorf("%s: overlay must be a non-null block object", modelOwner)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func ValidateDeferredConfig(source []byte, filename string) error {
@@ -422,8 +636,8 @@ func ValidateDeferredConfig(source []byte, filename string) error {
 }
 
 func validateDeferredConfigBody(body hcl.Body) error {
-	found, err := validateDeferredDeclarations(body)
-	if err != nil || !found {
+	_, err := validateDeferredDeclarations(body)
+	if err != nil {
 		return err
 	}
 	var raw struct {
@@ -445,37 +659,69 @@ func validateDeferredConfigBody(body hcl.Body) error {
 			return fmt.Errorf("deferred requires auth mode bearer_static")
 		}
 	}
+	syntax := rawFile{Providers: raw.Providers}
+	annotateProviderSyntax(body, &syntax)
 	byName := make(map[string]rawProvider, len(raw.Providers))
 	for _, p := range raw.Providers {
+		if _, exists := byName[p.Name]; exists {
+			return fmt.Errorf("duplicate provider %q", p.Name)
+		}
 		byName[p.Name] = p
 	}
-	for _, local := range raw.Providers {
-		if local.DeferredTransport == nil && local.DeferredReceiver == nil {
-			continue
-		}
+	for i, local := range raw.Providers {
 		effective := local
 		if local.Extends != "" {
+			if local.DeferredTransport == nil && local.DeferredReceiver == nil && len(local.Models) == 0 {
+				continue
+			}
 			base, ok := byName[local.Extends]
 			if !ok || base.Extends != "" || base.Type != local.Type {
 				return fmt.Errorf("provider %q: deferred opt-in requires a concrete same-type base provider", local.Name)
 			}
+			if base.Enabled != nil && !*base.Enabled {
+				return fmt.Errorf("provider %q: extends %q references a disabled provider", local.Name, local.Extends)
+			}
+			if i >= len(syntax.providerSyntax) {
+				return fmt.Errorf("provider %q: cannot inspect model overlay declarations", local.Name)
+			}
+			if err := validateDerivedProviderSurface(local, syntax.providerSyntax[i], base); err != nil {
+				return fmt.Errorf("provider %q: %w", local.Name, err)
+			}
 			effective.BaseURL, effective.Models = base.BaseURL, base.Models
 			effective.AllowInsecureBaseURL = base.AllowInsecureBaseURL
+		}
+		caller := local.DeferredTransport != nil
+		for _, model := range local.Models {
+			caller = caller || model.DeferredTransport != nil
+		}
+		if !caller && local.DeferredReceiver == nil {
+			continue
 		}
 		p := Provider{
 			Type: ProviderType(local.Type), Name: local.Name, BaseURL: effective.BaseURL,
 			APIKey: local.APIKey, ForwardAuthorization: local.ForwardAuthorization,
 			AllowInsecureBaseURL: effective.AllowInsecureBaseURL != nil && *effective.AllowInsecureBaseURL,
+			ModelByName:          make(map[string]Model, len(effective.Models)),
 		}
 		if local.APIKeyRef != nil { // pragma: allowlist secret
 			p.APIKeyRef = &APIKeyRef{Path: local.APIKeyRef.Path, Key: local.APIKeyRef.Key}
 		}
+		if local.CredentialRef != nil {
+			p.CopilotCredentialRef = &CopilotCredentialRef{Path: local.CredentialRef.Path, Name: local.CredentialRef.Name}
+		}
+		if err := validateProviderCredentialStructure(&p); err != nil {
+			return fmt.Errorf("provider %q: %w", p.Name, err)
+		}
 		for _, m := range effective.Models {
+			if _, exists := p.ModelByName[m.Name]; exists {
+				return fmt.Errorf("provider %q: duplicate model %q", p.Name, m.Name)
+			}
 			model := Model{Name: m.Name, Protocol: ModelProtocol(m.Protocol)}
 			for _, capability := range m.Capabilities {
 				model.Capabilities = append(model.Capabilities, Capability(capability))
 			}
 			p.Models = append(p.Models, model)
+			p.ModelByName[m.Name] = cloneModel(model)
 		}
 		if err := buildProviderDeferred(&p, local, root); err != nil {
 			return fmt.Errorf("provider %q: %w", p.Name, err)

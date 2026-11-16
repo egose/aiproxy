@@ -98,13 +98,13 @@ func binaryDeferredCallerConfig(addr, peer, token string, optIn bool, control, w
 	block, extra := "", ""
 	if optIn {
 		block = fmt.Sprintf(`
-  deferred_transport {
-    control_timeout = %q
-    max_wait = %q
-    poll_interval = "50ms"
-    max_control_calls = 256
-    max_control_retries = 8
-  }
+    deferred_transport {
+      control_timeout = %q
+      max_wait = %q
+      poll_interval = "50ms"
+      max_control_calls = 256
+      max_control_retries = 8
+    }
 `, control.String(), wait.String())
 	}
 	if backup != "" {
@@ -137,7 +137,9 @@ provider "openai-compatible" "peer" {
   api_key = %q
   forward_user_agent = true
   forward_headers = ["x-inference"]
-%s  model "m" { upstream_name = "p/m" }
+  model "m" {
+    upstream_name = "p/m"
+%s  }
 }
 %s`, addr, peer+"/mount/v1", token, block, extra)
 }

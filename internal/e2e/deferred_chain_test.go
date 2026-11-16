@@ -144,13 +144,13 @@ func deferredCallerConfig(peer, credential string, optIn bool) string {
 	block := ""
 	if optIn {
 		block = `
-  deferred_transport {
-    control_timeout = "200ms"
-    max_wait = "3s"
-    poll_interval = "50ms"
-    max_control_calls = 128
-    max_control_retries = 8
-  }`
+    deferred_transport {
+      control_timeout = "200ms"
+      max_wait = "3s"
+      poll_interval = "50ms"
+      max_control_calls = 128
+      max_control_retries = 8
+    }`
 	}
 	return `
 listener "http" "public" { address = ":0" }
@@ -161,8 +161,10 @@ provider "openai-compatible" "peer" {
   api_key = "` + credential + `"
   forward_user_agent = true
   forward_headers = ["x-inference"]
+  model "m" {
+    upstream_name = "p/m"
 ` + block + `
-  model "m" { upstream_name = "p/m" }
+  }
 }
 `
 }

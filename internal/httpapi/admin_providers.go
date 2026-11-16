@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -197,6 +198,10 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 				http.Error(w, "invalid body", http.StatusBadRequest)
 				return
 			}
+			if err := validateManagedDeferredDeclarations(strings.TrimSpace(req.Name), req.hasDeferredDeclarations()); err != nil {
+				writeCatalogError(deps, w, err)
+				return
+			}
 			workspace, ok := h.resolveWriteWorkspace(deps, w, r, claims, req.WorkspaceID)
 			if !ok {
 				return
@@ -310,12 +315,31 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 }
 
 type adminModelUpsert struct {
-	Name         string             `json:"name"`
-	DisplayName  string             `json:"display_name"`
-	UpstreamName string             `json:"upstream_name"`
-	Protocol     string             `json:"protocol"`
-	Capabilities []string           `json:"capabilities"`
-	Pricing      map[string]float64 `json:"pricing"`
+	Name                           string             `json:"name"`
+	DisplayName                    string             `json:"display_name"`
+	UpstreamName                   string             `json:"upstream_name"`
+	Protocol                       string             `json:"protocol"`
+	Capabilities                   []string           `json:"capabilities"`
+	Pricing                        map[string]float64 `json:"pricing"`
+	unsupportedDeferredDeclaration bool
+}
+
+func (req *adminModelUpsert) UnmarshalJSON(raw []byte) error {
+	type plainUpsert adminModelUpsert
+	var decoded plainUpsert
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	if err := visitAdminJSONFields(raw, func(name string, _ json.RawMessage) error {
+		if isDeferredJSONDeclaration(name) {
+			decoded.unsupportedDeferredDeclaration = true
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	*req = adminModelUpsert(decoded)
+	return nil
 }
 
 type adminHealthcheckUpsert struct {
@@ -374,20 +398,40 @@ func (req *adminProviderUpsert) UnmarshalJSON(raw []byte) error {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		return err
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return err
-	}
-	for name := range fields {
+	if err := visitAdminJSONFields(raw, func(name string, value json.RawMessage) error {
 		if jsonFieldHasPrefix(name, "tls_client_hello") && !strings.EqualFold(name, "tls_client_hello") {
 			decoded.unsupportedTLSDeclaration = true
 		}
 		if isDeferredJSONDeclaration(name) {
 			decoded.unsupportedDeferredDeclaration = true
 		}
+		if strings.EqualFold(name, "models") {
+			declared, err := deferredModelJSONDeclarations(value)
+			if err != nil {
+				return err
+			}
+			decoded.unsupportedDeferredDeclaration = decoded.unsupportedDeferredDeclaration || declared
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	*req = adminProviderUpsert(decoded)
 	return nil
+}
+
+func (req adminProviderUpsert) hasDeferredDeclarations() bool {
+	if req.unsupportedDeferredDeclaration {
+		return true
+	}
+	if req.Models != nil {
+		for _, model := range *req.Models {
+			if model.unsupportedDeferredDeclaration {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type adminCredentialUpsert struct {
@@ -406,20 +450,71 @@ func (req *adminCredentialUpsert) UnmarshalJSON(raw []byte) error {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		return err
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return err
-	}
-	for name := range fields {
+	if err := visitAdminJSONFields(raw, func(name string, value json.RawMessage) error {
 		if jsonFieldHasPrefix(name, "tls_client_hello") {
 			decoded.unsupportedTLSDeclaration = true
 		}
 		if isDeferredJSONDeclaration(name) {
 			decoded.unsupportedDeferredDeclaration = true
 		}
+		if strings.EqualFold(name, "models") {
+			declared, err := deferredModelJSONDeclarations(value)
+			if err != nil {
+				return err
+			}
+			decoded.unsupportedDeferredDeclaration = decoded.unsupportedDeferredDeclaration || declared
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	*req = adminCredentialUpsert(decoded)
 	return nil
+}
+
+func visitAdminJSONFields(raw []byte, visit func(string, json.RawMessage) error) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	if token != json.Delim('{') {
+		return nil
+	}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return err
+		}
+		if err := visit(token.(string), value); err != nil {
+			return err
+		}
+	}
+	_, err = decoder.Token()
+	return err
+}
+
+func deferredModelJSONDeclarations(raw []byte) (bool, error) {
+	models := []json.RawMessage{raw}
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '[' {
+		if err := json.Unmarshal(raw, &models); err != nil {
+			return false, err
+		}
+	}
+	declared := false
+	for _, model := range models {
+		if err := visitAdminJSONFields(model, func(name string, _ json.RawMessage) error {
+			declared = declared || isDeferredJSONDeclaration(name)
+			return nil
+		}); err != nil {
+			return false, err
+		}
+	}
+	return declared, nil
 }
 
 func jsonFieldHasPrefix(name, prefix string) bool {
@@ -741,7 +836,7 @@ func (h *Handler) buildConfigProvider(deps Dependencies, row store.DBProvider, m
 
 func (h *Handler) createDBProvider(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, workspace store.Workspace, req adminProviderUpsert) (adminProviderView, error) {
 	name := strings.TrimSpace(req.Name)
-	if err := validateManagedDeferredDeclarations(name, req.unsupportedDeferredDeclaration); err != nil {
+	if err := validateManagedDeferredDeclarations(name, req.hasDeferredDeclarations()); err != nil {
 		return adminProviderView{}, err
 	}
 	if !config.IsLowercaseName(name) {
@@ -950,7 +1045,7 @@ func (h *Handler) updateDBProviderWithFlow(ctx context.Context, deps Dependencie
 }
 
 func (h *Handler) applyProviderUpsert(name string, row *store.DBProvider, req adminProviderUpsert) error {
-	if err := validateManagedDeferredDeclarations(name, req.unsupportedDeferredDeclaration); err != nil {
+	if err := validateManagedDeferredDeclarations(name, req.hasDeferredDeclarations()); err != nil {
 		return err
 	}
 	extends := row.Extends
@@ -1055,6 +1150,9 @@ func (h *Handler) buildDBModels(name string, reqModels *[]adminModelUpsert) ([]s
 	}
 	models := make([]store.DBProviderModel, 0, len(*reqModels))
 	for _, m := range *reqModels {
+		if err := validateManagedDeferredDeclarations(name, m.unsupportedDeferredDeclaration); err != nil {
+			return nil, err
+		}
 		modelName := strings.TrimSpace(m.Name)
 		if modelName == "" {
 			return nil, errBad("model name is required")
@@ -1082,7 +1180,7 @@ func (h *Handler) buildDBModels(name string, reqModels *[]adminModelUpsert) ([]s
 
 func (h *Handler) updateDBProvider(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, req adminProviderUpsert) (adminProviderView, error) {
 	name := strings.TrimSpace(req.Name)
-	if err := validateManagedDeferredDeclarations(name, req.unsupportedDeferredDeclaration); err != nil {
+	if err := validateManagedDeferredDeclarations(name, req.hasDeferredDeclarations()); err != nil {
 		return adminProviderView{}, err
 	}
 	p, err := deps.AdminStore.GetProvider(ctx, name)

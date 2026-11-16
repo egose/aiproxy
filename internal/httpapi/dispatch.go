@@ -52,7 +52,7 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		Body:                 body,
 		Inbound:              inbound,
 		Client:               clientForProvider(deps, r.Provider),
-		DeferredTransport:    r.Provider.DeferredTransport,
+		DeferredTransport:    config.EffectiveDeferredTransport(r.Provider, r.Model),
 		ExecutionLimits:      execution.executionLimits(),
 		ObserveBody:          execution.bodyObserver(),
 	})
@@ -363,7 +363,7 @@ targetLoop:
 				Body:                 currentBody,
 				Inbound:              req,
 				Client:               clientForProvider(deps, prov),
-				DeferredTransport:    prov.DeferredTransport,
+				DeferredTransport:    config.EffectiveDeferredTransport(prov, model),
 				ExecutionLimits:      execution.executionLimits(),
 				ObserveBody:          execution.bodyObserver(),
 			})

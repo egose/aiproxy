@@ -95,7 +95,7 @@ func deferredOwner(principal *auth.Principal) (deferred.Owner, error) {
 func deferredReceiverLimits(deps Dependencies, resolved modelresolver.ResolveResult) (deferred.ReceiverLimits, error) {
 	var limits deferred.ReceiverLimits
 	check := func(p config.Provider, model config.Model) error {
-		if p.DeferredReceiver == nil || p.DeferredTransport != nil || p.ForwardAuthorization ||
+		if p.DeferredReceiver == nil || config.HasCallerDeferredTransport(p) || model.DeferredTransport != nil || p.ForwardAuthorization ||
 			!config.HasCapability(config.EffectiveCapabilities(p.Type, model), config.CapabilityChat) {
 			return fmt.Errorf("every deferred target must be receiver-opted-in and chat-capable without caller deferral")
 		}

@@ -402,13 +402,27 @@ func TestDeferredCapabilitiesValidateWholeAliasPoolAndMinimumLimits(t *testing.T
 	if capability.Limits.ResultBytes != 2048 || capability.Limits.ExecutionTimeoutMS != 1000 {
 		t.Fatalf("alias advertised wider than its pool: %+v", capability.Limits)
 	}
-	for _, mode := range []string{"missing_receiver", "recursive", "unsupported_chat"} {
-		bad := p2
+	directCapability := f.capability(t, "p2/m")
+	for _, mode := range []string{
+		"missing_receiver", "recursive", "unsupported_chat", "caller_model_slice",
+		"caller_model_index", "caller_sibling_slice", "caller_sibling_index",
+	} {
+		bad, _ := config.NewCatalog([]config.Provider{p2}, nil, nil).Provider("p2")
 		switch mode {
 		case "missing_receiver":
 			bad.DeferredReceiver = nil
 		case "recursive":
 			bad.DeferredTransport = &config.DeferredTransport{}
+		case "caller_model_slice":
+			bad.Models[0].DeferredTransport = &config.DeferredTransport{}
+		case "caller_model_index":
+			model := bad.ModelByName["m"]
+			model.DeferredTransport = &config.DeferredTransport{}
+			bad.ModelByName["m"] = model
+		case "caller_sibling_slice":
+			bad.Models = append(bad.Models, config.Model{Name: "caller", UpstreamName: "peer/m", DeferredTransport: &config.DeferredTransport{}})
+		case "caller_sibling_index":
+			bad.ModelByName["caller"] = config.Model{Name: "caller", UpstreamName: "peer/m", DeferredTransport: &config.DeferredTransport{}}
 		case "unsupported_chat":
 			bad.Models = []config.Model{{Name: "m", UpstreamName: "actual", Capabilities: []config.Capability{config.CapabilityEmbeddings}}}
 			bad.ModelByName = nil
@@ -417,14 +431,19 @@ func TestDeferredCapabilitiesValidateWholeAliasPoolAndMinimumLimits(t *testing.T
 		deps = f.h.current()
 		deps.Catalog, deps.Resolver = f.rt.Catalog, modelresolver.New(f.rt)
 		f.h.UpdateDependencies(deps)
-		w := f.call("GET", deferred.Prefix+"/capabilities?model=alias/a", "peer-token", nil)
-		if w.Code != 400 {
-			t.Fatalf("%s alias capability: %d %s", mode, w.Code, w.Body.String())
-		}
-		request := deferredSubmitRequest(t, capability, []byte(`{"model":"alias/a","messages":[]}`))
-		w = f.call("POST", deferred.Prefix+"/submit", "peer-token", submitWire(t, request))
-		if w.Code != 400 || calls.Load() != 0 {
-			t.Fatalf("%s alias submitted by filtering its pool: %d %s", mode, w.Code, w.Body.String())
+		for _, target := range []struct {
+			model      string
+			capability deferred.Capability
+		}{{"p2/m", directCapability}, {"alias/a", capability}} {
+			w := f.call("GET", deferred.Prefix+"/capabilities?model="+target.model, "peer-token", nil)
+			if w.Code != 400 {
+				t.Fatalf("%s %s capability: %d %s", mode, target.model, w.Code, w.Body.String())
+			}
+			request := deferredSubmitRequest(t, target.capability, []byte(`{"model":"`+target.model+`","messages":[]}`))
+			w = f.call("POST", deferred.Prefix+"/submit", "peer-token", submitWire(t, request))
+			if w.Code != 400 || calls.Load() != 0 {
+				t.Fatalf("%s %s bypassed receiver eligibility: %d %s", mode, target.model, w.Code, w.Body.String())
+			}
 		}
 	}
 }

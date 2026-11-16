@@ -136,26 +136,26 @@ func cloneProvider(provider Provider) Provider {
 		hc := *provider.Healthcheck
 		out.Healthcheck = &hc
 	}
-	if provider.DeferredTransport != nil {
-		deferred := *provider.DeferredTransport
-		out.DeferredTransport = &deferred
-	}
+	out.DeferredTransport = cloneDeferredTransport(provider.DeferredTransport)
 	if provider.DeferredReceiver != nil {
 		deferred := *provider.DeferredReceiver
 		out.DeferredReceiver = &deferred
 	}
 	out.Models = cloneModels(provider.Models)
 	out.ModelByName = make(map[string]Model, len(out.Models)+len(provider.ModelByName))
-	for _, model := range out.Models {
-		out.ModelByName[model.Name] = cloneModel(model)
+	for i := range out.Models {
+		model := &out.Models[i]
+		if model.DeferredTransport == nil {
+			model.DeferredTransport = cloneDeferredTransport(provider.ModelByName[model.Name].DeferredTransport)
+		}
+		out.ModelByName[model.Name] = cloneModel(*model)
 	}
-	for name, model := range provider.ModelByName {
+	for name, indexed := range provider.ModelByName {
 		if _, ok := out.ModelByName[name]; ok {
 			continue
 		}
-		model = cloneModel(model)
-		out.ModelByName[name] = model
-		out.Models = append(out.Models, model)
+		out.Models = append(out.Models, cloneModel(indexed))
+		out.ModelByName[name] = cloneModel(indexed)
 	}
 	return out
 }
@@ -173,7 +173,16 @@ func cloneModels(in []Model) []Model {
 
 func cloneModel(model Model) Model {
 	model.Capabilities = append([]Capability(nil), model.Capabilities...)
+	model.DeferredTransport = cloneDeferredTransport(model.DeferredTransport)
 	return model
+}
+
+func cloneDeferredTransport(in *DeferredTransport) *DeferredTransport {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
 
 func cloneAliases(in []Alias) []Alias {
