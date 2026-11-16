@@ -50,6 +50,30 @@ const toc = [{
   "id": "streaming",
   "level": 2
 }, {
+  "value": "Peer Deferred Transport v1",
+  "id": "peer-deferred-transport-v1",
+  "level": 2
+}, {
+  "value": "Peer Routes And Recognition",
+  "id": "peer-routes-and-recognition",
+  "level": 3
+}, {
+  "value": "Peer JSON Schema",
+  "id": "peer-json-schema",
+  "level": 3
+}, {
+  "value": "Peer State And Byte Delivery",
+  "id": "peer-state-and-byte-delivery",
+  "level": 3
+}, {
+  "value": "Acceptance And Deduplication",
+  "id": "acceptance-and-deduplication",
+  "level": 3
+}, {
+  "value": "Peer Control Errors",
+  "id": "peer-control-errors",
+  "level": 3
+}, {
   "value": "Authentication",
   "id": "authentication",
   "level": 2
@@ -654,6 +678,835 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "If an upstream stream fails after partial output, the proxy terminates the stream instead of fabricating a full JSON response."
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "peer-deferred-transport-v1",
+      children: "Peer Deferred Transport v1"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["This private opt-in extension serves chat completions between a statically\nconfigured caller and executor. It adds ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "no provider/model capability"
+      }), " and is\nnot Batch or Responses background mode. Ordinary clients keep\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/chat/completions"
+      }), ", JSON/SSE and their original ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "stream"
+      }), " choice; they do\nnot receive peer receipts, cursors or private headers. Other operations keep\nordinary transport. See ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#peer-deferred-transport-v1",
+        children: "configuration"
+      }), "\nand ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#peer-deferred-transport-v1",
+        children: "operational limits"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "peer-routes-and-recognition",
+      children: "Peer Routes And Recognition"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The executor serves the unmounted prefix ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/_internal/deferred/v1"
+      }), ". Private paths\nare intercepted before web UI fallback. All controls require inference bearer\nauthentication and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Aiproxy-Deferred-Version: 1"
+      }), "; job controls additionally\nrequire one ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Aiproxy-Deferred-Generation"
+      }), " header matching their receipt.\nSubmit carries the generation in its envelope."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.th, {
+            children: ["Method / path under ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "/_internal/deferred/v1"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Success status / body"
+          }), (0,jsx_runtime.jsxs)(_components.th, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "Allow"
+            }), " on a wrong method"]
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "GET /capabilities?model=<public-model>"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "200 Capability"
+            }), "; current model/receiver eligibility, no inference quota charge"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "GET"
+            })
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "POST /submit"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "202 Receipt"
+            }), " after bounded admission/scheduling, or accepted dedup replay"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "POST"
+            })
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "GET /jobs/{id}"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "200 JobInfo"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "GET, DELETE"
+            })
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "GET /jobs/{id}/result"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "202 JobInfo"
+            }), " while active; ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "200 ResultManifest"
+            }), " when terminal; no body bytes here"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "GET"
+            })
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "GET /jobs/{id}/read?cursor=<offset>&limit=<bytes>"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "200 ReadFrame"
+            }), ", immediate finite snapshot; required cursor, optional limit 1–65536, default 65536 bytes"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "GET"
+            })
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "DELETE /jobs/{id}"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Empty ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "204"
+            }), "; cancel-if-running and release, including repeated known release"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "GET, DELETE"
+            })
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Only submit has a request body, with\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Content-Type: application/vnd.aiproxy.deferred+json"
+      }), ". Query fields must be\nrecognized and unique; submit has no query. Every recognized response carries:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-http",
+        children: "Content-Type: application/vnd.aiproxy.deferred+json\nX-Aiproxy-Deferred-Version: 1\nCache-Control: private, no-store\nPragma: no-cache\nVary: Authorization\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The empty ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "204"
+      }), " still carries these headers. Recognition requires the dedicated\npath, exact media/version markers, matching envelope and expected identity,\n", (0,jsx_runtime.jsxs)(_components.strong, {
+        children: ["not just HTTP ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "202"
+        })]
+      }), ". The caller validates a positive capability for its\nconfigured executor public model before any submit. Missing/wrong-version\ncapabilities cause zero submits. An unrecognized submit response is\nindeterminate, never permission to use synchronous fallback or a new attempt."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["For a caller ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), ", remove one terminal ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/v1"
+      }), " segment and append the private\nprefix: ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https://executor.example/mount/v1"
+      }), " becomes\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https://executor.example/mount/_internal/deferred/v1"
+      }), ". An external mount must\nstrip ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/mount"
+      }), " before forwarding to the executor. Query strings, fragments, dot\nsegments, backslashes and encoded path separators are invalid in a deferred\ncaller base URL. Control URLs are derived locally, never from arbitrary peer\nlinks. Submit's ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Location"
+      }), " must match the expected origin, mount and job path\n(the exact absolute URL or path). ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "All control redirects are forbidden."
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["For the ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#full-caller-configuration",
+        children: "full configuration examples"
+      }), ",\ncapability discovery is:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-http",
+        children: "GET /_internal/deferred/v1/capabilities?model=alias%2Fpeer_chat HTTP/1.1\nHost: executor.example\nAuthorization: Bearer <peer-token>\nAccept: application/vnd.aiproxy.deferred+json\nX-Aiproxy-Deferred-Version: 1\n"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Substitute the configured peer token; use the returned generation/ticket and\nreceipt ID, not invented identifiers, for subsequent controls. A read request is:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-http",
+        children: "GET /_internal/deferred/v1/jobs/<receipt-id>/read?cursor=0&limit=65536 HTTP/1.1\nHost: executor.example\nAuthorization: Bearer <peer-token>\nAccept: application/vnd.aiproxy.deferred+json\nX-Aiproxy-Deferred-Version: 1\nX-Aiproxy-Deferred-Generation: <receipt-generation>\n"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "peer-json-schema",
+      children: "Peer JSON Schema"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Objects below use flattened fields, not wrapper objects named ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Receipt"
+      }), " or\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "JobInfo"
+      }), ". Every envelope has ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "protocol: \"aiproxy-deferred\""
+      }), " and numeric\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "version: 1"
+      }), ". Unknown/duplicate fields and numeric overflow are rejected.\nTimestamps are integer Unix milliseconds; durations are integer milliseconds.\nOptional fields are omitted when absent."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Object"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Required fields in addition to the common envelope"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "Capability"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "generation"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "public_model"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "submit_token"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "submit_until_ms"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "limits"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "poll_after_ms"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "SubmitRequest"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "generation"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "submit_token"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "attempt_key"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "headers"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "body"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "Receipt"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "generation"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "id"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "public_model"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "attempt_key"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "scope_digest"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "fingerprint"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "state"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "execution_deadline_ms"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "dedup_until_ms"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "poll_after_ms"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "replayed"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "JobInfo"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["All receipt fields plus ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "available_bytes"
+            }), "; optional ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "response"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "outcome"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "retain_until_ms"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "ResultManifest"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["All job-info fields plus ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "body_sha256"
+            }), "; terminal only"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "ReadFrame"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["All job-info fields plus ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "cursor"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "next_cursor"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "data"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "done"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "ControlError"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "error"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "acceptance"
+            }), "; optional ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "poll_after_ms"
+            })]
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Nested object"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Fields / meaning"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "limits"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "request_bytes"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "result_bytes"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "execution_timeout_ms"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "retention_ms"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "control_timeout_ms"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "finalization_timeout_ms"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "read_bytes"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "response"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "status_code"
+            }), " (200–599), ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "headers"
+            }), " (name → string array), ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "streaming"
+            }), " (boolean); optional ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "retry"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "retry"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "observed_at_ms"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "deadline_ms"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "remaining_ms"
+            }), "; original inference retry timing, not control poll advice"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "outcome"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "kind"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "usage"
+            }), "; optional ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "error"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "usage"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Nonnegative observed integers: ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "prompt_tokens"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "completion_tokens"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "total_tokens"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "cached_tokens"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "cache_creation_tokens"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "cache_read_tokens"
+            }), "; no estimates"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "error"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "type"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "message"
+            }), "; optional ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "block_id"
+            })]
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "body"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "data"
+      }), " are non-null standard JSON base64 strings; empty bytes are\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"\""
+      }), ". The decoded submit body is a JSON object with one required ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), " string\nand zero/one boolean ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "stream"
+      }), "; other inference fields are retained. It contains\nthe caller adapter's model rewrite, then undergoes executor admission and\nexisting adapter processing. The bounded ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "headers"
+      }), " bag has JSON content type\nand safe prepared inference metadata, never credentials, cookies, hop-by-hop or\nprivate deferred headers."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "cursor"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "next_cursor"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "available_bytes"
+      }), " are ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "strings"
+      }), " containing canonical\nunsigned decimal byte offsets/counts, with no sign or leading zeros except ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"0\""
+      }), ".\nGeneration and job IDs are canonical unpadded base64url encodings of 16 random\nbytes. Attempt keys are 22–64 base64url characters, generated with at least\n128 random bits. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "scope_digest"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "fingerprint"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "body_sha256"
+      }), " are lowercase\nSHA-256 hex strings. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "public_model"
+      }), " is at most 512 bytes."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Header bags allow at most 64 case-insensitively distinct names, 128 values total\nand 4096 bytes/value. Non-data serialized metadata is at most 16 KiB; error detail\nis at most 1 KiB. Finite control responses are at most 128 KiB, reads at most\n64 KiB decoded data, and submission tickets at most 512 bytes. Submit input has\nits separate decoded request ceiling plus bounded base64/metadata scratch;\nthe 128 KiB response ceiling is not a submit input ceiling."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "peer-state-and-byte-delivery",
+      children: "Peer State And Byte Delivery"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "State"
+          }), (0,jsx_runtime.jsxs)(_components.th, {
+            children: ["Terminal ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "outcome.kind"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Meaning"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "running"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Absent"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["No selected response; reads can have empty ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "data"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "headers_ready"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Absent"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Final selected adapter head and incremental bytes, not an intermediate alias attempt"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "completed"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "response"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Complete normalized adapter result, including provider HTTP errors"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "failed"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "upstream_error"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "invalid_request"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "execution_timeout"
+            }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "limit_exceeded"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Known failed execution; an exact streamed prefix may be retained"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "cancelled"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "cancelled"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Local cancellation, not proof external execution/billing stopped"
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Released/expired tombstones are not result states and disclose no retained head\nor body. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "response"
+      }), " is the original selected status and filtered headers after\nexisting adapter/non-JSON-error normalization, with private headers stripped.\nA terminal provider ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "500"
+      }), " is a ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "completed"
+      }), " / ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "response"
+      }), " outcome, not a peer\ncontrol ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "500"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Each read atomically captures state/head/outcome/available tail and one finite\nbyte slice. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "next_cursor = cursor + len(decoded_data)"
+      }), ". A cursor beyond that\ncaptured tail is ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "400 invalid_cursor"
+      }), ". ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "done"
+      }), " is true only when terminal and\nthe frame reaches the final byte; an empty pending frame or HTTP EOF is not\ncompletion. Decode and validate the ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "whole transfer"
+      }), " before delivering bytes\nand advancing the cursor; discard partial transfers and retry the unchanged\ncursor."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The terminal manifest hashes all final retained body bytes, including an empty\nbody or failed prefix. Unary callers wait for that manifest. Streaming callers\ndeliver the existing adapter/native bytes incrementally without synthetic SSE\nevents, IDs, heartbeats or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "[DONE]"
+      }), "; terminal validation cannot retract already\ndelivered bytes. After downstream commitment, errors terminate the stream rather\nthan selecting another inference. This is peer byte recovery, not client-session\nresume."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "acceptance-and-deduplication",
+      children: "Acceptance And Deduplication"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Capabilities issue a stateless signed ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "30-second"
+      }), " ticket binding protocol,\nprocess generation, owner/model digests, nonce, expiry and advertised limits.\nQualified dedup identity is ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "(generation, SHA256(ticket), owner, attempt_key)"
+      }), ".\nThe fingerprint covers fixed operation/model, exact decoded body and canonical\nheader bag, not mutable credentials or post-guardrail output."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The same fingerprint replays an accepted receipt without repeating inference\nadmission, rate/quota charges or guardrails. A conflict returns ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "409"
+      }), "; a still\npreparing duplicate returns ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "409 submission_in_progress"
+      }), ". Preparation rejections\nare cached through the ticket window. Accepted records/tombstones remain protected\nthrough ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "dedup_until_ms = submit_until_ms + execution_timeout_ms + retention_ms + finalization_timeout_ms"
+      }), ". Existing accepted entries can replay after ticket\nexpiry; absent expired scopes or old generations dispatch nothing."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Once submit begins, the caller freezes generation/ticket/key/prepared input.\nLost acknowledgments retry only that qualified submit, never a fresh capability\nor key. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "acceptance"
+      }), " is ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "not_accepted"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "accepted"
+      }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "indeterminate"
+      }), "; later\nauth/control failures never downgrade an accepted/indeterminate logical attempt.\nMissing restart evidence means unavailable/indeterminate, not invented proof of\nexpiry, cancellation or exactly-once external work."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "peer-control-errors",
+      children: "Peer Control Errors"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Protocol errors use ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "ControlError"
+      }), ". Existing ordinary inference admission\nrejections instead preserve their ordinary ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "{\"error\": ...}"
+      }), " shape, status/type\nand optional ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "block_id"
+      }), ", without protocol fields. Neither is an inference\nsuccess or provider outcome."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Status / type"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Meaning"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "400"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Invalid envelope, body, headers, model/receiver eligibility or query; ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "invalid_cursor"
+            }), " for invalid reads"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "401 auth_failed"
+            }), " / ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "403 forbidden"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Current inference authentication / admitted-model authorization failed; no result disclosure"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "404 job_unavailable"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Unknown or different-owner job, including unknown DELETE"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "404 deferred_disabled"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "New deferred admission is disabled"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "405 method_not_allowed"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Recognized route, unsupported method; carries ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "Allow"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "409 attempt_conflict"
+            }), " / ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "409 submission_in_progress"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Conflicting qualified request / preparation still active"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "410 job_released"
+            }), " / ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "410 job_expired"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Protected release / retention expiry"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "410 generation_mismatch"
+            }), " / ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "410 submit_scope_expired"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Old generation / absent expired submission scope; zero dispatch"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "413 request_too_large"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Oversized decoded/wire submit input"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "426 unsupported_deferred_version"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Wrong path version or missing/wrong version header"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "429 deferred_owner_limit"
+            }), " / ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "429 deferred_control_limited"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Owner admission / control pressure"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "503 deferred_saturated"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Global admission/resource pressure"
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "The ordinary caller sees standard JSON errors before downstream commitment:"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Caller status / error type"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Meaning"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "502 deferred_protocol_error"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Capability/version/marker/schema/identity or terminal-hash validation failed"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "502 deferred_submit_indeterminate"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Unacknowledged submission uncertainty; no fresh inference"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "502 deferred_request_lost"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Accepted work became unavailable; no fresh inference"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "502 deferred_control_error"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Control failure or recovery budgets exhausted"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "504 deferred_wait_timeout"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Overall caller wait expired"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "504 deferred_execution_timeout"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Fixed executor job deadline expired"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "502 deferred_limit_exceeded"
+            }), " / ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "502 deferred_cancelled"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Bounded execution failed / observable local cancellation"
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Definite terminal provider HTTP/transport outcomes ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "before downstream\ncommitment"
+      }), " still use ordinary inference retry rules. Peer errors, polling\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Retry-After"
+      }), ", admission pressure and accepted/indeterminate retrieval failures\ndo not trigger alias/encrypted-reasoning inference retries, provider-health\nmutation or model cooldown. After commitment, failure only terminates the stream.\nSee ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#ownership-cancellation-and-release",
+        children: "ownership and cleanup"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "authentication",
       children: "Authentication"
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
@@ -937,6 +1790,11 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "Unsupported operations return client-visible proxy errors"
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Peer deferred control failures are not provider outcomes and do not authorize\nalias failover; definite terminal inference outcomes retain the rules above\nbefore downstream commitment (see ", (0,jsx_runtime.jsx)(_components.a, {
+          href: "#peer-control-errors",
+          children: "peer errors"
+        }), ")"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["For database-owned user/team keys, unavailable required quota policy or spend\ndata returns JSON ", (0,jsx_runtime.jsx)(_components.code, {
           children: "503"
         }), "\n(", (0,jsx_runtime.jsx)(_components.code, {
@@ -1044,6 +1902,15 @@ function _createMdxContent(props) {
         href: "/docs/configuration#forwarding-client-authorization",
         children: "client authorization forwarding"
       }), "\nfor supported types and credential-exposure warnings."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred_transport"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred_receiver"
+      }), " are static-config-only.\nAdministrative provider POST/PUT and credential PUT reject either field before\ncommit, including null/empty objects and case variants, for every admin role.\nManaged derivatives cannot extend a static base carrying either opt-in.\nThere are no writable managed/web transport fields; see\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#peer-deferred-transport-v1",
+        children: "peer configuration"
+      }), "."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Within an existing ", (0,jsx_runtime.jsx)(_components.code, {
         children: "healthcheck"

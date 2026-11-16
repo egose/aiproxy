@@ -82,6 +82,30 @@ const toc = [{
   "id": "upstream-header-timeout",
   "level": 2
 }, {
+  "value": "Peer Deferred Transport v1",
+  "id": "peer-deferred-transport-v1",
+  "level": 2
+}, {
+  "value": "Executor Policy",
+  "id": "executor-policy",
+  "level": 3
+}, {
+  "value": "Caller Policy",
+  "id": "caller-policy",
+  "level": 3
+}, {
+  "value": "Receiver Limits",
+  "id": "receiver-limits",
+  "level": 3
+}, {
+  "value": "Full Caller Configuration",
+  "id": "full-caller-configuration",
+  "level": 3
+}, {
+  "value": "Full Executor Configuration",
+  "id": "full-executor-configuration",
+  "level": 3
+}, {
   "value": "Upstream TLS ClientHello",
   "id": "upstream-tls-clienthello",
   "level": 2
@@ -192,6 +216,10 @@ function _createMdxContent(props) {
         children: (0,jsx_runtime.jsx)(_components.code, {
           children: "alias \"<name>\""
         })
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["optional ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "deferred"
+        }), " executor policy"]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "mental-model",
@@ -570,6 +598,15 @@ function _createMdxContent(props) {
         }), " profiles)"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "deferred_transport"
+        }), " / ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "deferred_receiver"
+        }), " (static-only peer transport opt-ins;\nsee ", (0,jsx_runtime.jsx)(_components.a, {
+          href: "#peer-deferred-transport-v1",
+          children: "Peer Deferred Transport v1"
+        }), ")"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "enabled"
         }), " (optional, default ", (0,jsx_runtime.jsx)(_components.code, {
           children: "true"
@@ -594,7 +631,13 @@ function _createMdxContent(props) {
         children: "Authorization"
       }), "\nheader. To\nintentionally disable a provider, declare ", (0,jsx_runtime.jsx)(_components.code, {
         children: "enabled = false"
-      }), "; disabled\nproviders are still validated for structure, URL, models, capabilities and TLS profiles,\nbut they do not require a usable credential."]
+      }), "; disabled\nproviders are still validated for structure, URL, models, capabilities and TLS profiles,\nbut they normally do not require a usable credential. A declared\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred_transport"
+      }), " still requires a configured ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key"
+      }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key_ref"
+      }), ",\nincluding on a disabled provider."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "forwarding-client-authorization",
       children: "Forwarding Client Authorization"
@@ -874,7 +917,7 @@ function _createMdxContent(props) {
         children: "provider \"openai-compatible\" \"nvidia-1\" {\n  display_name = \"Nvidia - j.dev\"\n  base_url     = \"https://integrate.api.nvidia.com/v1\"\n\n  api_key_ref {\n    key = \"nvidia-1\"\n  }\n\n  model \"z-ai/glm-5.2\" {\n    display_name = \"GLM 5.2\"\n    capabilities = [\"chat\", \"responses\"]\n  }\n}\n\nprovider \"openai-compatible\" \"nvidia-2\" {\n  extends      = \"nvidia-1\"\n  display_name = \"Nvidia - corean\"\n\n  api_key_ref {\n    key = \"nvidia-2\"\n  }\n}\n"
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["A derived provider may be declared before or after its base. It may declare only ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["A derived provider may be declared before or after its base. It normally declares ", (0,jsx_runtime.jsx)(_components.code, {
         children: "extends"
       }), ", optional ", (0,jsx_runtime.jsx)(_components.code, {
         children: "display_name"
@@ -917,6 +960,14 @@ function _createMdxContent(props) {
       }), " declarations are rejected instead of ignored, including explicit TLS defaults."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Derived providers are flattened during config loading and reload. After a successful load, direct model strings, health, metrics, billing, and dashboard inventory use the derived provider's own name. Aliases still list each provider target explicitly."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Static derivatives may also declare a ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "local"
+      }), " ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred_transport"
+      }), " or\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred_receiver"
+      }), " block. Neither opt-in nor its provider-level limits are\ninherited; an omitted block means ordinary transport. Local caller blocks use\ncaller defaults, and local receiver blocks use root defaults. Managed derivatives\ncannot extend a base with either opt-in."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "upstream-header-timeout",
       children: "Upstream Header Timeout"
@@ -938,9 +989,500 @@ function _createMdxContent(props) {
         children: "upstream_header_timeout = \"120s\"\n\nprovider \"openai\" \"openai\" {\n  upstream_header_timeout = \"180s\"\n}\n"
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Precedence is provider value, then root value, then the 90-second default. The timeout applies only until response headers arrive; JSON and streaming response bodies can continue for any duration after headers are received. Root and provider timeout changes apply on a successful ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Precedence is provider value, then root value, then the 90-second default. The timeout applies only until response headers arrive; it does not cap JSON or streaming response bodies after headers are received. Deferred execution has a separate whole-job deadline. Root and provider timeout changes apply on a successful ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
       }), " reload."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "peer-deferred-transport-v1",
+      children: "Peer Deferred Transport v1"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["This opt-in replaces a silent, long-lived ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "caller proxy → executor proxy"
+      }), " chat\nrequest with one submission and bounded finite polls. End clients still call\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/chat/completions"
+      }), " with their original ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "stream"
+      }), " choice and receive ordinary\nJSON or SSE. It is a transport extension, ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "not a model capability, Batch API, or\nResponses background mode"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Role / operation"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Opt-in and behavior"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Caller"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Static ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "openai-compatible"
+            }), " provider with ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "deferred_transport"
+            }), "; chat JSON/SSE only"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Executor"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Root ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "deferred"
+            }), " plus a static ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "deferred_receiver"
+            }), " provider and a chat-capable model; uses the existing adapter"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Caller aliases"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "May mix ordinary and deferred targets; peer control failures never authorize a new inference attempt"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Executor aliases"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Every configured target must be static, receiver-opted-in and chat-capable, with no caller opt-in; mixed pools are rejected, not filtered or reordered"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Other operations"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Use ordinary transport and existing capability checks, even on a caller-opted-in provider"
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The caller's ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "upstream_name"
+      }), " names the executor's ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "public"
+      }), " model, such as\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "primary/chat"
+      }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "alias/peer_chat"
+      }), ". Executor aliases advertise the minimum\nexecution timeout and result limit of the entire target pool."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["All three settings are unlabeled blocks, supported in HCL, JSON and inline\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "AIPROXY_CONFIG"
+      }), ". Block presence enables the opt-in; there is no ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "enabled"
+      }), "\nattribute, and null declarations are invalid. A caller-only proxy does not need a\nroot ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred"
+      }), " block. An executor requires ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "auth.mode = \"bearer_static\""
+      }), ".\nOpt-ins require at least one chat-capable model and are validated even on disabled\nproviders. A provider cannot declare both roles or combine either with\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "forward_authorization"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["These settings are ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "static-config-only"
+      }), ". Managed provider/credential writes\nreject either declaration, including empty/null and case-variant fields, before\ncommit; managed providers cannot inherit an opted-in base. There are no new\ninteractive or non-interactive CLI creation flags or web form fields. Existing\nCLI edits preserve the blocks and supported ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env()"
+      }), " spelling."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "executor-policy",
+      children: "Executor Policy"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Defaults below apply when ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred {}"
+      }), " is declared. Durations are Go duration\nstrings; byte sizes and counts are integers. Ranges are inclusive."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.th, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "deferred"
+            }), " attribute"]
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Default"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Range / rule"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_jobs"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "64"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "1–4096; retained jobs and outstanding finalization ownership"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_running"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "8"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["1–256, at most ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_jobs"
+            }), "; preparation reserves a slot"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_admissions"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "4"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "1–64 concurrent submit readers/preparations"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_entries"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "256"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "max_jobs"
+            }), "–65536; dedup records, including rejections and tombstones"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_memory_bytes"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "268435456"
+            }), " (256 MiB)"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "16 MiB–4 GiB; feature-owned reservations, not total process RSS"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_request_bytes"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "1048576"
+            }), " (1 MiB)"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "1 KiB–8 MiB decoded inference input, before base64 expansion"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_result_bytes"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "8388608"
+            }), " (8 MiB)"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "1 KiB–32 MiB retained output / buffered upstream body ceiling"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_work_bytes"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "67108864"
+            }), " (64 MiB)"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "4–256 MiB temporary work reservation per job"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "per_owner_jobs"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "8"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["1–", (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_jobs"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "per_owner_running"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "2"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["1–", (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_running"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_control_inflight"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "16"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "4–128; two slots reserved for DELETE"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "execution_timeout"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "\"10m\""
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "1s–1h, starting at commit"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "retention"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "\"2m\""
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "10s–1h, starting at terminal sealing; reads do not renew it"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "control_timeout"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "\"5s\""
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "100ms–30s, finite control read/write deadline"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "finalization_timeout"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "\"5s\""
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "100ms–30s, completion deadline including queue wait"
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Validation requires enough memory for fixed metadata/control allowances, submit\ndecoding scratch, and at least one maximum input, output and work reservation.\nConcurrency settings are upper bounds: memory pressure may admit fewer jobs.\nThere is no inference execution queue."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "caller-policy",
+      children: "Caller Policy"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.th, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "deferred_transport"
+            }), " attribute"]
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Default"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Inclusive range / rule"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "control_timeout"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "\"5s\""
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "100ms–30s; each complete HTTP control transfer"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_wait"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "\"15m\""
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "1s–2h; total wait starts before capability discovery"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "poll_interval"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "\"250ms\""
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "50ms–5s; minimum empty-poll delay, combined with peer advice"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_control_calls"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "4096"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "4–65536; discovery, submission and retrieval calls combined"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_control_retries"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "8"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "0–32 failed-call retries total, not per poll"
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The effective call timeout is bounded by the caller setting, advertised executor\nsetting and remaining ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "max_wait"
+      }), ". One separate, deadline-bound best-effort DELETE\nis outside the retrieval call/retry budgets. The caller uses its configured\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key"
+      }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key_ref"
+      }), " to authenticate to the executor, not the end client's\ntoken."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "receiver-limits",
+      children: "Receiver Limits"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.th, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "deferred_receiver"
+            }), " attribute"]
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Default"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Inclusive range / rule"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "execution_timeout"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Root ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "execution_timeout"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "1s–root value; may narrow, never increase it"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_result_bytes"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Root ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_result_bytes"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "1024–root value; may narrow, never increase it"
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "full-caller-configuration",
+      children: "Full Caller Configuration"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Copy the following into ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "peer-caller.hcl"
+      }), ". Set each referenced environment\nvariable to a nonempty secret, and replace the reserved ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ".example"
+      }), " hosts for\ndeployment. The executor example below uses the same ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "AIPROXY_PEER_TOKEN"
+      }), ";\napplication and metrics credentials are separate. The HTTPS executor address\nassumes a TLS edge forwarding to its HTTP listener."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        metastring: "title=\"peer-caller.hcl\"",
+        children: "listener \"http\" \"public\" {\n  address = \":8080\"\n  timeouts {\n    read_header = \"10s\"\n    idle        = \"60s\"\n    write       = \"0s\"\n  }\n}\n\nauth \"main\" {\n  mode = \"bearer_static\"\n  client \"application\" {\n    token          = env(\"AIPROXY_CLIENT_TOKEN\")\n    allowed_models = [\"peer/chat\"]\n  }\n}\n\nlogging {\n  level      = \"info\"\n  access_log = true\n}\n\nmetrics {\n  token = env(\"AIPROXY_CALLER_METRICS_TOKEN\")\n}\n\nprovider \"openai-compatible\" \"peer\" {\n  base_url = \"https://executor.example/v1\"\n  api_key  = env(\"AIPROXY_PEER_TOKEN\")\n\n  deferred_transport {\n    control_timeout     = \"5s\"\n    max_wait            = \"15m\"\n    poll_interval       = \"250ms\"\n    max_control_calls   = 4096\n    max_control_retries = 8\n  }\n\n  model \"chat\" {\n    upstream_name = \"alias/peer_chat\"\n    capabilities  = [\"chat\", \"responses\"]\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "peer/chat"
+      }), " chat requests use deferred transport. Responses requests to the same\nmodel still use the executor's ordinary ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/v1/responses"
+      }), " route; they are not\nbackground jobs."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "full-executor-configuration",
+      children: "Full Executor Configuration"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Copy this into ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "peer-executor.hcl"
+      }), ". The upstream credentials are distinct from\nthe peer credential. The secondary provider demonstrates the required ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "local"
+      }), "\nderivative receiver opt-in; this alias advertises ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "5m / 4 MiB"
+      }), ", not the larger\nroot limits."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        metastring: "title=\"peer-executor.hcl\"",
+        children: "listener \"http\" \"public\" {\n  address = \":8081\"\n  timeouts {\n    read_header = \"10s\"\n    idle        = \"60s\"\n    write       = \"0s\"\n  }\n}\n\nupstream_header_timeout = \"10m\"\n\nauth \"main\" {\n  mode = \"bearer_static\"\n  client \"peer-caller\" {\n    token          = env(\"AIPROXY_PEER_TOKEN\")\n    tenant         = \"peer\"\n    allowed_models = [\"alias/peer_chat\"]\n  }\n}\n\nlogging {\n  level      = \"info\"\n  access_log = true\n}\n\nmetrics {\n  token = env(\"AIPROXY_EXECUTOR_METRICS_TOKEN\")\n}\n\ndeferred {\n  max_jobs             = 64\n  max_running          = 8\n  max_admissions       = 4\n  max_entries          = 256\n  max_memory_bytes     = 268435456\n  max_request_bytes    = 1048576\n  max_result_bytes     = 8388608\n  max_work_bytes       = 67108864\n  per_owner_jobs       = 8\n  per_owner_running    = 2\n  max_control_inflight = 16\n  execution_timeout    = \"10m\"\n  retention            = \"2m\"\n  control_timeout      = \"5s\"\n  finalization_timeout = \"5s\"\n}\n\nprovider \"openai-compatible\" \"primary\" {\n  base_url = \"https://upstream.example/v1\"\n  api_key  = env(\"UPSTREAM_API_KEY\")\n  deferred_receiver {}\n\n  model \"chat\" {\n    upstream_name = \"chat-model\"\n    capabilities  = [\"chat\", \"responses\"]\n  }\n}\n\nprovider \"openai-compatible\" \"secondary\" {\n  extends = \"primary\"\n  api_key = env(\"SECONDARY_UPSTREAM_API_KEY\")\n  deferred_receiver {\n    execution_timeout = \"5m\"\n    max_result_bytes  = 4194304\n  }\n}\n\nalias \"peer_chat\" {\n  algorithm = \"round_robin\"\n  target {\n    provider = \"primary\"\n    model    = \"chat\"\n  }\n  target {\n    provider = \"secondary\"\n    model    = \"chat\"\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "With the environment variables set, validate both files without dialing a peer\nor upstream:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "aiproxy validate --config peer-caller.hcl\naiproxy validate --config peer-executor.hcl\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The repository's ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "go test ./internal/config -run DocumentedDeferred -count=1"
+      }), "\nloads these exact code blocks with non-secret fixture values and checks HCL/JSON\nconversion and inline loading. See the ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/api-reference#peer-deferred-transport-v1",
+        children: "wire API"
+      }), "\nand ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#peer-deferred-transport-v1",
+        children: "deployment, deadlines and diagnostics"
+      }), "\nbefore enabling traffic."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "upstream-tls-clienthello",
       children: "Upstream TLS ClientHello"

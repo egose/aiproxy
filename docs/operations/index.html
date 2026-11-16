@@ -5,8 +5,8 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Operations | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/operations/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Operations | aiproxy"><meta data-rh="true" name="description" content="This page covers the commands and operational behavior that matter most for local development and production deployment."><meta data-rh="true" property="og:description" content="This page covers the commands and operational behavior that matter most for local development and production deployment."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/operations/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/operations/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/operations/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Operations","item":"https://aiproxy.pages.dev/docs/operations"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
-<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.418b09e0.css">
-<script src="/assets/js/runtime~main.3be09d62.js" defer="defer"></script>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.6e844cd5.css">
+<script src="/assets/js/runtime~main.0eb21314.js" defer="defer"></script>
 <script src="/assets/js/main.f0042d1c.js" defer="defer"></script>
 </head>
 <body>
@@ -226,6 +226,8 @@ instead of disabling verification or cycling profiles.</p>
 <li class="">metrics configuration</li>
 <li class="">provider-health configuration</li>
 <li class="">metrics-backed inventory state</li>
+<li class="">static peer deferred transport / receiver policy, subject to live reservation
+checks and <a href="#peer-reload-and-finalization" class="">drain rules</a></li>
 </ul>
 <p>If rate-limit settings are unchanged, reload preserves existing limiter buckets.
 Changing rate-limit settings creates a fresh limiter and resets bucket state.</p>
@@ -360,6 +362,179 @@ before repeating that edit.</p>
 without retaining deleted credentials. These identities and the ledger remain
 until the workspace is deleted. Previously erased spend cannot be recovered
 by the migration.</p>
+<h2 class="anchor anchorTargetStickyNavbar_T7vg" id="peer-deferred-transport-v1">Peer Deferred Transport v1<a href="#peer-deferred-transport-v1" class="hash-link" aria-label="Direct link to Peer Deferred Transport v1" title="Direct link to Peer Deferred Transport v1" translate="no">​</a></h2>
+<p>Use the <a class="" href="/docs/configuration/#peer-deferred-transport-v1">two-role configurations</a>
+and <a class="" href="/docs/api-reference/#peer-deferred-transport-v1">versioned wire contract</a>.
+The only replaced leg is:</p>
+<div class="language-text mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-text codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">end client → caller proxy → finite peer controls → executor proxy → upstream</span><br></div></code></pre></div></div>
+<p>The end-client and executor–upstream connections still have their own deadlines
+and intermediary idle limits. This is not durable job scheduling, Batch, or
+Responses background mode.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="streaming-and-deployment">Streaming And Deployment<a href="#streaming-and-deployment" class="hash-link" aria-label="Direct link to Streaming And Deployment" title="Direct link to Streaming And Deployment" translate="no">​</a></h3>
+<p>The executor keeps the original <code>stream</code> flag. Reads are immediate, finite byte
+snapshots, <strong>not long polls</strong>. JSON delivery waits for the complete terminal
+manifest; SSE delivery starts when the selected adapter head is available and
+retrieves output incrementally. The retained bytes are exactly the existing
+adapter&#x27;s output, including native SSE where passthrough applies. No synthetic
+SSE IDs, events, heartbeats or <code>[DONE]</code> are added.</p>
+<p>Polling adds latency (normally at least the empty-poll interval). A silent
+upstream remains silent to the end client. Incomplete peer transfers are discarded
+and retried at the same byte cursor only after a complete frame can be validated.
+The terminal SHA-256 verifies all retained bytes, but cannot undo bytes already
+delivered to a streaming client. A failure after downstream headers/bytes are
+committed terminates that stream; it never splices in another inference. Peer
+cursor recovery is not an end-client reconnect/resume session.</p>
+<p>Deploy compatible executors <strong>before enabling caller opt-ins</strong>. A positive,
+version-1 capability for the configured executor public model is required before
+submission. Missing capabilities or wrong versions mean zero submissions; opted-in
+chat never silently falls back to ordinary transport. An ordinary upstream <code>202</code>
+is not a job acknowledgment.</p>
+<p>Route capability discovery, submit/replay, reads, status, result and DELETE to
+the <strong>same executing process</strong>, using sticky routing or a dedicated executor.
+Expose the versioned private routes through the trusted TLS edge without caching
+or redirects; preserve their authentication and protocol markers. An external
+path mount must be stripped before the executor listener. Shared databases or
+Redis provider health do not share job storage.</p>
+<p>All job data, generations, tickets and dedup evidence are in memory. Restart,
+replica replacement or rolling deployment loses them, even if external inference
+or billing continues. v1 provides no replica failover, restart recovery,
+exactly-once external inference or billing-stop guarantee. Drain the old process
+rather than moving its controls to a replacement.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="independent-deadlines">Independent Deadlines<a href="#independent-deadlines" class="hash-link" aria-label="Direct link to Independent Deadlines" title="Direct link to Independent Deadlines" translate="no">​</a></h3>
+<table><thead><tr><th>Limit</th><th>Scope / default</th></tr></thead><tbody><tr><td>Executor <code>execution_timeout</code></td><td>Whole job, from commit; root 10m, narrowed by receiver/eligible alias limits</td></tr><tr><td>Executor <code>retention</code></td><td>Terminal result retention, from sealing; 2m, never renewed by reads</td></tr><tr><td>Peer <code>control_timeout</code></td><td>Headers and complete finite body read/write; 5s on each role, bounded by advertised policy and remaining caller wait</td></tr><tr><td>Caller <code>max_wait</code></td><td>Discovery, submit recovery, polling, transfer and delays combined; 15m, starts before discovery</td></tr><tr><td>Submission ticket window</td><td>30s to admit an absent qualified attempt; not an execution deadline</td></tr><tr><td>Executor <code>finalization_timeout</code></td><td>Terminal completion plus 5s, including queue wait; remote completion work must honor this deadline</td></tr><tr><td>Upstream header timeout</td><td>Existing root/provider setting, default 90s; only waits for inference response headers</td></tr><tr><td>Listener timeouts</td><td>Inbound header/idle/write settings; listener changes require restart</td></tr><tr><td>End-client / other intermediary limits</td><td>Unchanged; may expire before any configured peer limit</td></tr></tbody></table>
+<p>Execution uses an app-owned deadline independent of the submit connection.
+Polls extend neither execution nor retention, and <code>max_wait</code> is not a retention
+lease. Slow readers can lose retained output before finishing. Setting listener
+<code>write = &quot;0s&quot;</code> removes that listener write timeout, not client, ingress or upstream
+timeouts. The private handler still enforces finite control I/O deadlines.</p>
+<p>Empty polls delay by the greater of <code>poll_interval</code> and peer advice clamped to
+50ms–2s. Transient transport/transfer failures and control <code>429</code>/<code>503</code> can retry
+within both caller budgets, using full-jitter exponential backoff from 100ms,
+capped at 2s. Other control errors fail closed. Control <code>Retry-After</code> is polling
+advice, not a model cooldown.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="ownership-cancellation-and-release">Ownership, Cancellation And Release<a href="#ownership-cancellation-and-release" class="hash-link" aria-label="Direct link to Ownership, Cancellation And Release" title="Direct link to Ownership, Cancellation And Release" translate="no">​</a></h3>
+<p>Every control, including DELETE and accepted submit replay, authenticates against
+the <strong>current activated inference auth policy</strong> and checks the admitted public
+model&#x27;s current authorization. Controls do not re-resolve or reselect its target.
+Revocation denies further access but does not undo already-started work.</p>
+<ul>
+<li class="">A static owner is the named client plus tenant. Token rotation preserves
+ownership but rejects the old token; reusing a client name/tenant reuses identity.</li>
+<li class="">A database inbound key owns work by its key ID and workspace ID. A replacement
+key is a different owner.</li>
+<li class="">Anonymous requests and dashboard/admin JWTs cannot access peer controls.</li>
+<li class="">Unknown/different-owner jobs return <code>404 job_unavailable</code>. Current model denial
+returns <code>403</code>, without revealing a result or permitting deletion.</li>
+</ul>
+<p>A shared peer credential identifies the <strong>caller proxy</strong>, not end users behind
+it. Their jobs share that owner&#x27;s limits and authorization at the executor;
+caller-side user/tenant headers cannot establish executor ownership. Keep the
+peer credential separate from end-client and upstream credentials.</p>
+<p>Controls forward no end-client credentials, cookies or arbitrary inference
+headers. The submit header bag is bounded ordinary adapter metadata (JSON content
+type, Accept, chosen inference user-agent and configured safe forwarded headers).
+The executor uses its own upstream credentials and normal adapter policies.
+<code>forward_authorization</code> is incompatible with either opt-in. The case-insensitive
+<code>X-Aiproxy-Deferred</code> / <code>X-Aiproxy-Deferred-*</code> namespace is reserved, rejected in
+generic forwarding configuration and stripped from inference header bags.
+TLS/proxy behavior remains configured per provider; private controls forbid
+<strong>all</strong> redirects, even same-origin redirects. Health/discovery never submit jobs.</p>
+<p>Once a receipt is known, the caller makes one best-effort DELETE on cancellation
+or delivery completion. It has an independent fresh control deadline and does not
+use the canceled request context or retrieval budgets. A lost receipt may leave
+no job ID to delete. DELETE promptly seals/revokes appends and releases retained
+data; a known repeated release returns <code>204</code>. It cannot prove the external
+provider stopped work or charging. Execution deadlines and terminal TTL remain
+cleanup backstops even if DELETE fails or current authorization prevents it.</p>
+<p>Deletion/expiry retains protected dedup tombstones, not result bodies. A caller
+that has begun submit freezes its generation, signed ticket, attempt key and
+prepared request. Lost acknowledgments can retry only that same qualified submit.
+Never recover an accepted or indeterminate control failure by refreshing the
+ticket/key, starting ordinary inference or choosing another alias target.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="resource-bounds">Resource Bounds<a href="#resource-bounds" class="hash-link" aria-label="Direct link to Resource Bounds" title="Direct link to Resource Bounds" translate="no">​</a></h3>
+<p>Admission reserves job/running/owner/dedup capacity, the full output allowance,
+input and work memory, and finalization credit <strong>before</strong> <code>202</code>. There is no
+inference queue. Saturation can occur below <code>max_running</code> or <code>max_jobs</code> because
+memory, per-owner capacity, control slots and outstanding finalization ownership
+also constrain admission. Accepted records/tombstones are not evicted early to
+make room.</p>
+<p><code>max_memory_bytes</code> accounts feature-owned live capacity/reservations, including
+decoded/base64 submit scratch, request rewrites/redaction, parser/translation
+work, output slabs, control frames/readers and completion snapshots. It is <strong>not
+a total Go heap/RSS or ordinary-connection limit</strong>. Output uses 32 KiB slabs;
+each finite read copies at most 64 KiB rather than retaining a deleted full
+buffer. Fixed allowances include 512 KiB/control slot, 64 KiB/job metadata,
+4 KiB/dedup record and 1 KiB/owner bucket.</p>
+<p>Deferred-only structural bounds are JSON depth 64 / 16384 tokens; SSE line
+256 KiB / event 1 MiB / 1024 data lines; and control JSON depth 8 / 2048 tokens.
+Required translated parsing fails explicitly on overflow. Optional passthrough
+usage inspection can stop inspecting an oversized event without changing its
+delivered bytes. Buffered upstream bodies still obey the effective result ceiling.</p>
+<p>Payload capture is absent when logging is off and otherwise limited by both the
+configured capture prefix and effective request/result ceilings.
+<code>payload_log.max_body_bytes = 0</code> does <strong>not</strong> make deferred snapshots unbounded.
+On growth/structural/capture-work failure, the job fails explicitly, cancels/closes
+its source and finalizes once. It may retain an exact failed stream prefix, never
+a truncated success. Ordinary non-deferred adapter limits are unchanged.</p>
+<p>Non-delete controls have fixed global 100/s (burst 200) and per-owner 20/s
+(burst 40) buckets, at most four in flight per owner and one active control per
+job. DELETE has two reserved global slots, global 8/s (burst 16) and per-owner
+2/s (burst 4) buckets. Owner tables are bounded by <code>max_entries</code>; idle, job-free
+owners can be reclaimed after one minute, not evicted to reset live limits.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="peer-reload-and-finalization">Peer Reload And Finalization<a href="#peer-reload-and-finalization" class="hash-link" aria-label="Direct link to Peer Reload And Finalization" title="Direct link to Peer Reload And Finalization" translate="no">​</a></h3>
+<p>Accepted execution retains its admitted catalog, credentials, endpoint,
+transports, alias attempts and completion resources through a runtime lease.
+Per-job deadlines/limits stay frozen; current auth/model policy still governs
+controls. Failed reloads leave jobs and resources intact.</p>
+<p>To disable new execution, remove the root <code>deferred</code> block <strong>and all receiver
+blocks</strong> in a valid reload. Capabilities/new admissions then stop, while existing
+authenticated status/read/result/DELETE and protected submit replay drain under
+the last resource/control policy, even if opt-ins disappeared. Re-enablement and
+capacity reductions are checked against live ownership. Reducing global/owner
+job, running, admission, entry, control or memory capacity below reservations
+rejects activation; jobs are not evicted to fit.</p>
+<p>Two fixed app-owned completion workers handle at most <code>max_jobs</code> outstanding
+records, with credit reserved at admission. Known in-memory completion/usage is
+published once. Remote health/quota/payload completion has a deadline from
+terminal sealing plus <code>finalization_timeout</code>, <strong>including queue wait</strong>. Failed or
+expired persistence is reported, not retried into duplicate accounting.</p>
+<p>Local filesystem payload I/O has <strong>no hard cancellation guarantee</strong>: operation
+assumes local OS/filesystem calls complete in bounded time. A blocked call can
+occupy one of the two workers and its resource lease, applying admission
+backpressure; no unbounded timeout goroutines or replacement workers are spawned.
+Shutdown first stops admission and cancels sources, then waits within the app&#x27;s
+shutdown budget (default 10s), reporting incomplete cleanup rather than falsely
+freeing live ownership. Runtime resources retire only after their last lease.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="peer-diagnostics-and-metrics">Peer Diagnostics And Metrics<a href="#peer-diagnostics-and-metrics" class="hash-link" aria-label="Direct link to Peer Diagnostics And Metrics" title="Direct link to Peer Diagnostics And Metrics" translate="no">​</a></h3>
+<p>Separate peer control failures from provider inference outcomes. Typed
+<code>DeferredControlError</code> failures (negotiation, admission/control pressure,
+indeterminate acceptance, lost retrieval, limits or deadlines) do not trigger
+generic alias/encrypted-reasoning inference retries, provider-health mutation or
+model cooldown. A <strong>definite terminal provider HTTP/transport outcome before
+downstream commitment</strong> retains ordinary configured inference retry rules;
+direct requests never fail over. Original model retry advice is captured once
+at upstream headers and relayed as a remaining deadline, not restarted on replay.
+After downstream commitment, only the same job/cursor may be retrieved.</p>
+<p>Polls, replay and <code>202</code> are control traffic, not inference successes. The executor
+records one inference completion/known usage; the caller records its client
+completion. Do not sum both as two external billable executions.</p>
+<table><thead><tr><th>Metric</th><th>Type / labels</th></tr></thead><tbody><tr><td><code>aiproxy_deferred_admissions_total</code></td><td>Counter, <code>outcome</code> (including <code>accepted</code>, <code>replayed</code> and bounded rejection types)</td></tr><tr><td><code>aiproxy_deferred_controls_total</code></td><td>Counter, <code>route</code>, <code>outcome</code></td></tr><tr><td><code>aiproxy_deferred_delivery_errors_total</code></td><td>Counter, <code>route</code>; failed finite response transfers</td></tr><tr><td><code>aiproxy_deferred_jobs</code></td><td>Gauge, <code>state</code>: <code>running</code>, <code>headers_ready</code>, <code>completed</code>, <code>failed</code>, <code>cancelled</code></td></tr><tr><td><code>aiproxy_deferred_bytes</code></td><td>Gauge, <code>kind</code>: <code>fixed</code>, <code>input</code>, <code>output</code>, <code>work</code>, <code>ingress</code>, <code>reserved</code>, <code>retained</code></td></tr><tr><td><code>aiproxy_deferred_ownership</code></td><td>Gauge, <code>kind</code>: <code>jobs</code>, <code>running</code>, <code>admissions</code>, <code>entries</code>, <code>owners</code>, <code>controls</code>, <code>deletes</code>, <code>finalization_credits</code>, <code>finalizing</code></td></tr><tr><td><code>aiproxy_deferred_enabled</code></td><td>Gauge; whether new admission is enabled</td></tr><tr><td><code>aiproxy_deferred_cancellations_total</code></td><td>Counter; jobs sealed as cancelled</td></tr><tr><td><code>aiproxy_deferred_expirations_total</code></td><td>Counter; retained results expired</td></tr><tr><td><code>aiproxy_deferred_finalization_failures_total</code></td><td>Counter; failed/expired completion work</td></tr></tbody></table>
+<p>Routes are <code>capabilities</code>, <code>submit</code>, <code>status</code>, <code>result</code>, <code>read</code>, <code>delete</code> or
+<code>unknown</code>; unrecognized outcomes collapse to <code>rejected</code>. No request/job/attempt
+IDs, owners, tickets or credentials are metric labels. Byte categories overlap:
+<code>reserved</code> is aggregate accounting and <code>retained</code> is available data within output
+reservations, not additional memory to sum. Store-backed gauges/counters require
+an initialized store; they remain available while it drains after disablement.
+Store state survives reload, not restart. Scrapes use the separate
+<a href="#metrics-and-health" class="">metrics bearer token</a>.</p>
+<p>Look for <code>deferred control delivery failed</code>, <code>deferred inference finished</code> and
+<code>deferred finalization failed</code> diagnostics. Access/control logs can describe
+bounded private routes; <strong>payload logs contain inference bodies only</strong>, never
+peer envelopes, base64 frames, tickets or control credentials. Completion logs
+retain existing credential redaction and guardrail body omission/redaction
+policy; job storage is not a redacted payload log. Protect in-memory inference
+data and payload sinks separately. See <a href="#payload-logging" class="">payload logging</a> and
+the <a class="" href="/docs/api-reference/#peer-control-errors">caller-visible error table</a>.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="metrics-and-health">Metrics And Health<a href="#metrics-and-health" class="hash-link" aria-label="Direct link to Metrics And Health" title="Direct link to Metrics And Health" translate="no">​</a></h2>
 <p>The proxy exposes Prometheus metrics at <code>GET /metrics</code>.</p>
 <p>Coverage includes:</p>
@@ -725,6 +900,10 @@ sensitive headers (<code>authorization</code>, <code>proxy-authorization</code>,
 <code>set-cookie</code>, <code>x-api-key</code>) are stored as <code>[REDACTED]</code>.</p>
 <p>Only enable payload logging when you can protect the output directory:
 bodies contain prompts and completions. Changes apply on <code>SIGHUP</code> reload.</p>
+<p>Deferred inference additionally obeys its effective request/result and work
+ceilings; a configured full-body capture does not remove those bounds. Peer
+control envelopes/polls are not payload entries. See
+<a href="#peer-diagnostics-and-metrics" class="">peer diagnostics and finalization</a>.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="secret-handling">Secret Handling<a href="#secret-handling" class="hash-link" aria-label="Direct link to Secret Handling" title="Direct link to Secret Handling" translate="no">​</a></h2>
 <p>When <code>api_key_ref</code> is used, the default key file path is:</p>
 <ul>
@@ -774,6 +953,6 @@ unsupported until an explicit transport design is added</li>
 <li class="">explicitly <code>enabled = false</code> any provider you want to keep defined but
 inactive; missing credentials on enabled providers fail validation</li>
 <li class="">use aliases for controlled failover instead of relying on direct model requests</li>
-</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/api-reference/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">API Reference</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/deployment/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Deployment</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_sbaK thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#build-and-run" class="table-of-contents__link toc-highlight">Build And Run</a></li><li><a href="#helm-networkpolicy" class="table-of-contents__link toc-highlight">Helm NetworkPolicy</a></li><li><a href="#configure-wizard" class="table-of-contents__link toc-highlight">Configure Wizard</a><ul><li><a href="#configuring-provider-tls-profiles" class="table-of-contents__link toc-highlight">Configuring Provider TLS Profiles</a></li></ul></li><li><a href="#docker" class="table-of-contents__link toc-highlight">Docker</a></li><li><a href="#local-bun-clienthello-capture" class="table-of-contents__link toc-highlight">Local Bun ClientHello Capture</a><ul><li><a href="#using-a-recipe-with-static-configuration" class="table-of-contents__link toc-highlight">Using A Recipe With Static Configuration</a></li><li><a href="#provider-tls-transport-limits" class="table-of-contents__link toc-highlight">Provider TLS Transport Limits</a></li></ul></li><li><a href="#tests" class="table-of-contents__link toc-highlight">Tests</a></li><li><a href="#reload-behavior" class="table-of-contents__link toc-highlight">Reload Behavior</a><ul><li><a href="#editing-database-providers-in-the-web-ui" class="table-of-contents__link toc-highlight">Editing Database Providers In The Web UI</a></li><li><a href="#editing-database-aliases-in-the-web-ui" class="table-of-contents__link toc-highlight">Editing Database Aliases In The Web UI</a></li></ul></li><li><a href="#database-key-spend-and-quota-resets" class="table-of-contents__link toc-highlight">Database Key Spend And Quota Resets</a></li><li><a href="#metrics-and-health" class="table-of-contents__link toc-highlight">Metrics And Health</a></li><li><a href="#shared-provider-health" class="table-of-contents__link toc-highlight">Shared Provider Health</a></li><li><a href="#interactive-dashboard-lifecycle" class="table-of-contents__link toc-highlight">Interactive Dashboard Lifecycle</a></li><li><a href="#dashboard-layout-and-keyboard-controls" class="table-of-contents__link toc-highlight">Dashboard Layout And Keyboard Controls</a></li><li><a href="#dashboard-payload-and-block-inspection" class="table-of-contents__link toc-highlight">Dashboard Payload And Block Inspection</a></li><li><a href="#dashboard-requests-and-search" class="table-of-contents__link toc-highlight">Dashboard Requests And Search</a></li><li><a href="#dashboard-provider-diagnostics" class="table-of-contents__link toc-highlight">Dashboard Provider Diagnostics</a></li><li><a href="#dashboard-stable-inspection-and-pause" class="table-of-contents__link toc-highlight">Dashboard Stable Inspection And Pause</a></li><li><a href="#dashboard-metrics-and-cost-estimates" class="table-of-contents__link toc-highlight">Dashboard Metrics And Cost Estimates</a></li><li><a href="#dashboard-transport-security" class="table-of-contents__link toc-highlight">Dashboard Transport Security</a></li><li><a href="#security-defaults" class="table-of-contents__link toc-highlight">Security Defaults</a></li><li><a href="#logging" class="table-of-contents__link toc-highlight">Logging</a><ul><li><a href="#payload-logging" class="table-of-contents__link toc-highlight">Payload logging</a></li></ul></li><li><a href="#secret-handling" class="table-of-contents__link toc-highlight">Secret Handling</a></li><li><a href="#mock-only-copilot-verification" class="table-of-contents__link toc-highlight">Mock-only Copilot Verification</a></li><li><a href="#production-checklist" class="table-of-contents__link toc-highlight">Production Checklist</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Introduction</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/quickstart/">Quickstart</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/configuration/">Configuration</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/config-examples/">Config Examples</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Reference</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/api-reference/">API Reference</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/operations/">Operations</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/deployment/">Deployment</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/egose/aiproxy" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_hMXl"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 aiproxy. Built with Docusaurus.</div></div></div></footer></div>
+</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/api-reference/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">API Reference</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/deployment/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Deployment</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_sbaK thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#build-and-run" class="table-of-contents__link toc-highlight">Build And Run</a></li><li><a href="#helm-networkpolicy" class="table-of-contents__link toc-highlight">Helm NetworkPolicy</a></li><li><a href="#configure-wizard" class="table-of-contents__link toc-highlight">Configure Wizard</a><ul><li><a href="#configuring-provider-tls-profiles" class="table-of-contents__link toc-highlight">Configuring Provider TLS Profiles</a></li></ul></li><li><a href="#docker" class="table-of-contents__link toc-highlight">Docker</a></li><li><a href="#local-bun-clienthello-capture" class="table-of-contents__link toc-highlight">Local Bun ClientHello Capture</a><ul><li><a href="#using-a-recipe-with-static-configuration" class="table-of-contents__link toc-highlight">Using A Recipe With Static Configuration</a></li><li><a href="#provider-tls-transport-limits" class="table-of-contents__link toc-highlight">Provider TLS Transport Limits</a></li></ul></li><li><a href="#tests" class="table-of-contents__link toc-highlight">Tests</a></li><li><a href="#reload-behavior" class="table-of-contents__link toc-highlight">Reload Behavior</a><ul><li><a href="#editing-database-providers-in-the-web-ui" class="table-of-contents__link toc-highlight">Editing Database Providers In The Web UI</a></li><li><a href="#editing-database-aliases-in-the-web-ui" class="table-of-contents__link toc-highlight">Editing Database Aliases In The Web UI</a></li></ul></li><li><a href="#database-key-spend-and-quota-resets" class="table-of-contents__link toc-highlight">Database Key Spend And Quota Resets</a></li><li><a href="#peer-deferred-transport-v1" class="table-of-contents__link toc-highlight">Peer Deferred Transport v1</a><ul><li><a href="#streaming-and-deployment" class="table-of-contents__link toc-highlight">Streaming And Deployment</a></li><li><a href="#independent-deadlines" class="table-of-contents__link toc-highlight">Independent Deadlines</a></li><li><a href="#ownership-cancellation-and-release" class="table-of-contents__link toc-highlight">Ownership, Cancellation And Release</a></li><li><a href="#resource-bounds" class="table-of-contents__link toc-highlight">Resource Bounds</a></li><li><a href="#peer-reload-and-finalization" class="table-of-contents__link toc-highlight">Peer Reload And Finalization</a></li><li><a href="#peer-diagnostics-and-metrics" class="table-of-contents__link toc-highlight">Peer Diagnostics And Metrics</a></li></ul></li><li><a href="#metrics-and-health" class="table-of-contents__link toc-highlight">Metrics And Health</a></li><li><a href="#shared-provider-health" class="table-of-contents__link toc-highlight">Shared Provider Health</a></li><li><a href="#interactive-dashboard-lifecycle" class="table-of-contents__link toc-highlight">Interactive Dashboard Lifecycle</a></li><li><a href="#dashboard-layout-and-keyboard-controls" class="table-of-contents__link toc-highlight">Dashboard Layout And Keyboard Controls</a></li><li><a href="#dashboard-payload-and-block-inspection" class="table-of-contents__link toc-highlight">Dashboard Payload And Block Inspection</a></li><li><a href="#dashboard-requests-and-search" class="table-of-contents__link toc-highlight">Dashboard Requests And Search</a></li><li><a href="#dashboard-provider-diagnostics" class="table-of-contents__link toc-highlight">Dashboard Provider Diagnostics</a></li><li><a href="#dashboard-stable-inspection-and-pause" class="table-of-contents__link toc-highlight">Dashboard Stable Inspection And Pause</a></li><li><a href="#dashboard-metrics-and-cost-estimates" class="table-of-contents__link toc-highlight">Dashboard Metrics And Cost Estimates</a></li><li><a href="#dashboard-transport-security" class="table-of-contents__link toc-highlight">Dashboard Transport Security</a></li><li><a href="#security-defaults" class="table-of-contents__link toc-highlight">Security Defaults</a></li><li><a href="#logging" class="table-of-contents__link toc-highlight">Logging</a><ul><li><a href="#payload-logging" class="table-of-contents__link toc-highlight">Payload logging</a></li></ul></li><li><a href="#secret-handling" class="table-of-contents__link toc-highlight">Secret Handling</a></li><li><a href="#mock-only-copilot-verification" class="table-of-contents__link toc-highlight">Mock-only Copilot Verification</a></li><li><a href="#production-checklist" class="table-of-contents__link toc-highlight">Production Checklist</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Introduction</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/quickstart/">Quickstart</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/configuration/">Configuration</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/config-examples/">Config Examples</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Reference</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/api-reference/">API Reference</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/operations/">Operations</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/deployment/">Deployment</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/egose/aiproxy" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_hMXl"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 aiproxy. Built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>

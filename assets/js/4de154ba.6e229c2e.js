@@ -90,6 +90,34 @@ const toc = [{
   "id": "database-key-spend-and-quota-resets",
   "level": 2
 }, {
+  "value": "Peer Deferred Transport v1",
+  "id": "peer-deferred-transport-v1",
+  "level": 2
+}, {
+  "value": "Streaming And Deployment",
+  "id": "streaming-and-deployment",
+  "level": 3
+}, {
+  "value": "Independent Deadlines",
+  "id": "independent-deadlines",
+  "level": 3
+}, {
+  "value": "Ownership, Cancellation And Release",
+  "id": "ownership-cancellation-and-release",
+  "level": 3
+}, {
+  "value": "Resource Bounds",
+  "id": "resource-bounds",
+  "level": 3
+}, {
+  "value": "Peer Reload And Finalization",
+  "id": "peer-reload-and-finalization",
+  "level": 3
+}, {
+  "value": "Peer Diagnostics And Metrics",
+  "id": "peer-diagnostics-and-metrics",
+  "level": 3
+}, {
   "value": "Metrics And Health",
   "id": "metrics-and-health",
   "level": 2
@@ -633,6 +661,11 @@ function _createMdxContent(props) {
         children: "provider-health configuration"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "metrics-backed inventory state"
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["static peer deferred transport / receiver policy, subject to live reservation\nchecks and ", (0,jsx_runtime.jsx)(_components.a, {
+          href: "#peer-reload-and-finalization",
+          children: "drain rules"
+        })]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "If rate-limit settings are unchanged, reload preserves existing limiter buckets.\nChanging rate-limit settings creates a fresh limiter and resets bucket state."
@@ -749,6 +782,445 @@ function _createMdxContent(props) {
       }), " if the data is unavailable. Admin edits stop on failed policy\nreads; if an edit saves successfully but its response view cannot be read, the\nerror explicitly says the quota was saved. Inspect the view after recovery\nbefore repeating that edit."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "The forward database migration retains key and workspace UUIDs for accounting,\nwithout retaining deleted credentials. These identities and the ledger remain\nuntil the workspace is deleted. Previously erased spend cannot be recovered\nby the migration."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "peer-deferred-transport-v1",
+      children: "Peer Deferred Transport v1"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Use the ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#peer-deferred-transport-v1",
+        children: "two-role configurations"
+      }), "\nand ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/api-reference#peer-deferred-transport-v1",
+        children: "versioned wire contract"
+      }), ".\nThe only replaced leg is:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-text",
+        children: "end client → caller proxy → finite peer controls → executor proxy → upstream\n"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "The end-client and executor–upstream connections still have their own deadlines\nand intermediary idle limits. This is not durable job scheduling, Batch, or\nResponses background mode."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "streaming-and-deployment",
+      children: "Streaming And Deployment"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The executor keeps the original ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "stream"
+      }), " flag. Reads are immediate, finite byte\nsnapshots, ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "not long polls"
+      }), ". JSON delivery waits for the complete terminal\nmanifest; SSE delivery starts when the selected adapter head is available and\nretrieves output incrementally. The retained bytes are exactly the existing\nadapter's output, including native SSE where passthrough applies. No synthetic\nSSE IDs, events, heartbeats or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "[DONE]"
+      }), " are added."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Polling adds latency (normally at least the empty-poll interval). A silent\nupstream remains silent to the end client. Incomplete peer transfers are discarded\nand retried at the same byte cursor only after a complete frame can be validated.\nThe terminal SHA-256 verifies all retained bytes, but cannot undo bytes already\ndelivered to a streaming client. A failure after downstream headers/bytes are\ncommitted terminates that stream; it never splices in another inference. Peer\ncursor recovery is not an end-client reconnect/resume session."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Deploy compatible executors ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "before enabling caller opt-ins"
+      }), ". A positive,\nversion-1 capability for the configured executor public model is required before\nsubmission. Missing capabilities or wrong versions mean zero submissions; opted-in\nchat never silently falls back to ordinary transport. An ordinary upstream ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "202"
+      }), "\nis not a job acknowledgment."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Route capability discovery, submit/replay, reads, status, result and DELETE to\nthe ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "same executing process"
+      }), ", using sticky routing or a dedicated executor.\nExpose the versioned private routes through the trusted TLS edge without caching\nor redirects; preserve their authentication and protocol markers. An external\npath mount must be stripped before the executor listener. Shared databases or\nRedis provider health do not share job storage."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "All job data, generations, tickets and dedup evidence are in memory. Restart,\nreplica replacement or rolling deployment loses them, even if external inference\nor billing continues. v1 provides no replica failover, restart recovery,\nexactly-once external inference or billing-stop guarantee. Drain the old process\nrather than moving its controls to a replacement."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "independent-deadlines",
+      children: "Independent Deadlines"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Limit"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Scope / default"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Executor ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "execution_timeout"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Whole job, from commit; root 10m, narrowed by receiver/eligible alias limits"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Executor ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "retention"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Terminal result retention, from sealing; 2m, never renewed by reads"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Peer ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "control_timeout"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Headers and complete finite body read/write; 5s on each role, bounded by advertised policy and remaining caller wait"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Caller ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "max_wait"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Discovery, submit recovery, polling, transfer and delays combined; 15m, starts before discovery"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Submission ticket window"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "30s to admit an absent qualified attempt; not an execution deadline"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Executor ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "finalization_timeout"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Terminal completion plus 5s, including queue wait; remote completion work must honor this deadline"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Upstream header timeout"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Existing root/provider setting, default 90s; only waits for inference response headers"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Listener timeouts"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Inbound header/idle/write settings; listener changes require restart"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "End-client / other intermediary limits"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Unchanged; may expire before any configured peer limit"
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Execution uses an app-owned deadline independent of the submit connection.\nPolls extend neither execution nor retention, and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "max_wait"
+      }), " is not a retention\nlease. Slow readers can lose retained output before finishing. Setting listener\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "write = \"0s\""
+      }), " removes that listener write timeout, not client, ingress or upstream\ntimeouts. The private handler still enforces finite control I/O deadlines."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Empty polls delay by the greater of ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "poll_interval"
+      }), " and peer advice clamped to\n50ms–2s. Transient transport/transfer failures and control ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "429"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "503"
+      }), " can retry\nwithin both caller budgets, using full-jitter exponential backoff from 100ms,\ncapped at 2s. Other control errors fail closed. Control ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Retry-After"
+      }), " is polling\nadvice, not a model cooldown."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "ownership-cancellation-and-release",
+      children: "Ownership, Cancellation And Release"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Every control, including DELETE and accepted submit replay, authenticates against\nthe ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "current activated inference auth policy"
+      }), " and checks the admitted public\nmodel's current authorization. Controls do not re-resolve or reselect its target.\nRevocation denies further access but does not undo already-started work."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "A static owner is the named client plus tenant. Token rotation preserves\nownership but rejects the old token; reusing a client name/tenant reuses identity."
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "A database inbound key owns work by its key ID and workspace ID. A replacement\nkey is a different owner."
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "Anonymous requests and dashboard/admin JWTs cannot access peer controls."
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Unknown/different-owner jobs return ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "404 job_unavailable"
+        }), ". Current model denial\nreturns ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "403"
+        }), ", without revealing a result or permitting deletion."]
+      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["A shared peer credential identifies the ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "caller proxy"
+      }), ", not end users behind\nit. Their jobs share that owner's limits and authorization at the executor;\ncaller-side user/tenant headers cannot establish executor ownership. Keep the\npeer credential separate from end-client and upstream credentials."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Controls forward no end-client credentials, cookies or arbitrary inference\nheaders. The submit header bag is bounded ordinary adapter metadata (JSON content\ntype, Accept, chosen inference user-agent and configured safe forwarded headers).\nThe executor uses its own upstream credentials and normal adapter policies.\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "forward_authorization"
+      }), " is incompatible with either opt-in. The case-insensitive\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Aiproxy-Deferred"
+      }), " / ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Aiproxy-Deferred-*"
+      }), " namespace is reserved, rejected in\ngeneric forwarding configuration and stripped from inference header bags.\nTLS/proxy behavior remains configured per provider; private controls forbid\n", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "all"
+      }), " redirects, even same-origin redirects. Health/discovery never submit jobs."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Once a receipt is known, the caller makes one best-effort DELETE on cancellation\nor delivery completion. It has an independent fresh control deadline and does not\nuse the canceled request context or retrieval budgets. A lost receipt may leave\nno job ID to delete. DELETE promptly seals/revokes appends and releases retained\ndata; a known repeated release returns ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "204"
+      }), ". It cannot prove the external\nprovider stopped work or charging. Execution deadlines and terminal TTL remain\ncleanup backstops even if DELETE fails or current authorization prevents it."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Deletion/expiry retains protected dedup tombstones, not result bodies. A caller\nthat has begun submit freezes its generation, signed ticket, attempt key and\nprepared request. Lost acknowledgments can retry only that same qualified submit.\nNever recover an accepted or indeterminate control failure by refreshing the\nticket/key, starting ordinary inference or choosing another alias target."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "resource-bounds",
+      children: "Resource Bounds"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Admission reserves job/running/owner/dedup capacity, the full output allowance,\ninput and work memory, and finalization credit ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "before"
+      }), " ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "202"
+      }), ". There is no\ninference queue. Saturation can occur below ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "max_running"
+      }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "max_jobs"
+      }), " because\nmemory, per-owner capacity, control slots and outstanding finalization ownership\nalso constrain admission. Accepted records/tombstones are not evicted early to\nmake room."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "max_memory_bytes"
+      }), " accounts feature-owned live capacity/reservations, including\ndecoded/base64 submit scratch, request rewrites/redaction, parser/translation\nwork, output slabs, control frames/readers and completion snapshots. It is ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "not\na total Go heap/RSS or ordinary-connection limit"
+      }), ". Output uses 32 KiB slabs;\neach finite read copies at most 64 KiB rather than retaining a deleted full\nbuffer. Fixed allowances include 512 KiB/control slot, 64 KiB/job metadata,\n4 KiB/dedup record and 1 KiB/owner bucket."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Deferred-only structural bounds are JSON depth 64 / 16384 tokens; SSE line\n256 KiB / event 1 MiB / 1024 data lines; and control JSON depth 8 / 2048 tokens.\nRequired translated parsing fails explicitly on overflow. Optional passthrough\nusage inspection can stop inspecting an oversized event without changing its\ndelivered bytes. Buffered upstream bodies still obey the effective result ceiling."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Payload capture is absent when logging is off and otherwise limited by both the\nconfigured capture prefix and effective request/result ceilings.\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "payload_log.max_body_bytes = 0"
+      }), " does ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "not"
+      }), " make deferred snapshots unbounded.\nOn growth/structural/capture-work failure, the job fails explicitly, cancels/closes\nits source and finalizes once. It may retain an exact failed stream prefix, never\na truncated success. Ordinary non-deferred adapter limits are unchanged."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Non-delete controls have fixed global 100/s (burst 200) and per-owner 20/s\n(burst 40) buckets, at most four in flight per owner and one active control per\njob. DELETE has two reserved global slots, global 8/s (burst 16) and per-owner\n2/s (burst 4) buckets. Owner tables are bounded by ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "max_entries"
+      }), "; idle, job-free\nowners can be reclaimed after one minute, not evicted to reset live limits."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "peer-reload-and-finalization",
+      children: "Peer Reload And Finalization"
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Accepted execution retains its admitted catalog, credentials, endpoint,\ntransports, alias attempts and completion resources through a runtime lease.\nPer-job deadlines/limits stay frozen; current auth/model policy still governs\ncontrols. Failed reloads leave jobs and resources intact."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["To disable new execution, remove the root ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred"
+      }), " block ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "and all receiver\nblocks"
+      }), " in a valid reload. Capabilities/new admissions then stop, while existing\nauthenticated status/read/result/DELETE and protected submit replay drain under\nthe last resource/control policy, even if opt-ins disappeared. Re-enablement and\ncapacity reductions are checked against live ownership. Reducing global/owner\njob, running, admission, entry, control or memory capacity below reservations\nrejects activation; jobs are not evicted to fit."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Two fixed app-owned completion workers handle at most ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "max_jobs"
+      }), " outstanding\nrecords, with credit reserved at admission. Known in-memory completion/usage is\npublished once. Remote health/quota/payload completion has a deadline from\nterminal sealing plus ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "finalization_timeout"
+      }), ", ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "including queue wait"
+      }), ". Failed or\nexpired persistence is reported, not retried into duplicate accounting."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Local filesystem payload I/O has ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "no hard cancellation guarantee"
+      }), ": operation\nassumes local OS/filesystem calls complete in bounded time. A blocked call can\noccupy one of the two workers and its resource lease, applying admission\nbackpressure; no unbounded timeout goroutines or replacement workers are spawned.\nShutdown first stops admission and cancels sources, then waits within the app's\nshutdown budget (default 10s), reporting incomplete cleanup rather than falsely\nfreeing live ownership. Runtime resources retire only after their last lease."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "peer-diagnostics-and-metrics",
+      children: "Peer Diagnostics And Metrics"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Separate peer control failures from provider inference outcomes. Typed\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "DeferredControlError"
+      }), " failures (negotiation, admission/control pressure,\nindeterminate acceptance, lost retrieval, limits or deadlines) do not trigger\ngeneric alias/encrypted-reasoning inference retries, provider-health mutation or\nmodel cooldown. A ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "definite terminal provider HTTP/transport outcome before\ndownstream commitment"
+      }), " retains ordinary configured inference retry rules;\ndirect requests never fail over. Original model retry advice is captured once\nat upstream headers and relayed as a remaining deadline, not restarted on replay.\nAfter downstream commitment, only the same job/cursor may be retrieved."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Polls, replay and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "202"
+      }), " are control traffic, not inference successes. The executor\nrecords one inference completion/known usage; the caller records its client\ncompletion. Do not sum both as two external billable executions."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Metric"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Type / labels"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "aiproxy_deferred_admissions_total"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Counter, ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "outcome"
+            }), " (including ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "accepted"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "replayed"
+            }), " and bounded rejection types)"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "aiproxy_deferred_controls_total"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Counter, ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "route"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "outcome"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "aiproxy_deferred_delivery_errors_total"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Counter, ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "route"
+            }), "; failed finite response transfers"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "aiproxy_deferred_jobs"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Gauge, ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "state"
+            }), ": ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "running"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "headers_ready"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "completed"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "failed"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "cancelled"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "aiproxy_deferred_bytes"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Gauge, ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "kind"
+            }), ": ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "fixed"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "input"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "output"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "work"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "ingress"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "reserved"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "retained"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "aiproxy_deferred_ownership"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Gauge, ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "kind"
+            }), ": ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "jobs"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "running"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "admissions"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "entries"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "owners"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "controls"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "deletes"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "finalization_credits"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "finalizing"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "aiproxy_deferred_enabled"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Gauge; whether new admission is enabled"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "aiproxy_deferred_cancellations_total"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Counter; jobs sealed as cancelled"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "aiproxy_deferred_expirations_total"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Counter; retained results expired"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "aiproxy_deferred_finalization_failures_total"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Counter; failed/expired completion work"
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Routes are ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "capabilities"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "submit"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "status"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "result"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "read"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "delete"
+      }), " or\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "unknown"
+      }), "; unrecognized outcomes collapse to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "rejected"
+      }), ". No request/job/attempt\nIDs, owners, tickets or credentials are metric labels. Byte categories overlap:\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "reserved"
+      }), " is aggregate accounting and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "retained"
+      }), " is available data within output\nreservations, not additional memory to sum. Store-backed gauges/counters require\nan initialized store; they remain available while it drains after disablement.\nStore state survives reload, not restart. Scrapes use the separate\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "#metrics-and-health",
+        children: "metrics bearer token"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Look for ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred control delivery failed"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred inference finished"
+      }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred finalization failed"
+      }), " diagnostics. Access/control logs can describe\nbounded private routes; ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "payload logs contain inference bodies only"
+      }), ", never\npeer envelopes, base64 frames, tickets or control credentials. Completion logs\nretain existing credential redaction and guardrail body omission/redaction\npolicy; job storage is not a redacted payload log. Protect in-memory inference\ndata and payload sinks separately. See ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "#payload-logging",
+        children: "payload logging"
+      }), " and\nthe ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/api-reference#peer-control-errors",
+        children: "caller-visible error table"
+      }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "metrics-and-health",
       children: "Metrics And Health"
@@ -1506,6 +1978,11 @@ function _createMdxContent(props) {
       children: ["Only enable payload logging when you can protect the output directory:\nbodies contain prompts and completions. Changes apply on ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
       }), " reload."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Deferred inference additionally obeys its effective request/result and work\nceilings; a configured full-body capture does not remove those bounds. Peer\ncontrol envelopes/polls are not payload entries. See\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "#peer-diagnostics-and-metrics",
+        children: "peer diagnostics and finalization"
+      }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "secret-handling",
       children: "Secret Handling"
