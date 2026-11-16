@@ -320,6 +320,22 @@ func (l *appDeferredAdmissionLimiter) Allow(string) (bool, time.Duration) {
 	return true, 0
 }
 
+type appDeferredFlushGate struct {
+	http.ResponseWriter
+	flushed chan struct{}
+	resume  <-chan struct{}
+	once    sync.Once
+}
+
+func (w *appDeferredFlushGate) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *appDeferredFlushGate) FlushError() error {
+	err := http.NewResponseController(w.ResponseWriter).Flush()
+	w.once.Do(func() { close(w.flushed) })
+	<-w.resume
+	return err
+}
+
 func TestDeferredAppHTTPPreparationSerializesCommitWithPolicyActivation(t *testing.T) {
 	for _, mode := range []string{"remove", "changed", "failed"} {
 		t.Run(mode, func(t *testing.T) {
@@ -339,8 +355,29 @@ func TestDeferredAppHTTPPreparationSerializesCommitWithPolicyActivation(t *testi
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = a.Close() })
-			server := httptest.NewServer(a.handler)
+			var submits atomic.Int32
+			finished := make(chan struct{}, 2)
+			flushed, resume := make(chan struct{}), make(chan struct{})
+			resumeFlush := sync.OnceFunc(func() { close(resume) })
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost && r.URL.Path == deferred.Prefix+"/submit" {
+					defer func() { finished <- struct{}{} }()
+					if submits.Add(1) == 2 {
+						w = &appDeferredFlushGate{ResponseWriter: w, flushed: flushed, resume: resume}
+					}
+				}
+				a.handler.ServeHTTP(w, r)
+			}))
 			t.Cleanup(server.Close)
+			t.Cleanup(resumeFlush)
+			waitSubmit := func(description string) {
+				t.Helper()
+				select {
+				case <-finished:
+				case <-time.After(2 * time.Second):
+					t.Fatalf("%s submit handler did not finish", description)
+				}
+			}
 			capability := appDeferredCapability(t, server, "peer-token")
 			_, wire := appDeferredSubmit(t, capability)
 			gate := make(chan struct{})
@@ -392,7 +429,18 @@ func TestDeferredAppHTTPPreparationSerializesCommitWithPolicyActivation(t *testi
 			if submitted.err != nil {
 				t.Fatal(submitted.err)
 			}
+			waitSubmit("initial")
 			replay := callAppDeferred(t, server, "POST", deferred.Prefix+"/submit", "peer-token", "", wire)
+			select {
+			case <-flushed:
+			case <-time.After(2 * time.Second):
+				t.Fatal("replay response was not flushed")
+			}
+			if admissions := a.DeferredStore().Stats().Admissions; admissions != 1 {
+				t.Fatalf("flushed replay lost its active ingress reservation: %d", admissions)
+			}
+			resumeFlush()
+			waitSubmit("replay")
 			if mode == "failed" {
 				var receipt, repeated deferred.Receipt
 				if submitted.reply.status != 202 || replay.status != 202 ||
@@ -423,8 +471,9 @@ func TestDeferredAppHTTPPreparationSerializesCommitWithPolicyActivation(t *testi
 				}
 				cancel()
 			}
-			if limiter.calls.Load() != 1 || a.DeferredStore().Stats().Admissions != 0 {
-				t.Fatal("HTTP replay reran rate admission or retained ingress ownership")
+			rateCalls, admissions := limiter.calls.Load(), a.DeferredStore().Stats().Admissions
+			if rateCalls != 1 || admissions != 0 {
+				t.Fatalf("HTTP replay reran rate admission or retained ingress ownership: rate calls=%d admissions=%d", rateCalls, admissions)
 			}
 		})
 	}
