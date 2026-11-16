@@ -64,6 +64,229 @@ which passes Anthropic SSE through verbatim.
 
 If an upstream stream fails after partial output, the proxy terminates the stream instead of fabricating a full JSON response.
 
+## Peer Deferred Transport v1
+
+This private opt-in extension serves chat completions between a statically
+configured caller and executor. It adds **no provider/model capability** and is
+not Batch or Responses background mode. Ordinary clients keep
+`POST /v1/chat/completions`, JSON/SSE and their original `stream` choice; they do
+not receive peer receipts, cursors or private headers. Other operations keep
+ordinary transport. See [configuration](configuration.md#peer-deferred-transport-v1)
+and [operational limits](operations.md#peer-deferred-transport-v1).
+
+### Peer Routes And Recognition
+
+The executor serves the unmounted prefix `/_internal/deferred/v1`. Private paths
+are intercepted before web UI fallback. All controls require inference bearer
+authentication and `X-Aiproxy-Deferred-Version: 1`; job controls additionally
+require one `X-Aiproxy-Deferred-Generation` header matching their receipt.
+Submit carries the generation in its envelope.
+
+| Method / path under `/_internal/deferred/v1`        | Success status / body                                                                                    | `Allow` on a wrong method |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------- |
+| `GET /capabilities?model=<public-model>`            | `200 Capability`; current model/receiver eligibility, no inference quota charge                          | `GET`                     |
+| `POST /submit`                                      | `202 Receipt` after bounded admission/scheduling, or accepted dedup replay                               | `POST`                    |
+| `GET /jobs/{id}`                                    | `200 JobInfo`                                                                                            | `GET, DELETE`             |
+| `GET /jobs/{id}/result`                             | `202 JobInfo` while active; `200 ResultManifest` when terminal; no body bytes here                       | `GET`                     |
+| `GET /jobs/{id}/read?cursor=<offset>&limit=<bytes>` | `200 ReadFrame`, immediate finite snapshot; required cursor, optional limit 1–65536, default 65536 bytes | `GET`                     |
+| `DELETE /jobs/{id}`                                 | Empty `204`; cancel-if-running and release, including repeated known release                             | `GET, DELETE`             |
+
+Only submit has a request body, with
+`Content-Type: application/vnd.aiproxy.deferred+json`. Query fields must be
+recognized and unique; submit has no query. Every recognized response carries:
+
+```http
+Content-Type: application/vnd.aiproxy.deferred+json
+X-Aiproxy-Deferred-Version: 1
+Cache-Control: private, no-store
+Pragma: no-cache
+Vary: Authorization
+```
+
+The empty `204` still carries these headers. Recognition requires the dedicated
+path, exact media/version markers, matching envelope and expected identity,
+**not just HTTP `202`**. The caller validates a positive capability for its
+configured executor public model before any submit. Missing/wrong-version
+capabilities cause zero submits. An unrecognized submit response is
+indeterminate, never permission to use synchronous fallback or a new attempt.
+
+For a caller `base_url`, remove one terminal `/v1` segment and append the private
+prefix: `https://executor.example/mount/v1` becomes
+`https://executor.example/mount/_internal/deferred/v1`. An external mount must
+strip `/mount` before forwarding to the executor. Query strings, fragments, dot
+segments, backslashes and encoded path separators are invalid in a deferred
+caller base URL. Control URLs are derived locally, never from arbitrary peer
+links. Submit's `Location` must match the expected origin, mount and job path
+(the exact absolute URL or path). **All control redirects are forbidden.**
+
+For the [full configuration examples](configuration.md#full-caller-configuration),
+capability discovery is:
+
+```http
+GET /_internal/deferred/v1/capabilities?model=alias%2Fpeer_chat HTTP/1.1
+Host: executor.example
+Authorization: Bearer <peer-token>
+Accept: application/vnd.aiproxy.deferred+json
+X-Aiproxy-Deferred-Version: 1
+```
+
+Substitute the configured peer token; use the returned generation/ticket and
+receipt ID, not invented identifiers, for subsequent controls. A read request is:
+
+```http
+GET /_internal/deferred/v1/jobs/<receipt-id>/read?cursor=0&limit=65536 HTTP/1.1
+Host: executor.example
+Authorization: Bearer <peer-token>
+Accept: application/vnd.aiproxy.deferred+json
+X-Aiproxy-Deferred-Version: 1
+X-Aiproxy-Deferred-Generation: <receipt-generation>
+```
+
+### Peer JSON Schema
+
+Objects below use flattened fields, not wrapper objects named `Receipt` or
+`JobInfo`. Every envelope has `protocol: "aiproxy-deferred"` and numeric
+`version: 1`. Unknown/duplicate fields and numeric overflow are rejected.
+Timestamps are integer Unix milliseconds; durations are integer milliseconds.
+Optional fields are omitted when absent.
+
+| Object           | Required fields in addition to the common envelope                                                                                                                |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Capability`     | `generation`, `public_model`, `submit_token`, `submit_until_ms`, `limits`, `poll_after_ms`                                                                        |
+| `SubmitRequest`  | `generation`, `submit_token`, `attempt_key`, `headers`, `body`                                                                                                    |
+| `Receipt`        | `generation`, `id`, `public_model`, `attempt_key`, `scope_digest`, `fingerprint`, `state`, `execution_deadline_ms`, `dedup_until_ms`, `poll_after_ms`, `replayed` |
+| `JobInfo`        | All receipt fields plus `available_bytes`; optional `response`, `outcome`, `retain_until_ms`                                                                      |
+| `ResultManifest` | All job-info fields plus `body_sha256`; terminal only                                                                                                             |
+| `ReadFrame`      | All job-info fields plus `cursor`, `next_cursor`, `data`, `done`                                                                                                  |
+| `ControlError`   | `error`, `acceptance`; optional `poll_after_ms`                                                                                                                   |
+
+| Nested object | Fields / meaning                                                                                                                                                 |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `limits`      | `request_bytes`, `result_bytes`, `execution_timeout_ms`, `retention_ms`, `control_timeout_ms`, `finalization_timeout_ms`, `read_bytes`                           |
+| `response`    | `status_code` (200–599), `headers` (name → string array), `streaming` (boolean); optional `retry`                                                                |
+| `retry`       | `observed_at_ms`, `deadline_ms`, `remaining_ms`; original inference retry timing, not control poll advice                                                        |
+| `outcome`     | `kind`, `usage`; optional `error`                                                                                                                                |
+| `usage`       | Nonnegative observed integers: `prompt_tokens`, `completion_tokens`, `total_tokens`, `cached_tokens`, `cache_creation_tokens`, `cache_read_tokens`; no estimates |
+| `error`       | `type`, `message`; optional `block_id`                                                                                                                           |
+
+`body` and `data` are non-null standard JSON base64 strings; empty bytes are
+`""`. The decoded submit body is a JSON object with one required `model` string
+and zero/one boolean `stream`; other inference fields are retained. It contains
+the caller adapter's model rewrite, then undergoes executor admission and
+existing adapter processing. The bounded `headers` bag has JSON content type
+and safe prepared inference metadata, never credentials, cookies, hop-by-hop or
+private deferred headers.
+
+`cursor`, `next_cursor` and `available_bytes` are **strings** containing canonical
+unsigned decimal byte offsets/counts, with no sign or leading zeros except `"0"`.
+Generation and job IDs are canonical unpadded base64url encodings of 16 random
+bytes. Attempt keys are 22–64 base64url characters, generated with at least
+128 random bits. `scope_digest`, `fingerprint` and `body_sha256` are lowercase
+SHA-256 hex strings. `public_model` is at most 512 bytes.
+
+Header bags allow at most 64 case-insensitively distinct names, 128 values total
+and 4096 bytes/value. Non-data serialized metadata is at most 16 KiB; error detail
+is at most 1 KiB. Finite control responses are at most 128 KiB, reads at most
+64 KiB decoded data, and submission tickets at most 512 bytes. Submit input has
+its separate decoded request ceiling plus bounded base64/metadata scratch;
+the 128 KiB response ceiling is not a submit input ceiling.
+
+### Peer State And Byte Delivery
+
+| State           | Terminal `outcome.kind`                                                      | Meaning                                                                              |
+| --------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `running`       | Absent                                                                       | No selected response; reads can have empty `data`                                    |
+| `headers_ready` | Absent                                                                       | Final selected adapter head and incremental bytes, not an intermediate alias attempt |
+| `completed`     | `response`                                                                   | Complete normalized adapter result, including provider HTTP errors                   |
+| `failed`        | `upstream_error`, `invalid_request`, `execution_timeout` or `limit_exceeded` | Known failed execution; an exact streamed prefix may be retained                     |
+| `cancelled`     | `cancelled`                                                                  | Local cancellation, not proof external execution/billing stopped                     |
+
+Released/expired tombstones are not result states and disclose no retained head
+or body. `response` is the original selected status and filtered headers after
+existing adapter/non-JSON-error normalization, with private headers stripped.
+A terminal provider `500` is a `completed` / `response` outcome, not a peer
+control `500`.
+
+Each read atomically captures state/head/outcome/available tail and one finite
+byte slice. `next_cursor = cursor + len(decoded_data)`. A cursor beyond that
+captured tail is `400 invalid_cursor`. `done` is true only when terminal and
+the frame reaches the final byte; an empty pending frame or HTTP EOF is not
+completion. Decode and validate the **whole transfer** before delivering bytes
+and advancing the cursor; discard partial transfers and retry the unchanged
+cursor.
+
+The terminal manifest hashes all final retained body bytes, including an empty
+body or failed prefix. Unary callers wait for that manifest. Streaming callers
+deliver the existing adapter/native bytes incrementally without synthetic SSE
+events, IDs, heartbeats or `[DONE]`; terminal validation cannot retract already
+delivered bytes. After downstream commitment, errors terminate the stream rather
+than selecting another inference. This is peer byte recovery, not client-session
+resume.
+
+### Acceptance And Deduplication
+
+Capabilities issue a stateless signed **30-second** ticket binding protocol,
+process generation, owner/model digests, nonce, expiry and advertised limits.
+Qualified dedup identity is `(generation, SHA256(ticket), owner, attempt_key)`.
+The fingerprint covers fixed operation/model, exact decoded body and canonical
+header bag, not mutable credentials or post-guardrail output.
+
+The same fingerprint replays an accepted receipt without repeating inference
+admission, rate/quota charges or guardrails. A conflict returns `409`; a still
+preparing duplicate returns `409 submission_in_progress`. Preparation rejections
+are cached through the ticket window. Accepted records/tombstones remain protected
+through `dedup_until_ms = submit_until_ms + execution_timeout_ms + retention_ms +
+finalization_timeout_ms`. Existing accepted entries can replay after ticket
+expiry; absent expired scopes or old generations dispatch nothing.
+
+Once submit begins, the caller freezes generation/ticket/key/prepared input.
+Lost acknowledgments retry only that qualified submit, never a fresh capability
+or key. `acceptance` is `not_accepted`, `accepted` or `indeterminate`; later
+auth/control failures never downgrade an accepted/indeterminate logical attempt.
+Missing restart evidence means unavailable/indeterminate, not invented proof of
+expiry, cancellation or exactly-once external work.
+
+### Peer Control Errors
+
+Protocol errors use `ControlError`. Existing ordinary inference admission
+rejections instead preserve their ordinary `{"error": ...}` shape, status/type
+and optional `block_id`, without protocol fields. Neither is an inference
+success or provider outcome.
+
+| Status / type                                               | Meaning                                                                                                  |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `400`                                                       | Invalid envelope, body, headers, model/receiver eligibility or query; `invalid_cursor` for invalid reads |
+| `401 auth_failed` / `403 forbidden`                         | Current inference authentication / admitted-model authorization failed; no result disclosure             |
+| `404 job_unavailable`                                       | Unknown or different-owner job, including unknown DELETE                                                 |
+| `404 deferred_disabled`                                     | New deferred admission is disabled                                                                       |
+| `405 method_not_allowed`                                    | Recognized route, unsupported method; carries `Allow`                                                    |
+| `409 attempt_conflict` / `409 submission_in_progress`       | Conflicting qualified request / preparation still active                                                 |
+| `410 job_released` / `410 job_expired`                      | Protected release / retention expiry                                                                     |
+| `410 generation_mismatch` / `410 submit_scope_expired`      | Old generation / absent expired submission scope; zero dispatch                                          |
+| `413 request_too_large`                                     | Oversized decoded/wire submit input                                                                      |
+| `426 unsupported_deferred_version`                          | Wrong path version or missing/wrong version header                                                       |
+| `429 deferred_owner_limit` / `429 deferred_control_limited` | Owner admission / control pressure                                                                       |
+| `503 deferred_saturated`                                    | Global admission/resource pressure                                                                       |
+
+The ordinary caller sees standard JSON errors before downstream commitment:
+
+| Caller status / error type                               | Meaning                                                                      |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `502 deferred_protocol_error`                            | Capability/version/marker/schema/identity or terminal-hash validation failed |
+| `502 deferred_submit_indeterminate`                      | Unacknowledged submission uncertainty; no fresh inference                    |
+| `502 deferred_request_lost`                              | Accepted work became unavailable; no fresh inference                         |
+| `502 deferred_control_error`                             | Control failure or recovery budgets exhausted                                |
+| `504 deferred_wait_timeout`                              | Overall caller wait expired                                                  |
+| `504 deferred_execution_timeout`                         | Fixed executor job deadline expired                                          |
+| `502 deferred_limit_exceeded` / `502 deferred_cancelled` | Bounded execution failed / observable local cancellation                     |
+
+Definite terminal provider HTTP/transport outcomes **before downstream
+commitment** still use ordinary inference retry rules. Peer errors, polling
+`Retry-After`, admission pressure and accepted/indeterminate retrieval failures
+do not trigger alias/encrypted-reasoning inference retries, provider-health
+mutation or model cooldown. After commitment, failure only terminates the stream.
+See [ownership and cleanup](operations.md#ownership-cancellation-and-release).
+
 ## Authentication
 
 When `bearer_static` auth is enabled, requests must send:
@@ -237,6 +460,9 @@ ledger have separate lifetimes and pricing semantics.
   `4xx` statuses do not mark providers unhealthy
 - Other upstream `4xx` responses are returned verbatim
 - Unsupported operations return client-visible proxy errors
+- Peer deferred control failures are not provider outcomes and do not authorize
+  alias failover; definite terminal inference outcomes retain the rules above
+  before downstream commitment (see [peer errors](#peer-control-errors))
 - For database-owned user/team keys, unavailable required quota policy or spend
   data returns JSON `503`
   (`{"error":{"type":"quota_unavailable","message":"quota data temporarily unavailable"}}`)
@@ -290,6 +516,13 @@ credentials. To switch an existing keyed provider, explicitly send
 `"forward_authorization": true`. Omitting the flag preserves its current value.
 See [client authorization forwarding](configuration.md#forwarding-client-authorization)
 for supported types and credential-exposure warnings.
+
+`deferred_transport` and `deferred_receiver` are static-config-only.
+Administrative provider POST/PUT and credential PUT reject either field before
+commit, including null/empty objects and case variants, for every admin role.
+Managed derivatives cannot extend a static base carrying either opt-in.
+There are no writable managed/web transport fields; see
+[peer configuration](configuration.md#peer-deferred-transport-v1).
 
 Within an existing `healthcheck`, omitted scalar fields are preserved and
 `send_authorization: false` disables probe authorization. Empty `method`,

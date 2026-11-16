@@ -84,8 +84,17 @@ func (l *Logger) MaxBodyBytes() int {
 }
 
 func (l *Logger) Record(e payloadlog.Entry) error {
+	return l.RecordContext(context.Background(), e)
+}
+
+func (l *Logger) RecordContext(ctx context.Context, e payloadlog.Entry) error {
 	if l == nil {
 		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, l.timeout)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if e.Timestamp == "" {
 		e.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
@@ -94,8 +103,6 @@ func (l *Logger) Record(e payloadlog.Entry) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), l.timeout)
-	defer cancel()
 	_, err = l.coll.InsertOne(ctx, doc)
 	if err != nil {
 		return fmt.Errorf("mongodb insert: %w", err)

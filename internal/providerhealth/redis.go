@@ -31,6 +31,7 @@ func parseRedisOptions(redisURL string) (*redis.Options, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse redis_url: %w", err)
 	}
+	opts.ContextTimeoutEnabled = true
 	return opts, nil
 }
 

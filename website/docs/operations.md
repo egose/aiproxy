@@ -449,6 +449,8 @@ build` from the `website` directory.
 - metrics configuration
 - provider-health configuration
 - metrics-backed inventory state
+- static peer deferred transport / receiver policy, subject to live reservation
+  checks and [drain rules](#peer-reload-and-finalization)
 
 If rate-limit settings are unchanged, reload preserves existing limiter buckets.
 Changing rate-limit settings creates a fresh limiter and resets bucket state.
@@ -605,6 +607,238 @@ The forward database migration retains key and workspace UUIDs for accounting,
 without retaining deleted credentials. These identities and the ledger remain
 until the workspace is deleted. Previously erased spend cannot be recovered
 by the migration.
+
+## Peer Deferred Transport v1
+
+Use the [two-role configurations](configuration.md#peer-deferred-transport-v1)
+and [versioned wire contract](api-reference.md#peer-deferred-transport-v1).
+The only replaced leg is:
+
+```text
+end client → caller proxy → finite peer controls → executor proxy → upstream
+```
+
+The end-client and executor–upstream connections still have their own deadlines
+and intermediary idle limits. This is not durable job scheduling, Batch, or
+Responses background mode.
+
+### Streaming And Deployment
+
+The executor keeps the original `stream` flag. Reads are immediate, finite byte
+snapshots, **not long polls**. JSON delivery waits for the complete terminal
+manifest; SSE delivery starts when the selected adapter head is available and
+retrieves output incrementally. The retained bytes are exactly the existing
+adapter's output, including native SSE where passthrough applies. No synthetic
+SSE IDs, events, heartbeats or `[DONE]` are added.
+
+Polling adds latency (normally at least the empty-poll interval). A silent
+upstream remains silent to the end client. Incomplete peer transfers are discarded
+and retried at the same byte cursor only after a complete frame can be validated.
+The terminal SHA-256 verifies all retained bytes, but cannot undo bytes already
+delivered to a streaming client. A failure after downstream headers/bytes are
+committed terminates that stream; it never splices in another inference. Peer
+cursor recovery is not an end-client reconnect/resume session.
+
+Deploy compatible executors **before enabling caller opt-ins**. A positive,
+version-1 capability for the configured executor public model is required before
+submission. Missing capabilities or wrong versions mean zero submissions; opted-in
+chat never silently falls back to ordinary transport. An ordinary upstream `202`
+is not a job acknowledgment.
+
+Route capability discovery, submit/replay, reads, status, result and DELETE to
+the **same executing process**, using sticky routing or a dedicated executor.
+Expose the versioned private routes through the trusted TLS edge without caching
+or redirects; preserve their authentication and protocol markers. An external
+path mount must be stripped before the executor listener. Shared databases or
+Redis provider health do not share job storage.
+
+All job data, generations, tickets and dedup evidence are in memory. Restart,
+replica replacement or rolling deployment loses them, even if external inference
+or billing continues. v1 provides no replica failover, restart recovery,
+exactly-once external inference or billing-stop guarantee. Drain the old process
+rather than moving its controls to a replacement.
+
+### Independent Deadlines
+
+| Limit                                  | Scope / default                                                                                                      |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Executor `execution_timeout`           | Whole job, from commit; root 10m, narrowed by receiver/eligible alias limits                                         |
+| Executor `retention`                   | Terminal result retention, from sealing; 2m, never renewed by reads                                                  |
+| Peer `control_timeout`                 | Headers and complete finite body read/write; 5s on each role, bounded by advertised policy and remaining caller wait |
+| Caller `max_wait`                      | Discovery, submit recovery, polling, transfer and delays combined; 15m, starts before discovery                      |
+| Submission ticket window               | 30s to admit an absent qualified attempt; not an execution deadline                                                  |
+| Executor `finalization_timeout`        | Terminal completion plus 5s, including queue wait; remote completion work must honor this deadline                   |
+| Upstream header timeout                | Existing root/provider setting, default 90s; only waits for inference response headers                               |
+| Listener timeouts                      | Inbound header/idle/write settings; listener changes require restart                                                 |
+| End-client / other intermediary limits | Unchanged; may expire before any configured peer limit                                                               |
+
+Execution uses an app-owned deadline independent of the submit connection.
+Polls extend neither execution nor retention, and `max_wait` is not a retention
+lease. Slow readers can lose retained output before finishing. Setting listener
+`write = "0s"` removes that listener write timeout, not client, ingress or upstream
+timeouts. The private handler still enforces finite control I/O deadlines.
+
+Empty polls delay by the greater of `poll_interval` and peer advice clamped to
+50ms–2s. Transient transport/transfer failures and control `429`/`503` can retry
+within both caller budgets, using full-jitter exponential backoff from 100ms,
+capped at 2s. Other control errors fail closed. Control `Retry-After` is polling
+advice, not a model cooldown.
+
+### Ownership, Cancellation And Release
+
+Every control, including DELETE and accepted submit replay, authenticates against
+the **current activated inference auth policy** and checks the admitted public
+model's current authorization. Controls do not re-resolve or reselect its target.
+Revocation denies further access but does not undo already-started work.
+
+- A static owner is the named client plus tenant. Token rotation preserves
+  ownership but rejects the old token; reusing a client name/tenant reuses identity.
+- A database inbound key owns work by its key ID and workspace ID. A replacement
+  key is a different owner.
+- Anonymous requests and dashboard/admin JWTs cannot access peer controls.
+- Unknown/different-owner jobs return `404 job_unavailable`. Current model denial
+  returns `403`, without revealing a result or permitting deletion.
+
+A shared peer credential identifies the **caller proxy**, not end users behind
+it. Their jobs share that owner's limits and authorization at the executor;
+caller-side user/tenant headers cannot establish executor ownership. Keep the
+peer credential separate from end-client and upstream credentials.
+
+Controls forward no end-client credentials, cookies or arbitrary inference
+headers. The submit header bag is bounded ordinary adapter metadata (JSON content
+type, Accept, chosen inference user-agent and configured safe forwarded headers).
+The executor uses its own upstream credentials and normal adapter policies.
+`forward_authorization` is incompatible with either opt-in. The case-insensitive
+`X-Aiproxy-Deferred` / `X-Aiproxy-Deferred-*` namespace is reserved, rejected in
+generic forwarding configuration and stripped from inference header bags.
+TLS/proxy behavior remains configured per provider; private controls forbid
+**all** redirects, even same-origin redirects. Health/discovery never submit jobs.
+
+Once a receipt is known, the caller makes one best-effort DELETE on cancellation
+or delivery completion. It has an independent fresh control deadline and does not
+use the canceled request context or retrieval budgets. A lost receipt may leave
+no job ID to delete. DELETE promptly seals/revokes appends and releases retained
+data; a known repeated release returns `204`. It cannot prove the external
+provider stopped work or charging. Execution deadlines and terminal TTL remain
+cleanup backstops even if DELETE fails or current authorization prevents it.
+
+Deletion/expiry retains protected dedup tombstones, not result bodies. A caller
+that has begun submit freezes its generation, signed ticket, attempt key and
+prepared request. Lost acknowledgments can retry only that same qualified submit.
+Never recover an accepted or indeterminate control failure by refreshing the
+ticket/key, starting ordinary inference or choosing another alias target.
+
+### Resource Bounds
+
+Admission reserves job/running/owner/dedup capacity, the full output allowance,
+input and work memory, and finalization credit **before** `202`. There is no
+inference queue. Saturation can occur below `max_running` or `max_jobs` because
+memory, per-owner capacity, control slots and outstanding finalization ownership
+also constrain admission. Accepted records/tombstones are not evicted early to
+make room.
+
+`max_memory_bytes` accounts feature-owned live capacity/reservations, including
+decoded/base64 submit scratch, request rewrites/redaction, parser/translation
+work, output slabs, control frames/readers and completion snapshots. It is **not
+a total Go heap/RSS or ordinary-connection limit**. Output uses 32 KiB slabs;
+each finite read copies at most 64 KiB rather than retaining a deleted full
+buffer. Fixed allowances include 512 KiB/control slot, 64 KiB/job metadata,
+4 KiB/dedup record and 1 KiB/owner bucket.
+
+Deferred-only structural bounds are JSON depth 64 / 16384 tokens; SSE line
+256 KiB / event 1 MiB / 1024 data lines; and control JSON depth 8 / 2048 tokens.
+Required translated parsing fails explicitly on overflow. Optional passthrough
+usage inspection can stop inspecting an oversized event without changing its
+delivered bytes. Buffered upstream bodies still obey the effective result ceiling.
+
+Payload capture is absent when logging is off and otherwise limited by both the
+configured capture prefix and effective request/result ceilings.
+`payload_log.max_body_bytes = 0` does **not** make deferred snapshots unbounded.
+On growth/structural/capture-work failure, the job fails explicitly, cancels/closes
+its source and finalizes once. It may retain an exact failed stream prefix, never
+a truncated success. Ordinary non-deferred adapter limits are unchanged.
+
+Non-delete controls have fixed global 100/s (burst 200) and per-owner 20/s
+(burst 40) buckets, at most four in flight per owner and one active control per
+job. DELETE has two reserved global slots, global 8/s (burst 16) and per-owner
+2/s (burst 4) buckets. Owner tables are bounded by `max_entries`; idle, job-free
+owners can be reclaimed after one minute, not evicted to reset live limits.
+
+### Peer Reload And Finalization
+
+Accepted execution retains its admitted catalog, credentials, endpoint,
+transports, alias attempts and completion resources through a runtime lease.
+Per-job deadlines/limits stay frozen; current auth/model policy still governs
+controls. Failed reloads leave jobs and resources intact.
+
+To disable new execution, remove the root `deferred` block **and all receiver
+blocks** in a valid reload. Capabilities/new admissions then stop, while existing
+authenticated status/read/result/DELETE and protected submit replay drain under
+the last resource/control policy, even if opt-ins disappeared. Re-enablement and
+capacity reductions are checked against live ownership. Reducing global/owner
+job, running, admission, entry, control or memory capacity below reservations
+rejects activation; jobs are not evicted to fit.
+
+Two fixed app-owned completion workers handle at most `max_jobs` outstanding
+records, with credit reserved at admission. Known in-memory completion/usage is
+published once. Remote health/quota/payload completion has a deadline from
+terminal sealing plus `finalization_timeout`, **including queue wait**. Failed or
+expired persistence is reported, not retried into duplicate accounting.
+
+Local filesystem payload I/O has **no hard cancellation guarantee**: operation
+assumes local OS/filesystem calls complete in bounded time. A blocked call can
+occupy one of the two workers and its resource lease, applying admission
+backpressure; no unbounded timeout goroutines or replacement workers are spawned.
+Shutdown first stops admission and cancels sources, then waits within the app's
+shutdown budget (default 10s), reporting incomplete cleanup rather than falsely
+freeing live ownership. Runtime resources retire only after their last lease.
+
+### Peer Diagnostics And Metrics
+
+Separate peer control failures from provider inference outcomes. Typed
+`DeferredControlError` failures (negotiation, admission/control pressure,
+indeterminate acceptance, lost retrieval, limits or deadlines) do not trigger
+generic alias/encrypted-reasoning inference retries, provider-health mutation or
+model cooldown. A **definite terminal provider HTTP/transport outcome before
+downstream commitment** retains ordinary configured inference retry rules;
+direct requests never fail over. Original model retry advice is captured once
+at upstream headers and relayed as a remaining deadline, not restarted on replay.
+After downstream commitment, only the same job/cursor may be retrieved.
+
+Polls, replay and `202` are control traffic, not inference successes. The executor
+records one inference completion/known usage; the caller records its client
+completion. Do not sum both as two external billable executions.
+
+| Metric                                         | Type / labels                                                                                                                    |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `aiproxy_deferred_admissions_total`            | Counter, `outcome` (including `accepted`, `replayed` and bounded rejection types)                                                |
+| `aiproxy_deferred_controls_total`              | Counter, `route`, `outcome`                                                                                                      |
+| `aiproxy_deferred_delivery_errors_total`       | Counter, `route`; failed finite response transfers                                                                               |
+| `aiproxy_deferred_jobs`                        | Gauge, `state`: `running`, `headers_ready`, `completed`, `failed`, `cancelled`                                                   |
+| `aiproxy_deferred_bytes`                       | Gauge, `kind`: `fixed`, `input`, `output`, `work`, `ingress`, `reserved`, `retained`                                             |
+| `aiproxy_deferred_ownership`                   | Gauge, `kind`: `jobs`, `running`, `admissions`, `entries`, `owners`, `controls`, `deletes`, `finalization_credits`, `finalizing` |
+| `aiproxy_deferred_enabled`                     | Gauge; whether new admission is enabled                                                                                          |
+| `aiproxy_deferred_cancellations_total`         | Counter; jobs sealed as cancelled                                                                                                |
+| `aiproxy_deferred_expirations_total`           | Counter; retained results expired                                                                                                |
+| `aiproxy_deferred_finalization_failures_total` | Counter; failed/expired completion work                                                                                          |
+
+Routes are `capabilities`, `submit`, `status`, `result`, `read`, `delete` or
+`unknown`; unrecognized outcomes collapse to `rejected`. No request/job/attempt
+IDs, owners, tickets or credentials are metric labels. Byte categories overlap:
+`reserved` is aggregate accounting and `retained` is available data within output
+reservations, not additional memory to sum. Store-backed gauges/counters require
+an initialized store; they remain available while it drains after disablement.
+Store state survives reload, not restart. Scrapes use the separate
+[metrics bearer token](#metrics-and-health).
+
+Look for `deferred control delivery failed`, `deferred inference finished` and
+`deferred finalization failed` diagnostics. Access/control logs can describe
+bounded private routes; **payload logs contain inference bodies only**, never
+peer envelopes, base64 frames, tickets or control credentials. Completion logs
+retain existing credential redaction and guardrail body omission/redaction
+policy; job storage is not a redacted payload log. Protect in-memory inference
+data and payload sinks separately. See [payload logging](#payload-logging) and
+the [caller-visible error table](api-reference.md#peer-control-errors).
 
 ## Metrics And Health
 
@@ -1087,6 +1321,11 @@ sensitive headers (`authorization`, `proxy-authorization`, `cookie`,
 
 Only enable payload logging when you can protect the output directory:
 bodies contain prompts and completions. Changes apply on `SIGHUP` reload.
+
+Deferred inference additionally obeys its effective request/result and work
+ceilings; a configured full-body capture does not remove those bounds. Peer
+control envelopes/polls are not payload entries. See
+[peer diagnostics and finalization](#peer-diagnostics-and-metrics).
 
 ## Secret Handling
 

@@ -69,6 +69,8 @@ type ProviderInput struct {
 	ForwardUserAgent          bool
 	ForwardHeaders            []string
 	ForwardAuthorization      bool
+	DeferredTransportBlock    string
+	DeferredReceiverBlock     string
 	AllowInsecureBaseURL      bool
 	Credential                ProviderCredentialInput
 	Enabled                   *bool
@@ -186,6 +188,9 @@ func LoadDocument(path string) (string, []TopLevelBlock, error) {
 			return "", nil, nil
 		}
 		return "", nil, fmt.Errorf("read config %s: %w", path, err)
+	}
+	if strings.HasPrefix(strings.TrimSpace(string(src)), "{") {
+		return "", nil, fmt.Errorf("configure supports HCL file editing only; use aiproxy convert to convert JSON to HCL before editing")
 	}
 	blocks, err := ParseTopLevelBlocks(string(src))
 	if err != nil {
@@ -320,6 +325,7 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 	if input.Extends != "" {
 		b.WriteString("\n")
 		renderProviderCredential(&b, input, defaultSecretsPath)
+		renderProviderDeferredBlocks(&b, input)
 		b.WriteString("}\n")
 		return b.String()
 	}
@@ -351,10 +357,14 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 	}
 	if input.IsExplicitlyDisabled() {
 		b.WriteString("  enabled = false\n")
+		if input.DeferredTransportBlock != "" {
+			renderProviderCredential(&b, input, defaultSecretsPath)
+		}
 	} else {
 		b.WriteString("\n")
 		renderProviderCredential(&b, input, defaultSecretsPath)
 	}
+	renderProviderDeferredBlocks(&b, input)
 	if input.Healthcheck != nil {
 		b.WriteString(renderProviderHealthcheckBlock(input.Healthcheck))
 	}
@@ -449,6 +459,16 @@ func renderProviderCredential(b *strings.Builder, input ProviderInput, defaultSe
 		b.WriteString("  api_key = ")
 		b.WriteString(RenderStringOrExpression(input.Credential.APIKeyValue))
 		b.WriteString("\n")
+	}
+}
+
+func renderProviderDeferredBlocks(b *strings.Builder, input ProviderInput) {
+	for _, block := range []string{input.DeferredTransportBlock, input.DeferredReceiverBlock} {
+		if strings.TrimSpace(block) != "" {
+			b.WriteString("\n  ")
+			b.WriteString(strings.TrimSpace(block))
+			b.WriteString("\n")
+		}
 	}
 }
 
@@ -774,7 +794,10 @@ func WriteFile(path string, body []byte, mode os.FileMode) error {
 }
 
 func ValidateGeneratedConfig(source []byte, filename string) error {
-	return config.ValidateProviderTLSProfiles(source, filename)
+	if err := config.ValidateProviderTLSProfiles(source, filename); err != nil {
+		return err
+	}
+	return config.ValidateDeferredConfig(source, filename)
 }
 
 func UpsertBlock(source, blockText string, match func(TopLevelBlock) bool) (string, error) {

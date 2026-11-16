@@ -15,6 +15,7 @@ type rawFile struct {
 	Database              []*rawDatabase     `hcl:"database,block"`
 	MultiTenancy          []*rawMultiTenancy `hcl:"multi_tenancy,block"`
 	IngressGuardrails     []*rawGuardrails   `hcl:"ingress_guardrails,block"`
+	Deferred              []*rawDeferred     `hcl:"deferred,block"`
 	Providers             []rawProvider      `hcl:"provider,block"`
 	Aliases               []rawAlias         `hcl:"alias,block"`
 	providerSyntax        []rawProviderSyntax
@@ -23,6 +24,37 @@ type rawFile struct {
 type rawProviderSyntax struct {
 	Attrs  map[string]bool
 	Blocks map[string]int
+}
+
+type rawDeferred struct {
+	MaxJobs             *int    `hcl:"max_jobs,optional"`
+	MaxRunning          *int    `hcl:"max_running,optional"`
+	MaxAdmissions       *int    `hcl:"max_admissions,optional"`
+	MaxEntries          *int    `hcl:"max_entries,optional"`
+	MaxMemoryBytes      *int64  `hcl:"max_memory_bytes,optional"`
+	MaxRequestBytes     *int64  `hcl:"max_request_bytes,optional"`
+	MaxResultBytes      *int64  `hcl:"max_result_bytes,optional"`
+	MaxWorkBytes        *int64  `hcl:"max_work_bytes,optional"`
+	PerOwnerJobs        *int    `hcl:"per_owner_jobs,optional"`
+	PerOwnerRunning     *int    `hcl:"per_owner_running,optional"`
+	MaxControlInflight  *int    `hcl:"max_control_inflight,optional"`
+	ExecutionTimeout    *string `hcl:"execution_timeout,optional"`
+	Retention           *string `hcl:"retention,optional"`
+	ControlTimeout      *string `hcl:"control_timeout,optional"`
+	FinalizationTimeout *string `hcl:"finalization_timeout,optional"`
+}
+
+type rawDeferredTransport struct {
+	ControlTimeout    *string `hcl:"control_timeout,optional"`
+	MaxWait           *string `hcl:"max_wait,optional"`
+	PollInterval      *string `hcl:"poll_interval,optional"`
+	MaxControlCalls   *int    `hcl:"max_control_calls,optional"`
+	MaxControlRetries *int    `hcl:"max_control_retries,optional"`
+}
+
+type rawDeferredReceiver struct {
+	ExecutionTimeout *string `hcl:"execution_timeout,optional"`
+	MaxResultBytes   *int64  `hcl:"max_result_bytes,optional"`
 }
 
 type rawMetrics struct {
@@ -127,25 +159,27 @@ type rawProviderHealth struct {
 }
 
 type rawProvider struct {
-	Type                   string            `hcl:"type,label"`
-	Name                   string            `hcl:"name,label"`
-	Extends                string            `hcl:"extends,optional"`
-	DisplayName            string            `hcl:"display_name,optional"`
-	BaseURL                string            `hcl:"base_url,optional"`
-	UpstreamHeaderTimeout  string            `hcl:"upstream_header_timeout,optional"`
-	UserAgent              string            `hcl:"user_agent,optional"`
-	ForwardUserAgent       bool              `hcl:"forward_user_agent,optional"`
-	ForwardHeaders         []string          `hcl:"forward_headers,optional"`
-	ForwardAuthorization   bool              `hcl:"forward_authorization,optional"`
-	AllowInsecureBaseURL   *bool             `hcl:"allow_insecure_base_url,optional"`
-	TLSClientHello         string            `hcl:"tls_client_hello,optional"`
-	TLSClientHelloSpecFile string            `hcl:"tls_client_hello_spec_file,optional"`
-	APIKey                 string            `hcl:"api_key,optional"`
-	APIKeyRef              *rawAPIKeyRef     `hcl:"api_key_ref,block"`
-	CredentialRef          *rawCredentialRef `hcl:"credential_ref,block"`
-	Enabled                *bool             `hcl:"enabled,optional"`
-	Healthcheck            *rawHealthcheck   `hcl:"healthcheck,block"`
-	Models                 []rawModel        `hcl:"model,block"`
+	Type                   string                `hcl:"type,label"`
+	Name                   string                `hcl:"name,label"`
+	Extends                string                `hcl:"extends,optional"`
+	DisplayName            string                `hcl:"display_name,optional"`
+	BaseURL                string                `hcl:"base_url,optional"`
+	UpstreamHeaderTimeout  string                `hcl:"upstream_header_timeout,optional"`
+	UserAgent              string                `hcl:"user_agent,optional"`
+	ForwardUserAgent       bool                  `hcl:"forward_user_agent,optional"`
+	ForwardHeaders         []string              `hcl:"forward_headers,optional"`
+	ForwardAuthorization   bool                  `hcl:"forward_authorization,optional"`
+	DeferredTransport      *rawDeferredTransport `hcl:"deferred_transport,block"`
+	DeferredReceiver       *rawDeferredReceiver  `hcl:"deferred_receiver,block"`
+	AllowInsecureBaseURL   *bool                 `hcl:"allow_insecure_base_url,optional"`
+	TLSClientHello         string                `hcl:"tls_client_hello,optional"`
+	TLSClientHelloSpecFile string                `hcl:"tls_client_hello_spec_file,optional"`
+	APIKey                 string                `hcl:"api_key,optional"`
+	APIKeyRef              *rawAPIKeyRef         `hcl:"api_key_ref,block"`
+	CredentialRef          *rawCredentialRef     `hcl:"credential_ref,block"`
+	Enabled                *bool                 `hcl:"enabled,optional"`
+	Healthcheck            *rawHealthcheck       `hcl:"healthcheck,block"`
+	Models                 []rawModel            `hcl:"model,block"`
 }
 
 type rawHealthcheck struct {

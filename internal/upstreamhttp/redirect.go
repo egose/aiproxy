@@ -1,6 +1,7 @@
 package upstreamhttp
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -10,16 +11,30 @@ import (
 const MaxRedirects = 10
 
 var (
-	ErrRedirectOrigin = errors.New("upstream redirect blocked: destination must have the same scheme, hostname, and port as the original request")
-	ErrRedirectLimit  = errors.New("upstream redirect blocked: exceeded 10 redirects")
+	ErrRedirectOrigin  = errors.New("upstream redirect blocked: destination must have the same scheme, hostname, and port as the original request")
+	ErrRedirectLimit   = errors.New("upstream redirect blocked: exceeded 10 redirects")
+	ErrControlRedirect = errors.New("peer control redirects are forbidden")
 )
+
+type controlContextKey struct{}
+
+func ControlContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, controlContextKey{}, true)
+}
 
 func Do(client *http.Client, req *http.Request) (*http.Response, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
 	guarded := *client
+	control, _ := req.Context().Value(controlContextKey{}).(bool)
+	if control {
+		guarded.Jar = nil
+	}
 	guarded.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if control {
+			return ErrControlRedirect
+		}
 		if err := CheckRedirect(next, via); err != nil {
 			return err
 		}

@@ -66,6 +66,9 @@ func Load(src []byte, filename string) (*Runtime, error) {
 	if err := validateProviderTLSAttributes(file.Body); err != nil {
 		return nil, err
 	}
+	if _, err := validateDeferredDeclarations(file.Body); err != nil {
+		return nil, err
+	}
 
 	var raw rawFile
 	if d := gohcl.DecodeBody(file.Body, nil, &raw); d.HasErrors() {
@@ -189,6 +192,8 @@ func annotateProviderSyntax(body hcl.Body, raw *rawFile) {
 				{Type: "api_key_ref"},
 				{Type: "credential_ref"},
 				{Type: "healthcheck"},
+				{Type: "deferred_transport"},
+				{Type: "deferred_receiver"},
 				{Type: "model", LabelNames: []string{"name"}},
 			},
 		}); !blockDiags.HasErrors() {

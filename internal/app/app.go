@@ -20,6 +20,7 @@ import (
 	"github.com/egose/aiproxy/internal/copilotlogin"
 	"github.com/egose/aiproxy/internal/dashrpc"
 	"github.com/egose/aiproxy/internal/dbmerge"
+	"github.com/egose/aiproxy/internal/deferred"
 	"github.com/egose/aiproxy/internal/guardrails"
 	"github.com/egose/aiproxy/internal/healthcheck"
 	"github.com/egose/aiproxy/internal/httpapi"
@@ -83,15 +84,21 @@ type App struct {
 	dashboardTokenWritten bool
 	listen                func(network, address string) (net.Listener, error)
 	shutdownTimeout       time.Duration
+	deferredStore         *deferred.Store
+	runtimeResources      *httpapi.RuntimeResources
+	resourceManager       *runtimeResourceManager
 }
 
 type candidateResources struct {
-	clients *upstreamClientPool
-	probes  *healthcheck.Prepared
-	health  *providerhealth.Tracker
-	disk    *payloadlog.Logger
-	mongo   *mongolog.Logger
-	store   *store.Store
+	clients   *upstreamClientPool
+	probes    *healthcheck.Prepared
+	health    *providerhealth.Tracker
+	disk      *payloadlog.Logger
+	mongo     *mongolog.Logger
+	store     *store.Store
+	deferred  *deferred.Store
+	resources *httpapi.RuntimeResources
+	owners    []*httpapi.ResourceOwner
 }
 
 func (c *candidateResources) cleanup(err *error) {
@@ -105,17 +112,29 @@ func (c *candidateResources) cleanup(err *error) {
 	if c.clients != nil {
 		c.clients.Retire()
 	}
-	if c.mongo != nil {
-		cleanupErr = errors.Join(cleanupErr, c.mongo.Close())
+	if c.deferred != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cleanupErr = errors.Join(cleanupErr, c.deferred.Close(ctx))
+		cancel()
 	}
-	if c.disk != nil {
-		cleanupErr = errors.Join(cleanupErr, c.disk.Close())
-	}
-	if c.health != nil {
-		cleanupErr = errors.Join(cleanupErr, c.health.Close())
-	}
-	if c.store != nil {
-		cleanupErr = errors.Join(cleanupErr, c.store.Close())
+	if c.resources != nil {
+		c.resources.Retire()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cleanupErr = errors.Join(cleanupErr, waitCandidateOwners(ctx, c.owners))
+		cancel()
+	} else {
+		if c.mongo != nil {
+			cleanupErr = errors.Join(cleanupErr, c.mongo.Close())
+		}
+		if c.disk != nil {
+			cleanupErr = errors.Join(cleanupErr, c.disk.Close())
+		}
+		if c.health != nil {
+			cleanupErr = errors.Join(cleanupErr, c.health.Close())
+		}
+		if c.store != nil {
+			cleanupErr = errors.Join(cleanupErr, c.store.Close())
+		}
 	}
 	if cleanupErr != nil {
 		*err = errors.Join(*err, fmt.Errorf("candidate cleanup: %w", cleanupErr))
@@ -211,6 +230,21 @@ func Build(ctx context.Context, opts BuildOptions) (_ *App, err error) {
 	resolver := modelresolver.New(rt)
 	deps := buildDependencies(rt, resolver, logger, adapter, metrics, health, healthchecks, rateLimiter, usage, httpClients, logs, startTime, opts.Version, payloadRecorder, payloadDirOf(payloadLog), rt.Logging.PayloadLog.RedactGuardrailBodies, scanner, quarantine, exceptions, adminStore, dynKeys)
 	app := &App{Config: rt, metrics: metrics, logger: logger, adapter: adapter, resolver: resolver, clients: httpClients, health: health, healthchecks: healthchecks, rateLimiter: rateLimiter, quotaTracker: httpapi.NewQuotaTracker(adminStore), usage: usage, logs: logs, payloadLog: payloadLog, payloadMongo: payloadMongo, payloadRecorder: payloadRecorder, guardrails: scanner, quarantine: quarantine, exceptions: exceptions, adminStore: adminStore, buildOpt: opts, startTime: startTime, dashboardTokenMinted: dashboardTokenMinted}
+	if rt.Deferred.Enabled {
+		app.deferredStore, err = deferred.New(context.Background(), deferred.OptionsFromConfig(rt.Deferred))
+		if err != nil {
+			return nil, err
+		}
+		candidate.deferred = app.deferredStore
+	}
+	app.resourceManager = newRuntimeResourceManager()
+	app.runtimeResources, candidate.owners, err = app.resourceManager.prepare(runtimeResourceList(httpClients, health, payloadLog, payloadMongo, adminStore))
+	if err != nil {
+		return nil, err
+	}
+	candidate.resources = app.runtimeResources
+	deps.DeferredStore = app.deferredStore
+	deps.RuntimeResources = app.runtimeResources
 	deps.Quota = app.quotaTracker
 	deps.RequestReload = app.Reload
 	deps.CopilotDeviceClient = app.copilotDeviceClient
@@ -236,6 +270,7 @@ func (a *App) Run(ctx context.Context) error {
 
 func (a *App) RunReady(ctx context.Context, ready func() error) (runErr error) {
 	cleanupDone := false
+	var closeContext context.Context
 	var listener net.Listener
 	listenerOwned := false
 	cleanup := func() error {
@@ -249,7 +284,13 @@ func (a *App) RunReady(ctx context.Context, ready func() error) (runErr error) {
 				err = errors.Join(err, fmt.Errorf("listener close: %w", closeErr))
 			}
 		}
-		if closeErr := a.Close(); closeErr != nil {
+		var closeErr error
+		if closeContext == nil {
+			closeErr = a.Close()
+		} else {
+			closeErr = a.CloseContext(closeContext)
+		}
+		if closeErr != nil {
 			err = errors.Join(err, fmt.Errorf("app close: %w", closeErr))
 		}
 		return err
@@ -316,6 +357,8 @@ func (a *App) RunReady(ctx context.Context, ready func() error) (runErr error) {
 			}
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 			defer cancel()
+			closeContext = shutdownCtx
+			a.BeginShutdown()
 			if err := a.Server.Shutdown(shutdownCtx); err != nil {
 				shutdownErr := fmt.Errorf("server shutdown: %w", err)
 				if closeErr := a.Server.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
@@ -423,55 +466,84 @@ func (a *App) Reload() (err error) {
 	if current == nil || !ratelimit.ConfigEqual(current.Auth, rt.Auth) {
 		nextRateLimiter = ratelimit.New(rt.Auth)
 	}
-	dashboardTokenMinted, dashboardTokenPublished, err := ensureDashboardToken(rt, currentDashboard, true)
-	if err != nil {
-		return fmt.Errorf("dashboard token: %w", err)
+	nextDeferred := a.deferredStore
+	var deferredUpdate *deferred.Update
+	if nextDeferred == nil && rt.Deferred.Enabled {
+		initial := deferred.OptionsFromConfig(rt.Deferred)
+		initial.Enabled = false
+		nextDeferred, err = deferred.New(context.Background(), initial)
+		if err != nil {
+			return err
+		}
+		candidate.deferred = nextDeferred
 	}
-
-	nextHealth.SetProviders(rt.Catalog)
-	if err := preparedProbes.Activate(nextHealth); err != nil {
+	if nextDeferred != nil {
+		deferredUpdate, err = nextDeferred.PrepareUpdate(deferred.OptionsFromConfig(rt.Deferred))
+		if err != nil {
+			return err
+		}
+		defer deferredUpdate.Cancel()
+	}
+	nextResources, owners, err := a.resourceManager.prepare(runtimeResourceList(nextClients, nextHealth, nextPayloadLog, nextPayloadMongo, a.adminStore))
+	if err != nil {
 		return err
 	}
-	a.metrics.SetBuildInfo(a.buildOpt.Version)
-	a.metrics.RecordConfig(rt)
-	deps := buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, nextClients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadRecorder, payloadDirOf(nextPayloadLog), rt.Logging.PayloadLog.RedactGuardrailBodies, nextGuardrails, nextQuarantine, nextExceptions, a.adminStore, dynKeys)
-	deps.Quota = a.quotaTracker
-	deps.RequestReload = a.Reload
+	candidate.resources, candidate.owners = nextResources, owners
+	var deps httpapi.Dependencies
 	a.mu.RLock()
-	deps.CopilotDeviceClient = a.copilotDeviceClient
+	copilotDeviceClient := a.copilotDeviceClient
 	a.mu.RUnlock()
 	oldClients := a.clients
-	oldHealth := a.health
-	oldPayloadLog := a.payloadLog
-	oldPayloadMongo := a.payloadMongo
+	oldResources := a.runtimeResources
 	a.mu.Lock()
-	a.handler.UpdateDependencies(deps)
-	a.Config = rt
-	a.resolver = nextResolver
-	a.clients = nextClients
-	a.health = nextHealth
-	a.rateLimiter = nextRateLimiter
-	a.payloadLog = nextPayloadLog
-	a.payloadMongo = nextPayloadMongo
-	a.payloadRecorder = nextPayloadRecorder
-	a.guardrails = nextGuardrails
-	a.quarantine = nextQuarantine
-	a.exceptions = nextExceptions
-	a.dashboardTokenMinted = dashboardTokenMinted
-	a.dashboardTokenWritten = a.dashboardTokenWritten || dashboardTokenPublished
+	activate := func() error {
+		dashboardTokenMinted, dashboardTokenPublished, err := ensureDashboardToken(rt, currentDashboard, true)
+		if err != nil {
+			return fmt.Errorf("dashboard token: %w", err)
+		}
+		if err := preparedProbes.Activate(nextHealth); err != nil {
+			return err
+		}
+		nextHealth.SetProviders(rt.Catalog)
+		a.metrics.SetBuildInfo(a.buildOpt.Version)
+		a.metrics.RecordConfig(rt)
+		deps = buildDependencies(rt, nextResolver, a.logger, a.adapter, a.metrics, nextHealth, a.healthchecks, nextRateLimiter, a.usage, nextClients, a.logs, a.startTime, a.buildOpt.Version, nextPayloadRecorder, payloadDirOf(nextPayloadLog), rt.Logging.PayloadLog.RedactGuardrailBodies, nextGuardrails, nextQuarantine, nextExceptions, a.adminStore, dynKeys)
+		deps.DeferredStore, deps.RuntimeResources = nextDeferred, nextResources
+		deps.Quota = a.quotaTracker
+		deps.RequestReload = a.Reload
+		deps.CopilotDeviceClient = copilotDeviceClient
+		a.Config = rt
+		a.resolver = nextResolver
+		a.clients = nextClients
+		a.health = nextHealth
+		a.rateLimiter = nextRateLimiter
+		a.payloadLog = nextPayloadLog
+		a.payloadMongo = nextPayloadMongo
+		a.payloadRecorder = nextPayloadRecorder
+		a.guardrails = nextGuardrails
+		a.quarantine = nextQuarantine
+		a.exceptions = nextExceptions
+		a.deferredStore, a.runtimeResources = nextDeferred, nextResources
+		a.dashboardTokenMinted = dashboardTokenMinted
+		a.dashboardTokenWritten = a.dashboardTokenWritten || dashboardTokenPublished
+		return nil
+	}
+	err = a.handler.ActivateDependencies(func() (httpapi.Dependencies, error) {
+		if deferredUpdate != nil {
+			err := deferredUpdate.Commit(activate)
+			return deps, err
+		}
+		err := activate()
+		return deps, err
+	})
 	a.mu.Unlock()
+	if err != nil {
+		return err
+	}
 	if oldClients != nil {
 		oldClients.Retire()
 	}
-	if oldHealth != nil && oldHealth != nextHealth {
-		_ = oldHealth.Close()
-	}
-	if oldPayloadLog != nil && oldPayloadLog != nextPayloadLog {
-		_ = oldPayloadLog.Close()
-	}
-	if oldPayloadMongo != nil && oldPayloadMongo != nextPayloadMongo {
-		_ = oldPayloadMongo.Close()
-	}
+	oldResources.Retire()
 	observability.LogStartup(a.logger, rt)
 	return nil
 }
@@ -479,6 +551,46 @@ func (a *App) Reload() (err error) {
 func (a *App) Close() error {
 	if a == nil {
 		return nil
+	}
+	timeout := a.shutdownTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return a.CloseContext(ctx)
+}
+
+func (a *App) BeginShutdown() {
+	if a == nil {
+		return
+	}
+	a.reloadMu.Lock()
+	defer a.reloadMu.Unlock()
+	a.closed = true
+	a.mu.RLock()
+	jobs, handler := a.deferredStore, a.handler
+	a.mu.RUnlock()
+	if jobs != nil {
+		jobs.BeginShutdown()
+	}
+	if handler != nil {
+		handler.StopAdmission()
+	}
+}
+
+func (a *App) DeferredStore() *deferred.Store {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.deferredStore
+}
+
+func (a *App) CloseContext(ctx context.Context) error {
+	if a == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	a.closeOnce.Do(func() {
 		a.reloadMu.Lock()
@@ -492,7 +604,14 @@ func (a *App) Close() error {
 		payloadMongo := a.payloadMongo
 		adminStore := a.adminStore
 		cleanup := a.copilotCleanup
+		jobs, resources, manager := a.deferredStore, a.runtimeResources, a.resourceManager
 		a.mu.RUnlock()
+		if jobs != nil {
+			jobs.BeginShutdown()
+		}
+		if a.handler != nil {
+			a.handler.StopAdmission()
+		}
 		if cleanup != nil {
 			cleanup.stop()
 		}
@@ -501,6 +620,20 @@ func (a *App) Close() error {
 		}
 		if clients != nil {
 			clients.Retire()
+		}
+		if manager != nil {
+			supplemental, _, err := manager.prepare(runtimeResourceList(clients, health, payloadLog, payloadMongo, adminStore))
+			a.closeErr = errors.Join(a.closeErr, err)
+			manager.beginShutdown()
+			resources.Retire()
+			if supplemental != nil {
+				supplemental.Retire()
+			}
+			if jobs != nil {
+				a.closeErr = errors.Join(a.closeErr, jobs.Close(ctx))
+			}
+			a.closeErr = errors.Join(a.closeErr, manager.wait(ctx))
+			return
 		}
 		if health != nil {
 			a.closeErr = health.Close()
@@ -519,6 +652,9 @@ func (a *App) Close() error {
 			if err := adminStore.Close(); err != nil && a.closeErr == nil {
 				a.closeErr = err
 			}
+		}
+		if jobs != nil {
+			a.closeErr = errors.Join(a.closeErr, jobs.Close(ctx))
 		}
 	})
 	return a.closeErr

@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/deferred"
 	"github.com/egose/aiproxy/internal/provider"
 )
 
@@ -66,7 +68,7 @@ func requestHadOpaqueBlocks(body []byte) bool {
 }
 
 func isEncodedCallerMismatch(result *provider.Result, requestBody []byte, patterns []string) bool {
-	if result == nil || result.Streaming || result.StatusCode != http.StatusBadRequest ||
+	if result == nil || provider.IsPeerControlOutcome(result, nil) || result.Streaming || result.StatusCode != http.StatusBadRequest ||
 		len(result.Body) == 0 || len(patterns) == 0 || !requestHadOpaqueBlocks(requestBody) {
 		return false
 	}
@@ -120,6 +122,60 @@ func stripOpaqueBlocks(op provider.Operation, body []byte) ([]byte, bool) {
 		return body, false
 	}
 	return out, true
+}
+
+func stripDispatchOpaqueBlocks(ctx context.Context, op provider.Operation, body []byte) ([]byte, bool, error) {
+	execution := deferredExecutionFromContext(ctx)
+	if execution == nil {
+		out, changed := stripOpaqueBlocks(op, body)
+		return out, changed, nil
+	}
+	limits := execution.limits
+	shape, err := deferred.InspectJSON(body, limits.JSONDepth, limits.JSONTokens)
+	if err != nil {
+		return nil, false, provider.ErrExecutionLimit{Kind: "encrypted reasoning JSON", Limit: limits.RequestBytes}
+	}
+	release, err := limits.Work.Reserve(int64(len(body))*8 + int64(shape.Tokens)*256 + 16<<10)
+	if err != nil {
+		return nil, false, err
+	}
+	defer release()
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return body, false, nil
+	}
+	changed := stripChatMessages(doc)
+	if !changed {
+		return body, false, nil
+	}
+	size, err := deferred.JSONEncodedSize(doc, limits.RequestBytes, limits.JSONDepth, limits.JSONTokens)
+	if err != nil {
+		return nil, false, provider.ErrExecutionLimit{Kind: "encrypted reasoning rewrite", Limit: limits.RequestBytes}
+	}
+	if err := execution.memory.reserve(max(int64(512), size*4) + int64(shape.Tokens)*64 + 16<<10); err != nil {
+		return nil, false, err
+	}
+	out, err := json.Marshal(doc)
+	return out, err == nil, err
+}
+
+func isDispatchCallerMismatch(ctx context.Context, result *provider.Result, body []byte, patterns []string) (bool, error) {
+	if provider.IsPeerControlOutcome(result, nil) {
+		return false, nil
+	}
+	execution := deferredExecutionFromContext(ctx)
+	if execution == nil {
+		return isEncodedCallerMismatch(result, body, patterns), nil
+	}
+	if result == nil || result.Streaming || result.StatusCode != http.StatusBadRequest || len(patterns) == 0 {
+		return false, nil
+	}
+	release, err := execution.limits.Work.Reserve(6<<20 + int64(len(body))*3 + encryptedReasoningScanLimit*4)
+	if err != nil {
+		return false, err
+	}
+	defer release()
+	return isEncodedCallerMismatch(result, body, patterns), nil
 }
 
 func stripChatMessages(doc map[string]any) bool {

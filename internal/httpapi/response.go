@@ -86,17 +86,22 @@ func (h *Handler) writeUpstreamError(w http.ResponseWriter, r *provider.Result) 
 			body = read
 		}
 	}
-	e := apiError{}
-	e.Error.Type = upstreamErrorType(r.StatusCode)
-	trimmed := strings.TrimSpace(string(body))
-	if trimmed == "" {
-		e.Error.Message = fmt.Sprintf("upstream returned status %d", r.StatusCode)
-	} else {
-		e.Error.Message = trimmed
-	}
+	e := upstreamErrorEnvelope(r.StatusCode, body)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(r.StatusCode)
 	_ = json.NewEncoder(w).Encode(e)
+}
+
+func upstreamErrorEnvelope(status int, body []byte) apiError {
+	e := apiError{}
+	e.Error.Type = upstreamErrorType(status)
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		e.Error.Message = fmt.Sprintf("upstream returned status %d", status)
+	} else {
+		e.Error.Message = trimmed
+	}
+	return e
 }
 
 const maxUpstreamErrorBodyBytes int64 = 4 << 10
@@ -238,6 +243,9 @@ func copyResponseHeaders(dst, src http.Header) {
 		}
 	}
 	for key, vals := range src {
+		if config.IsDeferredHeader(key) {
+			continue
+		}
 		if _, skip := blocked[textproto.CanonicalMIMEHeaderKey(key)]; skip {
 			continue
 		}

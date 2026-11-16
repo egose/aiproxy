@@ -67,9 +67,9 @@ func (a *adapter) doOpenCodePassthrough(ctx context.Context, r Request, path str
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
-	rewritten, err := rewriteModel(body, r.UpstreamModel)
+	rewritten, err := rewriteModel(body, r.UpstreamModel, r.execution)
 	if err != nil {
-		return nil, ErrInvalidRequest{Message: fmt.Sprintf("rewrite model: %v", err)}
+		return nil, executionRequestError(r, "rewrite model", err)
 	}
 	target := joinBaseURLAndPath(r.BaseURL, path)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(rewritten))
@@ -87,9 +87,9 @@ func (a *adapter) doOpenCodeMessagesChat(ctx context.Context, r Request) (*Resul
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
-	translated, streaming, err := translateOpenAIToAnthropic(body, r.UpstreamModel)
+	translated, streaming, err := translateOpenAIToAnthropic(body, r.UpstreamModel, r.execution)
 	if err != nil {
-		return nil, ErrInvalidRequest{Message: fmt.Sprintf("translate request: %v", err)}
+		return nil, executionRequestError(r, "translate request", err)
 	}
 	target := strings.TrimRight(r.BaseURL, "/") + "/messages"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(translated))
@@ -103,18 +103,24 @@ func (a *adapter) doOpenCodeMessagesChat(ctx context.Context, r Request) (*Resul
 		req.Header.Set("Accept", "text/event-stream")
 	}
 	return executeUpstream(r, req, upstreamResponseHandlers{
+		RequireJSON: true,
 		IsStreaming: func(*http.Response) bool {
 			return streaming
 		},
 		OnStream: func(resp *http.Response) (*Result, error) {
 			stream := NewStreamCompletion()
-			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: translateAnthropicStream(resp.Body, r.PublicModel, stream), Streaming: true, Stream: stream}, nil
+			body, err := anthropicChatStreamWithLimits(resp.Body, r.PublicModel, stream, r.execution)
+			if err != nil {
+				return nil, err
+			}
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: body, Streaming: true, Stream: stream}, nil
 		},
 		OnError: func(resp *http.Response, body []byte) (*Result, error) {
-			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translateAnthropicError(body)}, nil
+			translated, err := translatedErrorWithLimits(body, r.execution, true)
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translated}, err
 		},
 		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
-			translatedBody, usageTokens, err := translateAnthropicResponse(body, r.PublicModel)
+			translatedBody, usageTokens, err := translateAnthropicResponse(body, r.PublicModel, r.execution)
 			if err != nil {
 				return nil, fmt.Errorf("translate response: %w", err)
 			}
@@ -212,27 +218,33 @@ func (a *adapter) doOpenCodeGeminiChat(ctx context.Context, r Request) (*Result,
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
-	translated, streaming, err := translateOpenAIToGemini(body)
+	translated, streaming, err := translateOpenAIToGemini(body, r.execution)
 	if err != nil {
-		return nil, ErrInvalidRequest{Message: fmt.Sprintf("translate request: %v", err)}
+		return nil, executionRequestError(r, "translate request", err)
 	}
 	req, err := newOpenCodeGeminiRequest(ctx, r, translated, streaming)
 	if err != nil {
 		return nil, err
 	}
 	return executeUpstream(r, req, upstreamResponseHandlers{
+		RequireJSON: true,
 		IsStreaming: func(*http.Response) bool {
 			return streaming
 		},
 		OnStream: func(resp *http.Response) (*Result, error) {
 			stream := NewStreamCompletion()
-			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: translateGeminiStream(resp.Body, r.PublicModel, stream), Streaming: true, Stream: stream}, nil
+			body, err := geminiChatStreamWithLimits(resp.Body, r.PublicModel, stream, r.execution)
+			if err != nil {
+				return nil, err
+			}
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, StreamBody: body, Streaming: true, Stream: stream}, nil
 		},
 		OnError: func(resp *http.Response, body []byte) (*Result, error) {
-			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translateGeminiError(body)}, nil
+			translated, err := translatedErrorWithLimits(body, r.execution, false)
+			return &Result{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: translated}, err
 		},
 		OnSuccess: func(resp *http.Response, body []byte) (*Result, error) {
-			translatedBody, err := translateGeminiResponse(body, r.PublicModel)
+			translatedBody, err := translateGeminiResponse(body, r.PublicModel, r.execution)
 			if err != nil {
 				return nil, fmt.Errorf("translate response: %w", err)
 			}

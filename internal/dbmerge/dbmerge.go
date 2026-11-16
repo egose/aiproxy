@@ -179,6 +179,11 @@ func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases m
 		if string(base.Type) != row.Type {
 			return config.Provider{}, fmt.Errorf("provider %q: type %q must match base provider %q type %q", name, row.Type, row.Extends, base.Type)
 		}
+		deferredBase := base
+		deferredBase.Name = name
+		if err := config.ValidateManagedProviderDeferred(deferredBase); err != nil {
+			return config.Provider{}, err
+		}
 		baseTLS := base
 		baseTLS.Name = name
 		baseTLS, err = config.ResolveDynamicProviderTLSProfile(baseTLS)

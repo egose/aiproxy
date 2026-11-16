@@ -136,6 +136,14 @@ func cloneProvider(provider Provider) Provider {
 		hc := *provider.Healthcheck
 		out.Healthcheck = &hc
 	}
+	if provider.DeferredTransport != nil {
+		deferred := *provider.DeferredTransport
+		out.DeferredTransport = &deferred
+	}
+	if provider.DeferredReceiver != nil {
+		deferred := *provider.DeferredReceiver
+		out.DeferredReceiver = &deferred
+	}
 	out.Models = cloneModels(provider.Models)
 	out.ModelByName = make(map[string]Model, len(out.Models)+len(provider.ModelByName))
 	for _, model := range out.Models {

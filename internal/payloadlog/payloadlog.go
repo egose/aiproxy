@@ -1,6 +1,7 @@
 package payloadlog
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -62,6 +63,9 @@ var redactedHeaders = map[string]struct{}{
 func RedactHeaders(h http.Header) map[string][]string {
 	out := make(map[string][]string, len(h))
 	for k, v := range h {
+		if config.IsDeferredHeader(k) {
+			continue
+		}
 		if _, ok := redactedHeaders[strings.ToLower(k)]; ok {
 			out[k] = []string{"[REDACTED]"}
 			continue
@@ -100,6 +104,15 @@ func EncodeBodyWithContentType(b []byte, max int, contentType string) Body {
 	}
 	out.Data = string(data)
 	return out
+}
+
+func EncodeSnapshot(b []byte, max int, contentType string, truncated bool) Body {
+	if truncated {
+		out := EncodeBody(b, max)
+		out.Truncated = true
+		return out
+	}
+	return EncodeBodyWithContentType(b, max, contentType)
 }
 
 func (b Body) AsString() string {
@@ -210,6 +223,13 @@ func (l *Logger) Record(e Entry) error {
 		l.sweepLocked(time.Now())
 	}
 	return nil
+}
+
+func (l *Logger) RecordContext(ctx context.Context, e Entry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return l.Record(e)
 }
 
 func (l *Logger) rotateLocked(bucket string) error {
