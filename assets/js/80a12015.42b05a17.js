@@ -58,9 +58,17 @@ const toc = [{
   "id": "failover-rules",
   "level": 2
 }, {
-  "value": "Alias Encrypted Reasoning",
-  "id": "alias-encrypted-reasoning",
+  "value": "Scoped Encrypted Reasoning",
+  "id": "scoped-encrypted-reasoning",
   "level": 2
+}, {
+  "value": "Conditional Recovery And Attempt Bounds",
+  "id": "conditional-recovery-and-attempt-bounds",
+  "level": 3
+}, {
+  "value": "Stripping Boundary",
+  "id": "stripping-boundary",
+  "level": 3
 }, {
   "value": "Upstream Retry Cooldown",
   "id": "upstream-retry-cooldown",
@@ -116,6 +124,7 @@ function _createMdxContent(props) {
     h3: "h3",
     header: "header",
     li: "li",
+    ol: "ol",
     p: "p",
     pre: "pre",
     strong: "strong",
@@ -281,7 +290,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Alias requests do not fail over on other upstream ", (0,jsx_runtime.jsx)(_components.code, {
         children: "4xx"
-      }), " responses. Those are returned to the client as-is."]
+      }), " responses. Outside the\nconditional same-target reasoning recovery below, those are returned to the client as-is."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "This avoids masking client-side request problems as routing problems."
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
@@ -290,66 +299,124 @@ function _createMdxContent(props) {
       }), " statuses are an alias failover policy only. They do not mark the provider unhealthy; provider health is mutated by transport/upstream request errors and upstream ", (0,jsx_runtime.jsx)(_components.code, {
         children: "5xx"
       }), " responses."]
+    }), "\n", (0,jsx_runtime.jsx)("a", {
+      id: "alias-encrypted-reasoning"
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
-      id: "alias-encrypted-reasoning",
-      children: "Alias Encrypted Reasoning"
+      id: "scoped-encrypted-reasoning",
+      children: "Scoped Encrypted Reasoning"
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Clients that replay prior-turn thinking blocks (extended thinking / reasoning passthrough) send caller-bound opaque blobs (", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Clients may replay caller-bound opaque history (", (0,jsx_runtime.jsx)(_components.code, {
         children: "encrypted_content"
-      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "signature"
-      }), ", redacted thinking) that the issuing model rejects when the pool routes the next turn to a different credential (", (0,jsx_runtime.jsx)(_components.code, {
-        children: "not issued to this caller"
-      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "invalid_encrypted_content"
-      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "Invalid signature"
-      }), "). The optional ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ", signatures,\nredacted thinking) that another credential cannot use. Optional\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "encrypted_reasoning"
-      }), " block controls this per alias for ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " blocks at root/provider/model/alias scope control this for\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "POST /v1/chat/completions"
       }), " and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "POST /v1/responses"
-      }), ":"]
+      }), ", including direct requests.\nNative ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/messages"
+      }), ", embeddings, images and audio are unaffected."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Direct precedence is ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "model → provider → root → built-ins"
+      }), "; alias precedence\nadds an ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "explicit alias"
+      }), " first, otherwise resolves the selected target's\npolicy. Missing blocks inherit. Empty blocks reset to passthrough ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "true"
+      }), ",\nmismatch ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"fail\""
+      }), " and built-in patterns. All blocks replace wholesale, so\nomitted members use built-ins, not lower-layer values. See the\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#scoped-encrypted-reasoning",
+        children: "full validated example and pattern bounds"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "For example, add this explicit alias to that full example:"
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
-        children: "alias \"chat_default\" {\n  algorithm = \"round_robin\"\n  encrypted_reasoning {\n    passthrough        = true\n    on_caller_mismatch = \"strip_and_retry\"\n  }\n  target { provider = \"spark-a\" model = \"muse-spark\" }\n  target { provider = \"spark-b\" model = \"muse-spark\" }\n}\n"
+        metastring: "title=\"reasoning-alias.hcl\"",
+        children: "alias \"routing_recovery\" {\n  algorithm = \"round_robin\"\n  encrypted_reasoning {\n    on_caller_mismatch = \"strip_and_retry\"\n  }\n  target {\n    provider = \"primary\"\n    model    = \"chat\"\n  }\n  target {\n    provider = \"secondary\"\n    model    = \"chat\"\n  }\n}\n"
       })
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "conditional-recovery-and-attempt-bounds",
+      children: "Conditional Recovery And Attempt Bounds"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["With passthrough enabled and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "on_caller_mismatch = \"strip_and_retry\""
+      }), ", recovery\nrequires ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "all"
+      }), " of:"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ol, {
+      children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["An ordinary non-streaming upstream ", (0,jsx_runtime.jsx)(_components.strong, {
+          children: "400"
+        }), " response, before downstream commitment."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Raw opaque markers in the submitted request (", (0,jsx_runtime.jsx)(_components.code, {
+          children: "encrypted_content"
+        }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "redacted_thinking"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "redacted_content"
+        }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "\"signature\""
+        }), ")."]
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "A configured case-insensitive substring in the first 64 KiB of successfully\ndecoded response text."
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "A supported stripping rewrite that actually changes the request, with the\nrequest context and any peer execution budget still live."
+      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["It retries the ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "same provider, credential, endpoint, upstream model and\nprotocol"
+      }), ", under the same request context. Marker presence alone or a matching\nmessage alone is insufficient. An immediate ordinary 400 response to a\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "stream: true"
+      }), " request can qualify; an established SSE stream is ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "never"
+      }), "\nretried. Unrelated/non-400 errors, peer submit/poll/replay/control outcomes,\ncancellation, exhausted budgets and unchanged rewrites cannot authorize recovery.\nDefinite terminal peer inference results remain subject to these gates."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
       children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: [(0,jsx_runtime.jsx)(_components.code, {
-          children: "passthrough = false"
-        }), " strips opaque reasoning blocks before fan-out (one upstream call, deterministic). ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "passthrough = true"
-        }), " (default) sends history intact."]
+        children: [(0,jsx_runtime.jsx)(_components.strong, {
+          children: "Direct:"
+        }), " at most ", (0,jsx_runtime.jsx)(_components.strong, {
+          children: "2"
+        }), " inference attempts; no target change, alias\ncooldown lookup/write, or alias failover."]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: [(0,jsx_runtime.jsx)(_components.code, {
-          children: "on_caller_mismatch = \"strip_and_retry\""
-        }), " (default ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "\"fail\""
-        }), ") retries the same target once with opaque blocks stripped when an upstream ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "400"
-        }), " matches ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "match_messages"
-        }), ". Unrelated ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "400"
-        }), "s return verbatim; established SSE streams are never retried (immediate error responses to streaming requests are retried normally)."]
-      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: [(0,jsx_runtime.jsx)(_components.code, {
-          children: "match_messages"
-        }), " lists case-insensitive substrings matched against the upstream ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "400"
-        }), " body. Omitting it uses built-ins covering Console, OpenAI, and Anthropic phrasings; a non-empty list replaces them. Keep entries specific: a generic entry like ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "\"error\""
-        }), " matches every ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "400"
+        children: [(0,jsx_runtime.jsx)(_components.strong, {
+          children: "Alias with N normally attempted targets:"
+        }), " at most ", (0,jsx_runtime.jsx)(_components.strong, {
+          children: "N + 1"
+        }), " inference\nattempts. The single extra recovery is shared across the entire request,\nnot replenished per target; ordinary failover remains governed by\ntransport errors/timeouts/", (0,jsx_runtime.jsx)(_components.code, {
+          children: "retry_status_codes"
         }), "."]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["Plaintext reasoning summaries without opaque blobs are never stripped or matched. Direct ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "<provider>/<model>"
-        }), " requests are never stripped."]
+        children: [(0,jsx_runtime.jsx)(_components.strong, {
+          children: "Explicit alias policy:"
+        }), " once stripped, that body stays stripped through\nnormal failover, including pre-stripping. An empty alias block is still explicit."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.strong, {
+          children: "No alias policy:"
+        }), " each selected target starts from the immutable admitted\n(already ingress-guardrailed, when configured) original body. A target's\nstripping cannot suppress a later target's passthrough override. The one\nrecovery allowance is still shared."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsxs)(_components.strong, {
+          children: [(0,jsx_runtime.jsx)(_components.code, {
+            children: "passthrough = false"
+          }), ":"]
+        }), " pre-strip before the first covered inference\nattempt; it adds no recovery call and consumes none of that allowance.\nNormal alias failover may still make multiple calls."]
       }), "\n"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Inspection accepts gzip/x-gzip, raw deflate, Brotli and zstd, up to four\nContent-Encoding entries, 256 bytes of encoding metadata, and 1 MiB of decoded\ndata per layer; zstd windows are capped at 1 MiB. Unsupported, corrupt or\nover-budget encodings skip recovery. If recovery is not performed, inspection\npreserves the original response bytes/headers; ordinary alias failover may\nstill discard that response under its separate rules."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "stripping-boundary",
+      children: "Stripping Boundary"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The existing helper retains ordinary message text and tool history, but removes\nsupported opaque items ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "and"
+      }), " typed unsigned thinking/reasoning items and chat\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "reasoning"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "reasoning_content"
+      }), " fields. Recovery's raw opaque-marker gate does\nnot require a signature on every removed item; pre-stripping does not require\nthat gate at all. This can lose reasoning continuity even for the original\ncredential. It neither decrypts outputs nor guarantees preservation of every\nplaintext reasoning summary. With no policy anywhere, built-ins preserve the\nexisting no-recovery behavior."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "upstream-retry-cooldown",
       children: "Upstream Retry Cooldown"
@@ -553,9 +620,9 @@ function _createMdxContent(props) {
         children: "openrouter"
       }), ", the proxy stays close to pass-through behavior. For translated providers, the proxy maps between the public OpenAI-style contract and the provider-native request and response shape."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Pass-through providers preserve request JSON values and unknown extension fields, rewriting only the top-level ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Apart from explicitly configured ingress guardrails and reasoning stripping,\npass-through providers preserve request JSON values and unknown extension fields,\nrewriting only the top-level ", (0,jsx_runtime.jsx)(_components.code, {
         children: "model"
-      }), " value before forwarding. Malformed JSON, non-object JSON bodies, and duplicate top-level ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " value before forwarding. Malformed JSON,\nnon-object JSON bodies, and duplicate top-level ", (0,jsx_runtime.jsx)(_components.code, {
         children: "model"
       }), " keys are rejected."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {

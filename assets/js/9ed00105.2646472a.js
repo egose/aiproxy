@@ -78,6 +78,10 @@ const toc = [{
   "id": "provider-inheritance",
   "level": 3
 }, {
+  "value": "Scoped Encrypted Reasoning",
+  "id": "scoped-encrypted-reasoning",
+  "level": 2
+}, {
   "value": "Upstream Header Timeout",
   "id": "upstream-header-timeout",
   "level": 2
@@ -229,6 +233,10 @@ function _createMdxContent(props) {
           children: "alias \"<name>\""
         })
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["optional root/provider/model/alias ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "encrypted_reasoning"
+        }), " policy"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["optional ", (0,jsx_runtime.jsx)(_components.code, {
           children: "deferred"
         }), " executor policy"]
@@ -286,7 +294,7 @@ function _createMdxContent(props) {
         }), " configures read, idle, and write timeouts"]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Listener address and timeout changes still require a restart, even though runtime state such as auth, providers, models, aliases, upstream header timeouts, access-log enablement, metrics, and provider-health config can reload on ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Listener address and timeout changes still require a restart, even though runtime state such as auth, providers, models, aliases, encrypted-reasoning policies, upstream header timeouts, access-log enablement, metrics, and provider-health config can reload on ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
       }), ". Logging level changes and enabling the dashboard after startup also require a restart."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
@@ -608,6 +616,13 @@ function _createMdxContent(props) {
         }), " (required only for static ", (0,jsx_runtime.jsx)(_components.code, {
           children: "custom"
         }), " profiles)"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "encrypted_reasoning"
+        }), " (whole-block policy; also supported at root, model and\nalias scopes; see ", (0,jsx_runtime.jsx)(_components.a, {
+          href: "#scoped-encrypted-reasoning",
+          children: "Scoped Encrypted Reasoning"
+        }), ")"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "deferred_transport"
@@ -945,9 +960,9 @@ function _createMdxContent(props) {
         children: "github-copilot"
       }), " derivatives instead require a local ", (0,jsx_runtime.jsx)(_components.code, {
         children: "credential_ref"
-      }), " and stay compact (no ", (0,jsx_runtime.jsx)(_components.code, {
+      }), "; they cannot redefine ", (0,jsx_runtime.jsx)(_components.code, {
         children: "base_url"
-      }), "/models); ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " or model definitions, but may use the reasoning-only overlays below. ", (0,jsx_runtime.jsx)(_components.code, {
         children: "credential_ref"
       }), " is rejected on all other types, and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "api_key"
@@ -969,17 +984,23 @@ function _createMdxContent(props) {
         children: "enabled"
       }), " declarations are rejected instead of ignored, including explicit TLS defaults. Local ", (0,jsx_runtime.jsx)(_components.code, {
         children: "model"
-      }), " declarations are also rejected except for the static transport-only overlays described below."]
+      }), " declarations are rejected except for existing-name policy overlays described below."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Derived providers are flattened during config loading and reload. After a successful load, direct model strings, health, metrics, billing, and dashboard inventory use the derived provider's own name. Aliases still list each provider target explicitly."
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Declared base provider/model reasoning policies are copied by value. A local\nprovider ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "encrypted_reasoning"
+      }), " block replaces the inherited provider block, but\nan inherited model block still outranks it. Override/reset that model with a\nlocal existing-name ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), " overlay; removing the overlay restores the base\nmodel declaration, not necessarily the child's provider policy."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Static derivatives inherit model definitions, ", (0,jsx_runtime.jsx)(_components.strong, {
         children: "not"
-      }), " base provider or model\ncaller opt-ins, nor receiver opt-ins/limits. A derivative may declare an existing\ninherited model name with ", (0,jsx_runtime.jsx)(_components.strong, {
-        children: "only"
-      }), " a local ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " base provider or model\ndeferred caller opt-ins, nor receiver opt-ins/limits. An existing-name model\noverlay may contain ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "encrypted_reasoning"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "deferred_transport"
-      }), " block. New model\nnames, definition fields (", (0,jsx_runtime.jsx)(_components.code, {
+      }), ", or both\n(at most one of each, at least one total). New model\nnames, definition fields (", (0,jsx_runtime.jsx)(_components.code, {
         children: "upstream_name"
       }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "display_name"
@@ -997,6 +1018,168 @@ function _createMdxContent(props) {
         href: "#local-static-derivative-overlays",
         children: "exact-tested overlay example"
       }), ".\nManaged derivatives cannot extend a base carrying any provider/model caller\nsetting or receiver opt-in."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "scoped-encrypted-reasoning",
+      children: "Scoped Encrypted Reasoning"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["An optional unlabeled ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "encrypted_reasoning"
+      }), " block controls replayed reasoning\nhistory for ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/chat/completions"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/responses"
+      }), ". It can be\ndeclared at ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "root, provider, model, or alias"
+      }), " scope, including on disabled\nproviders. It does not enable a model capability or decrypt upstream outputs.\nNative ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/messages"
+      }), " and all other operations are unaffected."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Direct precedence: ", (0,jsx_runtime.jsx)(_components.strong, {
+          children: "model → provider → root → built-in defaults"
+        }), "."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Alias precedence: ", (0,jsx_runtime.jsx)(_components.strong, {
+          children: "explicit alias → selected model → selected provider →\nroot → built-in defaults"
+        }), ". Without an alias block, resolution happens per\nselected target, not from the first member of the pool."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["A missing block inherits. A present empty ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "encrypted_reasoning {}"
+        }), " resets to\nsafe built-ins and stops inheritance. Blocks replace ", (0,jsx_runtime.jsx)(_components.strong, {
+          children: "wholesale"
+        }), ": omitted\nmembers use built-ins, never members of the lower-priority block."]
+      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Member"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Built-in default"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Meaning"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "passthrough"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "true"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Send history intact; ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "false"
+            }), " pre-strips supported reasoning shapes without adding a recovery attempt."]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "on_caller_mismatch"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "\"fail\""
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "\"strip_and_retry\""
+            }), " permits one conditional same-target recovery. Explicit ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "\"\""
+            }), " also selects ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "\"fail\""
+            }), "."]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "match_messages"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Built-in substrings"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["A nonempty list replaces built-ins; omitted or ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "[]"
+            }), " uses built-ins."]
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Patterns are literal case-insensitive substrings, trimmed and lowercased before\nvalidation/matching. Supply at most 16, each ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "4–256 Go string bytes after\nnormalization"
+      }), ", unique case-insensitively. Keep them specific; this is not\ngeneral error recovery. Built-ins are ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "not issued to this caller"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "invalid_encrypted_content"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "could not be verified"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "could not be decrypted"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "item_id did not match"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "invalid signature"
+      }), ". Unknown members, wrong types,\nduplicate/case-variant keys and invalid blocks are rejected."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["This complete example uses environment-supplied credentials and loopback stub\nURLs; config validation makes no upstream calls. It is also shipped as\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "examples/scoped-encrypted-reasoning.hcl"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        metastring: "title=\"scoped-encrypted-reasoning.hcl\"",
+        children: "listener \"http\" \"public\" {\n  address = \"127.0.0.1:8080\"\n}\n\nauth \"main\" {\n  mode = \"bearer_static\"\n  client \"application\" {\n    token = env(\"AIPROXY_CLIENT_TOKEN\")\n  }\n}\n\nencrypted_reasoning {\n  on_caller_mismatch = \"strip_and_retry\"\n  match_messages    = [\"  Caller binding mismatch  \"]\n}\n\nprovider \"openai-compatible\" \"primary\" {\n  base_url = \"http://127.0.0.1:18081/v1\"\n  api_key  = env(\"UPSTREAM_API_KEY\")\n\n  encrypted_reasoning {\n    passthrough = false\n  }\n\n  model \"chat\" {}\n  model \"recover\" {\n    encrypted_reasoning {\n      on_caller_mismatch = \"strip_and_retry\"\n    }\n  }\n  model \"safe\" {\n    encrypted_reasoning {}\n  }\n}\n\nprovider \"openai-compatible\" \"secondary\" {\n  extends = \"primary\"\n  api_key = env(\"SECONDARY_UPSTREAM_API_KEY\")\n\n  encrypted_reasoning {}\n\n  model \"chat\" {\n    encrypted_reasoning {\n      on_caller_mismatch = \"strip_and_retry\"\n      match_messages    = []\n    }\n  }\n  model \"safe\" {\n    encrypted_reasoning {\n      passthrough = false\n    }\n  }\n}\n\nprovider \"openai-compatible\" \"inherited\" {\n  extends = \"primary\"\n  api_key = env(\"SECONDARY_UPSTREAM_API_KEY\")\n}\n\nprovider \"openai-compatible\" \"root-only\" {\n  base_url = \"http://127.0.0.1:18082/v1\"\n  api_key  = env(\"UPSTREAM_API_KEY\")\n  model \"chat\" {}\n}\n\nalias \"target_policy\" {\n  algorithm = \"round_robin\"\n  providers = [\"primary\", \"secondary\"]\n  model     = \"chat\"\n}\n\nalias \"safe_pool\" {\n  algorithm = \"round_robin\"\n  providers = [\"primary\", \"secondary\"]\n  model     = \"recover\"\n  encrypted_reasoning {}\n}\n\nalias \"recover_pool\" {\n  algorithm = \"round_robin\"\n  providers = [\"primary\", \"secondary\"]\n  model     = \"recover\"\n  encrypted_reasoning {\n    on_caller_mismatch = \"strip_and_retry\"\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Here ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "primary/chat"
+      }), " strips with built-in ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"fail\""
+      }), " and built-in patterns, not\nthe root's retry/custom pattern. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "primary/safe"
+      }), " resets to passthrough/fail.\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "secondary/recover"
+      }), " retains its inherited model retry policy despite the child\nprovider reset. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "secondary/chat"
+      }), " is a local model retry override with default\npatterns; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "secondary/safe"
+      }), " strips via a local model override. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "root-only/chat"
+      }), "\nuses the root's normalized ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "caller binding mismatch"
+      }), " pattern.\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "inherited/chat"
+      }), " copies the base provider strip policy; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "inherited/safe"
+      }), " copies\nthe base model reset, with no local declarations.\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "alias/safe_pool"
+      }), " resets the entire pool; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "alias/target_policy"
+      }), " instead uses\neach selected target's policy."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Removing a static block/key resumes inheritance; static HCL does not use\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "encrypted_reasoning = null"
+      }), ", and static JSON null policies are rejected.\nManaged provider/model/alias policies have\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/api-reference#encrypted-reasoning-policy-intent",
+        children: "explicit nullable administrative semantics"
+      }), ",\nincluding sparse derivative model overlays. Root remains static-only. The\nCLI supports ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#editing-encrypted-reasoning-policies",
+        children: "inherit/reset/override editing"
+      }), ".\nManaged provider/model/alias web forms also offer inherit, safe reset and sparse\ncustom controls, with inherited definitions and static rows read-only. Effective\ncontext describes saved state, not unsaved resolution or proof of activation;\nan undeclared alias remains target-dependent."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.strong, {
+        children: "Stripping is lossy."
+      }), " Ordinary message text and tool history are retained,\nbut supported typed thinking/reasoning items and chat ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "reasoning"
+      }), "/\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "reasoning_content"
+      }), " fields can be removed even without their own signature.\nDo not assume universal plaintext-reasoning preservation. See\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/providers-and-routing#scoped-encrypted-reasoning",
+        children: "recovery gates, streaming and alias budgets"
+      }), "\nbefore enabling retry or pre-stripping."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "upstream-header-timeout",
       children: "Upstream Header Timeout"

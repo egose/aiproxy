@@ -50,6 +50,10 @@ const toc = [{
   "id": "configure-wizard",
   "level": 2
 }, {
+  "value": "Editing Encrypted Reasoning Policies",
+  "id": "editing-encrypted-reasoning-policies",
+  "level": 3
+}, {
   "value": "Configuring Provider TLS Profiles",
   "id": "configuring-provider-tls-profiles",
   "level": 3
@@ -77,6 +81,10 @@ const toc = [{
   "value": "Reload Behavior",
   "id": "reload-behavior",
   "level": 2
+}, {
+  "value": "Managed Reasoning Policy Storage And Activation",
+  "id": "managed-reasoning-policy-storage-and-activation",
+  "level": 3
 }, {
   "value": "Editing Database Providers In The Web UI",
   "id": "editing-database-providers-in-the-web-ui",
@@ -328,6 +336,8 @@ function _createMdxContent(props) {
           children: "listener"
         }), ", root ", (0,jsx_runtime.jsx)(_components.code, {
           children: "upstream_header_timeout"
+        }), "/", (0,jsx_runtime.jsx)(_components.code, {
+          children: "encrypted_reasoning"
         }), ", ", (0,jsx_runtime.jsx)(_components.code, {
           children: "auth"
         }), ", ", (0,jsx_runtime.jsx)(_components.code, {
@@ -454,6 +464,181 @@ function _createMdxContent(props) {
         className: "language-sh",
         children: "aiproxy configure provider --config /etc/aiproxy/config.hcl --delete --name backup\naiproxy configure alias --config /etc/aiproxy/config.hcl --delete --name chat_default\n"
       })
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "editing-encrypted-reasoning-policies",
+      children: "Editing Encrypted Reasoning Policies"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The existing ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "configure upstream"
+      }), " command edits root policy; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "configure provider"
+      }), "\nedits provider policy and selected models; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "configure alias"
+      }), " edits alias policy.\nInteractive choices distinguish ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "preserve, inherit/remove, reset, override"
+      }), ".\nThere is no separate root/model command. For all three commands:"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Flag"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Edit"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "--encrypted-reasoning-passthrough[=true|false]"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Set the member; use ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "=false"
+            }), " to pre-strip."]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "--encrypted-reasoning-on-caller-mismatch fail|strip_and_retry"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Set the member; ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "--encrypted-reasoning-on-caller-mismatch="
+            }), " writes explicit ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "\"\""
+            }), " (fail)."]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "--encrypted-reasoning-match-message TEXT"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Repeat to replace the list; a single ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "--encrypted-reasoning-match-message="
+            }), " writes ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "[]"
+            }), " (built-ins)."]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "--no-encrypted-reasoning"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Remove the local block and inherit."
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "--reset-encrypted-reasoning"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Write a present empty block (safe reset), not inheritance."
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Provider model controls use existing model names (including slash-separated names):"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Flag"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Value"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "--model-reasoning-passthrough"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "name=true"
+            }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "name=false"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "--model-reasoning-on-caller-mismatch"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "name=fail"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "name=strip_and_retry"
+            }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "name="
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "--model-reasoning-match-message"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "name=TEXT"
+            }), "; repeat per model to replace its list; a single ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "name="
+            }), " selects ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "[]"
+            }), "/built-ins"]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "--no-model-reasoning"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Model name; remove the local policy"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "--reset-model-reasoning"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Model name; declare local empty reset"
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Repeat model flags for different models and quote values containing spaces.\nDuplicate scalar/control edits for one model reject. Remove/reset/member edits\nconflict within the same scope/model; an empty pattern entry cannot be combined\nwith other entries. Pattern normalization and 16-entry/4–256-byte bounds are\nchecked before publication. The two scope-level boolean remove/reset flags set\nto ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "=false"
+      }), " are no-ops; model controls take names, not booleans."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["With the ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#scoped-encrypted-reasoning",
+        children: "complete scoped example"
+      }), "\nsaved as ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "config.hcl"
+      }), " and its environment variables set:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-sh",
+        children: "aiproxy configure upstream --config config.hcl --non-interactive \\\n  --encrypted-reasoning-on-caller-mismatch strip_and_retry\naiproxy configure provider --config config.hcl --non-interactive --name secondary \\\n  --model-reasoning-passthrough chat=false \\\n  --model-reasoning-match-message 'chat=caller binding mismatch'\naiproxy configure provider --config config.hcl --non-interactive --name secondary \\\n  --reset-model-reasoning chat\naiproxy configure alias --config config.hcl --non-interactive --name safe_pool \\\n  --no-encrypted-reasoning\n"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Omitted edit flags preserve local intent exactly. Member edits preserve untouched\nmembers of an existing local block, unlike an admin API whole-object replacement.\nNew blocks use built-ins for omitted members, never copy effective lower-layer\nvalues. Policy-only root edits need no timeout flag."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Editing stays ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "HCL-only"
+      }), ", preserves untouched ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env()"
+      }), " spelling and supported\ncomments, and validates before publishing; invalid edits do not change config or\nstaged secrets. HCL/JSON conversion instead resolves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env()"
+      }), " at conversion time,\nwhile retaining absent/reset/false distinctions. Changes activate only after\nrestart or successful ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Model controls alone never create definitions. On a derivative, they create\nonly sparse existing-name reasoning overlays using a valid, loadable base\ninventory; they cannot repair a partial/invalid base, redefine models or relax\ncredential/chain/deferred restrictions. Removing the last reasoning block removes\na reasoning-only child model overlay, but retains a deferred sibling block.\nInherited model policies still outrank child provider policies."
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "configuring-provider-tls-profiles",
       children: "Configuring Provider TLS Profiles"
@@ -652,6 +837,8 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "alias routing state"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "root/provider/model/alias encrypted-reasoning policies"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "access-log enablement"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "payload-log configuration"
@@ -675,6 +862,11 @@ function _createMdxContent(props) {
       children: ["Alias cooldown deadlines survive reload only for fingerprint-unchanged targets\n(resolved ", (0,jsx_runtime.jsx)(_components.code, {
         children: "base_url"
       }), ", credential, upstream model, protocol); removed or changed\ntargets are dropped, and failed reloads leave state untouched."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Reasoning policies resolve from the admitted runtime snapshot. New admissions use\nthe new policy after activation; admitted direct/alias requests, their recovery/\nfailover attempts and established streams retain the old snapshot. A failed\ncandidate leaves the old runtime intact. Stripping is lossy, not decryption;\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/providers-and-routing#scoped-encrypted-reasoning",
+        children: "recovery gates and attempt limits"
+      }), "\nremain in force across reload."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["When multi-tenancy is enabled, database-backed providers, aliases, and\ninbound keys merge into the serving catalog on the same reload path (and\nautomatically after admin API mutations). An invalid row — for example a\nprovider whose encrypted credential no longer decrypts under the current\nencryption key, or an alias pointing at a removed target — fails the reload\nwith the old runtime intact, and blocks server startup the same way an\ninvalid config file does. Use ", (0,jsx_runtime.jsx)(_components.code, {
         children: "aiproxy validate --check-db"
@@ -713,6 +905,30 @@ function _createMdxContent(props) {
       }), " means the complete\nedit is in the database while the old runtime remains active: inspect server logs,\nresolve the failure and reload. ", (0,jsx_runtime.jsx)(_components.code, {
         children: "500 saved but response view unavailable"
       }), " means the\nedit was saved and activation succeeded, but the response view failed; read current\nstate before retrying, especially before repeating a create. These outcomes do not\npromise a distributed transaction between the database and running proxies."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "managed-reasoning-policy-storage-and-activation",
+      children: "Managed Reasoning Policy Storage And Activation"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Existing databases require ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy migrate up"
+      }), " for the additive nullable\nprovider/model policy columns. The migration does not rewrite/delete old model\nrows. Store only local intent: SQL NULL for absence, ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "{}"
+      }), " for reset and sparse\nobjects for overrides. Stored JSON null is treated as absence; new writes use\nSQL NULL. Pre-feature derivative model rows with null policy remain inert legacy\nrows, not new model definitions or overlays."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Malformed stored policies, forbidden active overlays or a base-model removal\nthat leaves an overlay dangling reject startup/reload; the old runtime survives\na failed reload. This is not a silent corruption fallback. Correct the saved\ndeclaration/base inventory and reload. Credential-only edits preserve policies\nand cannot be used to change them."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The admin API exposes the full inherited model inventory, nullable local intent\nand normalized effective/source/inherited metadata. Omitted provider/alias policy\npreserves it, null removes it, and an object replaces it wholesale. In contrast,\nomitted ", (0,jsx_runtime.jsxs)(_components.strong, {
+        children: ["or null ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "models"
+        }), " preserves the whole collection"]
+      }), "; arrays replace\nlocal definitions/overlays. Read-only inherited GET definitions must not be\nsubmitted as local derivative definitions. See\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/api-reference#encrypted-reasoning-policy-intent",
+        children: "the exact managed update contract"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Metadata describes saved intent, not successful activation. Durable provider/\ncredential saves carry ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Aiproxy-Catalog-Saved: true"
+      }), ", including saved-but-\nactivation-failed outcomes; old serving state remains active on failure.\nActivation applies only to the receiving instance, with no cluster broadcast.\nRoot remains static configuration and existing RBAC is unchanged. Managed\nprovider/model/alias web forms offer inherit, safe reset and sparse custom\npolicy controls; static rows expose read-only local intent and effective context."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Use reload for routing and auth changes, not for socket-level listener changes."
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
@@ -724,6 +940,16 @@ function _createMdxContent(props) {
       children: "Blank URL, user-agent and header-timeout overrides restore the applicable provider\nor root defaults; provider types without a default URL still require one. Turning\noff local user-agent forwarding or clearing local forwarded headers cannot opt out\nof independently enabled root forwarding. The form displays local database values,\nnot the merged effective root settings.\nThese defaults apply to database providers on startup and every successful reload;\nchanging a root setting does not rewrite the saved local fields."
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "For inherited database providers, the editor uses the base provider's models,\ntransport and healthcheck rather than asking for local model rows. Type must match\nthe static base; display name and credentials remain local, with a blank display\nname falling back to the base. The database provider's Enabled flag remains local.\nClearing Extends requires valid local settings and models before saving."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Provider and model encrypted-reasoning controls edit ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "local declarations"
+      }), ", not\neffective metadata. Unchanged provider policy and model collections are omitted.\nInherit removes a local provider block with null; Safe reset writes ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "{}"
+      }), "; Custom\nsends only declared members, preserving explicit false, empty mismatch strings,\nempty lists and retained raw pattern spelling. Omitted members use built-ins,\nnot lower-layer values. Pattern validation checks normalized UTF-8 byte lengths\n(4–256), at most 16 entries and normalized uniqueness before sending a write;\nblank pattern lines are errors, while a deliberately empty list selects built-ins."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Inherited models keep their definitions read-only while allowing existing-name\nlocal reasoning overlays. Replacement arrays retain other local policies and\nsend only name+policy overlays for derivatives; clearing all overlays sends ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "[]"
+      }), "\nwithout deleting inherited inventory. Policy-bearing concrete/derived transitions\nrequire confirmation of the destination model/overlay array. Saved effective/\nsource/inherited context is read-only, not an unsaved preview or proof of activation."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["TLS ClientHello choices come from provider-type ", (0,jsx_runtime.jsx)(_components.code, {
         children: "tls_client_hello_selectors"
@@ -751,6 +977,12 @@ function _createMdxContent(props) {
       }), " is reserved. Missing names, empty segments, repeated\nor trailing slashes and other separators produce a field error before submission.\nTarget errors identify the input line to correct."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Alternatively, supply comma-separated provider names and one full model name in\nthe shorthand fields. The same naming rules apply; list each provider once with\nno empty comma entries. Clear explicit targets before using shorthand, and supply\nboth shorthand fields. Saved shorthand reopens as the equivalent full target list."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Alias encrypted-reasoning controls share the provider/model local-member validation\nand inherit/reset/custom behavior. Unchanged policies are omitted even when routing\nfields change, preserving the exact saved declaration. Inherit explicitly sends\nnull to remove an override; Safe reset sends ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "{}"
+      }), ", not an absent declaration.\nWithout an alias block, saved context is ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "target-dependent"
+      }), ", not a built-in,\nglobal or first-target policy. An explicit alias block wins over selected targets\nand retains stripped bodies through normal failover; otherwise each target evaluates\nthe original admitted body with its own policy. Recovery permits only one extra\nattempt across the whole request. Read-only context describes saved state, not\nunsaved edits or proof of runtime activation."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "database-key-spend-and-quota-resets",
       children: "Database Key Spend And Quota Resets"

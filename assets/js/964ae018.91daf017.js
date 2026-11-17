@@ -106,6 +106,10 @@ const toc = [{
   "id": "administrative-provider-and-alias-saves",
   "level": 2
 }, {
+  "value": "Encrypted Reasoning Policy Intent",
+  "id": "encrypted-reasoning-policy-intent",
+  "level": 3
+}, {
   "value": "Provider TLS ClientHello Settings",
   "id": "provider-tls-clienthello-settings",
   "level": 3
@@ -1792,7 +1796,14 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["Other upstream ", (0,jsx_runtime.jsx)(_components.code, {
           children: "4xx"
-        }), " responses are returned verbatim"]
+        }), " responses are returned verbatim, except for the narrowly\ngated same-target reasoning recovery below"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Chat completions/Responses may make one conditional same-identity\nencrypted-reasoning recovery attempt: direct requests make at most two\ninference attempts; aliases share one extra attempt across all targets, not\none per target. An ordinary immediate 400 to ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "stream: true"
+        }), " may qualify;\nestablished streams and peer control failures never do. See\n", (0,jsx_runtime.jsx)(_components.a, {
+          href: "/docs/providers-and-routing#scoped-encrypted-reasoning",
+          children: "all gates and stripping limits"
+        })]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "Unsupported operations return client-visible proxy errors"
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
@@ -1843,7 +1854,7 @@ function _createMdxContent(props) {
         children: "PUT /_internal/admin/providers/{name}"
       }), "\nsave provider metadata and supplied models atomically. A rejected model write\nleaves no new provider on POST and preserves the exact previous provider and models\non PUT. Omitting ", (0,jsx_runtime.jsx)(_components.code, {
         children: "models"
-      }), " (or sending null) preserves models; a supplied array is a\nreplacement subject to normal provider validation. Omitted fields and write-only\ncredentials are preserved on update. Credential-only PUT uses the same concurrency\nprotection and preserves models. Alias POST/PUT likewise save metadata and targets\nin one transaction, preserving omitted update fields."]
+      }), " (or sending null) preserves models; a supplied array is a\nreplacement subject to normal provider validation. Omitted fields and write-only\ncredentials are preserved on update. Policy values have the explicit null-removal\nexception below. Credential-only PUT uses the same concurrency\nprotection and preserves models/policies; it rejects policy/model edits rather\nthan silently accepting them. Alias POST/PUT likewise save metadata and targets\nin one transaction, preserving omitted update fields."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Provider PUT supports explicit ", (0,jsx_runtime.jsx)(_components.code, {
         children: "true"
@@ -2029,6 +2040,245 @@ function _createMdxContent(props) {
       children: ["After each valid commit, activation is requested once before response-view reads.\nOperational failure responses omit storage and credential details. Persistence and\nruntime activation are separate: later reloads can activate a complete saved edit\nafter an activation failure. The concurrency check protects the edited aggregate,\nnot an atomic snapshot of every catalog dependency or another proxy's runtime.\nSuccessful provider POST/PUT and credential PUT responses carry\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "X-Aiproxy-Catalog-Saved: true"
       }), " once the database commit is durable, including\nwhen activation itself fails."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "encrypted-reasoning-policy-intent",
+      children: "Encrypted Reasoning Policy Intent"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Provider POST/PUT, nested ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "models"
+      }), " entries, and alias POST/PUT accept an optional\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "encrypted_reasoning"
+      }), " object. Members are ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "passthrough"
+      }), " (boolean),\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "on_caller_mismatch"
+      }), " (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"fail\""
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"strip_and_retry\""
+      }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "\"\""
+      }), " for fail) and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "match_messages"
+      }), " (string array). These are ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "whole-block declarations"
+      }), ", not\neffective values or member patches; omitted members select built-ins. Pattern\nnormalization/bounds and runtime gates are the same as\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#scoped-encrypted-reasoning",
+        children: "static configuration"
+      }), ".\nPolicy members themselves cannot be null."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Policy input"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Create"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Provider / alias PUT"
+          }), (0,jsx_runtime.jsxs)(_components.th, {
+            children: ["Entry in a supplied replacement ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "models"
+            }), " array"]
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Omitted"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No local block"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Preserve the exact saved local block"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No local policy; do not preserve the old row's policy"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "null"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No local block"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Remove the local block; resume lower-layer resolution"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "No local policy/overlay"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "{}"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Safe reset"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Replace with passthrough ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "true"
+            }), ", mismatch ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "\"fail\""
+            }), ", built-in patterns"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Local reset, not inheritance"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Nonempty object"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Local override"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Replace the entire block, not just supplied members"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Local override"
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.strong, {
+        children: "Alias null removal is intentional:"
+      }), " omission keeps an explicit alias policy\nand its sticky stripped-body behavior; explicit null removes it, switching to\nper-selected-target policies and original-body-per-target behavior. Existing\nnon-null alias overrides keep their semantics."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Policy null and collection null are different. On provider PUT, omitted ", (0,jsx_runtime.jsxs)(_components.strong, {
+        children: ["or\nnull ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "models"
+        }), " preserves the complete local collection"]
+      }), ". An array replaces it\ntransactionally. A derivative's ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "models: []"
+      }), " clears only local overlays, not\ninherited inventory. A concrete provider still needs at least one valid model.\nWithin a replacement array, omitted/null policy removes that row's local policy;\nretain every other intended local override when submitting the array."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Managed derivatives inherit declared base provider/model policies by value,\nwith local provider overrides and existing-name model overlays. Their nested\nmodel entries accept ", (0,jsx_runtime.jsxs)(_components.strong, {
+        children: ["only ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "name"
+        }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "encrypted_reasoning"
+        })]
+      }), ":"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-json",
+        children: "{\n  \"extends\": \"primary\",\n  \"encrypted_reasoning\": { \"passthrough\": false },\n  \"models\": [{ \"name\": \"recover\", \"encrypted_reasoning\": {} }]\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["This is a provider PUT fragment, not a complete create. The model reset wins\nover both provider policies. Remove the overlay with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "models: []"
+      }), " or a replacement\nentry with omitted/null policy to restore the base model policy. Policy-free\nname entries are validated against the base inventory, then canonicalized away.\nNew names, duplicate overlays, model definition keys and all deferred keys are\nrejected, ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "even empty/null"
+      }), " (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "upstream_name: \"\""
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "capabilities: []"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "pricing: null"
+      }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "deferred_transport: null"
+      }), " are not allowed). Static overlays\nmay combine reasoning and deferred transport; managed overlays cannot."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The base must be enabled, concrete, same-type and eligible for managed\ninheritance; credentials stay local, chains remain unsupported. Switching\nconcrete ↔ derived with any stored model policy/overlay requires an explicit\nreplacement ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "models"
+      }), " ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "array"
+      }), " in that update; omission or null is insufficient.\nChanging bases validates preserved overlays against the new inventory. No\nprovider or credential relaxation is implied."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Writes reject duplicate JSON keys (including case-variant duplicates),\nnoncanonical reasoning/overlay keys, unknown policy members, wrong\ntypes, invalid patterns and read-only metadata. Do not PUT a GET view unchanged:\ninherited model definitions and effective metadata are not local declarations.\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "PUT /_internal/admin/providers/{name}/credential"
+      }), " preserves policy/model intent\nand rejects supplied policy or model edits before commit."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Provider/model GET views (including static entries under existing visibility\nrules) expose:"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Field"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Meaning"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "encrypted_reasoning"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Nullable ", (0,jsx_runtime.jsx)(_components.strong, {
+              children: "owner-local sparse declaration"
+            }), ": null for no local block, ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "{}"
+            }), " for reset, or only declared members, including explicit false."]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "encrypted_reasoning_effective"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Fully normalized policy; provider views resolve provider → root → built-ins, model views resolve model → provider → root → built-ins. A provider value does not override every model."
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "encrypted_reasoning_source"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Winning scope: ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "model"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "provider"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "root"
+            }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "builtin"
+            }), "; provider views never report ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "model"
+            }), "."]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "encrypted_reasoning_inherited"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["True only if the winning declaration was copied from a base provider/model through ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "extends"
+            }), "; root/built-in fallback is false."]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "models_inherited"
+            }), " (provider only)"]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Model definitions come from ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "extends"
+            }), ", independent of local policy overlays."]
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Derivative GET ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "models"
+      }), " is the ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "full inherited inventory"
+      }), ", with local nullable\nintent and effective metadata per model; PUT sends only sparse local overlays.\nFor an inherited model policy, local policy is null, source is ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), ", and\ninherited is true. A local ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "{}"
+      }), " overlay changes inherited to false without\nchanging ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "models_inherited"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Alias views expose local ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "encrypted_reasoning"
+      }), " and normalized\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "encrypted_reasoning_effective"
+      }), ". Without a local alias block, effective is\n", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "null"
+      }), ": there is no single pool-wide effective policy."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["All effective/source/inherited fields are read-only. Reads describe ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "saved\nintent"
+      }), " resolved against the relevant base/root snapshot, not proof that a\ncandidate activated. Existing RBAC, static-edit restrictions, durable-save\noutcomes/headers and receiving-instance-only activation still apply. Root has\nno new admin edit endpoint. Provider/model/alias web policy controls use these\nsame local-intent semantics: unchanged policies are omitted, inherit removes a\nlocal block, safe reset writes ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "{}"
+      }), ", and custom writes only declared members.\nInherited model definitions and static rows remain read-only; the forms do not\nturn effective context into local declarations."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "provider-tls-clienthello-settings",
       children: "Provider TLS ClientHello Settings"
