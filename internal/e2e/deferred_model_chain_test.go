@@ -3,7 +3,6 @@ package e2e
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +21,7 @@ import (
 
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/deferred"
+	"github.com/egose/aiproxy/internal/testutil"
 )
 
 func deferredMixedChainExecutorConfig(upstream string) string {
@@ -451,7 +451,7 @@ func TestDeferredMixedModelPeerChainFailuresStayPinned(t *testing.T) {
 				}
 				input := deferredMixedChainInput(model, "/v1/chat/completions", false)
 				if fault == "admission" {
-					secret := "AKIA" + rand.Text()[:16]
+					secret := testutil.GuardrailAWSKey(t)
 					input = bytes.Replace(input, []byte(`"content":"test"`), []byte(`"content":"deploy with `+secret+` now"`), 1)
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)

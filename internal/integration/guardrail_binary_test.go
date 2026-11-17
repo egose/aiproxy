@@ -3,12 +3,13 @@
 package integration
 
 import (
-	"crypto/rand"
 	"fmt"
 	"net/http"
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/egose/aiproxy/internal/testutil"
 )
 
 func guardrailBinaryConfig(addr, upstreamURL, mode string) string {
@@ -31,16 +32,7 @@ auth "main" { mode = "none" }
 
 func guardrailBinaryKey(t *testing.T) string {
 	t.Helper()
-	raw := make([]byte, 16)
-	if _, err := rand.Read(raw); err != nil {
-		t.Fatalf("rand: %v", err)
-	}
-	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ234567"
-	out := make([]byte, 16)
-	for i := range out {
-		out[i] = alphabet[int(raw[i])%len(alphabet)]
-	}
-	return "AKIA" + string(out)
+	return testutil.GuardrailAWSKey(t)
 }
 
 func TestBinaryIngressGuardrailBlockAuditReload(t *testing.T) {

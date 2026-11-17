@@ -20,6 +20,7 @@ import (
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/provider"
+	"github.com/egose/aiproxy/internal/testutil"
 )
 
 type countingAdapter struct {
@@ -58,16 +59,7 @@ func (a *countingAdapter) lastBody() []byte {
 
 func guardrailTestKey(t *testing.T) string {
 	t.Helper()
-	raw := make([]byte, 16)
-	if _, err := rand.Read(raw); err != nil {
-		t.Fatalf("rand: %v", err)
-	}
-	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ234567"
-	out := make([]byte, 16)
-	for i := range out {
-		out[i] = alphabet[int(raw[i])%len(alphabet)]
-	}
-	return "AKIA" + string(out)
+	return testutil.GuardrailAWSKey(t)
 }
 
 func guardrailTestScanner(t *testing.T, mode guardrails.Mode, maxTextBytes, maxStrings int) *guardrails.Scanner {

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/egose/aiproxy/internal/testutil"
 )
 
 func randAlnum(t *testing.T, alphabet string, n int) string {
@@ -23,7 +25,25 @@ func randAlnum(t *testing.T, alphabet string, n int) string {
 
 func awsKey(t *testing.T) string {
 	t.Helper()
-	return "AKIA" + randAlnum(t, "ABCDEFGHJKLMNPQRSTUVWXYZ234567", 16)
+	return testutil.GuardrailAWSKey(t)
+}
+
+func TestGeneratedAWSKeysAreDetected(t *testing.T) {
+	s := testScanner(t, nil)
+	for i := 0; i < 200; i++ {
+		key := awsKey(t)
+		seen := make(map[byte]bool)
+		for j := 4; j < len(key); j++ {
+			if seen[key[j]] {
+				t.Fatal("generated key contains repeated suffix characters")
+			}
+			seen[key[j]] = true
+		}
+		res := s.Scan(context.Background(), []string{"key " + key})
+		if res.Outcome != OutcomeFlagged {
+			t.Fatalf("generated AWS key not detected: outcome = %s", res.Outcome)
+		}
+	}
 }
 
 func testScanner(t *testing.T, mutate func(*Policy)) *Scanner {
