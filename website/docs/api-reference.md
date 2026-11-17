@@ -466,7 +466,14 @@ ledger have separate lifetimes and pricing semantics.
 - The default `retry_status_codes` list is `500`, `502`, `503`, and `504`
 - Configured retry statuses may include `4xx` responses such as `429`; retryable
   `4xx` statuses do not mark providers unhealthy
-- Other upstream `4xx` responses are returned verbatim
+- Other upstream `4xx` responses are returned verbatim, except for the narrowly
+  gated same-target reasoning recovery below
+- Chat completions/Responses may make one conditional same-identity
+  encrypted-reasoning recovery attempt: direct requests make at most two
+  inference attempts; aliases share one extra attempt across all targets, not
+  one per target. An ordinary immediate 400 to `stream: true` may qualify;
+  established streams and peer control failures never do. See
+  [all gates and stripping limits](providers-and-routing.md#scoped-encrypted-reasoning)
 - Unsupported operations return client-visible proxy errors
 - Peer deferred control failures are not provider outcomes and do not authorize
   alias failover; definite terminal inference outcomes retain the rules above
@@ -497,8 +504,10 @@ save provider metadata and supplied models atomically. A rejected model write
 leaves no new provider on POST and preserves the exact previous provider and models
 on PUT. Omitting `models` (or sending null) preserves models; a supplied array is a
 replacement subject to normal provider validation. Omitted fields and write-only
-credentials are preserved on update. Credential-only PUT uses the same concurrency
-protection and preserves models. Alias POST/PUT likewise save metadata and targets
+credentials are preserved on update. Policy values have the explicit null-removal
+exception below. Credential-only PUT uses the same concurrency
+protection and preserves models/policies; it rejects policy/model edits rather
+than silently accepting them. Alias POST/PUT likewise save metadata and targets
 in one transaction, preserving omitted update fields.
 
 Provider PUT supports explicit `true`/`false` for `enabled`,
@@ -560,6 +569,102 @@ not an atomic snapshot of every catalog dependency or another proxy's runtime.
 Successful provider POST/PUT and credential PUT responses carry
 `X-Aiproxy-Catalog-Saved: true` once the database commit is durable, including
 when activation itself fails.
+
+### Encrypted Reasoning Policy Intent
+
+Provider POST/PUT, nested `models` entries, and alias POST/PUT accept an optional
+`encrypted_reasoning` object. Members are `passthrough` (boolean),
+`on_caller_mismatch` (`"fail"`, `"strip_and_retry"`, or `""` for fail) and
+`match_messages` (string array). These are **whole-block declarations**, not
+effective values or member patches; omitted members select built-ins. Pattern
+normalization/bounds and runtime gates are the same as
+[static configuration](configuration.md#scoped-encrypted-reasoning).
+Policy members themselves cannot be null.
+
+| Policy input    | Create         | Provider / alias PUT                                                  | Entry in a supplied replacement `models` array        |
+| --------------- | -------------- | --------------------------------------------------------------------- | ----------------------------------------------------- |
+| Omitted         | No local block | Preserve the exact saved local block                                  | No local policy; do not preserve the old row's policy |
+| `null`          | No local block | Remove the local block; resume lower-layer resolution                 | No local policy/overlay                               |
+| `{}`            | Safe reset     | Replace with passthrough `true`, mismatch `"fail"`, built-in patterns | Local reset, not inheritance                          |
+| Nonempty object | Local override | Replace the entire block, not just supplied members                   | Local override                                        |
+
+**Alias null removal is intentional:** omission keeps an explicit alias policy
+and its sticky stripped-body behavior; explicit null removes it, switching to
+per-selected-target policies and original-body-per-target behavior. Existing
+non-null alias overrides keep their semantics.
+
+Policy null and collection null are different. On provider PUT, omitted **or
+null `models` preserves the complete local collection**. An array replaces it
+transactionally. A derivative's `models: []` clears only local overlays, not
+inherited inventory. A concrete provider still needs at least one valid model.
+Within a replacement array, omitted/null policy removes that row's local policy;
+retain every other intended local override when submitting the array.
+
+Managed derivatives inherit declared base provider/model policies by value,
+with local provider overrides and existing-name model overlays. Their nested
+model entries accept **only `name` and `encrypted_reasoning`**:
+
+```json
+{
+  "extends": "primary",
+  "encrypted_reasoning": { "passthrough": false },
+  "models": [{ "name": "recover", "encrypted_reasoning": {} }]
+}
+```
+
+This is a provider PUT fragment, not a complete create. The model reset wins
+over both provider policies. Remove the overlay with `models: []` or a replacement
+entry with omitted/null policy to restore the base model policy. Policy-free
+name entries are validated against the base inventory, then canonicalized away.
+New names, duplicate overlays, model definition keys and all deferred keys are
+rejected, **even empty/null** (`upstream_name: ""`, `capabilities: []`,
+`pricing: null`, or `deferred_transport: null` are not allowed). Static overlays
+may combine reasoning and deferred transport; managed overlays cannot.
+
+The base must be enabled, concrete, same-type and eligible for managed
+inheritance; credentials stay local, chains remain unsupported. Switching
+concrete ↔ derived with any stored model policy/overlay requires an explicit
+replacement `models` **array** in that update; omission or null is insufficient.
+Changing bases validates preserved overlays against the new inventory. No
+provider or credential relaxation is implied.
+
+Writes reject duplicate JSON keys (including case-variant duplicates),
+noncanonical reasoning/overlay keys, unknown policy members, wrong
+types, invalid patterns and read-only metadata. Do not PUT a GET view unchanged:
+inherited model definitions and effective metadata are not local declarations.
+`PUT /_internal/admin/providers/{name}/credential` preserves policy/model intent
+and rejects supplied policy or model edits before commit.
+
+Provider/model GET views (including static entries under existing visibility
+rules) expose:
+
+| Field                              | Meaning                                                                                                                                                                               |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `encrypted_reasoning`              | Nullable **owner-local sparse declaration**: null for no local block, `{}` for reset, or only declared members, including explicit false.                                             |
+| `encrypted_reasoning_effective`    | Fully normalized policy; provider views resolve provider → root → built-ins, model views resolve model → provider → root → built-ins. A provider value does not override every model. |
+| `encrypted_reasoning_source`       | Winning scope: `model`, `provider`, `root`, or `builtin`; provider views never report `model`.                                                                                        |
+| `encrypted_reasoning_inherited`    | True only if the winning declaration was copied from a base provider/model through `extends`; root/built-in fallback is false.                                                        |
+| `models_inherited` (provider only) | Model definitions come from `extends`, independent of local policy overlays.                                                                                                          |
+
+Derivative GET `models` is the **full inherited inventory**, with local nullable
+intent and effective metadata per model; PUT sends only sparse local overlays.
+For an inherited model policy, local policy is null, source is `model`, and
+inherited is true. A local `{}` overlay changes inherited to false without
+changing `models_inherited`.
+
+Alias views expose local `encrypted_reasoning` and normalized
+`encrypted_reasoning_effective`. Without a local alias block, effective is
+**null**: there is no single pool-wide effective policy.
+
+All effective/source/inherited fields are read-only. Reads describe **saved
+intent** resolved against the relevant base/root snapshot, not proof that a
+candidate activated. Existing RBAC, static-edit restrictions, durable-save
+outcomes/headers and receiving-instance-only activation still apply. Root has
+no new admin edit endpoint. Provider/model/alias web policy controls use these
+same local-intent semantics: unchanged policies are omitted, inherit removes a
+local block, safe reset writes `{}`, and custom writes only declared members.
+Inherited model definitions and static rows remain read-only; the forms do not
+turn effective context into local declarations.
 
 ### Provider TLS ClientHello Settings
 

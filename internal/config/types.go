@@ -24,6 +24,7 @@ type Runtime struct {
 	UserAgent             string
 	ForwardUserAgent      bool
 	ForwardHeaders        []string
+	EncryptedReasoning    *EncryptedReasoning
 	Catalog               Catalog
 }
 
@@ -271,31 +272,35 @@ const (
 )
 
 type Provider struct {
-	Type                      ProviderType
-	Name                      string
-	DisplayName               string
-	BaseURL                   string
-	UpstreamHeaderTimeout     time.Duration
-	UserAgent                 string
-	ForwardUserAgent          bool
-	ForwardHeaders            []string
-	ForwardAuthorization      bool
-	DeferredTransport         *DeferredTransport
-	DeferredReceiver          *DeferredReceiver
-	AllowInsecureBaseURL      bool
-	TLSClientHello            string
-	TLSClientHelloSpecFile    string
-	HasTLSClientHello         bool
-	HasTLSClientHelloSpecFile bool
-	TLSClientHelloInherited   bool
-	TLSProfile                tlsprofile.Profile
-	APIKey                    string
-	APIKeyRef                 *APIKeyRef
-	CopilotCredentialRef      *CopilotCredentialRef
-	CopilotToken              string
-	Enabled                   bool
-	Models                    []Model
-	Healthcheck               *ProviderHealthcheck
+	Type                        ProviderType
+	Name                        string
+	DatabaseManaged             bool `json:"-"`
+	Extends                     string
+	DisplayName                 string
+	BaseURL                     string
+	UpstreamHeaderTimeout       time.Duration
+	UserAgent                   string
+	ForwardUserAgent            bool
+	ForwardHeaders              []string
+	ForwardAuthorization        bool
+	EncryptedReasoning          *EncryptedReasoning
+	EncryptedReasoningInherited bool
+	DeferredTransport           *DeferredTransport
+	DeferredReceiver            *DeferredReceiver
+	AllowInsecureBaseURL        bool
+	TLSClientHello              string
+	TLSClientHelloSpecFile      string
+	HasTLSClientHello           bool
+	HasTLSClientHelloSpecFile   bool
+	TLSClientHelloInherited     bool
+	TLSProfile                  tlsprofile.Profile
+	APIKey                      string
+	APIKeyRef                   *APIKeyRef
+	CopilotCredentialRef        *CopilotCredentialRef
+	CopilotToken                string
+	Enabled                     bool
+	Models                      []Model
+	Healthcheck                 *ProviderHealthcheck
 
 	ModelByName map[string]Model
 }
@@ -325,13 +330,15 @@ type ProviderHealthcheck struct {
 }
 
 type Model struct {
-	Name              string
-	DisplayName       string
-	UpstreamName      string
-	Protocol          ModelProtocol
-	Capabilities      []Capability
-	Pricing           *ModelPricing
-	DeferredTransport *DeferredTransport
+	Name                        string
+	DisplayName                 string
+	UpstreamName                string
+	Protocol                    ModelProtocol
+	Capabilities                []Capability
+	Pricing                     *ModelPricing
+	EncryptedReasoning          *EncryptedReasoning
+	EncryptedReasoningInherited bool
+	DeferredTransport           *DeferredTransport
 }
 
 type ModelPricing struct {
@@ -400,6 +407,7 @@ func (p *ModelPricing) Cost(promptTokens, completionTokens, cachedTokens, cacheW
 
 type Alias struct {
 	Name               string
+	DatabaseManaged    bool `json:"-"`
 	Algorithm          Algorithm
 	RetryStatusCodes   []int
 	SessionAffinity    *SessionAffinity
@@ -416,6 +424,29 @@ type EncryptedReasoning struct {
 	Passthrough      bool
 	OnCallerMismatch string
 	MatchMessages    []string
+	Declaration      *EncryptedReasoningDeclaration
+}
+
+type EncryptedReasoningDeclaration struct {
+	Passthrough      *bool     `json:"passthrough,omitempty"`
+	OnCallerMismatch *string   `json:"on_caller_mismatch,omitempty"`
+	MatchMessages    *[]string `json:"match_messages,omitempty"`
+}
+
+type EncryptedReasoningSource string
+
+const (
+	EncryptedReasoningSourceAlias    EncryptedReasoningSource = "alias"
+	EncryptedReasoningSourceModel    EncryptedReasoningSource = "model"
+	EncryptedReasoningSourceProvider EncryptedReasoningSource = "provider"
+	EncryptedReasoningSourceRoot     EncryptedReasoningSource = "root"
+	EncryptedReasoningSourceBuiltin  EncryptedReasoningSource = "builtin"
+)
+
+type EncryptedReasoningResolution struct {
+	Policy    EncryptedReasoning
+	Source    EncryptedReasoningSource
+	Inherited bool
 }
 
 var DefaultEncryptedReasoningMatchMessages = []string{
@@ -428,10 +459,10 @@ var DefaultEncryptedReasoningMatchMessages = []string{
 }
 
 func EncryptedReasoningMatchMessages(a Alias) []string {
-	if a.EncryptedReasoning == nil || len(a.EncryptedReasoning.MatchMessages) == 0 {
-		return append([]string(nil), DefaultEncryptedReasoningMatchMessages...)
+	if er := NormalizeEncryptedReasoning(a.EncryptedReasoning); er != nil {
+		return er.MatchMessages
 	}
-	return append([]string(nil), a.EncryptedReasoning.MatchMessages...)
+	return DefaultEncryptedReasoning().MatchMessages
 }
 
 type SessionAffinity struct {

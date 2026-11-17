@@ -67,7 +67,12 @@ afterEach(() => {
   clearAdminSession();
 });
 
-function mount(initial: AdminProvider | undefined, savedViews: AdminProvider[] = []) {
+function mount(
+  initial: AdminProvider | undefined,
+  savedViews: AdminProvider[] = [],
+  inventory: AdminProvider[] = [],
+  denyTypes = false,
+) {
   let current = initial;
   axios.defaults.adapter = async (config) => {
     if (config.url === '/_internal/admin/status') {
@@ -85,9 +90,13 @@ function mount(initial: AdminProvider | undefined, savedViews: AdminProvider[] =
     }
     if (config.url === '/_internal/admin/providers') {
       listReads++;
-      return response(config, { providers: current ? [current] : [] });
+      return response(config, { providers: [...(current ? [current] : []), ...inventory] });
     }
     if (config.url === '/_internal/admin/provider-types') {
+      if (denyTypes) {
+        const denied = { ...response(config, 'forbidden'), status: 403, statusText: 'Forbidden' };
+        throw new AxiosError('forbidden', 'ERR_BAD_REQUEST', config, undefined, denied);
+      }
       return response(config, {
         provider_types: [
           {
@@ -392,7 +401,7 @@ describe('mounted provider form requests and reopened values', { timeout: 15000 
   });
 
   it('creates an inherited provider without a local model', async () => {
-    mount(undefined, [provider({ extends: 'base', models: [] })]);
+    mount(undefined, [provider({ extends: 'base', models: [] })], [provider({ name: 'base', source: 'config' })]);
     const form = await create();
     change('Name (lowercase, no spaces)', 'primary');
     change(/^Extends/, 'base');
@@ -485,6 +494,488 @@ describe('mounted provider form requests and reopened values', { timeout: 15000 
   });
 });
 
+const rootReasoning = { passthrough: false, on_caller_mismatch: 'strip_and_retry', match_messages: ['root mismatch'] };
+const safeReasoning = { passthrough: true, on_caller_mismatch: 'fail', match_messages: ['builtin mismatch'] };
+const modelPolicyLabel = 'Model gpt-4o-mini encrypted reasoning';
+
+function policy(label = 'Provider encrypted reasoning') {
+  return within(screen.getByRole('group', { name: label }));
+}
+
+function configurePolicy(label: string, local: Record<string, unknown> | null) {
+  const group = policy(label);
+  fireEvent.change(group.getByLabelText('Policy mode'), {
+    target: { value: local === null ? 'inherit' : Object.keys(local).length === 0 ? 'reset' : 'custom' },
+  });
+  if (local === null || Object.keys(local).length === 0) return;
+  if ('passthrough' in local)
+    fireEvent.change(group.getByLabelText('Passthrough member'), { target: { value: String(local.passthrough) } });
+  if ('on_caller_mismatch' in local)
+    fireEvent.change(group.getByLabelText('Mismatch member'), { target: { value: local.on_caller_mismatch } });
+  if ('match_messages' in local) {
+    fireEvent.change(group.getByLabelText('Match messages member'), { target: { value: 'declare' } });
+    fireEvent.change(group.getByLabelText('Match messages (one per line)'), {
+      target: { value: (local.match_messages as string[]).join('\n') },
+    });
+  }
+}
+
+describe('mounted sparse provider and model reasoning policies', { timeout: 15000 }, () => {
+  it.each([
+    undefined,
+    null,
+    {},
+    { passthrough: false },
+    { on_caller_mismatch: '' },
+    { match_messages: [] },
+    safeReasoning,
+  ])('omits untouched local intent %j and every effective/model metadata field', async (local) => {
+    const before = provider({
+      encrypted_reasoning: local,
+      encrypted_reasoning_effective: rootReasoning,
+      encrypted_reasoning_source: 'root',
+      encrypted_reasoning_inherited: false,
+      models: [
+        {
+          name: 'gpt-4o-mini',
+          encrypted_reasoning: {},
+          encrypted_reasoning_effective: safeReasoning,
+          encrypted_reasoning_source: 'model',
+        },
+      ],
+    });
+    mount(before, [before, { ...before, display_name: 'Unrelated' }]);
+    let form = await edit();
+    expect(policy().getByText(/source root · not inherited from base/)).toBeInTheDocument();
+    await save();
+    expect(writes[0].body).toEqual({});
+    form = await edit();
+    const expectedMode = local == null ? 'inherit' : Object.keys(local).length === 0 ? 'reset' : 'custom';
+    expect(policy().getByLabelText('Policy mode')).toHaveValue(expectedMode);
+    fireEvent.change(form.getAllByLabelText('Display name (optional)')[0], { target: { value: 'Unrelated' } });
+    await save();
+    expect(writes[1].body).toEqual({ display_name: 'Unrelated' });
+  });
+
+  it.each([
+    {},
+    { passthrough: false },
+    { on_caller_mismatch: '' },
+    { match_messages: [] },
+    {
+      passthrough: false,
+      on_caller_mismatch: 'strip_and_retry',
+      match_messages: ['  Custom mismatch  ', 'another error'],
+    },
+  ])('creates provider and model declarations without filling absent members: %j', async (local) => {
+    const saved = provider({
+      encrypted_reasoning: local,
+      models: [{ name: 'gpt-4o-mini', encrypted_reasoning: local }],
+    });
+    mount(undefined, [saved, saved]);
+    const form = await create();
+    change('Name (lowercase, no spaces)', 'primary');
+    change('Name', 'gpt-4o-mini');
+    configurePolicy('Provider encrypted reasoning', local);
+    configurePolicy(modelPolicyLabel, local);
+    fireEvent.click(form.getByRole('button', { name: 'Create provider' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(writes[0]).toEqual({
+      method: 'post',
+      url: '/_internal/admin/providers',
+      body: {
+        name: 'primary',
+        type: 'openai',
+        encrypted_reasoning: local,
+        models: [{ name: 'gpt-4o-mini', encrypted_reasoning: local }],
+      },
+    });
+    await edit();
+    expect(policy().getByLabelText('Policy mode')).toHaveValue(Object.keys(local).length ? 'custom' : 'reset');
+    expect(policy(modelPolicyLabel).getByLabelText('Policy mode')).toHaveValue(
+      Object.keys(local).length ? 'custom' : 'reset',
+    );
+    await save();
+    expect(writes[1].body).toEqual({});
+  });
+
+  it('replaces provider blocks with reset or removal and retains untouched declared members during custom edits', async () => {
+    const original = { passthrough: false, on_caller_mismatch: '', match_messages: [] };
+    const custom = { ...original, on_caller_mismatch: 'strip_and_retry' };
+    mount(provider({ encrypted_reasoning: original }), [
+      provider({ encrypted_reasoning: custom }),
+      provider({ encrypted_reasoning: {} }),
+      provider({ encrypted_reasoning: null }),
+    ]);
+    await edit();
+    fireEvent.change(policy().getByLabelText('Mismatch member'), { target: { value: 'strip_and_retry' } });
+    await save();
+    expect(writes[0].body).toEqual({ encrypted_reasoning: custom });
+    await edit();
+    configurePolicy('Provider encrypted reasoning', {});
+    await save();
+    expect(writes[1].body).toEqual({ encrypted_reasoning: {} });
+    await edit();
+    expect(policy().getByLabelText('Policy mode')).toHaveValue('reset');
+    configurePolicy('Provider encrypted reasoning', null);
+    await save();
+    expect(writes[2].body).toEqual({ encrypted_reasoning: null });
+    await edit();
+    expect(policy().getByLabelText('Policy mode')).toHaveValue('inherit');
+  });
+
+  it('allows explicit omission of one member without importing lower-layer values', async () => {
+    const original = { passthrough: false, on_caller_mismatch: '', match_messages: [] };
+    const replacement = { on_caller_mismatch: '', match_messages: [] };
+    mount(provider({ encrypted_reasoning: original, encrypted_reasoning_effective: rootReasoning }), [
+      provider({ encrypted_reasoning: replacement }),
+    ]);
+    await edit();
+    fireEvent.change(policy().getByLabelText('Passthrough member'), { target: { value: 'omit' } });
+    await save();
+    expect(writes[0].body).toEqual({ encrypted_reasoning: replacement });
+  });
+
+  it('retains every concrete model local policy exactly when replacing definitions', async () => {
+    const models = [
+      { name: 'gpt-4o-mini', encrypted_reasoning: { passthrough: false }, upstream_name: 'old' },
+      { name: 'reset', encrypted_reasoning: {} },
+      { name: 'empty', encrypted_reasoning: { on_caller_mismatch: '', match_messages: [] } },
+      { name: 'multiline', encrypted_reasoning: { match_messages: ['  RAW\nPattern  '] } },
+      { name: 'inherit', encrypted_reasoning: null, encrypted_reasoning_effective: rootReasoning },
+    ];
+    const saved = provider({ models: [{ ...models[0], upstream_name: 'new' }, ...models.slice(1)] });
+    mount(provider({ models }), [saved]);
+    await edit();
+    fireEvent.change(screen.getAllByLabelText('Upstream name (defaults to name)')[0], { target: { value: 'new' } });
+    await save();
+    expect(writes[0].body).toEqual({
+      models: [
+        { name: 'gpt-4o-mini', upstream_name: 'new', encrypted_reasoning: { passthrough: false } },
+        { name: 'reset', encrypted_reasoning: {} },
+        { name: 'empty', encrypted_reasoning: { on_caller_mismatch: '', match_messages: [] } },
+        { name: 'multiline', encrypted_reasoning: { match_messages: ['  RAW\nPattern  '] } },
+        { name: 'inherit' },
+      ],
+    });
+    await edit();
+    expect(policy('Model empty encrypted reasoning').getByLabelText('Mismatch member')).toHaveValue('');
+    expect(policy('Model reset encrypted reasoning').getByLabelText('Policy mode')).toHaveValue('reset');
+  });
+
+  it('resets/removes a concrete model policy in a full replacement while retaining sibling local intent', async () => {
+    const other = { name: 'other', encrypted_reasoning: { on_caller_mismatch: '' } };
+    mount(provider({ models: [{ name: 'gpt-4o-mini', encrypted_reasoning: { passthrough: false } }, other] }), [
+      provider({ models: [{ name: 'gpt-4o-mini', encrypted_reasoning: {} }, other] }),
+      provider({ models: [{ name: 'gpt-4o-mini', encrypted_reasoning: null }, other] }),
+    ]);
+    await edit();
+    configurePolicy(modelPolicyLabel, {});
+    await save();
+    expect(writes[0].body).toEqual({ models: [{ name: 'gpt-4o-mini', encrypted_reasoning: {} }, other] });
+    await edit();
+    configurePolicy(modelPolicyLabel, null);
+    await save();
+    expect(writes[1].body).toEqual({ models: [{ name: 'gpt-4o-mini' }, other] });
+    await edit();
+    expect(policy(modelPolicyLabel).getByLabelText('Policy mode')).toHaveValue('inherit');
+  });
+
+  it('shows inherited model metadata independently of local intent, writes sparse overlays and clears only overlays', async () => {
+    const baseModel = {
+      name: 'gpt-4o-mini',
+      upstream_name: 'base-upstream',
+      protocol: 'chat',
+      capabilities: ['chat'],
+      pricing: { input_per_million: 3 },
+      encrypted_reasoning: null,
+      encrypted_reasoning_effective: rootReasoning,
+      encrypted_reasoning_source: 'model',
+      encrypted_reasoning_inherited: true,
+    };
+    const initial = provider({
+      extends: 'base',
+      models_inherited: true,
+      encrypted_reasoning: null,
+      encrypted_reasoning_effective: rootReasoning,
+      encrypted_reasoning_source: 'provider',
+      encrypted_reasoning_inherited: true,
+      models: [baseModel],
+    });
+    const reset = provider({
+      ...initial,
+      models: [
+        {
+          ...baseModel,
+          encrypted_reasoning: {},
+          encrypted_reasoning_effective: safeReasoning,
+          encrypted_reasoning_inherited: false,
+        },
+      ],
+    });
+    mount(initial, [initial, reset, initial]);
+    let form = await edit();
+    expect(policy().getByLabelText('Policy mode')).toHaveValue('inherit');
+    expect(policy().getByText(/source provider · inherited from base/)).toBeInTheDocument();
+    expect(policy(modelPolicyLabel).getByLabelText('Policy mode')).toHaveValue('inherit');
+    expect(policy(modelPolicyLabel).getByText(/source model · inherited from base/)).toBeInTheDocument();
+    expect(form.queryByLabelText('Name', { exact: true })).not.toBeInTheDocument();
+    expect(form.queryByRole('button', { name: 'Add model' })).not.toBeInTheDocument();
+    await save();
+    expect(writes[0].body).toEqual({});
+    await edit();
+    configurePolicy(modelPolicyLabel, {});
+    await save();
+    expect(writes[1].body).toEqual({ models: [{ name: 'gpt-4o-mini', encrypted_reasoning: {} }] });
+    form = await edit();
+    expect(policy(modelPolicyLabel).getByText(/source model · not inherited from base/)).toBeInTheDocument();
+    configurePolicy(modelPolicyLabel, null);
+    await save();
+    expect(writes[2].body).toEqual({ models: [] });
+    await edit();
+    expect(policy(modelPolicyLabel).getByLabelText('Policy mode')).toHaveValue('inherit');
+    expect(policy(modelPolicyLabel).getByText(/source model · inherited from base/)).toBeInTheDocument();
+  });
+
+  it('retains sibling derivative overlays and never copies the base model policy into a new local override', async () => {
+    const models = [
+      { name: 'gpt-4o-mini', encrypted_reasoning: null, encrypted_reasoning_effective: rootReasoning },
+      {
+        name: 'other',
+        encrypted_reasoning: { on_caller_mismatch: '', match_messages: [] },
+        upstream_name: 'base-other',
+      },
+    ];
+    mount(provider({ extends: 'base', models_inherited: true, models }), [
+      provider({ extends: 'base', models: [{ ...models[0], encrypted_reasoning: { passthrough: false } }, models[1]] }),
+    ]);
+    await edit();
+    configurePolicy(modelPolicyLabel, { passthrough: false });
+    await save();
+    expect(writes[0].body).toEqual({
+      models: [
+        { name: 'gpt-4o-mini', encrypted_reasoning: { passthrough: false } },
+        { name: 'other', encrypted_reasoning: { on_caller_mismatch: '', match_messages: [] } },
+      ],
+    });
+  });
+
+  it('loads only authorized base inventory on creation and submits policy-only overlays', async () => {
+    const base = provider({
+      name: 'base',
+      source: 'config',
+      models: [
+        { name: 'gpt-4o-mini', upstream_name: 'base', encrypted_reasoning: rootReasoning },
+        { name: 'other', encrypted_reasoning: {} },
+      ],
+    });
+    mount(undefined, [provider({ extends: 'base', models: base.models })], [base]);
+    const form = await create();
+    change('Name (lowercase, no spaces)', 'primary');
+    change(/^Extends/, 'base');
+    expect(policy(modelPolicyLabel).getByLabelText('Policy mode')).toHaveValue('inherit');
+    expect(policy('Model other encrypted reasoning').getByLabelText('Policy mode')).toHaveValue('inherit');
+    configurePolicy(modelPolicyLabel, { passthrough: false, match_messages: [] });
+    fireEvent.click(form.getByRole('button', { name: 'Create provider' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(writes[0].body).toEqual({
+      name: 'primary',
+      type: 'openai',
+      extends: 'base',
+      models: [{ name: 'gpt-4o-mini', encrypted_reasoning: { passthrough: false, match_messages: [] } }],
+    });
+  });
+
+  it('revalidates changed-base names, retains unavailable overlays, then clears them only on explicit removal', async () => {
+    const initial = provider({
+      extends: 'old-base',
+      models: [{ name: 'old', encrypted_reasoning: { passthrough: false } }],
+    });
+    const base = provider({
+      name: 'new-base',
+      source: 'config',
+      models: [{ name: 'new', encrypted_reasoning: rootReasoning }],
+    });
+    mount(initial, [provider({ extends: 'new-base', models: [{ name: 'new', encrypted_reasoning: null }] })], [base]);
+    const form = await edit();
+    change(/^Extends/, 'new-base');
+    expect(policy('Model new encrypted reasoning').getByLabelText('Policy mode')).toHaveValue('inherit');
+    expect(form.getByText(/its local policy has not been discarded/)).toBeInTheDocument();
+    fireEvent.click(form.getByRole('button', { name: 'Save changes' }));
+    expect(await form.findByText(/A local overlay names a model unavailable/)).toBeInTheDocument();
+    expect(writes).toEqual([]);
+    fireEvent.click(form.getByRole('button', { name: 'Remove unavailable overlay old' }));
+    await save();
+    expect(writes[0].body).toEqual({ extends: 'new-base', models: [] });
+  });
+
+  it('preserves overlays matching a changed base without serializing its definitions or declared policy', async () => {
+    const local = { passthrough: false };
+    const base = provider({
+      name: 'new-base',
+      source: 'config',
+      models: [
+        { name: 'gpt-4o-mini', upstream_name: 'new-upstream', encrypted_reasoning: rootReasoning },
+        { name: 'added', encrypted_reasoning: {} },
+      ],
+    });
+    mount(
+      provider({ extends: 'old-base', models: [{ name: 'gpt-4o-mini', encrypted_reasoning: local }] }),
+      [provider({ extends: 'new-base', models: base.models })],
+      [base],
+    );
+    await edit();
+    change(/^Extends/, 'new-base');
+    expect(policy(modelPolicyLabel).getByLabelText('Passthrough member')).toHaveValue('false');
+    expect(policy('Model added encrypted reasoning').getByLabelText('Policy mode')).toHaveValue('inherit');
+    await save();
+    expect(writes[0].body).toEqual({ extends: 'new-base' });
+  });
+
+  it('restores the original authorized model inventory when returning to a base not separately listed', async () => {
+    const base = provider({
+      name: 'new-base',
+      source: 'config',
+      models: [{ name: 'new', encrypted_reasoning: rootReasoning }],
+    });
+    const initial = provider({
+      extends: 'original',
+      models: [
+        { name: 'gpt-4o-mini', encrypted_reasoning: { passthrough: false } },
+        { name: 'untouched', encrypted_reasoning: null },
+      ],
+    });
+    mount(initial, [initial], [base]);
+    await edit();
+    change(/^Extends/, 'new-base');
+    expect(policy('Model new encrypted reasoning').getByLabelText('Policy mode')).toHaveValue('inherit');
+    change(/^Extends/, 'original');
+    expect(policy(modelPolicyLabel).getByLabelText('Passthrough member')).toHaveValue('false');
+    expect(policy('Model untouched encrypted reasoning').getByLabelText('Policy mode')).toHaveValue('inherit');
+    await save();
+    expect(writes[0].body).toEqual({});
+  });
+
+  it.each(['concrete-to-derived', 'derived-to-concrete'])(
+    'requires explicit destination model replacement on a policy-bearing %s transition',
+    async (direction) => {
+      const toDerived = direction === 'concrete-to-derived';
+      const model = { name: 'gpt-4o-mini', upstream_name: 'upstream', encrypted_reasoning: { passthrough: false } };
+      const initial = provider({ extends: toDerived ? '' : 'base', models: [model] });
+      const base = provider({
+        name: 'base',
+        source: 'config',
+        models: [{ ...model, encrypted_reasoning: rootReasoning }],
+      });
+      mount(initial, [provider({ ...initial, extends: toDerived ? 'base' : '' })], [base]);
+      const form = await edit();
+      change(/^Extends/, toDerived ? 'base' : '');
+      fireEvent.click(form.getByRole('button', { name: 'Save changes' }));
+      expect(await form.findByText(/Confirm the destination model replacement/)).toBeInTheDocument();
+      expect(writes).toEqual([]);
+      fireEvent.click(form.getByRole('checkbox', { name: /^Confirm destination/ }));
+      await save();
+      expect(writes[0].body).toEqual(
+        toDerived
+          ? { extends: 'base', models: [{ name: model.name, encrypted_reasoning: { passthrough: false } }] }
+          : { extends: '', tls_client_hello: 'native', models: [model] },
+      );
+    },
+  );
+
+  it('sends an explicit empty overlay array when a policy-bearing concrete provider becomes derived with no overlays', async () => {
+    const base = provider({ name: 'base', source: 'config' });
+    mount(
+      provider({ models: [{ name: 'gpt-4o-mini', encrypted_reasoning: {} }] }),
+      [provider({ extends: 'base', models: [{ name: 'gpt-4o-mini', encrypted_reasoning: null }] })],
+      [base],
+    );
+    const form = await edit();
+    change(/^Extends/, 'base');
+    configurePolicy(modelPolicyLabel, null);
+    fireEvent.click(form.getByRole('checkbox', { name: /^Confirm destination overlays/ }));
+    await save();
+    expect(writes[0].body).toEqual({ extends: 'base', models: [] });
+    await edit();
+    expect(policy(modelPolicyLabel).getByLabelText('Policy mode')).toHaveValue('inherit');
+  });
+
+  it('fails clearly without guessing model inventory when the changed base is unavailable', async () => {
+    mount(provider());
+    const form = await edit();
+    change(/^Extends/, 'unreadable');
+    expect(form.queryByRole('button', { name: 'Add model' })).not.toBeInTheDocument();
+    expect(form.getByText(/Policy overlays cannot be added without an authorized inventory read/)).toBeInTheDocument();
+    fireEvent.click(form.getByRole('button', { name: 'Save changes' }));
+    expect(
+      await form.findByText(/Base inventory unavailable. Choose an enabled concrete provider/),
+    ).toBeInTheDocument();
+    expect(writes).toEqual([]);
+  });
+
+  it.each(
+    (['provider', 'concrete model', 'inherited model'] as const).flatMap((scope) =>
+      [
+        ['duplicate', 'a pattern\n A PATTERN '],
+        ['interior blank', 'first message\n\nlast message'],
+        ['short', 'abc'],
+        ['long', 'a'.repeat(257)],
+        ['UTF-8 bytes', '😀'.repeat(65)],
+        ['count', Array.from({ length: 17 }, (_, i) => `pattern ${i}`).join('\n')],
+      ].map(([kind, messages]) => [scope, kind, messages] as const),
+    ),
+  )('rejects %s %s patterns before any write', async (scope, _, messages) => {
+    mount(provider({ extends: scope === 'inherited model' ? 'base' : '' }));
+    const form = await edit();
+    const label = scope === 'provider' ? 'Provider encrypted reasoning' : modelPolicyLabel;
+    configurePolicy(label, { match_messages: ['valid message'] });
+    fireEvent.change(policy(label).getByLabelText('Match messages (one per line)'), { target: { value: messages } });
+    fireEvent.click(form.getByRole('button', { name: 'Save changes' }));
+    expect(await policy(label).findByRole('alert')).toBeInTheDocument();
+    expect(writes).toEqual([]);
+  });
+
+  it('exposes static local/effective policy context read-only without enabling edits or global controls', async () => {
+    mount(
+      provider({
+        source: 'config',
+        encrypted_reasoning: {},
+        encrypted_reasoning_effective: safeReasoning,
+        encrypted_reasoning_source: 'provider',
+        models: [
+          {
+            name: 'gpt-4o-mini',
+            encrypted_reasoning: null,
+            encrypted_reasoning_effective: rootReasoning,
+            encrypted_reasoning_source: 'model',
+            encrypted_reasoning_inherited: true,
+          },
+        ],
+      }),
+    );
+    const summary = await screen.findByText('Policies (read-only)');
+    fireEvent.click(summary);
+    const providerContext = within(screen.getByRole('region', { name: 'Provider policy' }));
+    expect(providerContext.getByText('Local declaration: {}')).toBeInTheDocument();
+    const modelContext = within(screen.getByRole('region', { name: 'Model gpt-4o-mini policy' }));
+    expect(modelContext.getByText('Local declaration: none (inherit)')).toBeInTheDocument();
+    expect(modelContext.getByText(/source model · inherited from base/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Actions for primary' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Policy mode')).not.toBeInTheDocument();
+    expect(writes).toEqual([]);
+  });
+
+  it('does not enable provider editing when the existing type/authorization read is denied', async () => {
+    mount(provider(), [], [], true);
+    const trigger = await screen.findByRole('button', { name: 'Actions for primary' });
+    expect(screen.getByRole('button', { name: 'Create provider' })).toBeDisabled();
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    expect(await screen.findByRole('menuitem', { name: 'Edit' })).toHaveAttribute('data-disabled');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(writes).toEqual([]);
+  });
+});
+
 describe('TLS ClientHello management', { timeout: 15000 }, () => {
   it('preserves a declared alias on unrelated edits and resets explicitly to native', async () => {
     const chrome = provider({ tls_client_hello: 'chrome', tls_client_hello_effective: 'chrome-133' });
@@ -528,15 +1019,19 @@ describe('TLS ClientHello management', { timeout: 15000 }, () => {
   });
 
   it('omits local TLS fields on concrete-to-derived transitions and reports inheritance', async () => {
-    mount(provider({ tls_client_hello: 'chrome', tls_client_hello_effective: 'chrome-133' }), [
-      provider({
-        extends: 'base',
-        models: [],
-        tls_client_hello: 'safari',
-        tls_client_hello_effective: 'safari-16.0',
-        tls_client_hello_inherited: true,
-      }),
-    ]);
+    mount(
+      provider({ tls_client_hello: 'chrome', tls_client_hello_effective: 'chrome-133' }),
+      [
+        provider({
+          extends: 'base',
+          models: [],
+          tls_client_hello: 'safari',
+          tls_client_hello_effective: 'safari-16.0',
+          tls_client_hello_inherited: true,
+        }),
+      ],
+      [provider({ name: 'base', source: 'config' })],
+    );
     let form = await edit();
     change('TLS ClientHello profile', 'native');
     change(/^Extends/, 'base');

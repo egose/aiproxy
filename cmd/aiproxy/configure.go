@@ -122,6 +122,9 @@ type providerOptions struct {
 	NonInteractive            bool
 	BaseProviderNames         []string
 	BaseProviderTypes         map[string]string
+	Reasoning                 encryptedReasoningOptions
+	ModelReasoning            modelReasoningOptions
+	ReasoningOnly             bool
 }
 
 func isGitHubCopilotProviderType(providerType string) bool {
@@ -129,21 +132,17 @@ func isGitHubCopilotProviderType(providerType string) bool {
 }
 
 type aliasOptions struct {
-	Name                             string
-	Algorithm                        string
-	Targets                          []string
-	Providers                        []string
-	Model                            string
-	AffinityHeaders                  []string
-	HasAffinityHeaders               bool
-	NoSessionAffinity                bool
-	EncryptedReasoningPassthrough    bool
-	HasEncryptedReasoningPassthrough bool
-	EncryptedReasoningOnMismatch     string
-	EncryptedReasoningMatchMessages  []string
-	HasEncryptedReasoningMatchMsgs   bool
-	NoEncryptedReasoning             bool
-	NonInteractive                   bool
+	Name               string
+	Algorithm          string
+	Targets            []string
+	Providers          []string
+	Model              string
+	AffinityHeaders    []string
+	HasAffinityHeaders bool
+	NoSessionAffinity  bool
+	Reasoning          encryptedReasoningOptions
+	ReasoningOnly      bool
+	NonInteractive     bool
 }
 
 type providerHealthOptions struct {
@@ -169,6 +168,7 @@ type upstreamOptions struct {
 	HasForwardUserAgent   bool
 	ForwardHeaders        string
 	HasForwardHeaders     bool
+	Reasoning             encryptedReasoningOptions
 	NonInteractive        bool
 }
 
@@ -237,13 +237,18 @@ func newConfigureUpstreamCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upstream",
 		Short: "Configure top-level upstream settings",
+		Long:  "Configure root upstream defaults and reasoning policy. Policy-only edits do not require --upstream-header-timeout.\n\n" + encryptedReasoningHelp,
 		Example: "aiproxy configure upstream\n" +
 			"aiproxy configure upstream --config /etc/aiproxy/config.hcl --non-interactive --upstream-header-timeout 120s\n" +
-			"aiproxy configure upstream --config /etc/aiproxy/config.hcl --non-interactive --upstream-header-timeout 120s --user-agent my-proxy/1.0 --forward-user-agent",
+			"aiproxy configure upstream --config /etc/aiproxy/config.hcl --non-interactive --upstream-header-timeout 120s --user-agent my-proxy/1.0 --forward-user-agent\n" +
+			"aiproxy configure upstream --non-interactive --encrypted-reasoning-passthrough=false\n" +
+			"aiproxy configure upstream --non-interactive --reset-encrypted-reasoning\n" +
+			"aiproxy configure upstream --non-interactive --no-encrypted-reasoning",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.HasUserAgent = cmd.Flags().Changed("user-agent")
 			options.HasForwardUserAgent = cmd.Flags().Changed("forward-user-agent")
 			options.HasForwardHeaders = cmd.Flags().Changed("forward-headers")
+			options.Reasoning.readPresence(cmd)
 			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureUpstream(&prompts, inheritedConfigPath(cmd), options)
 		},
@@ -253,6 +258,7 @@ func newConfigureUpstreamCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&options.ForwardUserAgent, "forward-user-agent", false, "root forward_user_agent default")
 	cmd.Flags().Lookup("forward-user-agent").NoOptDefVal = "true"
 	cmd.Flags().StringVar(&options.ForwardHeaders, "forward-headers", "", "root forward_headers default as comma-separated names (empty clears it when explicitly passed)")
+	addEncryptedReasoningFlags(cmd, &options.Reasoning)
 	cmd.Flags().BoolVar(&options.NonInteractive, "non-interactive", false, "fail instead of prompting for missing values")
 	return cmd
 }
@@ -313,9 +319,14 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "provider",
 		Short: "Interactively create or update a provider block",
+		Long:  "Configure a provider and its model definitions. Model reasoning flags use name=value and never create model definitions; for derivatives they create policy-only overlays of existing inherited models. --model and other model-definition flags retain their existing replacement semantics and remain forbidden on derivatives.\n\n" + encryptedReasoningHelp,
 		Example: "aiproxy configure provider\n" +
 			"aiproxy configure provider --config /etc/aiproxy/config.hcl --non-interactive --name backup --type openai-compatible --base-url https://llm.internal/v1 --secrets-key localai --api-key \"$LOCALAI_API_KEY\" --model qwen3-32b\n" +
 			"aiproxy configure provider --config /etc/aiproxy/config.hcl --non-interactive --name zen --type opencode-zen --api-key-env OPENCODE_ZEN_API_KEY --model glm-5.3 --model-protocol glm-5.3=chat\n" +
+			"aiproxy configure provider --non-interactive --name backup --encrypted-reasoning-on-caller-mismatch strip_and_retry\n" +
+			"aiproxy configure provider --non-interactive --name backup --model-reasoning-passthrough qwen3-32b=false --model-reasoning-match-message 'qwen3-32b=invalid signature'\n" +
+			"aiproxy configure provider --non-interactive --name backup --reset-model-reasoning qwen3-32b\n" +
+			"aiproxy configure provider --non-interactive --name backup --no-model-reasoning qwen3-32b\n" +
 			"aiproxy configure provider --config /etc/aiproxy/config.hcl --delete --name backup",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.HasEnabled = cmd.Flags().Changed("enabled")
@@ -329,6 +340,8 @@ func newConfigureProviderCommand() *cobra.Command {
 			options.HasHealthcheckFailures = cmd.Flags().Changed("healthcheck-failure-threshold")
 			options.HasHealthcheckSuccesses = cmd.Flags().Changed("healthcheck-success-threshold")
 			options.HasHealthcheckSendAuth = cmd.Flags().Changed("healthcheck-send-authorization")
+			options.Reasoning.readPresence(cmd)
+			options.ReasoningOnly = reasoningOnlyFlags(cmd)
 			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureProvider(&prompts, inheritedConfigPath(cmd), deleteBlock, options)
 		},
@@ -358,6 +371,8 @@ func newConfigureProviderCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&options.ModelDisplayName, "model-display-name", nil, "model display name spec: name=display")
 	cmd.Flags().StringArrayVar(&options.ModelCaps, "model-capabilities", nil, "model capabilities spec: name=cap1,cap2")
 	cmd.Flags().StringArrayVar(&options.ModelProtocols, "model-protocol", nil, "model protocol spec: name=protocol (required for opencode-zen and opencode-go: chat, responses, messages, or gemini; gemini is zen-only)")
+	addEncryptedReasoningFlags(cmd, &options.Reasoning)
+	addModelReasoningFlags(cmd, &options.ModelReasoning)
 	cmd.Flags().StringVar(&options.HealthcheckPath, "healthcheck-path", "", "healthcheck path relative to base_url (e.g. /health) or absolute http(s) URL (e.g. https://host/healthz); omit to leave unchanged")
 	cmd.Flags().StringVar(&options.HealthcheckMethod, "healthcheck-method", "", "healthcheck method: GET or HEAD")
 	cmd.Flags().IntVar(&options.HealthcheckStatus, "healthcheck-expected-status", 0, "healthcheck expected HTTP status code")
@@ -381,14 +396,17 @@ func newConfigureAliasCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "alias",
 		Short: "Interactively create or update an alias block",
+		Long:  "Configure an alias and its optional whole-block reasoning override.\n\n" + encryptedReasoningHelp,
 		Example: "aiproxy configure alias\n" +
 			"aiproxy configure alias --config /etc/aiproxy/config.hcl --non-interactive --name chat_default --algorithm round_robin --target primary/gpt-4o-mini --target backup/qwen3-32b\n" +
 			"aiproxy configure alias --config /etc/aiproxy/config.hcl --non-interactive --name chat_default --algorithm round_robin --providers primary,backup --model gpt-4o-mini\n" +
+			"aiproxy configure alias --non-interactive --name chat_default --encrypted-reasoning-passthrough=false\n" +
+			"aiproxy configure alias --non-interactive --name chat_default --reset-encrypted-reasoning\n" +
 			"aiproxy configure alias --config /etc/aiproxy/config.hcl --delete --name chat_default",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.HasAffinityHeaders = cmd.Flags().Changed("affinity-header")
-			options.HasEncryptedReasoningPassthrough = cmd.Flags().Changed("encrypted-reasoning-passthrough")
-			options.HasEncryptedReasoningMatchMsgs = cmd.Flags().Changed("encrypted-reasoning-match-message")
+			options.Reasoning.readPresence(cmd)
+			options.ReasoningOnly = reasoningOnlyFlags(cmd)
 			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
 			return runConfigureAlias(&prompts, inheritedConfigPath(cmd), deleteBlock, options)
 		},
@@ -401,10 +419,7 @@ func newConfigureAliasCommand() *cobra.Command {
 	cmd.Flags().StringVar(&options.Model, "model", "", "alias shorthand model name (requires --providers)")
 	cmd.Flags().StringArrayVar(&options.AffinityHeaders, "affinity-header", nil, "session affinity header (repeatable; defaults cover opencode, Claude Code, and Codex session headers)")
 	cmd.Flags().BoolVar(&options.NoSessionAffinity, "no-session-affinity", false, "disable session affinity for the alias")
-	cmd.Flags().BoolVar(&options.EncryptedReasoningPassthrough, "encrypted-reasoning-passthrough", true, "forward caller-bound encrypted reasoning blocks in alias requests")
-	cmd.Flags().StringVar(&options.EncryptedReasoningOnMismatch, "encrypted-reasoning-on-caller-mismatch", "", "caller-mismatch policy: fail or strip_and_retry")
-	cmd.Flags().StringArrayVar(&options.EncryptedReasoningMatchMessages, "encrypted-reasoning-match-message", nil, "caller-mismatch error substring (repeatable; replaces defaults)")
-	cmd.Flags().BoolVar(&options.NoEncryptedReasoning, "no-encrypted-reasoning", false, "remove the encrypted_reasoning block from the alias")
+	addEncryptedReasoningFlags(cmd, &options.Reasoning)
 	cmd.Flags().BoolVar(&options.NonInteractive, "non-interactive", false, "fail instead of prompting for missing values")
 	return cmd
 }
@@ -524,7 +539,10 @@ func runConfigureListener(prompts *promptSession, configPath string, deleteBlock
 }
 
 func runConfigureUpstream(prompts *promptSession, configPath string, options upstreamOptions) error {
-	var err error
+	reasoningEdit, err := options.Reasoning.edit()
+	if err != nil {
+		return err
+	}
 	configPath, err = resolveConfigPath(prompts, configPath)
 	if err != nil {
 		return err
@@ -533,6 +551,19 @@ func runConfigureUpstream(prompts *promptSession, configPath string, options ups
 	if err != nil {
 		return err
 	}
+	if options.UpstreamHeaderTimeout == "" && !options.HasUserAgent && !options.HasForwardUserAgent && !options.HasForwardHeaders &&
+		(options.NonInteractive || options.Reasoning.hasEdits()) {
+		updated, err := configedit.UpdateEncryptedReasoning(doc.source, configedit.EncryptedReasoningScope{}, reasoningEdit)
+		if err != nil {
+			return err
+		}
+		return writeReasoningOnlyConfig(prompts, configPath, doc.source, updated, "upstream settings")
+	}
+	existingReasoning, err := configedit.ReadEncryptedReasoning(doc.source, configedit.EncryptedReasoningScope{})
+	if err != nil {
+		return err
+	}
+	writeTimeout := options.UpstreamHeaderTimeout != ""
 	timeout := options.UpstreamHeaderTimeout
 	if timeout == "" {
 		current, err := configedit.TopLevelStringAttribute(doc.source, "upstream_header_timeout")
@@ -575,11 +606,10 @@ func runConfigureUpstream(prompts *promptSession, configPath string, options ups
 	}
 	writeForwardHeaders := options.HasForwardHeaders
 	if options.NonInteractive {
-		if timeout == "" {
-			return fmt.Errorf("upstream requires --upstream-header-timeout in non-interactive mode")
-		}
-		if err := validateOptionalPositiveDuration(timeout); err != nil {
-			return fmt.Errorf("invalid upstream-header-timeout: %w", err)
+		if writeTimeout {
+			if err := validateOptionalPositiveDuration(timeout); err != nil {
+				return fmt.Errorf("invalid upstream-header-timeout: %w", err)
+			}
 		}
 		if options.HasUserAgent && userAgent != "" && validateOptionalUserAgent(userAgent) != nil {
 			return fmt.Errorf("invalid user-agent: must be 1-256 printable ASCII characters without newlines")
@@ -590,13 +620,12 @@ func runConfigureUpstream(prompts *promptSession, configPath string, options ups
 			}
 		}
 	} else {
+		previousTimeout := timeout
 		timeout, err = prompts.askValidated("Root upstream header timeout", timeout, validateOptionalPositiveDuration)
 		if err != nil {
 			return err
 		}
-		if timeout == "" {
-			return fmt.Errorf("root upstream header timeout is required")
-		}
+		writeTimeout = writeTimeout || timeout != previousTimeout
 		if !options.HasUserAgent {
 			userAgent, err = prompts.ask("Root user agent override", userAgent)
 			if err != nil {
@@ -620,12 +649,20 @@ func runConfigureUpstream(prompts *promptSession, configPath string, options ups
 			writeForwardHeaders = true
 		}
 	}
-	updated, err := configedit.UpsertTopLevelStringAttribute(doc.source, "upstream_header_timeout", timeout)
-	if err != nil {
-		return err
+	updated := doc.source
+	actions := []string{"Config path: " + configPath, "Action: update root upstream settings (provider overrides preserved)"}
+	preview := ""
+	if writeTimeout {
+		if timeout == "" {
+			updated, err = configedit.RemoveTopLevelAttribute(updated, "upstream_header_timeout")
+		} else {
+			updated, err = configedit.UpsertTopLevelStringAttribute(updated, "upstream_header_timeout", timeout)
+			preview += "upstream_header_timeout = " + strconv.Quote(timeout) + "\n"
+		}
+		if err != nil {
+			return err
+		}
 	}
-	actions := []string{"Config path: " + configPath, "Action: update root upstream_header_timeout (provider overrides preserved)"}
-	preview := "upstream_header_timeout = " + strconv.Quote(timeout) + "\n"
 	if writeUserAgent {
 		if userAgent == "" {
 			updated, err = configedit.RemoveTopLevelAttribute(updated, "user_agent")
@@ -666,6 +703,19 @@ func runConfigureUpstream(prompts *promptSession, configPath string, options ups
 			actions = append(actions, "Action: update root forward_headers default (provider lists merge with root)")
 		}
 	}
+	reasoningEdit, err = promptEncryptedReasoningEdit(prompts, "Root", existingReasoning, options.Reasoning, options.NonInteractive)
+	if err != nil {
+		return err
+	}
+	updated, err = configedit.UpdateEncryptedReasoning(updated, configedit.EncryptedReasoningScope{}, reasoningEdit)
+	if err != nil {
+		return err
+	}
+	policy, err := configedit.ReadEncryptedReasoning(updated, configedit.EncryptedReasoningScope{})
+	if err != nil {
+		return err
+	}
+	preview += configedit.RenderEncryptedReasoningBlock(policy)
 	if err := prompts.confirmWrite("Review upstream changes", buildReviewSummary(actions, preview)); err != nil {
 		return err
 	}
@@ -747,6 +797,15 @@ func runConfigureAuth(prompts *promptSession, configPath string, deleteBlock boo
 }
 
 func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock bool, options providerOptions) error {
+	if _, err := options.Reasoning.edit(); err != nil {
+		return err
+	}
+	if _, err := options.ModelReasoning.edits(); err != nil {
+		return err
+	}
+	if deleteBlock && (options.Reasoning.hasEdits() || options.ModelReasoning.hasEdits()) {
+		return fmt.Errorf("--delete cannot be combined with reasoning policy edits")
+	}
 	var err error
 	configPath, err = resolveConfigPath(prompts, configPath)
 	if err != nil {
@@ -756,7 +815,19 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 	if err != nil {
 		return err
 	}
-
+	options.ConfigFilename = configPath
+	if !deleteBlock && options.ReasoningOnly && (options.NonInteractive || options.Reasoning.hasEdits() || options.ModelReasoning.hasEdits()) {
+		if existing := existingProviderInput(doc.blocks, options.Name); existing != nil {
+			if err := config.ValidateDeferredConfig([]byte(doc.source), configPath); err != nil {
+				return err
+			}
+			updated, err := updateProviderReasoningSource(doc.source, *existing, options)
+			if err != nil {
+				return err
+			}
+			return writeReasoningOnlyConfig(prompts, configPath, doc.source, updated, "provider "+strconv.Quote(existing.Name))
+		}
+	}
 	providerNames := providerBlockNames(doc.blocks)
 	selectedName := options.Name
 	if deleteBlock {
@@ -836,6 +907,9 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 	if err := validateProviderExtendsInput(doc.blocks, input); err != nil {
 		return err
 	}
+	if err := configureProviderReasoningInput(prompts, doc.source, &input, options); err != nil {
+		return err
+	}
 
 	updated, err := upsertBlock(doc.source, renderProviderBlock(input), func(block topLevelBlock) bool {
 		return block.Type == "provider" && len(block.Labels) >= 2 && block.Labels[1] == targetProviderName(action, nameForAction, input.Name)
@@ -865,7 +939,13 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 }
 
 func runConfigureAlias(prompts *promptSession, configPath string, deleteBlock bool, options aliasOptions) error {
-	var err error
+	reasoningEdit, err := options.Reasoning.edit()
+	if err != nil {
+		return err
+	}
+	if deleteBlock && options.Reasoning.hasEdits() {
+		return fmt.Errorf("--delete cannot be combined with reasoning policy edits")
+	}
 	configPath, err = resolveConfigPath(prompts, configPath)
 	if err != nil {
 		return err
@@ -874,7 +954,18 @@ func runConfigureAlias(prompts *promptSession, configPath string, deleteBlock bo
 	if err != nil {
 		return err
 	}
-
+	if !deleteBlock && options.ReasoningOnly && (options.NonInteractive || options.Reasoning.hasEdits()) {
+		if existing := existingAliasInput(doc.blocks, options.Name); existing != nil {
+			if err := config.ValidateDeferredConfig([]byte(doc.source), configPath); err != nil {
+				return err
+			}
+			updated, err := configedit.UpdateEncryptedReasoning(doc.source, configedit.EncryptedReasoningScope{Alias: existing.Name}, reasoningEdit)
+			if err != nil {
+				return err
+			}
+			return writeReasoningOnlyConfig(prompts, configPath, doc.source, updated, "alias "+strconv.Quote(existing.Name))
+		}
+	}
 	aliasNames := aliasBlockNames(doc.blocks)
 	selectedName := options.Name
 	if deleteBlock {
@@ -942,6 +1033,9 @@ func runConfigureAlias(prompts *promptSession, configPath string, deleteBlock bo
 		return nil
 	}
 
+	if err := config.ValidateDeferredConfig([]byte(doc.source), configPath); err != nil {
+		return err
+	}
 	input, err := promptAliasInput(prompts, doc.blocks, existingAliasInput(doc.blocks, nameForAction), options)
 	if err != nil {
 		return err
@@ -2023,8 +2117,10 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		defaults.Models = preserveProviderModelDeferredTransports(models, defaults.Models)
 	}
 	if options.NonInteractive {
-		if err := validateProviderModelProtocols(defaults.ProviderType, defaults.Models); err != nil {
-			return providerInput{}, secretsUpdate{}, err
+		if defaults.Extends == "" {
+			if err := validateProviderModelProtocols(defaults.ProviderType, defaults.Models); err != nil {
+				return providerInput{}, secretsUpdate{}, err
+			}
 		}
 		if defaults.ProviderType == "" || defaults.Name == "" {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider requires type and name in non-interactive mode")
@@ -2225,6 +2321,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 				ForwardHeaders:            parseForwardHeadersCSV(forwardHeaders),
 				DeferredTransportBlock:    defaults.DeferredTransportBlock,
 				DeferredReceiverBlock:     defaults.DeferredReceiverBlock,
+				EncryptedReasoning:        configedit.CloneEncryptedReasoningInput(defaults.EncryptedReasoning),
 				AllowInsecureBaseURL:      allowInsecure,
 				Credential:                credential,
 				Enabled:                   defaults.Enabled,
@@ -2337,6 +2434,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			ForwardAuthorization:      forwardAuthorization,
 			DeferredTransportBlock:    defaults.DeferredTransportBlock,
 			DeferredReceiverBlock:     defaults.DeferredReceiverBlock,
+			EncryptedReasoning:        configedit.CloneEncryptedReasoningInput(defaults.EncryptedReasoning),
 			AllowInsecureBaseURL:      allowInsecure,
 			Credential:                credential,
 			Enabled:                   defaults.Enabled,
@@ -2468,6 +2566,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			ForwardHeaders:            parseForwardHeadersCSV(forwardHeaders),
 			DeferredTransportBlock:    defaults.DeferredTransportBlock,
 			DeferredReceiverBlock:     defaults.DeferredReceiverBlock,
+			EncryptedReasoning:        configedit.CloneEncryptedReasoningInput(defaults.EncryptedReasoning),
 			AllowInsecureBaseURL:      allowInsecure,
 			Credential:                credential,
 			Enabled:                   defaults.Enabled,
@@ -2562,6 +2661,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		ForwardAuthorization:      forwardAuthorization,
 		DeferredTransportBlock:    defaults.DeferredTransportBlock,
 		DeferredReceiverBlock:     defaults.DeferredReceiverBlock,
+		EncryptedReasoning:        configedit.CloneEncryptedReasoningInput(defaults.EncryptedReasoning),
 		AllowInsecureBaseURL:      allowInsecure,
 		Credential:                credential,
 		Enabled:                   defaults.Enabled,
@@ -2817,6 +2917,7 @@ func promptProviderModelInteractive(prompts *promptSession, providerType string,
 	protocol := ""
 	capabilities := defaultCapabilities(providerType)
 	deferredTransportBlock := ""
+	var encryptedReasoning *configedit.EncryptedReasoningInput
 	if existing != nil {
 		name = existing.Name
 		displayName = existing.DisplayName
@@ -2824,6 +2925,7 @@ func promptProviderModelInteractive(prompts *promptSession, providerType string,
 		protocol = existing.Protocol
 		capabilities = append([]string(nil), existing.Capabilities...)
 		deferredTransportBlock = existing.DeferredTransportBlock
+		encryptedReasoning = configedit.CloneEncryptedReasoningInput(existing.EncryptedReasoning)
 	}
 	if err := prompts.runHuhForm(
 		huh.NewGroup(
@@ -2858,6 +2960,7 @@ func promptProviderModelInteractive(prompts *promptSession, providerType string,
 		Protocol:               protocol,
 		Capabilities:           selectedCaps,
 		DeferredTransportBlock: deferredTransportBlock,
+		EncryptedReasoning:     encryptedReasoning,
 	}, nil
 }
 
@@ -3029,8 +3132,8 @@ func promptAliasInput(prompts *promptSession, blocks []topLevelBlock, existing *
 			return aliasInput{}, err
 		}
 		defaults.SessionAffinity = affinity
-		defaults.EncryptedReasoning = applyAliasEncryptedReasoning(defaults.EncryptedReasoning, options)
-		return defaults, nil
+		defaults.EncryptedReasoning, err = applyAliasEncryptedReasoning(prompts, defaults.EncryptedReasoning, options)
+		return defaults, err
 	}
 	available := availableProviderModels(blocks)
 	if len(available) > 0 && !prompts.interactiveTUI {
@@ -3202,32 +3305,12 @@ func finishAliasInput(prompts *promptSession, input aliasInput, defaults aliasIn
 		return aliasInput{}, err
 	}
 	input.SessionAffinity = affinity
-	input.EncryptedReasoning = applyAliasEncryptedReasoning(defaults.EncryptedReasoning, options)
-	return input, nil
+	input.EncryptedReasoning, err = applyAliasEncryptedReasoning(prompts, defaults.EncryptedReasoning, options)
+	return input, err
 }
 
-func applyAliasEncryptedReasoning(existing *aliasEncryptedReasoningInput, options aliasOptions) *aliasEncryptedReasoningInput {
-	if options.NoEncryptedReasoning {
-		return nil
-	}
-	if !options.HasEncryptedReasoningPassthrough && options.EncryptedReasoningOnMismatch == "" && !options.HasEncryptedReasoningMatchMsgs {
-		return existing
-	}
-	er := &aliasEncryptedReasoningInput{}
-	if existing != nil {
-		*er = *existing
-		er.MatchMessages = append([]string(nil), existing.MatchMessages...)
-	}
-	if options.HasEncryptedReasoningPassthrough {
-		er.Passthrough = boolPtr(options.EncryptedReasoningPassthrough)
-	}
-	if options.EncryptedReasoningOnMismatch != "" {
-		er.OnCallerMismatch = options.EncryptedReasoningOnMismatch
-	}
-	if options.HasEncryptedReasoningMatchMsgs {
-		er.MatchMessages = append([]string(nil), options.EncryptedReasoningMatchMessages...)
-	}
-	return er
+func applyAliasEncryptedReasoning(prompts *promptSession, existing *aliasEncryptedReasoningInput, options aliasOptions) (*aliasEncryptedReasoningInput, error) {
+	return promptEncryptedReasoningInput(prompts, "Alias", existing, options.Reasoning, options.NonInteractive)
 }
 
 func promptAliasSessionAffinity(prompts *promptSession, existing *aliasSessionAffinityInput, options aliasOptions) (*aliasSessionAffinityInput, error) {
@@ -4427,6 +4510,10 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 	input.AllowInsecureBaseURL = parseBoolExpr(attributeExpr(src, parsed.Body, "allow_insecure_base_url"), false)
 	input.DeferredTransportBlock = nestedBlockSource(src, parsed.Body, "deferred_transport")
 	input.DeferredReceiverBlock = nestedBlockSource(src, parsed.Body, "deferred_receiver")
+	input.EncryptedReasoning, err = configedit.ReadEncryptedReasoning(block.Text, configedit.EncryptedReasoningScope{Provider: name})
+	if err != nil {
+		return nil
+	}
 	if enabledExpr := parseLiteralOrExpression(attributeExpr(src, parsed.Body, "enabled")); enabledExpr != "" {
 		boolVal := enabledExpr == "true" || enabledExpr == "1"
 		input.Enabled = &boolVal
@@ -4465,6 +4552,12 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 		model.Capabilities = parseQuotedListExpr(attributeExpr(src, modelBlock.Body, "capabilities"))
 		model.Pricing = parseModelPricingInput(src, modelBlock)
 		model.DeferredTransportBlock = nestedBlockSource(src, modelBlock.Body, "deferred_transport")
+		if policy := nestedBlockSource(src, modelBlock.Body, "encrypted_reasoning"); policy != "" {
+			model.EncryptedReasoning, err = configedit.ParseEncryptedReasoningBlock(policy)
+			if err != nil {
+				return nil
+			}
+		}
 		input.Models = append(input.Models, model)
 	}
 	if hcBlock := findNestedBlock(parsed.Body, "healthcheck"); hcBlock != nil {
@@ -4565,10 +4658,11 @@ func validateProviderExtendsInput(blocks []topLevelBlock, input providerInput) e
 	if input.Extends == "" {
 		return nil
 	}
-	if input.Extends == input.Name {
+	baseName := tlsClientHelloInputValue(input.Extends)
+	if baseName == input.Name {
 		return fmt.Errorf("provider %q: extends cannot reference itself", input.Name)
 	}
-	base := existingProviderInput(blocks, input.Extends)
+	base := existingProviderInput(blocks, baseName)
 	if base == nil {
 		return fmt.Errorf("provider %q: extends provider %q not found", input.Name, input.Extends)
 	}
@@ -4611,16 +4705,9 @@ func existingAliasInput(blocks []topLevelBlock, name string) *aliasInput {
 			Headers: normalizeAffinityHeaders(parseQuotedListExpr(attributeExpr(src, affinityBlock.Body, "headers"))),
 		}
 	}
-	if erBlock := findNestedBlock(parsed.Body, "encrypted_reasoning"); erBlock != nil {
-		er := &aliasEncryptedReasoningInput{}
-		if expr := strings.TrimSpace(attributeExpr(src, erBlock.Body, "passthrough")); expr != "" {
-			er.Passthrough = boolPtr(parseBoolExpr(expr, true))
-		}
-		if mismatch := strings.TrimSpace(parseLiteralOrExpression(attributeExpr(src, erBlock.Body, "on_caller_mismatch"))); mismatch != "" {
-			er.OnCallerMismatch = mismatch
-		}
-		er.MatchMessages = parseQuotedListExpr(attributeExpr(src, erBlock.Body, "match_messages"))
-		input.EncryptedReasoning = er
+	input.EncryptedReasoning, err = configedit.ReadEncryptedReasoning(block.Text, configedit.EncryptedReasoningScope{Alias: name})
+	if err != nil {
+		return nil
 	}
 	for _, targetBlock := range findNestedBlocks(parsed.Body, "target") {
 		input.Targets = append(input.Targets, aliasTargetInput{

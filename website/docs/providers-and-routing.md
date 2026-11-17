@@ -92,32 +92,103 @@ Alias requests retry the next target when the selected target fails with:
 
 By default `retry_status_codes` is `["500", "502", "503", "504"]`, so only those common `5xx` responses trigger status-based failover. Add codes like `"429"` to also retry on rate-limited responses.
 
-Alias requests do not fail over on other upstream `4xx` responses. Those are returned to the client as-is.
+Alias requests do not fail over on other upstream `4xx` responses. Outside the
+conditional same-target reasoning recovery below, those are returned to the client as-is.
 
 This avoids masking client-side request problems as routing problems.
 
 Retryable `4xx` statuses are an alias failover policy only. They do not mark the provider unhealthy; provider health is mutated by transport/upstream request errors and upstream `5xx` responses.
 
-## Alias Encrypted Reasoning
+<a id="alias-encrypted-reasoning"></a>
 
-Clients that replay prior-turn thinking blocks (extended thinking / reasoning passthrough) send caller-bound opaque blobs (`encrypted_content`, `signature`, redacted thinking) that the issuing model rejects when the pool routes the next turn to a different credential (`not issued to this caller`, `invalid_encrypted_content`, `Invalid signature`). The optional `encrypted_reasoning` block controls this per alias for `POST /v1/chat/completions` and `POST /v1/responses`:
+## Scoped Encrypted Reasoning
 
-```hcl
-alias "chat_default" {
+Clients may replay caller-bound opaque history (`encrypted_content`, signatures,
+redacted thinking) that another credential cannot use. Optional
+`encrypted_reasoning` blocks at root/provider/model/alias scope control this for
+`POST /v1/chat/completions` and `POST /v1/responses`, including direct requests.
+Native `POST /v1/messages`, embeddings, images and audio are unaffected.
+
+Direct precedence is **model → provider → root → built-ins**; alias precedence
+adds an **explicit alias** first, otherwise resolves the selected target's
+policy. Missing blocks inherit. Empty blocks reset to passthrough `true`,
+mismatch `"fail"` and built-in patterns. All blocks replace wholesale, so
+omitted members use built-ins, not lower-layer values. See the
+[full validated example and pattern bounds](configuration.md#scoped-encrypted-reasoning).
+
+For example, add this explicit alias to that full example:
+
+```hcl title="reasoning-alias.hcl"
+alias "routing_recovery" {
   algorithm = "round_robin"
   encrypted_reasoning {
-    passthrough        = true
     on_caller_mismatch = "strip_and_retry"
   }
-  target { provider = "spark-a" model = "muse-spark" }
-  target { provider = "spark-b" model = "muse-spark" }
+  target {
+    provider = "primary"
+    model    = "chat"
+  }
+  target {
+    provider = "secondary"
+    model    = "chat"
+  }
 }
 ```
 
-- `passthrough = false` strips opaque reasoning blocks before fan-out (one upstream call, deterministic). `passthrough = true` (default) sends history intact.
-- `on_caller_mismatch = "strip_and_retry"` (default `"fail"`) retries the same target once with opaque blocks stripped when an upstream `400` matches `match_messages`. Unrelated `400`s return verbatim; established SSE streams are never retried (immediate error responses to streaming requests are retried normally).
-- `match_messages` lists case-insensitive substrings matched against the upstream `400` body. Omitting it uses built-ins covering Console, OpenAI, and Anthropic phrasings; a non-empty list replaces them. Keep entries specific: a generic entry like `"error"` matches every `400`.
-- Plaintext reasoning summaries without opaque blobs are never stripped or matched. Direct `<provider>/<model>` requests are never stripped.
+### Conditional Recovery And Attempt Bounds
+
+With passthrough enabled and `on_caller_mismatch = "strip_and_retry"`, recovery
+requires **all** of:
+
+1. An ordinary non-streaming upstream **400** response, before downstream commitment.
+2. Raw opaque markers in the submitted request (`encrypted_content`,
+   `redacted_thinking`, `redacted_content`, or `"signature"`).
+3. A configured case-insensitive substring in the first 64 KiB of successfully
+   decoded response text.
+4. A supported stripping rewrite that actually changes the request, with the
+   request context and any peer execution budget still live.
+
+It retries the **same provider, credential, endpoint, upstream model and
+protocol**, under the same request context. Marker presence alone or a matching
+message alone is insufficient. An immediate ordinary 400 response to a
+`stream: true` request can qualify; an established SSE stream is **never**
+retried. Unrelated/non-400 errors, peer submit/poll/replay/control outcomes,
+cancellation, exhausted budgets and unchanged rewrites cannot authorize recovery.
+Definite terminal peer inference results remain subject to these gates.
+
+- **Direct:** at most **2** inference attempts; no target change, alias
+  cooldown lookup/write, or alias failover.
+- **Alias with N normally attempted targets:** at most **N + 1** inference
+  attempts. The single extra recovery is shared across the entire request,
+  not replenished per target; ordinary failover remains governed by
+  transport errors/timeouts/`retry_status_codes`.
+- **Explicit alias policy:** once stripped, that body stays stripped through
+  normal failover, including pre-stripping. An empty alias block is still explicit.
+- **No alias policy:** each selected target starts from the immutable admitted
+  (already ingress-guardrailed, when configured) original body. A target's
+  stripping cannot suppress a later target's passthrough override. The one
+  recovery allowance is still shared.
+- **`passthrough = false`:** pre-strip before the first covered inference
+  attempt; it adds no recovery call and consumes none of that allowance.
+  Normal alias failover may still make multiple calls.
+
+Inspection accepts gzip/x-gzip, raw deflate, Brotli and zstd, up to four
+Content-Encoding entries, 256 bytes of encoding metadata, and 1 MiB of decoded
+data per layer; zstd windows are capped at 1 MiB. Unsupported, corrupt or
+over-budget encodings skip recovery. If recovery is not performed, inspection
+preserves the original response bytes/headers; ordinary alias failover may
+still discard that response under its separate rules.
+
+### Stripping Boundary
+
+The existing helper retains ordinary message text and tool history, but removes
+supported opaque items **and** typed unsigned thinking/reasoning items and chat
+`reasoning`/`reasoning_content` fields. Recovery's raw opaque-marker gate does
+not require a signature on every removed item; pre-stripping does not require
+that gate at all. This can lose reasoning continuity even for the original
+credential. It neither decrypts outputs nor guarantees preservation of every
+plaintext reasoning summary. With no policy anywhere, built-ins preserve the
+existing no-recovery behavior.
 
 ## Upstream Retry Cooldown
 
@@ -182,7 +253,10 @@ Alias targets additionally honor upstream retry advice as a cross-request cooldo
 
 For `openai`, `openai-compatible`, `zenmux`, and `openrouter`, the proxy stays close to pass-through behavior. For translated providers, the proxy maps between the public OpenAI-style contract and the provider-native request and response shape.
 
-Pass-through providers preserve request JSON values and unknown extension fields, rewriting only the top-level `model` value before forwarding. Malformed JSON, non-object JSON bodies, and duplicate top-level `model` keys are rejected.
+Apart from explicitly configured ingress guardrails and reasoning stripping,
+pass-through providers preserve request JSON values and unknown extension fields,
+rewriting only the top-level `model` value before forwarding. Malformed JSON,
+non-object JSON bodies, and duplicate top-level `model` keys are rejected.
 
 Translated providers intentionally support a conservative OpenAI-style request subset. Unsupported top-level controls such as `tools`, `tool_choice`, `response_format`, `logprobs`, `parallel_tool_calls`, and unknown extension fields are rejected with `invalid_request` instead of being silently dropped.
 

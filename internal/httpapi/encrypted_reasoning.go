@@ -30,30 +30,43 @@ var opaqueResponsesItemTypes = map[string]bool{
 	"redacted_content":  true,
 }
 
-func encryptedReasoningEffective(a config.Alias) *config.EncryptedReasoning {
-	if a.EncryptedReasoning == nil {
-		return &config.EncryptedReasoning{
-			Passthrough:      true,
-			OnCallerMismatch: config.EncryptedReasoningFail,
-			MatchMessages:    append([]string(nil), config.DefaultEncryptedReasoningMatchMessages...),
-		}
+func encryptedReasoningForTarget(deps Dependencies, prov config.Provider, model config.Model, alias *config.Alias) config.EncryptedReasoning {
+	if deps.Resolver != nil {
+		return deps.Resolver.EncryptedReasoning(prov, model, alias).Policy
 	}
-	out := &config.EncryptedReasoning{
-		Passthrough:      a.EncryptedReasoning.Passthrough,
-		OnCallerMismatch: a.EncryptedReasoning.OnCallerMismatch,
-		MatchMessages:    append([]string(nil), a.EncryptedReasoning.MatchMessages...),
-	}
-	if out.OnCallerMismatch == "" {
-		out.OnCallerMismatch = config.EncryptedReasoningFail
-	}
-	if len(out.MatchMessages) == 0 {
-		out.MatchMessages = append([]string(nil), config.DefaultEncryptedReasoningMatchMessages...)
-	}
-	return out
+	return config.ResolveEncryptedReasoning(nil, prov, model, alias).Policy
 }
 
 func encryptedReasoningApplies(op provider.Operation) bool {
 	return op == provider.OpChatCompletions || op == provider.OpResponses
+}
+
+func recoverDispatchOpaqueBlocks(ctx context.Context, op provider.Operation, result *provider.Result, body []byte, policy config.EncryptedReasoning) ([]byte, bool, error) {
+	if !encryptedReasoningApplies(op) || !policy.Passthrough || policy.OnCallerMismatch != config.EncryptedReasoningStripAndRetry {
+		return body, false, nil
+	}
+	mismatch, err := isDispatchCallerMismatch(ctx, result, body, policy.MatchMessages)
+	if err != nil || !mismatch {
+		return body, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	return stripDispatchOpaqueBlocks(ctx, op, body)
+}
+
+func allowReasoningRecovery(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if execution := deferredExecutionFromContext(ctx); execution != nil {
+		release, err := execution.limits.Work.Reserve(0)
+		if err != nil {
+			return err
+		}
+		release()
+	}
+	return ctx.Err()
 }
 
 func requestHadOpaqueBlocks(body []byte) bool {

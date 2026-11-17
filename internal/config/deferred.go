@@ -559,7 +559,7 @@ func validateDeferredDeclarations(body hcl.Body) (bool, error) {
 			}
 			if derived {
 				if seenModels[model.Labels[0]] {
-					return false, fmt.Errorf("%s: duplicate model %q deferred_transport overlays", owner, model.Labels[0])
+					return false, fmt.Errorf("%s: duplicate model %q policy overlays", owner, model.Labels[0])
 				}
 				if err := validateDerivedModelOverlaySyntax(model.Labels[0], annotateModelSyntax(model.Body)); err != nil {
 					return false, fmt.Errorf("%s: %w", owner, err)
@@ -636,6 +636,9 @@ func ValidateDeferredConfig(source []byte, filename string) error {
 }
 
 func validateDeferredConfigBody(body hcl.Body) error {
+	if err := validateEncryptedReasoningDeclarations(body); err != nil {
+		return err
+	}
 	_, err := validateDeferredDeclarations(body)
 	if err != nil {
 		return err
@@ -671,15 +674,12 @@ func validateDeferredConfigBody(body hcl.Body) error {
 	for i, local := range raw.Providers {
 		effective := local
 		if local.Extends != "" {
-			if local.DeferredTransport == nil && local.DeferredReceiver == nil && len(local.Models) == 0 {
+			if local.DeferredTransport == nil && local.DeferredReceiver == nil && local.EncryptedReasoning == nil && len(local.Models) == 0 {
 				continue
 			}
-			base, ok := byName[local.Extends]
-			if !ok || base.Extends != "" || base.Type != local.Type {
-				return fmt.Errorf("provider %q: deferred opt-in requires a concrete same-type base provider", local.Name)
-			}
-			if base.Enabled != nil && !*base.Enabled {
-				return fmt.Errorf("provider %q: extends %q references a disabled provider", local.Name, local.Extends)
+			base, err := derivedProviderBase(local, byName)
+			if err != nil {
+				return fmt.Errorf("provider %q: %w", local.Name, err)
 			}
 			if i >= len(syntax.providerSyntax) {
 				return fmt.Errorf("provider %q: cannot inspect model overlay declarations", local.Name)

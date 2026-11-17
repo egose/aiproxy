@@ -78,7 +78,7 @@ JSON config form, where `env("VAR")` is written bare as the value. Run
 The server supports `SIGHUP`-triggered live config reload for auth, providers,
 models, aliases, root and provider upstream header timeouts, provider TLS
 ClientHello profiles and custom recipes, root and provider
-user-agent settings, access-log
+user-agent settings, root/provider/model/alias encrypted-reasoning policies, access-log
 enablement, payload-log configuration, metrics config, provider-health config, ingress-guardrail policy, web UI enablement, and metrics-backed inventory
 state. When multi-tenancy is enabled, database-backed providers, aliases, and
 inbound keys merge into the serving catalog on the same reload path (and
@@ -152,6 +152,43 @@ The optional standalone Bun capture tool is documented in
   it for keyless access, or derivatives explicitly setting
   `forward_authorization = true` which must omit it); the base must be enabled,
   concrete, and the same type.
+- Optional root/provider/model/alias `encrypted_reasoning` blocks replace
+  wholesale. Direct precedence is model > provider > root > built-ins; explicit
+  alias policy wins over the selected target's policy. Missing inherits; `{}`
+  resets to passthrough true, mismatch `fail`, built-in patterns; omitted members
+  never merge lower-layer values. Patterns normalize/trim to 4–256 Go bytes,
+  at most 16, unique case-insensitively; `[]` selects built-ins.
+  Declared base provider/model policies copy by value; inherited model policy
+  still outranks a child provider override. Local existing-name model policy
+  overlays can reset/override it, without model redefinition or credential/chain
+  relaxation. Applies only to chat completions/Responses, never native messages.
+  Recovery requires ordinary non-streaming upstream 400, raw opaque request
+  markers, bounded decoded pattern matching, and a changed stripping rewrite:
+  one same-identity/context extra attempt (direct max 2, alias max N+1 once
+  total). Immediate 400s to streaming requests may qualify; established streams,
+  peer controls, cancellation and exhausted budgets never authorize recovery.
+  Explicit aliases keep stripped bodies through normal failover; absent alias
+  policy uses each target's policy against the immutable admitted/guardrailed
+  original, sharing the recovery allowance. Pre-stripping adds no recovery call
+  or allowance use. Ordinary text/tool history survives, but typed unsigned
+  thinking/reasoning and chat reasoning fields can be stripped too; no universal
+  plaintext-reasoning preservation or output decryption.
+  Managed provider/model storage keeps nullable sparse local intent; PUT omitted
+  provider/alias policy preserves, null removes, `{}` resets, object replaces.
+  Omitted/null `models` preserves the collection; arrays replace local rows/
+  overlays, with derivative `[]` retaining inherited inventory. Managed overlays
+  accept name+policy only (no deferred/definition keys, even empty/null).
+  Credential PUT rejects policy/model edits. GET exposes local nullable intent,
+  full inherited inventory and read-only effective/source/inherited metadata;
+  undeclared alias effective policy is null. Root has no admin edit surface or
+  RBAC expansion. Provider/model/alias web controls expose inherit/reset/custom,
+  preserve untouched local intent by omission, and show read-only saved context,
+  not unsaved resolution or proof of runtime activation. Static rows stay read-only.
+  See
+  `website/docs/configuration.md#scoped-encrypted-reasoning` and
+  `website/docs/api-reference.md#encrypted-reasoning-policy-intent`.
+  Exact doc/example fixtures run with
+  `go test ./internal/config -run DocumentedEncryptedReasoning -count=1`.
 - Peer Deferred Transport v1 uses unlabeled root `deferred`, static
   `openai-compatible` model-level caller `deferred_transport`, and provider-only
   static chat `deferred_receiver` blocks. A local provider caller block remains
@@ -163,7 +200,8 @@ The optional standalone Bun capture tool is documented in
   eligibility is additive and does not defer ordinary calls, but a receiver
   cannot coexist with any caller setting on the same provider. Static derivatives
   inherit model definitions, never base caller/receiver opt-ins; local existing-name
-  model overlays may contain only `deferred_transport`. Opt-ins are incompatible
+  model overlays may contain `deferred_transport`, `encrypted_reasoning`, or both,
+  with no model definition attributes. Deferred opt-ins are incompatible
   with `forward_authorization` and rejected on managed provider/credential writes
   (including nested models) and managed inheritance. Callers require configured
   `api_key`/`api_key_ref` even when disabled. Peer control failures never authorize
@@ -216,8 +254,9 @@ The optional standalone Bun capture tool is documented in
 - Direct (`<provider>/<model>`) requests never fail over to a different
   target and never consult or populate alias cooldown state. Alias requests retry the next target on transport errors, timeouts,
   and configured `retry_status_codes` in the `400`-`599` range. The default list
-  is `500`, `502`, `503`, and `504`; other upstream `4xx` responses are returned
-  verbatim. Retryable `4xx` statuses do not mark providers unhealthy.
+  is `500`, `502`, `503`, and `504`; outside the conditional same-target reasoning
+  recovery above, other upstream `4xx` responses are returned verbatim.
+  Retryable `4xx` statuses do not mark providers unhealthy.
 - Alias targets honor upstream retry advice (`retry-after-ms` wins, else
   `Retry-After` delay-seconds then HTTP-date, else exhausted Meta quota
   (`x-ratelimit-remaining-tokens` / `x-ratelimit-remaining-requests` of `0`
@@ -261,7 +300,8 @@ The optional standalone Bun capture tool is documented in
   HTTP using bearer authentication and refuses non-loopback listener hosts.
   Remote dashboard support requires a future explicit transport design.
   Repeated invalid dashboard tokens are rate limited with `429`.
-- The openai/openai-compatible adapter is pass-through: it only rewrites the
+- Apart from explicit ingress guardrails and reasoning stripping, the
+  openai/openai-compatible adapter is pass-through: it only rewrites the
   `model` field to the configured `upstream_name`, injects the upstream
   `Authorization: Bearer` header, and copies the body (including SSE streams)
   back. `anthropic` and `gemini` use built-in request/response translation for

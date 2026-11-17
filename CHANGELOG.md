@@ -2,6 +2,32 @@
 
 ### Features
 
+- Add scoped `encrypted_reasoning` policies at root/provider/model/alias scope,
+  with whole-block inheritance, explicit safe resets, derived model-policy
+  overlays, HCL/JSON conversion and CLI editing. Managed provider/model/alias
+  APIs store sparse local intent and expose read-only effective metadata;
+  dedicated provider/model web controls remain pending.
+  Direct chat-completions/Responses requests can now pre-strip history or make
+  one narrowly gated same-identity recovery attempt (at most two calls), never
+  fail over or use alias cooldowns. Aliases retain one extra recovery attempt
+  total: explicit alias policies keep stripped bodies through normal failover;
+  otherwise target-local policy starts from the original admitted body.
+  Established streams, peer controls and failed bounded inspection never
+  authorize recovery. Stripping may remove unsigned typed reasoning as well as
+  opaque items and can lose continuity; it does not decrypt output.
+  See [configuration](website/docs/configuration.md#scoped-encrypted-reasoning)
+  and [attempt bounds](website/docs/providers-and-routing.md#scoped-encrypted-reasoning).
+- Clarify managed policy updates: omitted provider/alias policy preserves it,
+  explicit null removes it, `{}` resets and objects replace wholesale.
+  **Alias null now removes its override**, intentionally selecting per-target
+  policy instead of preserving an explicit sticky alias. Omitted/null `models`
+  still preserves the collection; arrays replace local definitions/overlays.
+  Concrete/derived transitions carrying stored model policies require an explicit
+  model array.
+  Existing databases need `aiproxy migrate up`; the additive migration leaves
+  legacy null-policy derivative rows inert without rewriting model history.
+  Invalid stored policy/active overlays reject reload with the old runtime intact.
+  See [managed intent](website/docs/api-reference.md#encrypted-reasoning-policy-intent).
 - Add opt-in Peer Deferred Transport v1 for static `openai-compatible` chat
   callers and static chat receivers/eligible aliases. Versioned, authenticated
   submissions and incremental finite polls preserve JSON/native SSE output,

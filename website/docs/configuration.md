@@ -11,6 +11,7 @@ sidebar_position: 3
 - `logging`
 - `provider "<type>" "<name>"`
 - `alias "<name>"`
+- optional root/provider/model/alias `encrypted_reasoning` policy
 - optional `deferred` executor policy
 
 ## Mental Model
@@ -111,7 +112,7 @@ The listener block configures the inbound HTTP server.
 - `address` sets the listen address such as `:8080`
 - `timeouts` configures read, idle, and write timeouts
 
-Listener address and timeout changes still require a restart, even though runtime state such as auth, providers, models, aliases, upstream header timeouts, access-log enablement, metrics, and provider-health config can reload on `SIGHUP`. Logging level changes and enabling the dashboard after startup also require a restart.
+Listener address and timeout changes still require a restart, even though runtime state such as auth, providers, models, aliases, encrypted-reasoning policies, upstream header timeouts, access-log enablement, metrics, and provider-health config can reload on `SIGHUP`. Logging level changes and enabling the dashboard after startup also require a restart.
 
 For most deployments, one HTTP listener is enough.
 
@@ -243,6 +244,8 @@ Common attributes:
 - `upstream_header_timeout`
 - `tls_client_hello` (provider-only upstream TLS profile; see below)
 - `tls_client_hello_spec_file` (required only for static `custom` profiles)
+- `encrypted_reasoning` (whole-block policy; also supported at root, model and
+  alias scopes; see [Scoped Encrypted Reasoning](#scoped-encrypted-reasoning))
 - `deferred_transport` (static-only caller compatibility default; prefer a
   model-level block) / `deferred_receiver` (provider-only executor opt-in;
   see [Peer Deferred Transport v1](#peer-deferred-transport-v1))
@@ -460,15 +463,22 @@ provider "openai-compatible" "nvidia-2" {
 
 A derived provider may be declared before or after its base. It normally declares `extends`, optional `display_name`, and exactly one local credential, either `api_key` or `api_key_ref`. It inherits the base provider type, `base_url`, effective upstream header timeout, TLS ClientHello settings/profile, enabled state, and all model blocks.
 
-`github-copilot` derivatives instead require a local `credential_ref` and stay compact (no `base_url`/models); `credential_ref` is rejected on all other types, and `api_key`/`api_key_ref` are rejected on Copilot blocks.
+`github-copilot` derivatives instead require a local `credential_ref`; they cannot redefine `base_url` or model definitions, but may use the reasoning-only overlays below. `credential_ref` is rejected on all other types, and `api_key`/`api_key_ref` are rejected on Copilot blocks.
 
-The type label remains required and must match the base. The base must exist, be enabled, and must not itself use `extends`; inheritance chains are rejected. Local `base_url`, `upstream_header_timeout`, `tls_client_hello`, `tls_client_hello_spec_file`, and `enabled` declarations are rejected instead of ignored, including explicit TLS defaults. Local `model` declarations are also rejected except for the static transport-only overlays described below.
+The type label remains required and must match the base. The base must exist, be enabled, and must not itself use `extends`; inheritance chains are rejected. Local `base_url`, `upstream_header_timeout`, `tls_client_hello`, `tls_client_hello_spec_file`, and `enabled` declarations are rejected instead of ignored, including explicit TLS defaults. Local `model` declarations are rejected except for existing-name policy overlays described below.
 
 Derived providers are flattened during config loading and reload. After a successful load, direct model strings, health, metrics, billing, and dashboard inventory use the derived provider's own name. Aliases still list each provider target explicitly.
 
+Declared base provider/model reasoning policies are copied by value. A local
+provider `encrypted_reasoning` block replaces the inherited provider block, but
+an inherited model block still outranks it. Override/reset that model with a
+local existing-name `model` overlay; removing the overlay restores the base
+model declaration, not necessarily the child's provider policy.
+
 Static derivatives inherit model definitions, **not** base provider or model
-caller opt-ins, nor receiver opt-ins/limits. A derivative may declare an existing
-inherited model name with **only** a local `deferred_transport` block. New model
+deferred caller opt-ins, nor receiver opt-ins/limits. An existing-name model
+overlay may contain `encrypted_reasoning`, `deferred_transport`, or both
+(at most one of each, at least one total). New model
 names, definition fields (`upstream_name`, `display_name`, `protocol`,
 `capabilities`, `pricing`), empty model overlays and duplicate overlays are
 rejected, even if a forbidden field is empty, null or a default value.
@@ -480,6 +490,158 @@ local provider-only `deferred_receiver` blocks use root defaults. See the
 [exact-tested overlay example](#local-static-derivative-overlays).
 Managed derivatives cannot extend a base carrying any provider/model caller
 setting or receiver opt-in.
+
+## Scoped Encrypted Reasoning
+
+An optional unlabeled `encrypted_reasoning` block controls replayed reasoning
+history for `POST /v1/chat/completions` and `POST /v1/responses`. It can be
+declared at **root, provider, model, or alias** scope, including on disabled
+providers. It does not enable a model capability or decrypt upstream outputs.
+Native `POST /v1/messages` and all other operations are unaffected.
+
+- Direct precedence: **model → provider → root → built-in defaults**.
+- Alias precedence: **explicit alias → selected model → selected provider →
+  root → built-in defaults**. Without an alias block, resolution happens per
+  selected target, not from the first member of the pool.
+- A missing block inherits. A present empty `encrypted_reasoning {}` resets to
+  safe built-ins and stops inheritance. Blocks replace **wholesale**: omitted
+  members use built-ins, never members of the lower-priority block.
+
+| Member               | Built-in default    | Meaning                                                                                                |
+| -------------------- | ------------------- | ------------------------------------------------------------------------------------------------------ |
+| `passthrough`        | `true`              | Send history intact; `false` pre-strips supported reasoning shapes without adding a recovery attempt.  |
+| `on_caller_mismatch` | `"fail"`            | `"strip_and_retry"` permits one conditional same-target recovery. Explicit `""` also selects `"fail"`. |
+| `match_messages`     | Built-in substrings | A nonempty list replaces built-ins; omitted or `[]` uses built-ins.                                    |
+
+Patterns are literal case-insensitive substrings, trimmed and lowercased before
+validation/matching. Supply at most 16, each **4–256 Go string bytes after
+normalization**, unique case-insensitively. Keep them specific; this is not
+general error recovery. Built-ins are `not issued to this caller`,
+`invalid_encrypted_content`, `could not be verified`, `could not be decrypted`,
+`item_id did not match`, and `invalid signature`. Unknown members, wrong types,
+duplicate/case-variant keys and invalid blocks are rejected.
+
+This complete example uses environment-supplied credentials and loopback stub
+URLs; config validation makes no upstream calls. It is also shipped as
+`examples/scoped-encrypted-reasoning.hcl`.
+
+```hcl title="scoped-encrypted-reasoning.hcl"
+listener "http" "public" {
+  address = "127.0.0.1:8080"
+}
+
+auth "main" {
+  mode = "bearer_static"
+  client "application" {
+    token = env("AIPROXY_CLIENT_TOKEN")
+  }
+}
+
+encrypted_reasoning {
+  on_caller_mismatch = "strip_and_retry"
+  match_messages    = ["  Caller binding mismatch  "]
+}
+
+provider "openai-compatible" "primary" {
+  base_url = "http://127.0.0.1:18081/v1"
+  api_key  = env("UPSTREAM_API_KEY")
+
+  encrypted_reasoning {
+    passthrough = false
+  }
+
+  model "chat" {}
+  model "recover" {
+    encrypted_reasoning {
+      on_caller_mismatch = "strip_and_retry"
+    }
+  }
+  model "safe" {
+    encrypted_reasoning {}
+  }
+}
+
+provider "openai-compatible" "secondary" {
+  extends = "primary"
+  api_key = env("SECONDARY_UPSTREAM_API_KEY")
+
+  encrypted_reasoning {}
+
+  model "chat" {
+    encrypted_reasoning {
+      on_caller_mismatch = "strip_and_retry"
+      match_messages    = []
+    }
+  }
+  model "safe" {
+    encrypted_reasoning {
+      passthrough = false
+    }
+  }
+}
+
+provider "openai-compatible" "inherited" {
+  extends = "primary"
+  api_key = env("SECONDARY_UPSTREAM_API_KEY")
+}
+
+provider "openai-compatible" "root-only" {
+  base_url = "http://127.0.0.1:18082/v1"
+  api_key  = env("UPSTREAM_API_KEY")
+  model "chat" {}
+}
+
+alias "target_policy" {
+  algorithm = "round_robin"
+  providers = ["primary", "secondary"]
+  model     = "chat"
+}
+
+alias "safe_pool" {
+  algorithm = "round_robin"
+  providers = ["primary", "secondary"]
+  model     = "recover"
+  encrypted_reasoning {}
+}
+
+alias "recover_pool" {
+  algorithm = "round_robin"
+  providers = ["primary", "secondary"]
+  model     = "recover"
+  encrypted_reasoning {
+    on_caller_mismatch = "strip_and_retry"
+  }
+}
+```
+
+Here `primary/chat` strips with built-in `"fail"` and built-in patterns, not
+the root's retry/custom pattern. `primary/safe` resets to passthrough/fail.
+`secondary/recover` retains its inherited model retry policy despite the child
+provider reset. `secondary/chat` is a local model retry override with default
+patterns; `secondary/safe` strips via a local model override. `root-only/chat`
+uses the root's normalized `caller binding mismatch` pattern.
+`inherited/chat` copies the base provider strip policy; `inherited/safe` copies
+the base model reset, with no local declarations.
+`alias/safe_pool` resets the entire pool; `alias/target_policy` instead uses
+each selected target's policy.
+
+Removing a static block/key resumes inheritance; static HCL does not use
+`encrypted_reasoning = null`, and static JSON null policies are rejected.
+Managed provider/model/alias policies have
+[explicit nullable administrative semantics](api-reference.md#encrypted-reasoning-policy-intent),
+including sparse derivative model overlays. Root remains static-only. The
+CLI supports [inherit/reset/override editing](operations.md#editing-encrypted-reasoning-policies).
+Managed provider/model/alias web forms also offer inherit, safe reset and sparse
+custom controls, with inherited definitions and static rows read-only. Effective
+context describes saved state, not unsaved resolution or proof of activation;
+an undeclared alias remains target-dependent.
+
+**Stripping is lossy.** Ordinary message text and tool history are retained,
+but supported typed thinking/reasoning items and chat `reasoning`/
+`reasoning_content` fields can be removed even without their own signature.
+Do not assume universal plaintext-reasoning preservation. See
+[recovery gates, streaming and alias budgets](providers-and-routing.md#scoped-encrypted-reasoning)
+before enabling retry or pre-stripping.
 
 ## Upstream Header Timeout
 

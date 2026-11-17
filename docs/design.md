@@ -1520,13 +1520,109 @@ Dispatch never sleeps.
 Direct provider model requests do not fail over to a different provider or
 model, because the client selected a specific target explicitly.
 
+### Scoped Encrypted-Reasoning Policy
+
+Optional unlabeled `encrypted_reasoning` blocks at root/provider/model/alias
+scope retain sparse declaration presence separately from normalized values.
+Direct precedence is model → provider → root → built-ins; alias resolution adds
+an explicit alias first, otherwise uses the selected target's model/provider.
+Missing blocks inherit; an empty block resets to passthrough true, mismatch
+`fail`, built-in patterns. Any present block replaces wholesale: omitted
+members never merge lower-layer values. Empty mismatch strings select fail;
+omitted/empty pattern lists select built-ins. Nonempty patterns replace them,
+are trimmed/lowercased, number at most 16, measure 4–256 normalized Go bytes
+each, and must be unique case-insensitively. Disabled static providers validate too.
+
+Base declared provider/model policies and pattern slices copy by value through
+candidate builds, ordered/indexed catalogs and admitted snapshots. Root fallback
+is never materialized as a local declaration. A child provider override cannot
+outrank a copied model policy. Static existing-name model overlays may contain
+reasoning, deferred transport, or both (one of each, at least one total), with
+no model attributes, new names or definition changes. Credentials remain local;
+enabled/concrete/same-type base and no-chain rules remain. Deferred base opt-ins
+remain non-inherited and retain their own eligibility constraints.
+
+Managed providers/models store nullable sparse declarations: SQL NULL for
+absence, `{}` for reset, objects preserving explicit false/empty members.
+The additive migration does not rewrite old models. Pre-feature null-policy
+derivative rows remain inert; a non-null invalid policy/active overlay rejects
+startup/reload, as does a dangling overlay after base inventory changes.
+Managed derivatives use only existing nested `models` entries with name+policy,
+not flattened definitions, a new endpoint or an overlay map. Forbidden
+definition/deferred keys reject by presence, including empty/null values.
+
+Provider/alias PUT omission preserves exact local policy, null removes, and
+objects replace wholesale. Alias null removal intentionally distinguishes
+inheritance/per-target mode from an unchanged explicit sticky alias. Omitted or
+null `models` preserves the complete local collection, while arrays replace it;
+derivative `[]` clears overlays, not inherited inventory. Within replacement
+arrays, omitted/null policy means no local declaration. A policy-bearing
+concrete/derived transition requires an explicit array; credential-only PUT
+rejects policy/model edits. Strict canonical reasoning/overlay keys, duplicate/
+case-variant duplicate detection and read-only metadata rejection apply before
+commit.
+
+Provider/model admin views expose owner-local nullable declaration, normalized
+effective policy, winning source and inherited-winner metadata; providers also
+expose `models_inherited`. Provider effective metadata resolves only provider →
+root → built-ins, not all its models. Derivative GET includes full inherited
+inventory; writes send only sparse local overlays. An undeclared alias has null
+effective policy, not the first pool member's policy. Reads use declaration-only
+resolution without decrypting credentials merely to render metadata and describe
+saved intent, not proof of activation. Existing RBAC/static visibility, durable-save
+outcomes/headers and receiving-instance-only reload remain; root stays static.
+Provider/model/alias web controls distinguish inherit, safe reset and sparse
+custom declarations. Unchanged policy and model collections are omitted; member
+edits retain other local members exactly, never copying effective metadata into
+writes. Inherited model definitions stay read-only with local policy-only overlays.
+Aliases without a local block show target-dependent context rather than an
+invented pool-wide policy. All context is saved state, not an unsaved preview or
+proof of runtime activation.
+
+The HCL editor preserves omitted/no-op local intent, raw `env()` spelling and
+supported comments; reset creates an empty block, removal inherits. Root policy
+uses `configure upstream`, model flags use `name=value` within provider editing.
+Only validated base inventory authorizes sparse derivative overlay creation.
+Conversion supports all scopes and resolves environment expressions, but never
+flattens inherited declarations into local blocks. Exact public HCL/example
+fixtures assert declarations and effective policies in
+`TestDocumentedEncryptedReasoning*`.
+
+### Recovery And Stripping Boundary
+
+Only public chat completions/Responses are applicable; native messages and other
+operations are unchanged. With passthrough enabled and mismatch `strip_and_retry`,
+recovery requires an ordinary non-streaming upstream 400, raw opaque markers,
+successfully bounded decoded pattern matching and an actual changed rewrite.
+Retry keeps provider, credential, endpoint, upstream model, protocol and context.
+Immediate ordinary 400s to `stream: true` may qualify; established streams,
+unrelated/non-400 errors, peer submit/poll/replay/control outcomes, canceled
+contexts and exhausted execution budgets never authorize fresh recovery inference.
+Definite terminal peer inference outcomes remain subject to the same gates.
+
+Direct dispatch allows at most two inference attempts and neither fails over nor
+consults/populates alias cooldowns. Alias dispatch has one extra recovery attempt
+total (N normally attempted targets + at most 1), shared across all target policies.
+An explicit alias keeps its stripped body across normal failover. Without an
+alias block, every selected target starts from the immutable admitted/guardrailed
+original body so a later passthrough override can still receive history.
+Pre-stripping with passthrough false adds no recovery attempt and consumes no
+allowance. Ordinary alias status/transport failover remains separate.
+
+Reuse the existing stripping boundary: ordinary text/tool history survives,
+but typed unsigned thinking/reasoning items and chat reasoning/reasoning_content
+fields are also removed. Raw marker gating for recovery does not require every
+removed item to carry its own signature; pre-stripping has no opaque-marker gate.
+No universal plaintext-reasoning preservation, output decryption or guaranteed
+reasoning continuity is promised. Policy reload is transactional: new admissions
+use the activated snapshot; admitted requests/streams retain theirs; failed
+candidates leave the old runtime active.
+
 ### Bounded Encrypted-Reasoning Inspection
 
-Alias `encrypted_reasoning.on_caller_mismatch = "strip_and_retry"` inspects only
-non-streaming HTTP 400 responses to applicable chat/Responses requests carrying
-opaque reasoning markers. Status, request applicability, configured patterns and
-the single stripped-attempt budget are checked before decoding. Successful small
-mismatches retry the same target with opaque blocks removed and text retained.
+Status, operation, passthrough/mismatch policy, raw request markers and the shared
+recovery allowance gate inspection. A bounded decoded match is still insufficient
+unless stripping changes the body.
 
 Optional inspection supports gzip (including x-gzip), raw deflate, Brotli and zstd,
 decoding Content-Encoding layers in reverse order. Repeated header fields are
@@ -1690,7 +1786,9 @@ operations still use ordinary adapter paths.
 Static derivatives inherit model definitions but clear base provider and model
 caller opt-ins and receiver opt-ins/limits in both ordered/indexed model views.
 They may declare a local provider compatibility default or provider receiver,
-or local existing-name model overlays containing only `deferred_transport`.
+or local existing-name model overlays containing `deferred_transport`,
+`encrypted_reasoning`, or both. Reasoning declarations, unlike deferred opt-ins,
+are inherited by value as described above.
 New model names, empty/duplicate overlays and definition fields are rejected by
 declaration presence, including explicit empty/null/default values.
 `HasCallerDeferredTransport` inspects provider storage and both model collections

@@ -155,6 +155,7 @@ func newRT() *config.Runtime {
 			{
 				Type:    config.ProviderTypeOpenAI,
 				Name:    "openai",
+				Enabled: true,
 				BaseURL: "https://api.openai.com/v1",
 				APIKey:  "sk",
 				Models:  []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini"}},
@@ -2696,6 +2697,13 @@ func (a *streamingStatusByAPIKeyAdapter) Do(ctx context.Context, r provider.Requ
 	status := http.StatusOK
 	if s, ok := a.rules[r.APIKey]; ok {
 		status = s
+	}
+	if status >= 400 {
+		return &provider.Result{
+			StatusCode: status,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       []byte(`{"error":{"message":"immediate upstream error"}}`),
+		}, nil
 	}
 	return &provider.Result{
 		StatusCode: status,

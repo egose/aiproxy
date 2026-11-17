@@ -591,6 +591,7 @@ func TestDeferredCallerModelPeerFailuresAndControlBudgetsFailClosed(t *testing.T
 				t.Cleanup(peer.Close)
 				rt := callerMixedModelRuntime(peer.URL)
 				providers, aliases := rt.Catalog.Providers(), rt.Catalog.Aliases()
+				rt.EncryptedReasoning = scopedReasoningPolicy("retry")
 				providers[0].Models[1].DeferredTransport.MaxControlRetries = tc.retries
 				providers[0].Models[1].DeferredTransport.MaxControlCalls = tc.calls
 				providers[0].ModelByName = nil
@@ -603,7 +604,7 @@ func TestDeferredCallerModelPeerFailuresAndControlBudgetsFailClosed(t *testing.T
 					model = "alias/mixed"
 				}
 				w := httptest.NewRecorder()
-				h.ServeHTTP(w, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"`+model+`","messages":[]}`)))
+				h.ServeHTTP(w, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"`+model+`","messages":[{"role":"assistant","content":[{"type":"reasoning","encrypted_content":"opaque"}]}]}`)))
 				if w.Code != 502 || !strings.Contains(w.Body.String(), `"type":"`+tc.code+`"`) || capabilities.Load() != tc.capabilities ||
 					submits.Load() != tc.submit || ordinary.Load() != 0 || inferences.Load() > tc.submit || !health.IsHealthy("a") || len(recorder.Events()) != 1 {
 					t.Fatalf("model control failure dispatched fresh inference or ignored budgets: status=%d body=%s capabilities=%d submits=%d inference=%d ordinary=%d",

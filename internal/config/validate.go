@@ -41,6 +41,9 @@ func Validate(rt *Runtime) error {
 	if err := validateIngressGuardrails(rt.IngressGuardrails); err != nil {
 		return err
 	}
+	if err := ValidateEncryptedReasoning(rt.EncryptedReasoning, "root"); err != nil {
+		return err
+	}
 	if err := validateProviders(rt.Catalog.Providers(), true); err != nil {
 		return err
 	}
@@ -254,6 +257,9 @@ func validateAuth(a Auth) error {
 
 func validateProviders(providers []Provider, requireCredential bool) error {
 	for _, p := range providers {
+		if err := validateProviderEncryptedReasoning(p); err != nil {
+			return err
+		}
 		if !IsLowercaseName(p.Name) {
 			return fmt.Errorf("provider %q: name must be lowercase, no spaces, no '/', and start with [a-z0-9]", p.Name)
 		}
@@ -600,7 +606,7 @@ func validateAliases(aliases []Alias, catalog Catalog) error {
 		if err := validateSessionAffinity(a); err != nil {
 			return err
 		}
-		if err := validateEncryptedReasoning(a); err != nil {
+		if err := ValidateEncryptedReasoning(a.EncryptedReasoning, fmt.Sprintf("alias %q", a.Name)); err != nil {
 			return err
 		}
 		seen := make(map[string]bool)
@@ -647,37 +653,6 @@ func validateSessionAffinity(a Alias) error {
 		lower := strings.ToLower(h)
 		if seen[lower] {
 			return fmt.Errorf("alias %q: session_affinity.headers has duplicate header %q", a.Name, h)
-		}
-		seen[lower] = true
-	}
-	return nil
-}
-
-func validateEncryptedReasoning(a Alias) error {
-	if a.EncryptedReasoning == nil {
-		return nil
-	}
-	er := a.EncryptedReasoning
-	switch er.OnCallerMismatch {
-	case EncryptedReasoningFail, EncryptedReasoningStripAndRetry:
-	default:
-		return fmt.Errorf("alias %q: encrypted_reasoning.on_caller_mismatch must be %q or %q", a.Name, EncryptedReasoningFail, EncryptedReasoningStripAndRetry)
-	}
-	if len(er.MatchMessages) > 16 {
-		return fmt.Errorf("alias %q: encrypted_reasoning.match_messages must list at most 16 entries", a.Name)
-	}
-	seen := make(map[string]bool, len(er.MatchMessages))
-	for _, m := range er.MatchMessages {
-		trimmed := strings.TrimSpace(m)
-		if trimmed == "" {
-			return fmt.Errorf("alias %q: encrypted_reasoning.match_messages must not contain empty values", a.Name)
-		}
-		if len(trimmed) < 4 || len(trimmed) > 256 {
-			return fmt.Errorf("alias %q: encrypted_reasoning.match_messages entries must be between 4 and 256 characters", a.Name)
-		}
-		lower := strings.ToLower(trimmed)
-		if seen[lower] {
-			return fmt.Errorf("alias %q: encrypted_reasoning.match_messages has duplicate entry %q", a.Name, m)
 		}
 		seen[lower] = true
 	}

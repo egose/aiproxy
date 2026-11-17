@@ -135,6 +135,7 @@ func TestDeferredCallerCommittedInferenceFailureDelivery(t *testing.T) {
 				backup := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { backupCalls.Add(1) }))
 				defer backup.Close()
 				rt := callerDispatchRuntime(peer.URL, backup.URL)
+				rt.EncryptedReasoning = scopedReasoningPolicy("retry")
 				if !optedIn {
 					providers := rt.Catalog.Providers()
 					providers[0].DeferredTransport, providers[0].BaseURL = nil, upstream.URL+"/v1"

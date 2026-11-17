@@ -71,6 +71,7 @@ type ProviderInput struct {
 	ForwardAuthorization      bool
 	DeferredTransportBlock    string
 	DeferredReceiverBlock     string
+	EncryptedReasoning        *EncryptedReasoningInput
 	AllowInsecureBaseURL      bool
 	Credential                ProviderCredentialInput
 	Enabled                   *bool
@@ -111,6 +112,7 @@ type ProviderModelInput struct {
 	Capabilities           []string
 	Pricing                *ModelPricingInput
 	DeferredTransportBlock string
+	EncryptedReasoning     *EncryptedReasoningInput
 }
 
 type ModelPricingInput struct {
@@ -147,11 +149,7 @@ type AliasSessionAffinityInput struct {
 	Headers []string
 }
 
-type AliasEncryptedReasoningInput struct {
-	Passthrough      *bool
-	OnCallerMismatch string
-	MatchMessages    []string
-}
+type AliasEncryptedReasoningInput = EncryptedReasoningInput
 
 type AliasTargetInput struct {
 	Provider string
@@ -317,7 +315,7 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 	}
 	if input.Extends != "" {
 		b.WriteString("  extends = ")
-		b.WriteString(strconv.Quote(input.Extends))
+		b.WriteString(RenderStringOrExpression(input.Extends))
 		b.WriteString("\n")
 	}
 	if input.DisplayName != "" {
@@ -339,6 +337,7 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 		b.WriteString("\n")
 		renderProviderCredential(&b, input, defaultSecretsPath)
 		renderProviderDeferredBlocks(&b, input)
+		renderEncryptedReasoningBlock(&b, input.EncryptedReasoning, "  ")
 		renderProviderModelBlocks(&b, input)
 		b.WriteString("}\n")
 		return b.String()
@@ -379,6 +378,7 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 		renderProviderCredential(&b, input, defaultSecretsPath)
 	}
 	renderProviderDeferredBlocks(&b, input)
+	renderEncryptedReasoningBlock(&b, input.EncryptedReasoning, "  ")
 	if input.Healthcheck != nil {
 		b.WriteString(renderProviderHealthcheckBlock(input.Healthcheck))
 	}
@@ -389,7 +389,7 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 
 func renderProviderModelBlocks(b *strings.Builder, input ProviderInput) {
 	for _, model := range input.Models {
-		if input.Extends != "" && strings.TrimSpace(model.DeferredTransportBlock) == "" {
+		if input.Extends != "" && strings.TrimSpace(model.DeferredTransportBlock) == "" && model.EncryptedReasoning == nil {
 			continue
 		}
 		b.WriteString("\n  model ")
@@ -425,6 +425,7 @@ func renderProviderModelBlocks(b *strings.Builder, input ProviderInput) {
 			b.WriteString(block)
 			b.WriteString("\n")
 		}
+		renderEncryptedReasoningBlock(b, model.EncryptedReasoning, "    ")
 		b.WriteString("  }\n")
 	}
 }
@@ -579,27 +580,7 @@ func RenderAliasBlock(input AliasInput) string {
 		}
 		b.WriteString("  }\n")
 	}
-	if input.EncryptedReasoning != nil {
-		b.WriteString("\n  encrypted_reasoning {\n")
-		if input.EncryptedReasoning.Passthrough != nil {
-			if *input.EncryptedReasoning.Passthrough {
-				b.WriteString("    passthrough = true\n")
-			} else {
-				b.WriteString("    passthrough = false\n")
-			}
-		}
-		if input.EncryptedReasoning.OnCallerMismatch != "" {
-			b.WriteString("    on_caller_mismatch = ")
-			b.WriteString(strconv.Quote(input.EncryptedReasoning.OnCallerMismatch))
-			b.WriteString("\n")
-		}
-		if len(input.EncryptedReasoning.MatchMessages) > 0 {
-			b.WriteString("    match_messages = ")
-			b.WriteString(RenderQuotedList(input.EncryptedReasoning.MatchMessages))
-			b.WriteString("\n")
-		}
-		b.WriteString("  }\n")
-	}
+	renderEncryptedReasoningBlock(&b, input.EncryptedReasoning, "  ")
 	if len(input.Providers) > 0 || input.Model != "" {
 		b.WriteString("  providers = ")
 		b.WriteString(RenderQuotedList(input.Providers))

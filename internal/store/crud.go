@@ -90,6 +90,7 @@ func (s *Store) GetAlias(ctx context.Context, name string) (DBAlias, error) {
 func (s *Store) CreateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTarget) error {
 	output := a
 	copy := *a
+	copy.EncryptedReasoning = nullableEncryptedReasoning(copy.EncryptedReasoning)
 	a = &copy
 	targets = append([]DBAliasTarget(nil), targets...)
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -121,6 +122,7 @@ func (s *Store) CreateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTa
 func (s *Store) UpdateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTarget) error {
 	output := a
 	copy := *a
+	copy.EncryptedReasoning = nullableEncryptedReasoning(copy.EncryptedReasoning)
 	a = &copy
 	targets = append([]DBAliasTarget(nil), targets...)
 	tx, err := s.DB.BeginTx(ctx, nil)

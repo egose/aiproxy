@@ -229,7 +229,7 @@ func TestCopilotFlowExpiryDuringProviderWait(t *testing.T) {
 	}
 	saved, err := a.GetProvider(ctx, p.Name)
 	flowOK(t, err)
-	if saved.UpdatedAt != old.UpdatedAt || saved.CopilotCredentialName != "old" || saved.CopilotCredentialEncrypted != nil {
+	if !saved.UpdatedAt.Equal(old.UpdatedAt) || saved.CopilotCredentialName != "old" || saved.CopilotCredentialEncrypted != nil {
 		t.Fatal("expiry rollback failed")
 	}
 	status, err = a.GetCopilotFlow(ctx, users[0].ID, status.ID)
