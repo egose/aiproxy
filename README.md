@@ -526,6 +526,8 @@ aiproxy configure auth
 aiproxy configure alias
 aiproxy configure upstream
 aiproxy configure logging
+aiproxy configure dashboard
+aiproxy configure multi-tenancy
 ```
 
 The wizard prompts for the config path first when `--config` is not provided,
@@ -541,6 +543,13 @@ Supported block workflows:
 - `upstream`
 - `logging`
 - `provider-health`
+- `dashboard` and `web_ui`
+- `multi_tenancy` and `database`
+
+The **Dashboard & Web UI** entry enables the Dashboard API and embedded app
+independently. The **Multi-tenancy** entry configures accounts, workspaces, and
+the PostgreSQL reference together. See the
+[setup and restart guidance](website/docs/operations.md#dashboard-web-ui-and-multi-tenancy).
 
 Block subcommands also support non-interactive scripting with flags:
 

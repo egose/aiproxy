@@ -189,7 +189,10 @@ func newConfigureCommand() *cobra.Command {
 				}
 			}
 			prompts := newPromptSession(cmd.InOrStdin(), cmd.OutOrStdout())
-			choice, err := prompts.askChoice("Block to configure", []string{"provider", "alias", "auth", "listener", "upstream", "logging", "provider-health"}, "provider")
+			choice, err := prompts.askChoice("Block to configure", []string{
+				"provider", "alias", "auth", "listener", "upstream", "logging", "provider-health",
+				configureDashboardMenu, configureMultiTenancyMenu,
+			}, "provider")
 			if err != nil {
 				return err
 			}
@@ -210,6 +213,10 @@ func newConfigureCommand() *cobra.Command {
 				return runConfigureLogging(&prompts, resolvedConfigPath, false, loggingOptions{})
 			case "provider-health":
 				return runConfigureProviderHealth(&prompts, resolvedConfigPath, false, providerHealthOptions{})
+			case configureDashboardMenu:
+				return runConfigureDashboardUI(&prompts, resolvedConfigPath, dashboardUIOptions{})
+			case configureMultiTenancyMenu:
+				return runConfigureMultiTenancy(&prompts, resolvedConfigPath, multiTenancyOptions{})
 			default:
 				return runConfigureProvider(&prompts, resolvedConfigPath, false, providerOptions{})
 			}
@@ -229,6 +236,8 @@ func newConfigureCommand() *cobra.Command {
 	cmd.AddCommand(newConfigureAliasCommand())
 	cmd.AddCommand(newConfigureLoggingCommand())
 	cmd.AddCommand(newConfigureProviderHealthCommand())
+	cmd.AddCommand(newConfigureDashboardUICommand())
+	cmd.AddCommand(newConfigureMultiTenancyCommand())
 	return cmd
 }
 

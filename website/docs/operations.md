@@ -98,6 +98,8 @@ aiproxy configure listener
 aiproxy configure upstream
 aiproxy configure logging
 aiproxy configure provider-health
+aiproxy configure dashboard
+aiproxy configure multi-tenancy
 ```
 
 The root `aiproxy configure` command shows a block selector. The block-specific
@@ -107,9 +109,50 @@ Supported workflows:
 
 - create or update `listener`, root `upstream_header_timeout`/`encrypted_reasoning`, `auth`, `provider`, `alias`, `logging`, and `provider_health`
 - update provider secrets when using `api_key_ref`
-- delete existing blocks with `--delete`
+- configure the Dashboard API (`dashboard`) and embedded browser app (`web_ui`) independently
+- configure `multi_tenancy` and its `database` block together
+- delete existing blocks on commands that support `--delete`
 
 For scripted environments, use `--non-interactive` on block subcommands.
+
+### Dashboard, Web UI, and Multi-tenancy
+
+In **Dashboard & Web UI**, enable the Dashboard API if you want the TUI or live
+browser dashboard. Enable the embedded Web UI separately if you want browser
+access. The Web UI alone supports workspace management if multi-tenancy is on;
+otherwise it only serves the app shell. No database is needed for the Dashboard
+API or Web UI themselves. The dashboard token defaults to server-generated;
+existing token settings are kept unless you change them or disable the Dashboard
+API, which removes the `dashboard` block.
+
+In **Multi-tenancy**, reuse the existing PostgreSQL URL or supply the name of an
+environment variable for the wizard to write as `database.url = env("...")`.
+The wizard defaults public registration to off for new setups and preserves
+existing choices. An enabled, hand-written `multi_tenancy {}` still implicitly
+allows public registration unless the attribute is explicitly changed.
+Disabling multi-tenancy leaves the database block and stored data in place.
+
+```sh
+aiproxy configure dashboard --config ./config.hcl --non-interactive --dashboard --web-ui
+aiproxy configure multi-tenancy --config ./config.hcl --non-interactive \
+  --enabled --database-url-env AIPROXY_DB_URL --allow-public-registration=false
+```
+
+Use `--dashboard=false`, `--web-ui=false`, or `--enabled=false` to turn the
+respective feature off. Use `--token-env NAME` to set a dashboard token
+reference or `--token-env=` to remove the explicit token and use the server's
+automatic token handling.
+
+Enabling the Dashboard API, toggling multi-tenancy, or changing the database URL
+while multi-tenancy is enabled requires a restart. Web UI and public registration
+changes can apply on `SIGHUP`. The wizard only edits the file. For first-time
+multi-tenancy setup, provide the database URL to the migration and serving
+processes, set `AIPROXY_JWT_SECRET` for the server, and set `AIPROXY_ADMIN_EMAIL`
+and `AIPROXY_ADMIN_PASSWORD` before running `aiproxy migrate up --config ./config.hcl`
+to seed the first administrator on a fresh database. Multi-tenancy does not
+change inference authentication; use `bearer_static` auth to enforce API keys.
+
+### Other Configure Examples
 
 Provider example:
 
