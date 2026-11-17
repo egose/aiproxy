@@ -100,7 +100,7 @@ for the bounds and rationale; proxy-owned `GET /v1/models` is unaffected.
 - `zenmux` – ZenMux gateway (defaults to `https://zenmux.ai/api/v1`); OpenAI pass-through for chat, responses, embeddings, images, and audio
 - `openrouter` – OpenRouter gateway (defaults to `https://openrouter.ai/api/v1`); OpenAI pass-through for chat, responses, embeddings, images, and audio
 
-Pass-through providers rewrite only the top-level `model` JSON field and preserve other request fields, including unknown extension fields. Translated providers reject unsupported top-level request controls rather than silently dropping them; their supported chat fields are `model`, `messages`, `max_tokens`, `temperature`, `top_p`, and `stream`, their supported responses fields are `model`, `input`, `instructions`, `max_output_tokens`, `temperature`, `top_p`, and `stream`, and Gemini embeddings supports `model`, `input`, and `dimensions`.
+Apart from explicit ingress guardrails and reasoning stripping, pass-through providers rewrite only the top-level `model` JSON field and preserve other request fields, including unknown extension fields. Translated providers reject unsupported top-level request controls rather than silently dropping them; their supported chat fields are `model`, `messages`, `max_tokens`, `temperature`, `top_p`, and `stream`, their supported responses fields are `model`, `input`, `instructions`, `max_output_tokens`, `temperature`, `top_p`, and `stream`, and Gemini embeddings supports `model`, `input`, and `dimensions`.
 
 OpenCode providers share one adapter behind the two explicit types: the type
 selects the service, never the URL or credential. `protocol` is `chat`,
@@ -231,7 +231,8 @@ provider "github-copilot" "copilot" {
 `credential_ref.path` defaults to the shared secrets path so the sidecar is
 found next to `keys.json`; set it explicitly only for a custom location.
 Derived `github-copilot` providers require their own local `credential_ref`
-and stay compact (no `base_url`/models). `api_key`/`api_key_ref` and
+and cannot redefine `base_url` or model definitions (reasoning-only existing-name
+model overlays are allowed). `api_key`/`api_key_ref` and
 `protocol` are rejected on Copilot blocks, and
 `credential_ref` is rejected on all other types.
 
@@ -324,16 +325,30 @@ flags or writable managed/web fields.
 - Alias failover: retry the next target on transport errors, timeouts, and
   upstream statuses listed in `retry_status_codes`. The default is `500`, `502`,
   `503`, and `504`; configured `4xx` statuses such as `429` can be retried.
-  Other upstream `4xx` responses are returned verbatim.
-- Alias encrypted reasoning: optional `encrypted_reasoning` block strips
-  caller-bound opaque reasoning blobs (`encrypted_content`, `signature`,
-  redacted thinking) before fan-out (`passthrough = false`), or retries
-  the same target once stripped when an upstream `400` matches
-  `match_messages` (`on_caller_mismatch = "strip_and_retry"). Optional compressed
-  inspection accepts up to four encoding layers, 256 bytes of encoding metadata,
-  and 1 MiB of decoded data per layer; zstd windows are limited to 1 MiB.
-  Unsupported, corrupt, or over-budget encodings skip the mismatch retry and
-  preserve the original response bytes.
+  Other upstream `4xx` responses are returned verbatim unless the narrow
+  same-target reasoning recovery below applies.
+- Scoped encrypted reasoning: optional whole-block `encrypted_reasoning` at
+  root/provider/model/alias scope. Direct precedence is model → provider → root →
+  built-ins; an explicit alias overrides all of these. Missing blocks inherit;
+  `{}` resets to passthrough `true`, mismatch `"fail"` and built-in patterns.
+  `passthrough = false` pre-strips supported history; `"strip_and_retry"` allows
+  one conditional same-identity recovery for recognized ordinary upstream 400s,
+  only with raw opaque request markers, bounded decoded matching and an actual
+  changed rewrite. Direct calls make at most 2 attempts and never fail over;
+  aliases share one extra attempt total. Explicit alias policies keep a stripped
+  body through normal failover; without one, each target starts from the original
+  admitted body. Established streams, peer controls and failed inspection never
+  authorize recovery. Ordinary text/tool history is retained, but unsigned typed
+  thinking/reasoning and chat reasoning fields may also be removed; no output
+  decryption or universal plaintext-reasoning preservation is promised.
+  See [configuration/examples](website/docs/configuration.md#scoped-encrypted-reasoning),
+  [retry/decoding bounds](website/docs/providers-and-routing.md#scoped-encrypted-reasoning),
+  [CLI controls](website/docs/operations.md#editing-encrypted-reasoning-policies)
+  and [managed API intent](website/docs/api-reference.md#encrypted-reasoning-policy-intent).
+  Base provider/model declarations are inherited by value with local policy-only
+  overrides. Managed API and provider/model/alias web controls support inherit,
+  safe reset and sparse custom declarations. Read-only context describes saved
+  state, not unsaved edits or proof of activation; root remains static configuration.
 
 ### Not Implemented
 
@@ -344,7 +359,7 @@ flags or writable managed/web fields.
 The server supports live config reload on `SIGHUP` for auth, providers, models,
 aliases, root and provider upstream header timeouts, provider TLS ClientHello
 profiles and custom recipes, access-log enablement,
-payload-log configuration, metrics config, provider-health config,
+root/provider/model/alias encrypted-reasoning policies, payload-log configuration, metrics config, provider-health config,
 ingress-guardrail policy, and
 metrics-backed inventory state.
 Peer deferred policy can reload subject to live reservation checks; removing its

@@ -250,6 +250,34 @@ export const adminStatusSchema = z.object({
 
 const sourceSchema = z.enum(['config', 'database']).catch('config');
 
+export const encryptedReasoningDeclarationSchema = z.object({
+  passthrough: z.boolean().optional(),
+  on_caller_mismatch: z.string().optional(),
+  match_messages: z.array(z.string()).optional(),
+});
+
+export const encryptedReasoningEffectiveSchema = z.object({
+  passthrough: z.boolean(),
+  on_caller_mismatch: z.enum(['fail', 'strip_and_retry']),
+  match_messages: z.array(z.string()),
+});
+
+const encryptedReasoningViewFields = {
+  encrypted_reasoning: encryptedReasoningDeclarationSchema.nullable().optional(),
+  encrypted_reasoning_effective: encryptedReasoningEffectiveSchema.nullable().optional(),
+  encrypted_reasoning_source: z.enum(['model', 'provider', 'root', 'builtin']).optional(),
+  encrypted_reasoning_inherited: z.boolean().optional(),
+};
+
+export type EncryptedReasoningDeclaration = z.infer<typeof encryptedReasoningDeclarationSchema>;
+export type EncryptedReasoningEffective = z.infer<typeof encryptedReasoningEffectiveSchema>;
+export type EncryptedReasoningView = {
+  encrypted_reasoning?: EncryptedReasoningDeclaration | null;
+  encrypted_reasoning_effective?: EncryptedReasoningEffective | null;
+  encrypted_reasoning_source?: 'model' | 'provider' | 'root' | 'builtin';
+  encrypted_reasoning_inherited?: boolean;
+};
+
 export const adminModelSchema = z.object({
   name: z.string(),
   display_name: z.string().optional().default(''),
@@ -257,6 +285,7 @@ export const adminModelSchema = z.object({
   protocol: z.string().optional().default(''),
   capabilities: z.array(z.string()).catch([]),
   pricing: z.record(z.string(), z.number()).optional().default({}),
+  ...encryptedReasoningViewFields,
 });
 
 export const adminHealthcheckSchema = z.object({
@@ -304,6 +333,8 @@ export const adminProviderSchema = z.object({
   workspace_name: z.string().optional().default(''),
   has_credential: z.boolean().catch(false),
   healthcheck: adminHealthcheckSchema.optional(),
+  ...encryptedReasoningViewFields,
+  models_inherited: z.boolean().optional(),
   models: z.array(adminModelSchema).catch([]),
 });
 
@@ -336,13 +367,8 @@ export const adminAliasSchema = z.object({
   algorithm: z.string(),
   retry_status_codes: z.array(z.number()).catch([]),
   session_affinity: z.object({ headers: z.array(z.string()).catch([]) }).optional(),
-  encrypted_reasoning: z
-    .object({
-      passthrough: z.boolean().catch(true),
-      on_caller_mismatch: z.string().optional().default(''),
-      match_messages: z.array(z.string()).catch([]),
-    })
-    .optional(),
+  encrypted_reasoning: encryptedReasoningDeclarationSchema.nullable().optional(),
+  encrypted_reasoning_effective: encryptedReasoningEffectiveSchema.nullable().optional(),
   source: sourceSchema,
   workspace_id: z.string().optional().default(''),
   workspace_name: z.string().optional().default(''),

@@ -63,6 +63,9 @@ func Load(src []byte, filename string) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateEncryptedReasoningDeclarations(file.Body); err != nil {
+		return nil, err
+	}
 	if err := validateProviderTLSAttributes(file.Body); err != nil {
 		return nil, err
 	}
@@ -137,6 +140,9 @@ func parseConfig(src []byte, filename string) (*hcl.File, error) {
 	if jsonFile, jsonDiags := json.Parse(src, filename); !jsonDiags.HasErrors() {
 		return jsonFile, nil
 	}
+	if err := encryptedReasoningParseError(file, diags); err != nil {
+		return nil, err
+	}
 	return nil, fmt.Errorf("parse config %s: %s", filename, diags.Error())
 }
 
@@ -200,6 +206,7 @@ func annotateProviderSyntax(body hcl.Body, raw *rawFile) {
 				{Type: "healthcheck"},
 				{Type: "deferred_transport"},
 				{Type: "deferred_receiver"},
+				{Type: "encrypted_reasoning"},
 				{Type: "model", LabelNames: []string{"name"}},
 			},
 		}); !blockDiags.HasErrors() {
@@ -231,7 +238,7 @@ func annotateModelSyntax(body hcl.Body) rawModelSyntax {
 	}
 	for name := range attrs {
 		switch name {
-		case "pricing", "deferred_transport", "deferred_receiver":
+		case "pricing", "deferred_transport", "deferred_receiver", "encrypted_reasoning":
 			syntax.Blocks[name]++
 		default:
 			syntax.Attrs[name] = true

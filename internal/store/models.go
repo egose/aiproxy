@@ -66,20 +66,22 @@ type DBProvider struct {
 	Enabled                    bool            `bun:"enabled,notnull"`
 	WorkspaceID                uuid.UUID       `bun:"workspace_id,notnull,type:uuid"`
 	Healthcheck                json.RawMessage `bun:"healthcheck,type:jsonb,nullzero"`
+	EncryptedReasoning         json.RawMessage `bun:"encrypted_reasoning,type:jsonb,nullzero"`
 	CreatedAt                  time.Time       `bun:"created_at,notnull,default:now()"`
 	UpdatedAt                  time.Time       `bun:"updated_at,notnull,default:now()"`
 }
 
 type DBProviderModel struct {
-	bun.BaseModel `bun:"table:db_provider_models,alias:m"`
-	ID            uuid.UUID       `bun:"id,pk,type:uuid,default:gen_random_uuid()"`
-	ProviderID    uuid.UUID       `bun:"provider_id,notnull,type:uuid"`
-	Name          string          `bun:"name,notnull"`
-	DisplayName   string          `bun:"display_name,notnull,default:''"`
-	UpstreamName  string          `bun:"upstream_name,notnull,default:''"`
-	Protocol      string          `bun:"protocol,notnull,default:''"`
-	Capabilities  []string        `bun:"capabilities,type:jsonb,nullzero"`
-	Pricing       json.RawMessage `bun:"pricing,type:jsonb,nullzero"`
+	bun.BaseModel      `bun:"table:db_provider_models,alias:m"`
+	ID                 uuid.UUID       `bun:"id,pk,type:uuid,default:gen_random_uuid()"`
+	ProviderID         uuid.UUID       `bun:"provider_id,notnull,type:uuid"`
+	Name               string          `bun:"name,notnull"`
+	DisplayName        string          `bun:"display_name,notnull,default:''"`
+	UpstreamName       string          `bun:"upstream_name,notnull,default:''"`
+	Protocol           string          `bun:"protocol,notnull,default:''"`
+	Capabilities       []string        `bun:"capabilities,type:jsonb,nullzero"`
+	Pricing            json.RawMessage `bun:"pricing,type:jsonb,nullzero"`
+	EncryptedReasoning json.RawMessage `bun:"encrypted_reasoning,type:jsonb,nullzero"`
 }
 
 type DBAlias struct {

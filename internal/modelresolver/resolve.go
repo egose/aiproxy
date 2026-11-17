@@ -32,9 +32,10 @@ const (
 )
 
 type Resolver struct {
-	catalog   config.Catalog
-	selectors map[string]alias.Selector
-	cooldowns *CooldownStore
+	catalog            config.Catalog
+	selectors          map[string]alias.Selector
+	cooldowns          *CooldownStore
+	encryptedReasoning *config.EncryptedReasoning
 }
 
 func New(rt *config.Runtime) *Resolver {
@@ -48,9 +49,10 @@ func NewWithPrevious(rt *config.Runtime, previous *Resolver) *Resolver {
 		selectors[a.Name] = selectorForAlias(a.Name, a, previous)
 	}
 	return &Resolver{
-		catalog:   rt.Catalog,
-		selectors: selectors,
-		cooldowns: cooldownsForCatalog(rt.Catalog, previous),
+		catalog:            rt.Catalog,
+		selectors:          selectors,
+		cooldowns:          cooldownsForCatalog(rt.Catalog, previous),
+		encryptedReasoning: config.CloneEncryptedReasoning(rt.EncryptedReasoning),
 	}
 }
 
@@ -117,6 +119,10 @@ func (r *Resolver) Alias(name string) (config.Alias, bool) {
 
 func (r *Resolver) Model(providerName, modelName string) (config.Provider, config.Model, bool) {
 	return r.catalog.Model(providerName, modelName)
+}
+
+func (r *Resolver) EncryptedReasoning(provider config.Provider, model config.Model, alias *config.Alias) config.EncryptedReasoningResolution {
+	return config.ResolveEncryptedReasoning(r.encryptedReasoning, provider, model, alias)
 }
 
 func (r *Resolver) Resolve(publicModel string) (ResolveResult, error) {

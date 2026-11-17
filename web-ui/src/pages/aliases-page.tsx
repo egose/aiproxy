@@ -19,14 +19,16 @@ import { createTypedDialog, useDialog } from '@egose/shadcn-theme/components/wid
 import { ActionMenu } from '@egose/shadcn-theme/components/widgets/action-menu';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { FormProvider, useForm } from 'react-hook-form';
+import { Controller, FormProvider, useForm, useFormContext } from 'react-hook-form';
 import { Link } from 'react-router';
 import { z } from 'zod';
 import { DataTable, type ManagementColumnDef } from '../components/data-table';
 import { useConfirm } from '../components/dialogs';
+import { EncryptedReasoningControl, ReasoningPolicyReadOnly } from '../components/encrypted-reasoning-control';
 import { SourceBadge } from '../components/source-badge';
 import { WorkspaceBadge } from '../components/workspace-select';
 import { useAdminAliases, useAdminSession, useAdminStatus, useSnapshot } from '../hooks';
+import { reasoningDeclaration, reasoningDraft, reasoningDraftSchema } from '../lib/encrypted-reasoning-form';
 import { createAdminAlias, deleteAdminAlias, updateAdminAlias } from '../services/admin';
 import { errorMessage } from '../services/dashboard';
 import type { AdminAlias } from '../types';
@@ -100,10 +102,7 @@ const aliasFormSchema = z
     shorthandModel: z.string().optional(),
     useAffinity: z.boolean().optional(),
     affinityHeaders: z.string().optional(),
-    useReasoning: z.boolean().optional(),
-    reasoningPassthrough: z.boolean().optional(),
-    reasoningMismatch: z.string().optional(),
-    reasoningMessages: z.string().optional(),
+    reasoning: reasoningDraftSchema,
   })
   .superRefine((values, ctx) => {
     const shorthand = (values.shorthandProviders ?? '').trim() !== '' || (values.shorthandModel ?? '').trim() !== '';
@@ -144,10 +143,7 @@ const emptyAliasForm = (): AliasFormValues => ({
   shorthandModel: '',
   useAffinity: false,
   affinityHeaders: '',
-  useReasoning: false,
-  reasoningPassthrough: true,
-  reasoningMismatch: '',
-  reasoningMessages: '',
+  reasoning: reasoningDraft(),
 });
 
 function aliasToFormValues(a: AdminAlias): AliasFormValues {
@@ -160,14 +156,11 @@ function aliasToFormValues(a: AdminAlias): AliasFormValues {
     shorthandModel: '',
     useAffinity: a.session_affinity != null,
     affinityHeaders: (a.session_affinity?.headers ?? []).join(', '),
-    useReasoning: a.encrypted_reasoning != null,
-    reasoningPassthrough: a.encrypted_reasoning?.passthrough ?? true,
-    reasoningMismatch: a.encrypted_reasoning?.on_caller_mismatch ?? '',
-    reasoningMessages: (a.encrypted_reasoning?.match_messages ?? []).join('\n'),
+    reasoning: reasoningDraft(a.encrypted_reasoning),
   };
 }
 
-function buildAliasBody(v: AliasFormValues): Record<string, unknown> {
+function buildAliasBody(v: AliasFormValues, initial?: AliasFormValues): Record<string, unknown> {
   const body: Record<string, unknown> = { name: v.name.trim(), algorithm: v.algorithm ?? 'round_robin' };
   const codes = (v.retryCodes ?? '')
     .split(',')
@@ -191,20 +184,15 @@ function buildAliasBody(v: AliasFormValues): Record<string, unknown> {
       .filter(Boolean);
     body.session_affinity = { headers };
   }
-  if (v.useReasoning) {
-    const reasoning: Record<string, unknown> = { passthrough: v.reasoningPassthrough };
-    if ((v.reasoningMismatch ?? '').trim() !== '') reasoning.on_caller_mismatch = (v.reasoningMismatch ?? '').trim();
-    const messages = (v.reasoningMessages ?? '')
-      .split('\n')
-      .map((m) => m.trim())
-      .filter(Boolean);
-    if (messages.length > 0) reasoning.match_messages = messages;
-    body.encrypted_reasoning = reasoning;
+  const local = reasoningDeclaration(v.reasoning);
+  if (initial ? JSON.stringify(local) !== JSON.stringify(reasoningDeclaration(initial.reasoning)) : local !== null) {
+    body.encrypted_reasoning = local;
   }
   return body;
 }
 
-function AliasFields({ lockName }: { lockName: boolean }) {
+function AliasFields({ lockName, alias, disabled }: { lockName: boolean; alias?: AdminAlias; disabled: boolean }) {
+  const form = useFormContext<AliasFormValues>();
   return (
     <>
       <HookFormTextInput<AliasFormValues>
@@ -273,21 +261,28 @@ function AliasFields({ lockName }: { lockName: boolean }) {
         placeholder="x-session-id"
       />
 
-      <HookFormCheckbox<AliasFormValues> name="useReasoning" label="Encrypted reasoning handling" />
-
-      <HookFormCheckbox<AliasFormValues> name="reasoningPassthrough" label="Passthrough" />
-
-      <HookFormTextInput<AliasFormValues>
-        name="reasoningMismatch"
-        label="On caller mismatch (fail or strip_and_retry)"
-        placeholder="fail"
+      <Controller
+        control={form.control}
+        name="reasoning"
+        render={({ field, fieldState }) => (
+          <EncryptedReasoningControl
+            label="Alias encrypted reasoning"
+            value={field.value}
+            onChange={field.onChange}
+            view={alias}
+            scope="alias"
+            error={fieldState.error?.message}
+            disabled={disabled}
+          />
+        )}
       />
-
-      <HookFormTextarea<AliasFormValues>
-        name="reasoningMessages"
-        label="Match messages (one per line, optional)"
-        rows={3}
-      />
+      <p className="text-xs text-slate-500">
+        Unchanged policy is omitted on save to preserve its exact saved declaration. Inherit removes an existing alias
+        override; safe reset writes an explicit empty block. An explicit alias policy wins over every selected target
+        and keeps a stripped body through normal failover. Without one, each target uses its own policy against the
+        original admitted body. Recovery allows at most one extra attempt across the entire request, not one per target.
+        Root policy remains static configuration.
+      </p>
     </>
   );
 }
@@ -298,16 +293,18 @@ function AliasForm({
   onSubmit,
   onCancel,
   lockName,
+  alias,
 }: {
   initial: AliasFormValues;
   submitLabel: string;
   onSubmit: (body: Record<string, unknown>) => Promise<void>;
   onCancel?: () => void;
   lockName: boolean;
+  alias?: AdminAlias;
 }) {
   const form = useForm<AliasFormValues>({ resolver: zodResolver(aliasFormSchema), defaultValues: initial });
   const submitMutation = useMutation({
-    mutationFn: async (values: AliasFormValues) => onSubmit(buildAliasBody(values)),
+    mutationFn: async (values: AliasFormValues) => onSubmit(buildAliasBody(values, lockName ? initial : undefined)),
   });
 
   return (
@@ -319,7 +316,7 @@ function AliasForm({
           </Alert>
         )}
 
-        <AliasFields lockName={lockName} />
+        <AliasFields lockName={lockName} alias={alias} disabled={submitMutation.isPending} />
 
         <div className="flex gap-2">
           <Button variant="primary" type="submit" disabled={submitMutation.isPending}>
@@ -369,12 +366,13 @@ const EditAliasDialog = createTypedDialog<{ alias: AdminAlias }, boolean>(({ ope
     <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-auto sm:max-w-2xl">
       <DialogHeader>
         <DialogTitle>Edit alias alias/{args.alias.name}</DialogTitle>
-        <DialogDescription>Saving applies immediately.</DialogDescription>
+        <DialogDescription>Saves update managed configuration; activation failures are reported.</DialogDescription>
       </DialogHeader>
 
       <AliasForm
         key={`edit-${args.alias.name}`}
         initial={aliasToFormValues(args.alias)}
+        alias={args.alias}
         submitLabel="Save changes"
         lockName
         onSubmit={async (body) => {
@@ -474,6 +472,17 @@ function ManagedAliases() {
           <span className="font-mono text-xs text-slate-500">
             {row.original.targets.map((t) => `${t.provider}/${t.model}`).join(', ')}
           </span>
+        ),
+      },
+      {
+        id: 'reasoning',
+        header: 'Encrypted reasoning',
+        enableGlobalFilter: false,
+        cell: ({ row }) => (
+          <details className="grid gap-2">
+            <summary className="cursor-pointer text-sm">Policy (read-only)</summary>
+            <ReasoningPolicyReadOnly label="Alias policy" view={row.original} scope="alias" />
+          </details>
         ),
       },
       {

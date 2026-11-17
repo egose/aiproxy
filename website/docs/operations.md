@@ -105,7 +105,7 @@ subcommands can also be used directly.
 
 Supported workflows:
 
-- create or update `listener`, root `upstream_header_timeout`, `auth`, `provider`, `alias`, `logging`, and `provider_health`
+- create or update `listener`, root `upstream_header_timeout`/`encrypted_reasoning`, `auth`, `provider`, `alias`, `logging`, and `provider_health`
 - update provider secrets when using `api_key_ref`
 - delete existing blocks with `--delete`
 
@@ -256,6 +256,71 @@ Delete examples:
 aiproxy configure provider --config /etc/aiproxy/config.hcl --delete --name backup
 aiproxy configure alias --config /etc/aiproxy/config.hcl --delete --name chat_default
 ```
+
+### Editing Encrypted Reasoning Policies
+
+The existing `configure upstream` command edits root policy; `configure provider`
+edits provider policy and selected models; `configure alias` edits alias policy.
+Interactive choices distinguish **preserve, inherit/remove, reset, override**.
+There is no separate root/model command. For all three commands:
+
+| Flag                                                             | Edit                                                                                                 |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `--encrypted-reasoning-passthrough[=true\|false]`                | Set the member; use `=false` to pre-strip.                                                           |
+| `--encrypted-reasoning-on-caller-mismatch fail\|strip_and_retry` | Set the member; `--encrypted-reasoning-on-caller-mismatch=` writes explicit `""` (fail).             |
+| `--encrypted-reasoning-match-message TEXT`                       | Repeat to replace the list; a single `--encrypted-reasoning-match-message=` writes `[]` (built-ins). |
+| `--no-encrypted-reasoning`                                       | Remove the local block and inherit.                                                                  |
+| `--reset-encrypted-reasoning`                                    | Write a present empty block (safe reset), not inheritance.                                           |
+
+Provider model controls use existing model names (including slash-separated names):
+
+| Flag                                   | Value                                                                                      |
+| -------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `--model-reasoning-passthrough`        | `name=true` or `name=false`                                                                |
+| `--model-reasoning-on-caller-mismatch` | `name=fail`, `name=strip_and_retry`, or `name=`                                            |
+| `--model-reasoning-match-message`      | `name=TEXT`; repeat per model to replace its list; a single `name=` selects `[]`/built-ins |
+| `--no-model-reasoning`                 | Model name; remove the local policy                                                        |
+| `--reset-model-reasoning`              | Model name; declare local empty reset                                                      |
+
+Repeat model flags for different models and quote values containing spaces.
+Duplicate scalar/control edits for one model reject. Remove/reset/member edits
+conflict within the same scope/model; an empty pattern entry cannot be combined
+with other entries. Pattern normalization and 16-entry/4–256-byte bounds are
+checked before publication. The two scope-level boolean remove/reset flags set
+to `=false` are no-ops; model controls take names, not booleans.
+
+With the [complete scoped example](configuration.md#scoped-encrypted-reasoning)
+saved as `config.hcl` and its environment variables set:
+
+```sh
+aiproxy configure upstream --config config.hcl --non-interactive \
+  --encrypted-reasoning-on-caller-mismatch strip_and_retry
+aiproxy configure provider --config config.hcl --non-interactive --name secondary \
+  --model-reasoning-passthrough chat=false \
+  --model-reasoning-match-message 'chat=caller binding mismatch'
+aiproxy configure provider --config config.hcl --non-interactive --name secondary \
+  --reset-model-reasoning chat
+aiproxy configure alias --config config.hcl --non-interactive --name safe_pool \
+  --no-encrypted-reasoning
+```
+
+Omitted edit flags preserve local intent exactly. Member edits preserve untouched
+members of an existing local block, unlike an admin API whole-object replacement.
+New blocks use built-ins for omitted members, never copy effective lower-layer
+values. Policy-only root edits need no timeout flag.
+
+Editing stays **HCL-only**, preserves untouched `env()` spelling and supported
+comments, and validates before publishing; invalid edits do not change config or
+staged secrets. HCL/JSON conversion instead resolves `env()` at conversion time,
+while retaining absent/reset/false distinctions. Changes activate only after
+restart or successful `SIGHUP`.
+
+Model controls alone never create definitions. On a derivative, they create
+only sparse existing-name reasoning overlays using a valid, loadable base
+inventory; they cannot repair a partial/invalid base, redefine models or relax
+credential/chain/deferred restrictions. Removing the last reasoning block removes
+a reasoning-only child model overlay, but retains a deferred sibling block.
+Inherited model policies still outrank child provider policies.
 
 ### Configuring Provider TLS Profiles
 
@@ -444,6 +509,7 @@ build` from the `website` directory.
 - root and provider upstream header timeouts
 - provider TLS ClientHello selections and custom recipe contents
 - alias routing state
+- root/provider/model/alias encrypted-reasoning policies
 - access-log enablement
 - payload-log configuration
 - metrics configuration
@@ -467,6 +533,13 @@ even if the source file was replaced. No custom-file reads occur on requests.
 Alias cooldown deadlines survive reload only for fingerprint-unchanged targets
 (resolved `base_url`, credential, upstream model, protocol); removed or changed
 targets are dropped, and failed reloads leave state untouched.
+
+Reasoning policies resolve from the admitted runtime snapshot. New admissions use
+the new policy after activation; admitted direct/alias requests, their recovery/
+failover attempts and established streams retain the old snapshot. A failed
+candidate leaves the old runtime intact. Stripping is lossy, not decryption;
+[recovery gates and attempt limits](providers-and-routing.md#scoped-encrypted-reasoning)
+remain in force across reload.
 
 When multi-tenancy is enabled, database-backed providers, aliases, and
 inbound keys merge into the serving catalog on the same reload path (and
@@ -506,6 +579,37 @@ edit was saved and activation succeeded, but the response view failed; read curr
 state before retrying, especially before repeating a create. These outcomes do not
 promise a distributed transaction between the database and running proxies.
 
+### Managed Reasoning Policy Storage And Activation
+
+Existing databases require `aiproxy migrate up` for the additive nullable
+provider/model policy columns. The migration does not rewrite/delete old model
+rows. Store only local intent: SQL NULL for absence, `{}` for reset and sparse
+objects for overrides. Stored JSON null is treated as absence; new writes use
+SQL NULL. Pre-feature derivative model rows with null policy remain inert legacy
+rows, not new model definitions or overlays.
+
+Malformed stored policies, forbidden active overlays or a base-model removal
+that leaves an overlay dangling reject startup/reload; the old runtime survives
+a failed reload. This is not a silent corruption fallback. Correct the saved
+declaration/base inventory and reload. Credential-only edits preserve policies
+and cannot be used to change them.
+
+The admin API exposes the full inherited model inventory, nullable local intent
+and normalized effective/source/inherited metadata. Omitted provider/alias policy
+preserves it, null removes it, and an object replaces it wholesale. In contrast,
+omitted **or null `models` preserves the whole collection**; arrays replace
+local definitions/overlays. Read-only inherited GET definitions must not be
+submitted as local derivative definitions. See
+[the exact managed update contract](api-reference.md#encrypted-reasoning-policy-intent).
+
+Metadata describes saved intent, not successful activation. Durable provider/
+credential saves carry `X-Aiproxy-Catalog-Saved: true`, including saved-but-
+activation-failed outcomes; old serving state remains active on failure.
+Activation applies only to the receiving instance, with no cluster broadcast.
+Root remains static configuration and existing RBAC is unchanged. Managed
+provider/model/alias web forms offer inherit, safe reset and sparse custom
+policy controls; static rows expose read-only local intent and effective context.
+
 Use reload for routing and auth changes, not for socket-level listener changes.
 
 ### Editing Database Providers In The Web UI
@@ -530,6 +634,22 @@ transport and healthcheck rather than asking for local model rows. Type must mat
 the static base; display name and credentials remain local, with a blank display
 name falling back to the base. The database provider's Enabled flag remains local.
 Clearing Extends requires valid local settings and models before saving.
+
+Provider and model encrypted-reasoning controls edit **local declarations**, not
+effective metadata. Unchanged provider policy and model collections are omitted.
+Inherit removes a local provider block with null; Safe reset writes `{}`; Custom
+sends only declared members, preserving explicit false, empty mismatch strings,
+empty lists and retained raw pattern spelling. Omitted members use built-ins,
+not lower-layer values. Pattern validation checks normalized UTF-8 byte lengths
+(4–256), at most 16 entries and normalized uniqueness before sending a write;
+blank pattern lines are errors, while a deliberately empty list selects built-ins.
+
+Inherited models keep their definitions read-only while allowing existing-name
+local reasoning overlays. Replacement arrays retain other local policies and
+send only name+policy overlays for derivatives; clearing all overlays sends `[]`
+without deleting inherited inventory. Policy-bearing concrete/derived transitions
+require confirmation of the destination model/overlay array. Saved effective/
+source/inherited context is read-only, not an unsaved preview or proof of activation.
 
 TLS ClientHello choices come from provider-type `tls_client_hello_selectors`
 metadata: native, bundled Chrome 133/Safari 16.0 and their approved aliases.
@@ -565,6 +685,17 @@ Alternatively, supply comma-separated provider names and one full model name in
 the shorthand fields. The same naming rules apply; list each provider once with
 no empty comma entries. Clear explicit targets before using shorthand, and supply
 both shorthand fields. Saved shorthand reopens as the equivalent full target list.
+
+Alias encrypted-reasoning controls share the provider/model local-member validation
+and inherit/reset/custom behavior. Unchanged policies are omitted even when routing
+fields change, preserving the exact saved declaration. Inherit explicitly sends
+null to remove an override; Safe reset sends `{}`, not an absent declaration.
+Without an alias block, saved context is **target-dependent**, not a built-in,
+global or first-target policy. An explicit alias block wins over selected targets
+and retains stripped bodies through normal failover; otherwise each target evaluates
+the original admitted body with its own policy. Recovery permits only one extra
+attempt across the whole request. Read-only context describes saved state, not
+unsaved edits or proof of runtime activation.
 
 ## Database Key Spend And Quota Resets
 

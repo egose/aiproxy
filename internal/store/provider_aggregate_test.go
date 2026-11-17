@@ -9,6 +9,12 @@ import (
 	"github.com/google/uuid"
 )
 
+func sameStoredProvider(a, b DBProvider) bool {
+	a.CreatedAt, a.UpdatedAt = a.CreatedAt.UTC(), a.UpdatedAt.UTC()
+	b.CreatedAt, b.UpdatedAt = b.CreatedAt.UTC(), b.UpdatedAt.UTC()
+	return reflect.DeepEqual(a, b)
+}
+
 func TestProviderAggregateRollback(t *testing.T) {
 	st := openInviteTestStore(t)
 	ctx := context.Background()
@@ -127,7 +133,7 @@ func TestProviderAggregateConcurrentCredentials(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(current, locked) {
+			if !sameStoredProvider(current, locked) {
 				t.Fatal("stale writer overwrote current state")
 			}
 			current.APIKeyEncrypted = []byte("retry credential")

@@ -23,12 +23,16 @@ import (
 )
 
 type adminModelView struct {
-	Name         string             `json:"name"`
-	DisplayName  string             `json:"display_name,omitempty"`
-	UpstreamName string             `json:"upstream_name,omitempty"`
-	Protocol     string             `json:"protocol,omitempty"`
-	Capabilities []string           `json:"capabilities,omitempty"`
-	Pricing      map[string]float64 `json:"pricing,omitempty"`
+	Name                        string                                `json:"name"`
+	DisplayName                 string                                `json:"display_name,omitempty"`
+	UpstreamName                string                                `json:"upstream_name,omitempty"`
+	Protocol                    string                                `json:"protocol,omitempty"`
+	Capabilities                []string                              `json:"capabilities,omitempty"`
+	Pricing                     map[string]float64                    `json:"pricing,omitempty"`
+	EncryptedReasoning          *config.EncryptedReasoningDeclaration `json:"encrypted_reasoning"`
+	EncryptedReasoningEffective adminEncryptedReason                  `json:"encrypted_reasoning_effective"`
+	EncryptedReasoningSource    config.EncryptedReasoningSource       `json:"encrypted_reasoning_source"`
+	EncryptedReasoningInherited bool                                  `json:"encrypted_reasoning_inherited"`
 }
 
 type adminHealthcheckView struct {
@@ -44,34 +48,39 @@ type adminHealthcheckView struct {
 }
 
 type adminProviderView struct {
-	Name                     string                `json:"name"`
-	Type                     string                `json:"type"`
-	DisplayName              string                `json:"display_name,omitempty"`
-	BaseURL                  string                `json:"base_url,omitempty"`
-	TLSClientHello           string                `json:"tls_client_hello"`
-	TLSClientHelloEffective  string                `json:"tls_client_hello_effective"`
-	TLSClientHelloInherited  bool                  `json:"tls_client_hello_inherited"`
-	TLSClientHelloStaticOnly bool                  `json:"tls_client_hello_static_only"`
-	UpstreamHeaderTimeout    string                `json:"upstream_header_timeout,omitempty"`
-	UserAgent                string                `json:"user_agent,omitempty"`
-	ForwardUserAgent         bool                  `json:"forward_user_agent"`
-	ForwardHeaders           []string              `json:"forward_headers,omitempty"`
-	ForwardAuthorization     bool                  `json:"forward_authorization"`
-	AllowInsecureBaseURL     bool                  `json:"allow_insecure_base_url"`
-	Extends                  string                `json:"extends,omitempty"`
-	APIKeyRefPath            string                `json:"api_key_ref_path,omitempty"`
-	APIKeyRefKey             string                `json:"api_key_ref_key,omitempty"`
-	CopilotCredentialPath    string                `json:"copilot_credential_path,omitempty"`
-	CopilotCredentialName    string                `json:"copilot_credential_name,omitempty"`
-	CopilotCredentialSource  string                `json:"copilot_credential_source,omitempty"`
-	UpdatedAt                string                `json:"updated_at,omitempty"`
-	Enabled                  bool                  `json:"enabled"`
-	Source                   string                `json:"source"`
-	WorkspaceID              string                `json:"workspace_id,omitempty"`
-	WorkspaceName            string                `json:"workspace_name,omitempty"`
-	HasCredential            bool                  `json:"has_credential"`
-	Healthcheck              *adminHealthcheckView `json:"healthcheck,omitempty"`
-	Models                   []adminModelView      `json:"models"`
+	Name                        string                                `json:"name"`
+	Type                        string                                `json:"type"`
+	DisplayName                 string                                `json:"display_name,omitempty"`
+	BaseURL                     string                                `json:"base_url,omitempty"`
+	TLSClientHello              string                                `json:"tls_client_hello"`
+	TLSClientHelloEffective     string                                `json:"tls_client_hello_effective"`
+	TLSClientHelloInherited     bool                                  `json:"tls_client_hello_inherited"`
+	TLSClientHelloStaticOnly    bool                                  `json:"tls_client_hello_static_only"`
+	UpstreamHeaderTimeout       string                                `json:"upstream_header_timeout,omitempty"`
+	UserAgent                   string                                `json:"user_agent,omitempty"`
+	ForwardUserAgent            bool                                  `json:"forward_user_agent"`
+	ForwardHeaders              []string                              `json:"forward_headers,omitempty"`
+	ForwardAuthorization        bool                                  `json:"forward_authorization"`
+	AllowInsecureBaseURL        bool                                  `json:"allow_insecure_base_url"`
+	Extends                     string                                `json:"extends,omitempty"`
+	APIKeyRefPath               string                                `json:"api_key_ref_path,omitempty"`
+	APIKeyRefKey                string                                `json:"api_key_ref_key,omitempty"`
+	CopilotCredentialPath       string                                `json:"copilot_credential_path,omitempty"`
+	CopilotCredentialName       string                                `json:"copilot_credential_name,omitempty"`
+	CopilotCredentialSource     string                                `json:"copilot_credential_source,omitempty"`
+	UpdatedAt                   string                                `json:"updated_at,omitempty"`
+	Enabled                     bool                                  `json:"enabled"`
+	Source                      string                                `json:"source"`
+	WorkspaceID                 string                                `json:"workspace_id,omitempty"`
+	WorkspaceName               string                                `json:"workspace_name,omitempty"`
+	HasCredential               bool                                  `json:"has_credential"`
+	Healthcheck                 *adminHealthcheckView                 `json:"healthcheck,omitempty"`
+	Models                      []adminModelView                      `json:"models"`
+	EncryptedReasoning          *config.EncryptedReasoningDeclaration `json:"encrypted_reasoning"`
+	EncryptedReasoningEffective adminEncryptedReason                  `json:"encrypted_reasoning_effective"`
+	EncryptedReasoningSource    config.EncryptedReasoningSource       `json:"encrypted_reasoning_source"`
+	EncryptedReasoningInherited bool                                  `json:"encrypted_reasoning_inherited"`
+	ModelsInherited             bool                                  `json:"models_inherited"`
 }
 
 func copilotCredentialSource(providerType string, encrypted []byte, refPath, refName string) string {
@@ -194,11 +203,11 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 			return
 		case http.MethodPost:
 			var req adminProviderUpsert
-			if err := json.NewDecoder(ioLimitReader(r)).Decode(&req); err != nil {
+			if err := decodeAdminCatalogBody(r, &req); err != nil {
 				http.Error(w, "invalid body", http.StatusBadRequest)
 				return
 			}
-			if err := validateManagedDeferredDeclarations(strings.TrimSpace(req.Name), req.hasDeferredDeclarations()); err != nil {
+			if err := validateAdminProviderInput(req); err != nil {
 				writeCatalogError(deps, w, err)
 				return
 			}
@@ -233,7 +242,7 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 			return
 		}
 		var req adminCredentialUpsert
-		if err := json.NewDecoder(ioLimitReader(r)).Decode(&req); err != nil {
+		if err := decodeAdminCatalogBody(r, &req); err != nil {
 			http.Error(w, "invalid body", http.StatusBadRequest)
 			return
 		}
@@ -268,7 +277,7 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 		http.Error(w, "provider not found", http.StatusNotFound)
 	case http.MethodPut:
 		var req adminProviderUpsert
-		if err := json.NewDecoder(ioLimitReader(r)).Decode(&req); err != nil {
+		if err := decodeAdminCatalogBody(r, &req); err != nil {
 			http.Error(w, "invalid body", http.StatusBadRequest)
 			return
 		}
@@ -321,7 +330,10 @@ type adminModelUpsert struct {
 	Protocol                       string             `json:"protocol"`
 	Capabilities                   []string           `json:"capabilities"`
 	Pricing                        map[string]float64 `json:"pricing"`
+	EncryptedReasoning             json.RawMessage    `json:"encrypted_reasoning"`
 	unsupportedDeferredDeclaration bool
+	declaredFields                 []string
+	inputJSONError                 error
 }
 
 func (req *adminModelUpsert) UnmarshalJSON(raw []byte) error {
@@ -331,6 +343,7 @@ func (req *adminModelUpsert) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	if err := visitAdminJSONFields(raw, func(name string, _ json.RawMessage) error {
+		decoded.declaredFields = append(decoded.declaredFields, name)
 		if isDeferredJSONDeclaration(name) {
 			decoded.unsupportedDeferredDeclaration = true
 		}
@@ -338,6 +351,7 @@ func (req *adminModelUpsert) UnmarshalJSON(raw []byte) error {
 	}); err != nil {
 		return err
 	}
+	decoded.inputJSONError = adminJSONKeyError(raw, adminModelWritableFields)
 	*req = adminModelUpsert(decoded)
 	return nil
 }
@@ -388,8 +402,10 @@ type adminProviderUpsert struct {
 	Extends                        *string                   `json:"extends"`
 	Healthcheck                    *adminHealthcheckUpsert   `json:"healthcheck"`
 	Models                         *[]adminModelUpsert       `json:"models"`
+	EncryptedReasoning             json.RawMessage           `json:"encrypted_reasoning"`
 	unsupportedTLSDeclaration      bool
 	unsupportedDeferredDeclaration bool
+	inputJSONError                 error
 }
 
 func (req *adminProviderUpsert) UnmarshalJSON(raw []byte) error {
@@ -416,6 +432,7 @@ func (req *adminProviderUpsert) UnmarshalJSON(raw []byte) error {
 	}); err != nil {
 		return err
 	}
+	decoded.inputJSONError = adminJSONKeyErrorWithCompatibility(raw, adminProviderWritableFields, []string{"tls_client_hello"}, false)
 	*req = adminProviderUpsert(decoded)
 	return nil
 }
@@ -435,13 +452,15 @@ func (req adminProviderUpsert) hasDeferredDeclarations() bool {
 }
 
 type adminCredentialUpsert struct {
-	APIKey                         *string `json:"api_key"`
-	APIKeyRefPath                  *string `json:"api_key_ref_path"`
-	APIKeyRefKey                   *string `json:"api_key_ref_key"`
-	CopilotCredentialPath          *string `json:"copilot_credential_path"`
-	CopilotCredentialName          *string `json:"copilot_credential_name"`
-	unsupportedTLSDeclaration      bool
-	unsupportedDeferredDeclaration bool
+	APIKey                          *string `json:"api_key"`
+	APIKeyRefPath                   *string `json:"api_key_ref_path"`
+	APIKeyRefKey                    *string `json:"api_key_ref_key"`
+	CopilotCredentialPath           *string `json:"copilot_credential_path"`
+	CopilotCredentialName           *string `json:"copilot_credential_name"`
+	unsupportedTLSDeclaration       bool
+	unsupportedDeferredDeclaration  bool
+	unsupportedReasoningDeclaration bool
+	inputJSONError                  error
 }
 
 func (req *adminCredentialUpsert) UnmarshalJSON(raw []byte) error {
@@ -457,6 +476,9 @@ func (req *adminCredentialUpsert) UnmarshalJSON(raw []byte) error {
 		if isDeferredJSONDeclaration(name) {
 			decoded.unsupportedDeferredDeclaration = true
 		}
+		if jsonFieldHasPrefix(name, "encrypted_reasoning") || jsonFieldHasPrefix(name, "models") {
+			decoded.unsupportedReasoningDeclaration = true
+		}
 		if strings.EqualFold(name, "models") {
 			declared, err := deferredModelJSONDeclarations(value)
 			if err != nil {
@@ -468,6 +490,7 @@ func (req *adminCredentialUpsert) UnmarshalJSON(raw []byte) error {
 	}); err != nil {
 		return err
 	}
+	decoded.inputJSONError = adminJSONKeyErrorWithCompatibility(raw, adminCredentialWritableFields, strings.Fields(adminCredentialWritableFields), true)
 	*req = adminCredentialUpsert(decoded)
 	return nil
 }
@@ -563,18 +586,33 @@ type dbHealthcheck struct {
 }
 
 func (h *Handler) isStaticProvider(deps Dependencies, name string) bool {
-	_, ok := deps.Catalog.Provider(name)
-	return ok
+	if provider, ok := deps.Catalog.Provider(name); ok {
+		return !provider.DatabaseManaged
+	}
+	for _, provider := range deps.Catalog.DisabledProviders() {
+		if provider.Name == name {
+			return !provider.DatabaseManaged
+		}
+	}
+	return false
 }
 
 func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, filterWorkspace string) ([]adminProviderView, error) {
 	visible, _ := h.visibleWorkspaceIDs(deps, r, claims)
 	names := h.workspaceNameMap(deps, r, claims)
+	inventory, err := loadAdminProviderInventory(ctx, deps)
+	if err != nil {
+		return nil, err
+	}
 	views := map[string]*adminProviderView{}
 	if h.canSeeSystemWorkspace(deps, r, claims, filterWorkspace) {
 		for _, p := range deps.Catalog.Providers() {
-			mv := adminProviderView{Name: p.Name, Type: string(p.Type), DisplayName: p.DisplayName, BaseURL: p.BaseURL, Enabled: true, Source: "config", HasCredential: true}
+			if _, managed := inventory.rowsByName[p.Name]; managed || p.DatabaseManaged {
+				continue
+			}
+			mv := adminProviderView{Name: p.Name, Type: string(p.Type), DisplayName: p.DisplayName, BaseURL: p.BaseURL, Extends: p.Extends, Enabled: true, Source: "config", HasCredential: true}
 			setProviderTLSView(&mv, p)
+			setProviderReasoningView(deps, &mv, p)
 			if p.UpstreamHeaderTimeout > 0 {
 				mv.UpstreamHeaderTimeout = p.UpstreamHeaderTimeout.String()
 			}
@@ -592,33 +630,18 @@ func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r 
 					SendAuthorization: p.Healthcheck.SendAuthorization,
 				}
 			}
-			for _, m := range p.Models {
-				caps := make([]string, 0, len(m.Capabilities))
-				for _, c := range m.Capabilities {
-					caps = append(caps, string(c))
-				}
-				mv.Models = append(mv.Models, adminModelView{Name: m.Name, DisplayName: m.DisplayName, UpstreamName: m.UpstreamName, Protocol: string(m.Protocol), Capabilities: caps, Pricing: modelPricingView(m.Pricing)})
-			}
 			v := mv
 			views[p.Name] = &v
 		}
 	}
-	rows, err := deps.AdminStore.ListProviders(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rowsByName := make(map[string]store.DBProvider, len(rows))
-	for _, p := range rows {
-		rowsByName[p.Name] = p
-	}
-	for _, p := range rows {
+	for _, p := range inventory.rows {
 		if filterWorkspace != "" && p.WorkspaceID.String() != filterWorkspace {
 			continue
 		}
 		if visible != nil && !visible[p.WorkspaceID.String()] {
 			continue
 		}
-		models, err := deps.AdminStore.ListProviderModels(ctx, p.ID)
+		provider, err := inventory.provider(ctx, p.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -638,14 +661,8 @@ func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r 
 			HasCredential: len(p.APIKeyEncrypted) > 0 || p.APIKeyRefKey != "" || p.CopilotCredentialName != "" || len(p.CopilotCredentialEncrypted) > 0,
 			Healthcheck:   providerHealthcheckView(p.Healthcheck),
 		}
-		tlsProvider, err := managedProviderTLSMetadata(p, rowsByName, deps.Catalog)
-		if err != nil {
-			return nil, err
-		}
-		setProviderTLSView(&mv, tlsProvider)
-		for _, m := range models {
-			mv.Models = append(mv.Models, adminModelView{Name: m.Name, DisplayName: m.DisplayName, UpstreamName: m.UpstreamName, Protocol: m.Protocol, Capabilities: append([]string(nil), m.Capabilities...), Pricing: providerModelPricingView(m.Pricing)})
-		}
+		setProviderTLSView(&mv, provider)
+		setProviderReasoningView(deps, &mv, provider)
 		v := mv
 		views[p.Name] = &v
 	}
@@ -816,6 +833,9 @@ func (h *Handler) validateExtends(deps Dependencies, name, extends, providerType
 	if string(base.Type) != providerType {
 		return fmt.Errorf("provider %q: type %q must match base provider %q type %q", name, providerType, extends, base.Type)
 	}
+	if base.Extends != "" {
+		return fmt.Errorf("provider %q: extends %q must reference a concrete provider; inheritance chains are not supported", name, extends)
+	}
 	base.Name = name
 	if err := config.ValidateManagedProviderDeferred(base); err != nil {
 		return err
@@ -836,7 +856,7 @@ func (h *Handler) buildConfigProvider(deps Dependencies, row store.DBProvider, m
 
 func (h *Handler) createDBProvider(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, workspace store.Workspace, req adminProviderUpsert) (adminProviderView, error) {
 	name := strings.TrimSpace(req.Name)
-	if err := validateManagedDeferredDeclarations(name, req.hasDeferredDeclarations()); err != nil {
+	if err := validateAdminProviderInput(req); err != nil {
 		return adminProviderView{}, err
 	}
 	if !config.IsLowercaseName(name) {
@@ -868,18 +888,8 @@ func (h *Handler) createDBProvider(ctx context.Context, deps Dependencies, r *ht
 	if flowID := trimmedOrEmpty(req.CopilotDeviceFlowID); flowID != "" {
 		return h.createDBProviderWithFlow(ctx, deps, claims, req, &row, flowID)
 	}
-	if err := h.validateExtends(deps, name, row.Extends, providerType); err != nil {
-		return adminProviderView{}, err
-	}
-	models, err := h.buildDBModels(name, req.Models)
+	_, models, err := h.prepareDBProvider(ctx, deps, nil, row, req)
 	if err != nil {
-		return adminProviderView{}, err
-	}
-	cfgProvider, err := h.buildConfigProvider(deps, row, models)
-	if err != nil {
-		return adminProviderView{}, err
-	}
-	if err := config.ValidateDynamicProvider(cfgProvider); err != nil {
 		return adminProviderView{}, err
 	}
 	if err := deps.AdminStore.CreateProviderAggregate(ctx, &row, models); err != nil {
@@ -940,9 +950,6 @@ func (h *Handler) createDBProviderWithFlow(ctx context.Context, deps Dependencie
 	if flowCredentialConflict(req) {
 		return adminProviderView{}, errBad("copilot_device_flow_id cannot be combined with a credential")
 	}
-	if err := h.validateExtends(deps, name, row.Extends, row.Type); err != nil {
-		return adminProviderView{}, err
-	}
 	snapshot, err := h.readyFlowSnapshot(ctx, deps, claims, flowID)
 	if err != nil {
 		return adminProviderView{}, err
@@ -950,15 +957,8 @@ func (h *Handler) createDBProviderWithFlow(ctx context.Context, deps Dependencie
 	if err := snapshot.AttachCredential(row); err != nil {
 		return adminProviderView{}, errBad("device flow does not authorize this provider")
 	}
-	models, err := h.buildDBModels(name, req.Models)
+	_, models, err := h.prepareDBProvider(ctx, deps, nil, *row, req)
 	if err != nil {
-		return adminProviderView{}, err
-	}
-	cfgProvider, err := h.buildConfigProvider(deps, *row, models)
-	if err != nil {
-		return adminProviderView{}, err
-	}
-	if err := config.ValidateDynamicProvider(cfgProvider); err != nil {
 		return adminProviderView{}, err
 	}
 	if err := deps.AdminStore.ConsumeCopilotFlow(ctx, snapshot, row, &models); err != nil {
@@ -999,9 +999,6 @@ func (h *Handler) updateDBProviderWithFlow(ctx context.Context, deps Dependencie
 	if candidate.Type != "github-copilot" {
 		return adminProviderView{}, errBad("copilot_device_flow_id is only supported by github-copilot")
 	}
-	if err := h.validateExtends(deps, name, candidate.Extends, candidate.Type); err != nil {
-		return adminProviderView{}, err
-	}
 	snapshot, err := h.readyFlowSnapshot(ctx, deps, claims, flowID)
 	if err != nil {
 		return adminProviderView{}, err
@@ -1009,23 +1006,8 @@ func (h *Handler) updateDBProviderWithFlow(ctx context.Context, deps Dependencie
 	if err := snapshot.AttachCredential(&candidate); err != nil {
 		return adminProviderView{}, errBad("device flow does not authorize this provider")
 	}
-	var models []store.DBProviderModel
-	if req.Models != nil {
-		models, err = h.buildDBModels(name, req.Models)
-		if err != nil {
-			return adminProviderView{}, err
-		}
-	} else {
-		models, err = deps.AdminStore.ListProviderModels(ctx, candidate.ID)
-		if err != nil {
-			return adminProviderView{}, catalogStorageError{err}
-		}
-	}
-	cfgProvider, err := h.buildConfigProvider(deps, candidate, models)
+	_, models, err := h.prepareDBProvider(ctx, deps, &current, candidate, req)
 	if err != nil {
-		return adminProviderView{}, err
-	}
-	if err := config.ValidateDynamicProvider(cfgProvider); err != nil {
 		return adminProviderView{}, err
 	}
 	var replacement *[]store.DBProviderModel
@@ -1045,8 +1027,16 @@ func (h *Handler) updateDBProviderWithFlow(ctx context.Context, deps Dependencie
 }
 
 func (h *Handler) applyProviderUpsert(name string, row *store.DBProvider, req adminProviderUpsert) error {
-	if err := validateManagedDeferredDeclarations(name, req.hasDeferredDeclarations()); err != nil {
+	if err := validateAdminProviderInput(req); err != nil {
 		return err
+	}
+	reasoning := row.EncryptedReasoning
+	if len(req.EncryptedReasoning) != 0 {
+		var err error
+		reasoning, err = encodeAdminEncryptedReasoning(req.EncryptedReasoning, fmt.Sprintf("provider %q", name))
+		if err != nil {
+			return err
+		}
 	}
 	extends := row.Extends
 	if req.Extends != nil {
@@ -1109,6 +1099,7 @@ func (h *Handler) applyProviderUpsert(name string, row *store.DBProvider, req ad
 	}
 	row.Extends = extends
 	row.TLSClientHello = selector
+	row.EncryptedReasoning = reasoning
 	if row.Extends != "" {
 		row.AllowInsecureBaseURL = false
 	}
@@ -1149,6 +1140,7 @@ func (h *Handler) buildDBModels(name string, reqModels *[]adminModelUpsert) ([]s
 		return nil, nil
 	}
 	models := make([]store.DBProviderModel, 0, len(*reqModels))
+	seen := make(map[string]bool, len(*reqModels))
 	for _, m := range *reqModels {
 		if err := validateManagedDeferredDeclarations(name, m.unsupportedDeferredDeclaration); err != nil {
 			return nil, err
@@ -1156,6 +1148,14 @@ func (h *Handler) buildDBModels(name string, reqModels *[]adminModelUpsert) ([]s
 		modelName := strings.TrimSpace(m.Name)
 		if modelName == "" {
 			return nil, errBad("model name is required")
+		}
+		if seen[modelName] {
+			return nil, fmt.Errorf("provider %q: duplicate model %q", name, modelName)
+		}
+		seen[modelName] = true
+		reasoning, err := encodeAdminEncryptedReasoning(m.EncryptedReasoning, fmt.Sprintf("provider %q: model %q", name, modelName))
+		if err != nil {
+			return nil, err
 		}
 		var pricingJSON []byte
 		if m.Pricing != nil {
@@ -1171,8 +1171,9 @@ func (h *Handler) buildDBModels(name string, reqModels *[]adminModelUpsert) ([]s
 		models = append(models, store.DBProviderModel{
 			Name: modelName, DisplayName: m.DisplayName,
 			UpstreamName: m.UpstreamName, Protocol: m.Protocol,
-			Capabilities: append([]string(nil), m.Capabilities...),
-			Pricing:      pricingJSON,
+			Capabilities:       append([]string(nil), m.Capabilities...),
+			Pricing:            pricingJSON,
+			EncryptedReasoning: reasoning,
 		})
 	}
 	return models, nil
@@ -1180,7 +1181,7 @@ func (h *Handler) buildDBModels(name string, reqModels *[]adminModelUpsert) ([]s
 
 func (h *Handler) updateDBProvider(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, req adminProviderUpsert) (adminProviderView, error) {
 	name := strings.TrimSpace(req.Name)
-	if err := validateManagedDeferredDeclarations(name, req.hasDeferredDeclarations()); err != nil {
+	if err := validateAdminProviderInput(req); err != nil {
 		return adminProviderView{}, err
 	}
 	p, err := deps.AdminStore.GetProvider(ctx, name)
@@ -1196,6 +1197,7 @@ func (h *Handler) updateDBProvider(ctx context.Context, deps Dependencies, r *ht
 	if !h.canWriteWorkspace(deps, ctx, claims, p.WorkspaceID) {
 		return adminProviderView{}, errBad("workspace admin required")
 	}
+	current := p
 	if req.Type != nil {
 		if !knownProviderType(strings.TrimSpace(*req.Type)) {
 			return adminProviderView{}, errBad("unknown provider type")
@@ -1208,26 +1210,8 @@ func (h *Handler) updateDBProvider(ctx context.Context, deps Dependencies, r *ht
 	if err := h.applyProviderUpsert(name, &p, req); err != nil {
 		return adminProviderView{}, err
 	}
-	if err := h.validateExtends(deps, name, p.Extends, p.Type); err != nil {
-		return adminProviderView{}, err
-	}
-	var models []store.DBProviderModel
-	if req.Models != nil {
-		models, err = h.buildDBModels(name, req.Models)
-		if err != nil {
-			return adminProviderView{}, err
-		}
-	} else {
-		models, err = deps.AdminStore.ListProviderModels(ctx, p.ID)
-		if err != nil {
-			return adminProviderView{}, catalogStorageError{err}
-		}
-	}
-	cfgProvider, err := h.buildConfigProvider(deps, p, models)
+	_, models, err := h.prepareDBProvider(ctx, deps, &current, p, req)
 	if err != nil {
-		return adminProviderView{}, err
-	}
-	if err := config.ValidateDynamicProvider(cfgProvider); err != nil {
 		return adminProviderView{}, err
 	}
 	var replacement *[]store.DBProviderModel
@@ -1256,6 +1240,12 @@ func (h *Handler) providerViewByName(ctx context.Context, deps Dependencies, r *
 func (h *Handler) setProviderCredential(ctx context.Context, deps Dependencies, claims *adminauth.Claims, name string, req adminCredentialUpsert) error {
 	if err := validateManagedDeferredDeclarations(name, req.unsupportedDeferredDeclaration); err != nil {
 		return err
+	}
+	if req.unsupportedReasoningDeclaration {
+		return fmt.Errorf("provider %q: encrypted_reasoning and models cannot be declared on a credential update", name)
+	}
+	if req.inputJSONError != nil && !req.unsupportedTLSDeclaration {
+		return req.inputJSONError
 	}
 	p, err := deps.AdminStore.GetProvider(ctx, name)
 	if err != nil {
@@ -1297,15 +1287,7 @@ func (h *Handler) setProviderCredential(ctx context.Context, deps Dependencies, 
 	if p.Type == "github-copilot" && (strings.TrimSpace(p.CopilotCredentialPath) != "" || strings.TrimSpace(p.CopilotCredentialName) != "") {
 		p.CopilotCredentialEncrypted = nil
 	}
-	models, err := deps.AdminStore.ListProviderModels(ctx, p.ID)
-	if err != nil {
-		return catalogStorageError{err}
-	}
-	cfgProvider, err := h.buildConfigProvider(deps, p, models)
-	if err != nil {
-		return err
-	}
-	if err := config.ValidateDynamicProvider(cfgProvider); err != nil {
+	if _, _, err := h.prepareDBProvider(ctx, deps, &p, p, adminProviderUpsert{}); err != nil {
 		return err
 	}
 	if err := deps.AdminStore.UpdateProvider(ctx, &p); err != nil {

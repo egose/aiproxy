@@ -26,6 +26,7 @@ func replaceProviderModels(ctx context.Context, tx bun.Tx, id uuid.UUID, models 
 	for _, model := range models {
 		model.ID = uuid.New()
 		model.ProviderID = id
+		model.EncryptedReasoning = nullableEncryptedReasoning(model.EncryptedReasoning)
 		if _, err := tx.NewInsert().Model(&model).Exec(ctx); err != nil {
 			return err
 		}
@@ -35,6 +36,7 @@ func replaceProviderModels(ctx context.Context, tx bun.Tx, id uuid.UUID, models 
 
 func createProviderAggregateTx(ctx context.Context, tx bun.Tx, p *DBProvider, models []DBProviderModel) (DBProvider, error) {
 	next := *p
+	next.EncryptedReasoning = nullableEncryptedReasoning(next.EncryptedReasoning)
 	next.ID = uuid.New()
 	next.CreatedAt = nextCatalogRevision(time.Time{})
 	next.UpdatedAt = next.CreatedAt
@@ -49,6 +51,7 @@ func createProviderAggregateTx(ctx context.Context, tx bun.Tx, p *DBProvider, mo
 
 func updateProviderAggregateTx(ctx context.Context, tx bun.Tx, p *DBProvider, models *[]DBProviderModel) (DBProvider, error) {
 	next := *p
+	next.EncryptedReasoning = nullableEncryptedReasoning(next.EncryptedReasoning)
 	next.UpdatedAt = nextCatalogRevision(p.UpdatedAt)
 	result, err := tx.NewUpdate().Model(&next).Where("id = ? AND updated_at = ?", p.ID, p.UpdatedAt).Exec(ctx)
 	if err != nil {

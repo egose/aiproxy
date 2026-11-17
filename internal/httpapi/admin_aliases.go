@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -20,15 +21,16 @@ type adminAliasTargetView struct {
 }
 
 type adminAliasView struct {
-	Name               string                 `json:"name"`
-	Algorithm          string                 `json:"algorithm"`
-	RetryStatusCodes   []int                  `json:"retry_status_codes,omitempty"`
-	SessionAffinity    *adminSessionAffinity  `json:"session_affinity,omitempty"`
-	EncryptedReasoning *adminEncryptedReason  `json:"encrypted_reasoning,omitempty"`
-	Source             string                 `json:"source"`
-	WorkspaceID        string                 `json:"workspace_id,omitempty"`
-	WorkspaceName      string                 `json:"workspace_name,omitempty"`
-	Targets            []adminAliasTargetView `json:"targets"`
+	Name                        string                                `json:"name"`
+	Algorithm                   string                                `json:"algorithm"`
+	RetryStatusCodes            []int                                 `json:"retry_status_codes,omitempty"`
+	SessionAffinity             *adminSessionAffinity                 `json:"session_affinity,omitempty"`
+	EncryptedReasoning          *config.EncryptedReasoningDeclaration `json:"encrypted_reasoning"`
+	EncryptedReasoningEffective *adminEncryptedReason                 `json:"encrypted_reasoning_effective"`
+	Source                      string                                `json:"source"`
+	WorkspaceID                 string                                `json:"workspace_id,omitempty"`
+	WorkspaceName               string                                `json:"workspace_name,omitempty"`
+	Targets                     []adminAliasTargetView                `json:"targets"`
 }
 
 type adminSessionAffinity struct {
@@ -37,8 +39,8 @@ type adminSessionAffinity struct {
 
 type adminEncryptedReason struct {
 	Passthrough      bool     `json:"passthrough"`
-	OnCallerMismatch string   `json:"on_caller_mismatch,omitempty"`
-	MatchMessages    []string `json:"match_messages,omitempty"`
+	OnCallerMismatch string   `json:"on_caller_mismatch"`
+	MatchMessages    []string `json:"match_messages"`
 }
 
 func (h *Handler) adminAliases(deps Dependencies, w http.ResponseWriter, r *http.Request, rest []string) {
@@ -50,7 +52,9 @@ func (h *Handler) adminAliases(deps Dependencies, w http.ResponseWriter, r *http
 	ctx := r.Context()
 	static := map[string]bool{}
 	for _, a := range deps.Catalog.Aliases() {
-		static[a.Name] = true
+		if !a.DatabaseManaged {
+			static[a.Name] = true
+		}
 	}
 	if len(rest) == 0 || rest[0] == "" {
 		switch r.Method {
@@ -68,7 +72,7 @@ func (h *Handler) adminAliases(deps Dependencies, w http.ResponseWriter, r *http
 			return
 		case http.MethodPost:
 			var req adminAliasUpsert
-			if err := json.NewDecoder(ioLimitReader(r)).Decode(&req); err != nil {
+			if err := decodeAdminCatalogBody(r, &req); err != nil {
 				http.Error(w, "invalid body", http.StatusBadRequest)
 				return
 			}
@@ -116,7 +120,7 @@ func (h *Handler) adminAliases(deps Dependencies, w http.ResponseWriter, r *http
 		http.Error(w, "alias not found", http.StatusNotFound)
 	case http.MethodPut:
 		var req adminAliasUpsert
-		if err := json.NewDecoder(ioLimitReader(r)).Decode(&req); err != nil {
+		if err := decodeAdminCatalogBody(r, &req); err != nil {
 			http.Error(w, "invalid body", http.StatusBadRequest)
 			return
 		}
@@ -166,14 +170,21 @@ type adminAliasTargetUpsert struct {
 	Model    string `json:"model"`
 }
 
-type adminSessionAffinityUpsert struct {
-	Headers []string `json:"headers"`
+func (req *adminAliasTargetUpsert) UnmarshalJSON(raw []byte) error {
+	type plainUpsert adminAliasTargetUpsert
+	var decoded plainUpsert
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	if err := adminJSONKeyError(raw, "provider model"); err != nil {
+		return err
+	}
+	*req = adminAliasTargetUpsert(decoded)
+	return nil
 }
 
-type adminEncryptedReasonUpsert struct {
-	Passthrough      *bool    `json:"passthrough"`
-	OnCallerMismatch *string  `json:"on_caller_mismatch"`
-	MatchMessages    []string `json:"match_messages"`
+type adminSessionAffinityUpsert struct {
+	Headers []string `json:"headers"`
 }
 
 type adminAliasUpsert struct {
@@ -184,36 +195,50 @@ type adminAliasUpsert struct {
 	Providers          []string                    `json:"providers"`
 	Model              *string                     `json:"model"`
 	SessionAffinity    *adminSessionAffinityUpsert `json:"session_affinity"`
-	EncryptedReasoning *adminEncryptedReasonUpsert `json:"encrypted_reasoning"`
+	EncryptedReasoning json.RawMessage             `json:"encrypted_reasoning"`
 	Targets            *[]adminAliasTargetUpsert   `json:"targets"`
+	inputJSONError     error
+}
+
+func (req *adminAliasUpsert) UnmarshalJSON(raw []byte) error {
+	type plainUpsert adminAliasUpsert
+	var decoded plainUpsert
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	decoded.inputJSONError = adminJSONKeyError(raw, adminAliasWritableFields)
+	*req = adminAliasUpsert(decoded)
+	return nil
 }
 
 func (h *Handler) mergedAliasViews(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, filterWorkspace string) ([]adminAliasView, error) {
 	visible, _ := h.visibleWorkspaceIDs(deps, r, claims)
 	names := h.workspaceNameMap(deps, r, claims)
+	rows, err := deps.AdminStore.ListAliases(ctx)
+	if err != nil {
+		return nil, err
+	}
+	managedNames := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		managedNames[row.Name] = true
+	}
 	views := map[string]*adminAliasView{}
 	if h.canSeeSystemWorkspace(deps, r, claims, filterWorkspace) {
 		for _, a := range deps.Catalog.Aliases() {
+			if managedNames[a.Name] || a.DatabaseManaged {
+				continue
+			}
 			v := adminAliasView{Name: a.Name, Algorithm: string(a.Algorithm), RetryStatusCodes: append([]int(nil), a.RetryStatusCodes...), Source: "config"}
 			if a.SessionAffinity != nil {
 				v.SessionAffinity = &adminSessionAffinity{Headers: append([]string(nil), a.SessionAffinity.Headers...)}
 			}
-			if a.EncryptedReasoning != nil {
-				v.EncryptedReasoning = &adminEncryptedReason{
-					Passthrough: a.EncryptedReasoning.Passthrough, OnCallerMismatch: a.EncryptedReasoning.OnCallerMismatch,
-					MatchMessages: append([]string(nil), a.EncryptedReasoning.MatchMessages...),
-				}
-			}
+			setAliasReasoningView(&v, a.EncryptedReasoning)
 			for _, t := range a.Targets {
 				v.Targets = append(v.Targets, adminAliasTargetView{Provider: t.Provider, Model: t.Model})
 			}
 			vv := v
 			views[a.Name] = &vv
 		}
-	}
-	rows, err := deps.AdminStore.ListAliases(ctx)
-	if err != nil {
-		return nil, err
 	}
 	for _, a := range rows {
 		if filterWorkspace != "" && a.WorkspaceID.String() != filterWorkspace {
@@ -233,12 +258,11 @@ func (h *Handler) mergedAliasViews(ctx context.Context, deps Dependencies, r *ht
 				v.SessionAffinity = &affinity
 			}
 		}
-		if jsonBlockPresent(a.EncryptedReasoning) {
-			var reasoning adminEncryptedReason
-			if unmarshalJSONBlock(a.EncryptedReasoning, &reasoning) {
-				v.EncryptedReasoning = &reasoning
-			}
+		reasoning, err := config.DecodeEncryptedReasoningJSON(a.EncryptedReasoning, fmt.Sprintf("alias %q", a.Name))
+		if err != nil {
+			return nil, err
 		}
+		setAliasReasoningView(&v, reasoning)
 		for _, t := range targets {
 			v.Targets = append(v.Targets, adminAliasTargetView{Provider: t.Provider, Model: t.Model})
 		}
@@ -254,30 +278,31 @@ func (h *Handler) mergedAliasViews(ctx context.Context, deps Dependencies, r *ht
 }
 
 func (h *Handler) mergedAliasCatalog(ctx context.Context, deps Dependencies) (config.Catalog, error) {
-	providers := append([]config.Provider(nil), deps.Catalog.Providers()...)
-	disabled := append([]config.Provider(nil), deps.Catalog.DisabledProviders()...)
-	rows, err := deps.AdminStore.ListProviders(ctx)
+	inventory, err := loadAdminProviderInventory(ctx, deps)
 	if err != nil {
 		return config.Catalog{}, err
 	}
-	for _, p := range rows {
-		models, err := deps.AdminStore.ListProviderModels(ctx, p.ID)
+	providers := make([]config.Provider, 0, len(inventory.static)+len(inventory.rows))
+	disabled := make([]config.Provider, 0)
+	for _, provider := range deps.Catalog.Providers() {
+		if _, managed := inventory.rowsByName[provider.Name]; !managed && !provider.DatabaseManaged {
+			providers = append(providers, provider)
+		}
+	}
+	for _, provider := range deps.Catalog.DisabledProviders() {
+		if _, managed := inventory.rowsByName[provider.Name]; !managed && !provider.DatabaseManaged {
+			disabled = append(disabled, provider)
+		}
+	}
+	for _, row := range inventory.rows {
+		provider, err := inventory.provider(ctx, row.Name)
 		if err != nil {
 			return config.Catalog{}, err
 		}
-		entry := config.Provider{Type: config.ProviderType(p.Type), Name: p.Name, Enabled: p.Enabled, ModelByName: make(map[string]config.Model)}
-		for _, m := range models {
-			model := config.Model{Name: m.Name, UpstreamName: m.UpstreamName, Protocol: config.ModelProtocol(m.Protocol)}
-			for _, c := range m.Capabilities {
-				model.Capabilities = append(model.Capabilities, config.Capability(c))
-			}
-			entry.Models = append(entry.Models, model)
-			entry.ModelByName[m.Name] = model
-		}
-		if p.Enabled {
-			providers = append(providers, entry)
+		if provider.Enabled {
+			providers = append(providers, provider)
 		} else {
-			disabled = append(disabled, entry)
+			disabled = append(disabled, provider)
 		}
 	}
 	return config.NewCatalog(providers, disabled, deps.Catalog.Aliases()), nil
@@ -330,24 +355,10 @@ func buildAliasSessionAffinity(req *adminSessionAffinityUpsert) (*config.Session
 	return &config.SessionAffinity{Headers: headers}, nil
 }
 
-func buildAliasEncryptedReasoning(req *adminEncryptedReasonUpsert) *config.EncryptedReasoning {
-	if req == nil {
-		return nil
-	}
-	er := &config.EncryptedReasoning{Passthrough: true, OnCallerMismatch: config.EncryptedReasoningFail}
-	if req.Passthrough != nil {
-		er.Passthrough = *req.Passthrough
-	}
-	if req.OnCallerMismatch != nil {
-		er.OnCallerMismatch = strings.TrimSpace(*req.OnCallerMismatch)
-	}
-	if req.MatchMessages != nil {
-		er.MatchMessages = append([]string(nil), req.MatchMessages...)
-	}
-	return er
-}
-
 func (h *Handler) buildConfigAlias(name, algorithm string, req adminAliasUpsert) (config.Alias, []store.DBAliasTarget, error) {
+	if req.inputJSONError != nil {
+		return config.Alias{}, nil, req.inputJSONError
+	}
 	targets, err := expandAliasTargets(req.Providers, stringValue(req.Model), req.Targets)
 	if err != nil {
 		return config.Alias{}, nil, err
@@ -363,7 +374,11 @@ func (h *Handler) buildConfigAlias(name, algorithm string, req adminAliasUpsert)
 	if err != nil {
 		return config.Alias{}, nil, err
 	}
-	alias := config.Alias{Name: name, Algorithm: config.Algorithm(algorithm), RetryStatusCodes: retryCodes, SessionAffinity: affinity, EncryptedReasoning: buildAliasEncryptedReasoning(req.EncryptedReasoning)}
+	reasoning, err := config.DecodeEncryptedReasoningJSON(req.EncryptedReasoning, fmt.Sprintf("alias %q", name))
+	if err != nil {
+		return config.Alias{}, nil, err
+	}
+	alias := config.Alias{Name: name, Algorithm: config.Algorithm(algorithm), RetryStatusCodes: retryCodes, SessionAffinity: affinity, EncryptedReasoning: reasoning}
 	rows := make([]store.DBAliasTarget, 0, len(targets))
 	for _, t := range targets {
 		provider := strings.TrimSpace(t.Provider)
@@ -384,19 +399,10 @@ func stringValue(s *string) string {
 	return *s
 }
 
-func (h *Handler) checkDisabledTargets(deps Dependencies, ctx context.Context, alias config.Alias) error {
+func checkDisabledAliasTargets(catalog config.Catalog, alias config.Alias) error {
 	disabled := make(map[string]bool)
-	for _, p := range deps.Catalog.DisabledProviders() {
+	for _, p := range catalog.DisabledProviders() {
 		disabled[p.Name] = true
-	}
-	rows, err := deps.AdminStore.ListProviders(ctx)
-	if err != nil {
-		return catalogStorageError{err}
-	}
-	for _, p := range rows {
-		if !p.Enabled {
-			disabled[p.Name] = true
-		}
 	}
 	for _, t := range alias.Targets {
 		if disabled[t.Provider] {
@@ -417,7 +423,7 @@ func (h *Handler) createDBAlias(ctx context.Context, deps Dependencies, r *http.
 		return adminAliasView{}, catalogStorageError{err}
 	}
 	for _, a := range deps.Catalog.Aliases() {
-		if a.Name == name {
+		if a.Name == name && !a.DatabaseManaged {
 			return adminAliasView{}, errBad("alias exists in static config")
 		}
 	}
@@ -437,12 +443,12 @@ func (h *Handler) createDBAlias(ctx context.Context, deps Dependencies, r *http.
 			return adminAliasView{}, errBad("retry status codes must be between 400 and 599")
 		}
 	}
-	if err := h.checkDisabledTargets(deps, ctx, alias); err != nil {
-		return adminAliasView{}, err
-	}
 	catalog, err := h.mergedAliasCatalog(ctx, deps)
 	if err != nil {
-		return adminAliasView{}, catalogStorageError{err}
+		return adminAliasView{}, err
+	}
+	if err := checkDisabledAliasTargets(catalog, alias); err != nil {
+		return adminAliasView{}, err
 	}
 	if err := config.ValidateDynamicAlias(alias, catalog); err != nil {
 		return adminAliasView{}, err
@@ -455,15 +461,9 @@ func (h *Handler) createDBAlias(ctx context.Context, deps Dependencies, r *http.
 		}
 		row.SessionAffinity = raw
 	}
-	if alias.EncryptedReasoning != nil {
-		raw, err := json.Marshal(adminEncryptedReason{
-			Passthrough: alias.EncryptedReasoning.Passthrough, OnCallerMismatch: alias.EncryptedReasoning.OnCallerMismatch,
-			MatchMessages: alias.EncryptedReasoning.MatchMessages,
-		})
-		if err != nil {
-			return adminAliasView{}, err
-		}
-		row.EncryptedReasoning = raw
+	row.EncryptedReasoning, err = config.EncodeEncryptedReasoningJSON(alias.EncryptedReasoning, fmt.Sprintf("alias %q", name))
+	if err != nil {
+		return adminAliasView{}, err
 	}
 	if err := deps.AdminStore.CreateAlias(ctx, row, targetRows); err != nil {
 		return adminAliasView{}, catalogStorageError{err}
@@ -479,7 +479,7 @@ func (h *Handler) updateDBAlias(ctx context.Context, deps Dependencies, r *http.
 			return adminAliasView{}, catalogStorageError{err}
 		}
 		for _, a := range deps.Catalog.Aliases() {
-			if a.Name == name {
+			if a.Name == name && !a.DatabaseManaged {
 				return adminAliasView{}, errBad("config-managed: edit the HCL file")
 			}
 		}
@@ -503,14 +503,8 @@ func (h *Handler) updateDBAlias(ctx context.Context, deps Dependencies, r *http.
 		}
 		effective.SessionAffinity = &adminSessionAffinityUpsert{Headers: affinity.Headers}
 	}
-	if effective.EncryptedReasoning == nil && jsonBlockPresent(current.EncryptedReasoning) {
-		var reasoning adminEncryptedReason
-		if !unmarshalJSONBlock(current.EncryptedReasoning, &reasoning) {
-			return adminAliasView{}, errBad("stored encrypted_reasoning is corrupt")
-		}
-		passthrough := reasoning.Passthrough
-		mismatch := reasoning.OnCallerMismatch
-		effective.EncryptedReasoning = &adminEncryptedReasonUpsert{Passthrough: &passthrough, OnCallerMismatch: &mismatch, MatchMessages: reasoning.MatchMessages}
+	if len(effective.EncryptedReasoning) == 0 {
+		effective.EncryptedReasoning = append(json.RawMessage(nil), current.EncryptedReasoning...)
 	}
 	if effective.Targets == nil && len(effective.Providers) == 0 && effective.Model == nil {
 		rows, err := deps.AdminStore.ListAliasTargets(ctx, current.ID)
@@ -536,12 +530,12 @@ func (h *Handler) updateDBAlias(ctx context.Context, deps Dependencies, r *http.
 			return adminAliasView{}, errBad("retry status codes must be between 400 and 599")
 		}
 	}
-	if err := h.checkDisabledTargets(deps, ctx, alias); err != nil {
-		return adminAliasView{}, err
-	}
 	catalog, err := h.mergedAliasCatalog(ctx, deps)
 	if err != nil {
-		return adminAliasView{}, catalogStorageError{err}
+		return adminAliasView{}, err
+	}
+	if err := checkDisabledAliasTargets(catalog, alias); err != nil {
+		return adminAliasView{}, err
 	}
 	if err := config.ValidateDynamicAlias(alias, catalog); err != nil {
 		return adminAliasView{}, err
@@ -557,17 +551,11 @@ func (h *Handler) updateDBAlias(ctx context.Context, deps Dependencies, r *http.
 	} else {
 		current.SessionAffinity = nil
 	}
-	if alias.EncryptedReasoning != nil {
-		raw, err := json.Marshal(adminEncryptedReason{
-			Passthrough: alias.EncryptedReasoning.Passthrough, OnCallerMismatch: alias.EncryptedReasoning.OnCallerMismatch,
-			MatchMessages: alias.EncryptedReasoning.MatchMessages,
-		})
+	if len(req.EncryptedReasoning) != 0 {
+		current.EncryptedReasoning, err = config.EncodeEncryptedReasoningJSON(alias.EncryptedReasoning, fmt.Sprintf("alias %q", name))
 		if err != nil {
 			return adminAliasView{}, err
 		}
-		current.EncryptedReasoning = raw
-	} else {
-		current.EncryptedReasoning = nil
 	}
 	if err := deps.AdminStore.UpdateAlias(ctx, &current, targetRows); err != nil {
 		return adminAliasView{}, catalogStorageError{err}

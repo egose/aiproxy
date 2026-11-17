@@ -1,23 +1,24 @@
 package config
 
 type rawFile struct {
-	UpstreamHeaderTimeout string             `hcl:"upstream_header_timeout,optional"`
-	UserAgent             string             `hcl:"user_agent,optional"`
-	ForwardUserAgent      bool               `hcl:"forward_user_agent,optional"`
-	ForwardHeaders        []string           `hcl:"forward_headers,optional"`
-	Listeners             []rawListener      `hcl:"listener,block"`
-	Auth                  []rawAuth          `hcl:"auth,block"`
-	Logging               *rawLogging        `hcl:"logging,block"`
-	ProviderHealth        *rawProviderHealth `hcl:"provider_health,block"`
-	Metrics               []*rawMetrics      `hcl:"metrics,block"`
-	Dashboard             []*rawDashboard    `hcl:"dashboard,block"`
-	WebUI                 []*rawWebUI        `hcl:"web_ui,block"`
-	Database              []*rawDatabase     `hcl:"database,block"`
-	MultiTenancy          []*rawMultiTenancy `hcl:"multi_tenancy,block"`
-	IngressGuardrails     []*rawGuardrails   `hcl:"ingress_guardrails,block"`
-	Deferred              []*rawDeferred     `hcl:"deferred,block"`
-	Providers             []rawProvider      `hcl:"provider,block"`
-	Aliases               []rawAlias         `hcl:"alias,block"`
+	UpstreamHeaderTimeout string                 `hcl:"upstream_header_timeout,optional"`
+	UserAgent             string                 `hcl:"user_agent,optional"`
+	ForwardUserAgent      bool                   `hcl:"forward_user_agent,optional"`
+	ForwardHeaders        []string               `hcl:"forward_headers,optional"`
+	EncryptedReasoning    *rawEncryptedReasoning `hcl:"encrypted_reasoning,block"`
+	Listeners             []rawListener          `hcl:"listener,block"`
+	Auth                  []rawAuth              `hcl:"auth,block"`
+	Logging               *rawLogging            `hcl:"logging,block"`
+	ProviderHealth        *rawProviderHealth     `hcl:"provider_health,block"`
+	Metrics               []*rawMetrics          `hcl:"metrics,block"`
+	Dashboard             []*rawDashboard        `hcl:"dashboard,block"`
+	WebUI                 []*rawWebUI            `hcl:"web_ui,block"`
+	Database              []*rawDatabase         `hcl:"database,block"`
+	MultiTenancy          []*rawMultiTenancy     `hcl:"multi_tenancy,block"`
+	IngressGuardrails     []*rawGuardrails       `hcl:"ingress_guardrails,block"`
+	Deferred              []*rawDeferred         `hcl:"deferred,block"`
+	Providers             []rawProvider          `hcl:"provider,block"`
+	Aliases               []rawAlias             `hcl:"alias,block"`
 	providerSyntax        []rawProviderSyntax
 }
 
@@ -165,27 +166,28 @@ type rawProviderHealth struct {
 }
 
 type rawProvider struct {
-	Type                   string                `hcl:"type,label"`
-	Name                   string                `hcl:"name,label"`
-	Extends                string                `hcl:"extends,optional"`
-	DisplayName            string                `hcl:"display_name,optional"`
-	BaseURL                string                `hcl:"base_url,optional"`
-	UpstreamHeaderTimeout  string                `hcl:"upstream_header_timeout,optional"`
-	UserAgent              string                `hcl:"user_agent,optional"`
-	ForwardUserAgent       bool                  `hcl:"forward_user_agent,optional"`
-	ForwardHeaders         []string              `hcl:"forward_headers,optional"`
-	ForwardAuthorization   bool                  `hcl:"forward_authorization,optional"`
-	DeferredTransport      *rawDeferredTransport `hcl:"deferred_transport,block"`
-	DeferredReceiver       *rawDeferredReceiver  `hcl:"deferred_receiver,block"`
-	AllowInsecureBaseURL   *bool                 `hcl:"allow_insecure_base_url,optional"`
-	TLSClientHello         string                `hcl:"tls_client_hello,optional"`
-	TLSClientHelloSpecFile string                `hcl:"tls_client_hello_spec_file,optional"`
-	APIKey                 string                `hcl:"api_key,optional"`
-	APIKeyRef              *rawAPIKeyRef         `hcl:"api_key_ref,block"`
-	CredentialRef          *rawCredentialRef     `hcl:"credential_ref,block"`
-	Enabled                *bool                 `hcl:"enabled,optional"`
-	Healthcheck            *rawHealthcheck       `hcl:"healthcheck,block"`
-	Models                 []rawModel            `hcl:"model,block"`
+	Type                   string                 `hcl:"type,label"`
+	Name                   string                 `hcl:"name,label"`
+	Extends                string                 `hcl:"extends,optional"`
+	DisplayName            string                 `hcl:"display_name,optional"`
+	BaseURL                string                 `hcl:"base_url,optional"`
+	UpstreamHeaderTimeout  string                 `hcl:"upstream_header_timeout,optional"`
+	UserAgent              string                 `hcl:"user_agent,optional"`
+	ForwardUserAgent       bool                   `hcl:"forward_user_agent,optional"`
+	ForwardHeaders         []string               `hcl:"forward_headers,optional"`
+	ForwardAuthorization   bool                   `hcl:"forward_authorization,optional"`
+	EncryptedReasoning     *rawEncryptedReasoning `hcl:"encrypted_reasoning,block"`
+	DeferredTransport      *rawDeferredTransport  `hcl:"deferred_transport,block"`
+	DeferredReceiver       *rawDeferredReceiver   `hcl:"deferred_receiver,block"`
+	AllowInsecureBaseURL   *bool                  `hcl:"allow_insecure_base_url,optional"`
+	TLSClientHello         string                 `hcl:"tls_client_hello,optional"`
+	TLSClientHelloSpecFile string                 `hcl:"tls_client_hello_spec_file,optional"`
+	APIKey                 string                 `hcl:"api_key,optional"`
+	APIKeyRef              *rawAPIKeyRef          `hcl:"api_key_ref,block"`
+	CredentialRef          *rawCredentialRef      `hcl:"credential_ref,block"`
+	Enabled                *bool                  `hcl:"enabled,optional"`
+	Healthcheck            *rawHealthcheck        `hcl:"healthcheck,block"`
+	Models                 []rawModel             `hcl:"model,block"`
 }
 
 type rawHealthcheck struct {
@@ -211,13 +213,14 @@ type rawCredentialRef struct {
 }
 
 type rawModel struct {
-	Name              string                `hcl:"name,label"`
-	DisplayName       string                `hcl:"display_name,optional"`
-	UpstreamName      string                `hcl:"upstream_name,optional"`
-	Protocol          string                `hcl:"protocol,optional"`
-	Capabilities      []string              `hcl:"capabilities,optional"`
-	Pricing           *rawPricing           `hcl:"pricing,block"`
-	DeferredTransport *rawDeferredTransport `hcl:"deferred_transport,block"`
+	Name               string                 `hcl:"name,label"`
+	DisplayName        string                 `hcl:"display_name,optional"`
+	UpstreamName       string                 `hcl:"upstream_name,optional"`
+	Protocol           string                 `hcl:"protocol,optional"`
+	Capabilities       []string               `hcl:"capabilities,optional"`
+	Pricing            *rawPricing            `hcl:"pricing,block"`
+	EncryptedReasoning *rawEncryptedReasoning `hcl:"encrypted_reasoning,block"`
+	DeferredTransport  *rawDeferredTransport  `hcl:"deferred_transport,block"`
 }
 
 type rawPricing struct {
@@ -239,9 +242,9 @@ type rawAlias struct {
 }
 
 type rawEncryptedReasoning struct {
-	Passthrough      *bool    `hcl:"passthrough,optional"`
-	OnCallerMismatch string   `hcl:"on_caller_mismatch,optional"`
-	MatchMessages    []string `hcl:"match_messages,optional"`
+	Passthrough      *bool     `hcl:"passthrough,optional"`
+	OnCallerMismatch *string   `hcl:"on_caller_mismatch,optional"`
+	MatchMessages    *[]string `hcl:"match_messages,optional"`
 }
 
 type rawSessionAffinity struct {

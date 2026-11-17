@@ -61,6 +61,12 @@ func DefaultRetryStatusCodes() []int {
 }
 
 func (rt *Runtime) ApplyProviderDefaults(p Provider) Provider {
+	p = cloneProvider(p)
+	p.EncryptedReasoning = NormalizeEncryptedReasoning(p.EncryptedReasoning)
+	for i := range p.Models {
+		p.Models[i].EncryptedReasoning = NormalizeEncryptedReasoning(p.Models[i].EncryptedReasoning)
+		p.ModelByName[p.Models[i].Name] = cloneModel(p.Models[i])
+	}
 	if p.UpstreamHeaderTimeout == 0 {
 		p.UpstreamHeaderTimeout = rt.UpstreamHeaderTimeout
 	}
@@ -99,26 +105,14 @@ func NormalizeAlias(a Alias) Alias {
 		}
 		out.SessionAffinity = &SessionAffinity{Headers: headers}
 	}
-	if out.EncryptedReasoning != nil {
-		er := &EncryptedReasoning{
-			Passthrough:      out.EncryptedReasoning.Passthrough,
-			OnCallerMismatch: out.EncryptedReasoning.OnCallerMismatch,
-		}
-		if er.OnCallerMismatch == "" {
-			er.OnCallerMismatch = EncryptedReasoningFail
-		}
-		for _, m := range out.EncryptedReasoning.MatchMessages {
-			er.MatchMessages = append(er.MatchMessages, strings.ToLower(strings.TrimSpace(m)))
-		}
-		if len(er.MatchMessages) == 0 {
-			er.MatchMessages = append([]string(nil), DefaultEncryptedReasoningMatchMessages...)
-		}
-		out.EncryptedReasoning = er
-	}
+	out.EncryptedReasoning = NormalizeEncryptedReasoning(out.EncryptedReasoning)
 	return out
 }
 
 func ValidateDynamicProvider(p Provider) error {
+	if err := validateProviderEncryptedReasoning(p); err != nil {
+		return err
+	}
 	if err := ValidateManagedProviderDeferred(p); err != nil {
 		return err
 	}

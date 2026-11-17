@@ -20,22 +20,21 @@ import (
 )
 
 func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op provider.Operation, r modelresolver.ResolveResult, inbound *http.Request, body []byte, logger *slog.Logger) (*provider.Result, error) {
-	if deps.AccessLog && logger != nil {
-		logger.Info("upstream request started",
-			"provider", r.Provider.Name,
-			"provider_type", r.Provider.Type,
-			"upstream_model", r.Model.UpstreamName,
-		)
+	er := encryptedReasoningForTarget(deps, r.Provider, r.Model, nil)
+	if encryptedReasoningApplies(op) && !er.Passthrough {
+		stripped, changed, err := stripDispatchOpaqueBlocks(ctx, op, body)
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			body = stripped
+		}
 	}
 	if deps.Metrics != nil {
 		deps.Metrics.RecordProviderSelection(op, r.Provider.Name+"/"+r.Model.Name, r.Provider.Name, r.Model.Name)
 	}
-	if inbound != nil {
-		inbound = cloneRequestWithBody(ctx, inbound, body)
-	}
-	start := time.Now()
 	execution := deferredExecutionFromContext(ctx)
-	result, err := deps.Adapter.Do(ctx, provider.Request{
+	request := provider.Request{
 		Operation:            op,
 		ProviderType:         r.Provider.Type,
 		PublicModel:          r.Provider.Name + "/" + r.Model.Name,
@@ -49,51 +48,83 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		ForwardHeaders:       r.Provider.ForwardHeaders,
 		ForwardAuthorization: r.Provider.ForwardAuthorization,
 		Version:              deps.Version,
-		Body:                 body,
-		Inbound:              inbound,
 		Client:               clientForProvider(deps, r.Provider),
 		DeferredTransport:    config.EffectiveDeferredTransport(r.Provider, r.Model),
 		ExecutionLimits:      execution.executionLimits(),
 		ObserveBody:          execution.bodyObserver(),
-	})
-	if result != nil {
-		result.Provider = r.Provider.Name
-		result.UpstreamModel = r.Model.Name
 	}
-	if deps.Metrics != nil && !provider.IsPeerControlOutcome(result, err) && (result == nil || !result.Streaming) {
-		status := 0
+	recovery := false
+	for {
+		if recovery {
+			if err := allowReasoningRecovery(ctx); err != nil {
+				return nil, err
+			}
+		}
+		request.Body = body
+		request.Inbound = cloneRequestWithBody(ctx, inbound, body)
+		if deps.AccessLog && logger != nil {
+			logger.Info("upstream request started",
+				"provider", r.Provider.Name,
+				"provider_type", r.Provider.Type,
+				"upstream_model", r.Model.UpstreamName,
+			)
+		}
+		start := time.Now()
+		result, err := deps.Adapter.Do(ctx, request)
 		if result != nil {
-			status = result.StatusCode
+			result.Provider = r.Provider.Name
+			result.UpstreamModel = r.Model.Name
 		}
-		deps.Metrics.RecordUpstream(op, r.Provider.Name, status, err, time.Since(start).Seconds())
-	}
-	if deps.AccessLog && logger != nil && (result == nil || !result.Streaming) {
-		attrs := []any{
-			"provider", r.Provider.Name,
-			"provider_type", r.Provider.Type,
-			"upstream_model", r.Model.UpstreamName,
-			"duration_ms", time.Since(start).Milliseconds(),
+		if deps.Metrics != nil && !provider.IsPeerControlOutcome(result, err) && (result == nil || !result.Streaming) {
+			status := 0
+			if result != nil {
+				status = result.StatusCode
+			}
+			deps.Metrics.RecordUpstream(op, r.Provider.Name, status, err, time.Since(start).Seconds())
 		}
-		if result != nil {
-			attrs = append(attrs, "status", result.StatusCode)
+		if deps.AccessLog && logger != nil && (result == nil || !result.Streaming) {
+			attrs := []any{
+				"provider", r.Provider.Name,
+				"provider_type", r.Provider.Type,
+				"upstream_model", r.Model.UpstreamName,
+				"duration_ms", time.Since(start).Milliseconds(),
+			}
+			if result != nil {
+				attrs = append(attrs, "status", result.StatusCode)
+			}
+			if err != nil {
+				attrs = append(attrs, "error", err)
+			}
+			logger.Info("upstream request finished", attrs...)
 		}
-		if err != nil {
-			attrs = append(attrs, "error", err)
+		if result != nil && result.Streaming && err == nil {
+			h.attachStreamFinalizers(deps, ctx, op, r.Provider.Name, result, start, logger, []any{
+				"provider", r.Provider.Name,
+				"provider_type", r.Provider.Type,
+				"upstream_model", r.Model.UpstreamName,
+			})
+			h.instrumentUpstreamResponseSize(deps, op, r.Provider.Name, result, err)
+			return result, nil
 		}
-		logger.Info("upstream request finished", attrs...)
-	}
-	if result != nil && result.Streaming && err == nil {
-		h.attachStreamFinalizers(deps, ctx, op, r.Provider.Name, result, start, logger, []any{
-			"provider", r.Provider.Name,
-			"provider_type", r.Provider.Type,
-			"upstream_model", r.Model.UpstreamName,
-		})
+		h.recordProviderHealth(deps, ctx, r.Provider.Name, result, err, false)
 		h.instrumentUpstreamResponseSize(deps, op, r.Provider.Name, result, err)
-		return result, nil
+		if err == nil && !recovery {
+			stripped, changed, rewriteErr := recoverDispatchOpaqueBlocks(ctx, op, result, body, er)
+			if rewriteErr != nil {
+				closeResult(result)
+				return nil, rewriteErr
+			}
+			if changed {
+				closeResult(result)
+				body, recovery = stripped, true
+				if deps.AccessLog && logger != nil {
+					logger.Warn("upstream rejected encrypted reasoning, retrying stripped", "provider", r.Provider.Name)
+				}
+				continue
+			}
+		}
+		return result, err
 	}
-	h.recordProviderHealth(deps, ctx, r.Provider.Name, result, err, false)
-	h.instrumentUpstreamResponseSize(deps, op, r.Provider.Name, result, err)
-	return result, err
 }
 
 type aliasPoolTarget struct {
@@ -212,20 +243,10 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 		retryCodes[code] = true
 	}
 	pool := resolveAliasPool(deps, r.Alias.Name, r.Alias.Targets)
-	er := encryptedReasoningEffective(r.Alias)
 	stripApplies := encryptedReasoningApplies(op)
-	conditionalRetry := stripApplies && er.Passthrough && er.OnCallerMismatch == config.EncryptedReasoningStripAndRetry
-	strippedAttempted := false
-	if stripApplies && !er.Passthrough {
-		stripped, ok, err := stripDispatchOpaqueBlocks(ctx, op, body)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			body = stripped
-			strippedAttempted = true
-		}
-	}
+	explicitPolicy := r.Alias.EncryptedReasoning != nil
+	aliasPrestripped := false
+	recoveryUsed := false
 	var cooldowns *modelresolver.CooldownStore
 	if deps.Resolver != nil {
 		cooldowns = deps.Resolver.Cooldowns()
@@ -264,6 +285,12 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 	affinityPending := hasSession
 targetLoop:
 	for {
+		if recoveryUsed {
+			if err := ctx.Err(); err != nil {
+				closeResult(pending)
+				return nil, err
+			}
+		}
 		var t alias.Target
 		var releaseLease func()
 		if affinityPending {
@@ -320,14 +347,6 @@ targetLoop:
 		commitPending()
 		lastErrorResult = nil
 		targetLogger := logger.With("target", t.Provider+"/"+t.Model)
-		if deps.AccessLog {
-			targetLogger.Info("upstream request started",
-				"alias", r.Alias.Name,
-				"provider", t.Provider,
-				"provider_type", prov.Type,
-				"upstream_model", model.UpstreamName,
-			)
-		}
 		if deps.Metrics != nil {
 			deps.Metrics.RecordProviderSelection(op, "alias/"+r.Alias.Name, t.Provider, t.Model)
 			deps.Metrics.AddAliasInFlight(r.Alias.Name, t.Provider, t.Model, 1)
@@ -342,31 +361,65 @@ targetLoop:
 			})
 		}
 		currentBody := body
+		er := encryptedReasoningForTarget(deps, prov, model, &r.Alias)
+		if stripApplies && !er.Passthrough && (!explicitPolicy || !aliasPrestripped) {
+			stripped, changed, err := stripDispatchOpaqueBlocks(ctx, op, currentBody)
+			if err != nil {
+				releaseTarget()
+				return nil, err
+			}
+			if changed {
+				currentBody = stripped
+				if explicitPolicy {
+					body = stripped
+				}
+			}
+			if explicitPolicy {
+				aliasPrestripped = true
+			}
+		}
+		execution := deferredExecutionFromContext(ctx)
+		request := provider.Request{
+			Operation:            op,
+			ProviderType:         prov.Type,
+			PublicModel:          "alias/" + r.Alias.Name,
+			BaseURL:              prov.BaseURL,
+			APIKey:               prov.APIKey,
+			CopilotToken:         prov.CopilotToken,
+			UpstreamModel:        model.UpstreamName,
+			ModelProtocol:        model.Protocol,
+			UserAgent:            prov.UserAgent,
+			ForwardUserAgent:     prov.ForwardUserAgent,
+			ForwardHeaders:       prov.ForwardHeaders,
+			ForwardAuthorization: prov.ForwardAuthorization,
+			Version:              deps.Version,
+			Client:               clientForProvider(deps, prov),
+			DeferredTransport:    config.EffectiveDeferredTransport(prov, model),
+			ExecutionLimits:      execution.executionLimits(),
+			ObserveBody:          execution.bodyObserver(),
+		}
+		recoveryPending := false
 		for {
-			req := cloneRequestWithBody(ctx, inbound, currentBody)
+			if recoveryPending {
+				if err := allowReasoningRecovery(ctx); err != nil {
+					releaseTarget()
+					return nil, err
+				}
+				recoveryUsed = true
+				recoveryPending = false
+			}
+			request.Body = currentBody
+			request.Inbound = cloneRequestWithBody(ctx, inbound, currentBody)
+			if deps.AccessLog {
+				targetLogger.Info("upstream request started",
+					"alias", r.Alias.Name,
+					"provider", t.Provider,
+					"provider_type", prov.Type,
+					"upstream_model", model.UpstreamName,
+				)
+			}
 			start := time.Now()
-			execution := deferredExecutionFromContext(ctx)
-			result, err := deps.Adapter.Do(ctx, provider.Request{
-				Operation:            op,
-				ProviderType:         prov.Type,
-				PublicModel:          "alias/" + r.Alias.Name,
-				BaseURL:              prov.BaseURL,
-				APIKey:               prov.APIKey,
-				CopilotToken:         prov.CopilotToken,
-				UpstreamModel:        model.UpstreamName,
-				ModelProtocol:        model.Protocol,
-				UserAgent:            prov.UserAgent,
-				ForwardUserAgent:     prov.ForwardUserAgent,
-				ForwardHeaders:       prov.ForwardHeaders,
-				ForwardAuthorization: prov.ForwardAuthorization,
-				Version:              deps.Version,
-				Body:                 currentBody,
-				Inbound:              req,
-				Client:               clientForProvider(deps, prov),
-				DeferredTransport:    config.EffectiveDeferredTransport(prov, model),
-				ExecutionLimits:      execution.executionLimits(),
-				ObserveBody:          execution.bodyObserver(),
-			})
+			result, err := deps.Adapter.Do(ctx, request)
 			if result != nil {
 				result.Provider = t.Provider
 				result.UpstreamModel = model.Name
@@ -438,28 +491,22 @@ targetLoop:
 				continue targetLoop
 			}
 			observeCooldownResult(cooldowns, ctx, fp, result)
-			if !provider.IsPeerControlOutcome(result, nil) && !strippedAttempted && conditionalRetry {
-				mismatch, err := isDispatchCallerMismatch(ctx, result, currentBody, er.MatchMessages)
+			if !recoveryUsed {
+				stripped, changed, err := recoverDispatchOpaqueBlocks(ctx, op, result, currentBody, er)
 				if err != nil {
 					closeResult(result)
 					releaseTarget()
 					return nil, err
 				}
-				if mismatch {
-					stripped, ok, err := stripDispatchOpaqueBlocks(ctx, op, currentBody)
-					if err != nil {
-						closeResult(result)
-						releaseTarget()
-						return nil, err
-					}
-					if ok {
-						closeResult(result)
-						strippedAttempted = true
+				if changed {
+					closeResult(result)
+					recoveryPending = true
+					if explicitPolicy {
 						body = stripped
-						currentBody = stripped
-						targetLogger.Warn("alias target rejected encrypted reasoning, retrying stripped")
-						continue
 					}
+					currentBody = stripped
+					targetLogger.Warn("alias target rejected encrypted reasoning, retrying stripped")
+					continue
 				}
 			}
 			existingClose := result.OnClose
@@ -469,7 +516,7 @@ targetLoop:
 				}
 				releaseTarget()
 			}
-			if !provider.IsPeerControlOutcome(result, nil) && retryCodes[result.StatusCode] {
+			if !provider.IsPeerControlOutcome(result, nil) && !result.Streaming && retryCodes[result.StatusCode] {
 				if remaining, ok := allCoolingRemaining(cooldowns, pool); ok {
 					if pending != nil {
 						closeResult(pending)

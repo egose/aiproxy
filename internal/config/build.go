@@ -32,6 +32,7 @@ func buildRuntime(raw *rawFile, filename string) (*Runtime, error) {
 		return nil, err
 	}
 	rt.Auth = auth
+	rt.EncryptedReasoning = buildEncryptedReasoning(raw.EncryptedReasoning)
 	if len(raw.Deferred) > 0 {
 		if len(raw.Deferred) > 1 {
 			return nil, fmt.Errorf("only one deferred block is supported")
@@ -192,22 +193,7 @@ func buildRuntime(raw *rawFile, filename string) (*Runtime, error) {
 			}
 			alias.SessionAffinity = &SessionAffinity{Headers: headers}
 		}
-		if al.EncryptedReasoning != nil {
-			er := &EncryptedReasoning{Passthrough: true, OnCallerMismatch: EncryptedReasoningFail}
-			if al.EncryptedReasoning.Passthrough != nil {
-				er.Passthrough = *al.EncryptedReasoning.Passthrough
-			}
-			if al.EncryptedReasoning.OnCallerMismatch != "" {
-				er.OnCallerMismatch = al.EncryptedReasoning.OnCallerMismatch
-			}
-			for _, m := range al.EncryptedReasoning.MatchMessages {
-				er.MatchMessages = append(er.MatchMessages, strings.ToLower(strings.TrimSpace(m)))
-			}
-			if len(er.MatchMessages) == 0 {
-				er.MatchMessages = append([]string(nil), DefaultEncryptedReasoningMatchMessages...)
-			}
-			alias.EncryptedReasoning = er
-		}
+		alias.EncryptedReasoning = buildEncryptedReasoning(al.EncryptedReasoning)
 		hasTargets := len(al.Targets) > 0
 		hasProviders := len(al.Providers) > 0
 		hasModel := al.Model != ""
@@ -248,37 +234,32 @@ func buildRuntime(raw *rawFile, filename string) (*Runtime, error) {
 }
 
 func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvider, syntaxByName map[string]rawProviderSyntax, builtByName map[string]Provider, deferred Deferred) (Provider, error) {
-	if rawProvider.Extends == rawProvider.Name {
-		return Provider{}, fmt.Errorf("extends %q references itself", rawProvider.Extends)
-	}
-	baseRaw, ok := rawByName[rawProvider.Extends]
-	if !ok {
-		return Provider{}, fmt.Errorf("extends %q is not defined", rawProvider.Extends)
-	}
-	if baseRaw.Extends != "" {
-		return Provider{}, fmt.Errorf("extends %q references derived provider %q; inheritance chains are not supported", rawProvider.Extends, rawProvider.Extends)
+	baseRaw, err := derivedProviderBase(rawProvider, rawByName)
+	if err != nil {
+		return Provider{}, err
 	}
 	base, ok := builtByName[rawProvider.Extends]
 	if !ok {
 		return Provider{}, fmt.Errorf("extends %q references a disabled provider", rawProvider.Extends)
-	}
-	if rawProvider.Type != baseRaw.Type {
-		return Provider{}, fmt.Errorf("type %q must match base provider %q type %q", rawProvider.Type, rawProvider.Extends, baseRaw.Type)
 	}
 	if err := validateDerivedProviderSurface(rawProvider, syntaxByName[rawProvider.Name], baseRaw); err != nil {
 		return Provider{}, err
 	}
 	provider := cloneProvider(base)
 	provider.Name = rawProvider.Name
+	provider.Extends = rawProvider.Extends
+	provider.EncryptedReasoningInherited = provider.EncryptedReasoning != nil
 	provider.TLSClientHelloInherited = true
 	provider.ForwardAuthorization = rawProvider.ForwardAuthorization
 	provider.DeferredTransport = nil
 	provider.DeferredReceiver = nil
 	for i := range provider.Models {
 		provider.Models[i].DeferredTransport = nil
+		provider.Models[i].EncryptedReasoningInherited = provider.Models[i].EncryptedReasoning != nil
 	}
 	for name, model := range provider.ModelByName {
 		model.DeferredTransport = nil
+		model.EncryptedReasoningInherited = model.EncryptedReasoning != nil
 		provider.ModelByName[name] = model
 	}
 	if rawProvider.DisplayName != "" {
@@ -311,10 +292,33 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 			return Provider{}, err
 		}
 	}
+	if err := buildProviderEncryptedReasoning(&provider, rawProvider); err != nil {
+		return Provider{}, err
+	}
 	if err := buildProviderDeferred(&provider, rawProvider, deferred); err != nil {
 		return Provider{}, err
 	}
 	return provider, nil
+}
+
+func derivedProviderBase(local rawProvider, rawByName map[string]rawProvider) (rawProvider, error) {
+	if local.Extends == local.Name {
+		return rawProvider{}, fmt.Errorf("extends %q references itself", local.Extends)
+	}
+	base, ok := rawByName[local.Extends]
+	if !ok {
+		return rawProvider{}, fmt.Errorf("extends %q is not defined", local.Extends)
+	}
+	if base.Extends != "" {
+		return rawProvider{}, fmt.Errorf("extends %q references derived provider %q; inheritance chains are not supported", local.Extends, local.Extends)
+	}
+	if base.Enabled != nil && !*base.Enabled {
+		return rawProvider{}, fmt.Errorf("extends %q references a disabled provider", local.Extends)
+	}
+	if local.Type != base.Type {
+		return rawProvider{}, fmt.Errorf("type %q must match base provider %q type %q", local.Type, local.Extends, base.Type)
+	}
+	return base, nil
 }
 
 func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderSyntax, base rawProvider) error {
@@ -363,17 +367,17 @@ func validateDerivedModelOverlays(local rawProvider, syntax []rawModelSyntax, ba
 	seen := make(map[string]bool, len(local.Models))
 	for i, model := range local.Models {
 		if seen[model.Name] {
-			return fmt.Errorf("derived provider has duplicate model %q deferred_transport overlays", model.Name)
+			return fmt.Errorf("derived provider has duplicate model %q policy overlays", model.Name)
 		}
 		seen[model.Name] = true
 		if err := validateDerivedModelOverlaySyntax(model.Name, syntax[i]); err != nil {
 			return err
 		}
-		if model.DeferredTransport == nil {
-			return fmt.Errorf("derived provider cannot declare model blocks without exactly one deferred_transport block; model %q requires a transport-only overlay", model.Name)
+		if model.DeferredTransport == nil && model.EncryptedReasoning == nil {
+			return fmt.Errorf("derived provider cannot declare model blocks without encrypted_reasoning or deferred_transport; model %q requires a policy-only overlay", model.Name)
 		}
 		if !inherited[model.Name] {
-			return fmt.Errorf("derived provider cannot declare new model %q; deferred_transport overlays require an existing inherited model name", model.Name)
+			return fmt.Errorf("derived provider cannot declare new model %q; policy overlays require an existing inherited model name", model.Name)
 		}
 	}
 	return nil
@@ -381,15 +385,20 @@ func validateDerivedModelOverlays(local rawProvider, syntax []rawModelSyntax, ba
 
 func validateDerivedModelOverlaySyntax(modelName string, syntax rawModelSyntax) error {
 	for name := range syntax.Attrs {
-		return fmt.Errorf("derived provider cannot declare model blocks with %s; model %q supports only deferred_transport overlays", name, modelName)
+		return fmt.Errorf("derived provider cannot declare model blocks with %s; model %q supports only encrypted_reasoning and deferred_transport overlays", name, modelName)
 	}
 	for name, count := range syntax.Blocks {
-		if name != "deferred_transport" && count > 0 {
-			return fmt.Errorf("derived provider cannot declare model blocks with %s; model %q supports only deferred_transport overlays", name, modelName)
+		if name != "deferred_transport" && name != "encrypted_reasoning" && count > 0 {
+			return fmt.Errorf("derived provider cannot declare model blocks with %s; model %q supports only encrypted_reasoning and deferred_transport overlays", name, modelName)
 		}
 	}
-	if syntax.Blocks["deferred_transport"] != 1 {
-		return fmt.Errorf("derived provider cannot declare model blocks without exactly one deferred_transport block; model %q requires a transport-only overlay", modelName)
+	for _, name := range []string{"encrypted_reasoning", "deferred_transport"} {
+		if syntax.Blocks[name] > 1 {
+			return fmt.Errorf("derived provider model %q supports at most one %s block", modelName, name)
+		}
+	}
+	if syntax.Blocks["deferred_transport"]+syntax.Blocks["encrypted_reasoning"] == 0 {
+		return fmt.Errorf("derived provider cannot declare model blocks without encrypted_reasoning or deferred_transport; model %q requires a policy-only overlay", modelName)
 	}
 	return nil
 }
@@ -685,6 +694,9 @@ func buildProvider(rawProvider rawProvider, syntax rawProviderSyntax, filename s
 		}
 		provider.Models = append(provider.Models, model)
 		provider.ModelByName[m.Name] = cloneModel(model)
+	}
+	if err := buildProviderEncryptedReasoning(&provider, rawProvider); err != nil {
+		return Provider{}, err
 	}
 	if err := buildProviderDeferred(&provider, rawProvider, deferred); err != nil {
 		return Provider{}, err

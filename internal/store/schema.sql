@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS db_providers (
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   workspace_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000' REFERENCES workspaces(id),
   healthcheck JSONB,
+  encrypted_reasoning JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT db_providers_copilot_credential_source CHECK (
@@ -142,6 +143,7 @@ CREATE TABLE IF NOT EXISTS db_provider_models (
   protocol TEXT NOT NULL DEFAULT '',
   capabilities JSONB NOT NULL DEFAULT '[]',
   pricing JSONB,
+  encrypted_reasoning JSONB,
   UNIQUE (provider_id, name)
 );
 CREATE INDEX IF NOT EXISTS idx_db_provider_models_provider ON db_provider_models(provider_id);

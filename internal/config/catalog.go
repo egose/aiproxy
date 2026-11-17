@@ -137,6 +137,7 @@ func cloneProvider(provider Provider) Provider {
 		out.Healthcheck = &hc
 	}
 	out.DeferredTransport = cloneDeferredTransport(provider.DeferredTransport)
+	out.EncryptedReasoning = CloneEncryptedReasoning(provider.EncryptedReasoning)
 	if provider.DeferredReceiver != nil {
 		deferred := *provider.DeferredReceiver
 		out.DeferredReceiver = &deferred
@@ -147,6 +148,11 @@ func cloneProvider(provider Provider) Provider {
 		model := &out.Models[i]
 		if model.DeferredTransport == nil {
 			model.DeferredTransport = cloneDeferredTransport(provider.ModelByName[model.Name].DeferredTransport)
+		}
+		if model.EncryptedReasoning == nil {
+			indexed := provider.ModelByName[model.Name]
+			model.EncryptedReasoning = CloneEncryptedReasoning(indexed.EncryptedReasoning)
+			model.EncryptedReasoningInherited = indexed.EncryptedReasoningInherited
 		}
 		out.ModelByName[model.Name] = cloneModel(*model)
 	}
@@ -174,6 +180,7 @@ func cloneModels(in []Model) []Model {
 func cloneModel(model Model) Model {
 	model.Capabilities = append([]Capability(nil), model.Capabilities...)
 	model.DeferredTransport = cloneDeferredTransport(model.DeferredTransport)
+	model.EncryptedReasoning = CloneEncryptedReasoning(model.EncryptedReasoning)
 	return model
 }
 
@@ -204,10 +211,6 @@ func cloneAlias(alias Alias) Alias {
 		affinity.Headers = append([]string(nil), alias.SessionAffinity.Headers...)
 		alias.SessionAffinity = &affinity
 	}
-	if alias.EncryptedReasoning != nil {
-		er := *alias.EncryptedReasoning
-		er.MatchMessages = append([]string(nil), alias.EncryptedReasoning.MatchMessages...)
-		alias.EncryptedReasoning = &er
-	}
+	alias.EncryptedReasoning = CloneEncryptedReasoning(alias.EncryptedReasoning)
 	return alias
 }

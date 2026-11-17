@@ -22,13 +22,14 @@ import { ActionMenu } from '@egose/shadcn-theme/components/widgets/action-menu';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FormProvider, useFieldArray, useForm } from 'react-hook-form';
+import { Controller, FormProvider, useFieldArray, useForm } from 'react-hook-form';
 import { Link } from 'react-router';
 import { z } from 'zod';
 import { useSnapshot as useValtioSnapshot } from 'valtio';
 import { DataTable, type ManagementColumnDef } from '../components/data-table';
 import { useConfirm } from '../components/dialogs';
 import { SourceBadge } from '../components/source-badge';
+import { EncryptedReasoningControl, ReasoningPolicyReadOnly } from '../components/encrypted-reasoning-control';
 import { WorkspaceBadge } from '../components/workspace-select';
 import {
   useAdminWorkspace,
@@ -53,7 +54,8 @@ import {
 } from '../services/admin';
 import { errorMessage } from '../services/dashboard';
 import { builtinTLSClientHelloSelectors, copilotDeviceFlowStatusSchema } from '../types';
-import type { AdminProvider, CopilotDeviceFlowStatus, Provider, ProviderTypeInfo } from '../types';
+import type { AdminModel, AdminProvider, CopilotDeviceFlowStatus, Provider, ProviderTypeInfo } from '../types';
+import { reasoningDeclaration, reasoningDraft, reasoningDraftSchema } from '../lib/encrypted-reasoning-form';
 
 type SnapshotSortKey = 'name' | 'type' | 'models' | 'display';
 type SnapshotSort = { key: SnapshotSortKey; desc: boolean } | null;
@@ -162,6 +164,7 @@ const modelRowSchema = z.object({
   pricingOutput: z.string().optional(),
   pricingCached: z.string().optional(),
   pricingCacheWrite: z.string().optional(),
+  reasoning: reasoningDraftSchema,
 });
 
 const providerFormSchema = z
@@ -184,6 +187,8 @@ const providerFormSchema = z
     apiKeyRefKey: z.string().optional(),
     credentialPath: z.string().optional(),
     credentialName: z.string().optional(),
+    reasoning: reasoningDraftSchema,
+    modelsReplacementConfirmed: z.boolean(),
     models: z.array(modelRowSchema),
     showHealthcheck: z.boolean().optional(),
     hcPath: z.string().optional(),
@@ -227,6 +232,7 @@ const emptyModelRow = (): ProviderFormValues['models'][number] => ({
   pricingOutput: '',
   pricingCached: '',
   pricingCacheWrite: '',
+  reasoning: reasoningDraft(),
 });
 
 const emptyProviderForm = (): ProviderFormValues => ({
@@ -248,6 +254,8 @@ const emptyProviderForm = (): ProviderFormValues => ({
   apiKeyRefKey: '',
   credentialPath: '',
   credentialName: '',
+  reasoning: reasoningDraft(),
+  modelsReplacementConfirmed: false,
   models: [emptyModelRow()],
   showHealthcheck: false,
   hcPath: '',
@@ -260,6 +268,21 @@ const emptyProviderForm = (): ProviderFormValues => ({
   hcSuccesses: '',
   hcSendAuth: false,
 });
+
+function modelToFormRow(m: AdminModel): ProviderFormValues['models'][number] {
+  return {
+    name: m.name,
+    upstreamName: m.upstream_name && m.upstream_name !== m.name ? m.upstream_name : '',
+    displayName: m.display_name ?? '',
+    protocol: m.protocol ?? '',
+    capabilities: [...(m.capabilities ?? [])],
+    pricingInput: m.pricing?.input_per_million?.toString() ?? '',
+    pricingOutput: m.pricing?.output_per_million?.toString() ?? '',
+    pricingCached: m.pricing?.cached_per_million?.toString() ?? '',
+    pricingCacheWrite: m.pricing?.cache_write_per_million?.toString() ?? '',
+    reasoning: reasoningDraft(m.encrypted_reasoning),
+  };
+}
 
 function providerToFormValues(p: AdminProvider): ProviderFormValues {
   return {
@@ -281,20 +304,9 @@ function providerToFormValues(p: AdminProvider): ProviderFormValues {
     apiKeyRefKey: p.api_key_ref_key ?? '',
     credentialPath: p.copilot_credential_path ?? '',
     credentialName: p.copilot_credential_name ?? '',
-    models:
-      p.models.length > 0
-        ? p.models.map((m) => ({
-            name: m.name,
-            upstreamName: m.upstream_name && m.upstream_name !== m.name ? m.upstream_name : '',
-            displayName: m.display_name ?? '',
-            protocol: m.protocol ?? '',
-            capabilities: [...(m.capabilities ?? [])],
-            pricingInput: m.pricing?.input_per_million?.toString() ?? '',
-            pricingOutput: m.pricing?.output_per_million?.toString() ?? '',
-            pricingCached: m.pricing?.cached_per_million?.toString() ?? '',
-            pricingCacheWrite: m.pricing?.cache_write_per_million?.toString() ?? '',
-          }))
-        : [emptyModelRow()],
+    reasoning: reasoningDraft(p.encrypted_reasoning),
+    modelsReplacementConfirmed: false,
+    models: p.models.length > 0 ? p.models.map(modelToFormRow) : p.extends ? [] : [emptyModelRow()],
     showHealthcheck: p.healthcheck != null,
     hcPath: p.healthcheck?.path ?? '',
     hcMethod: p.healthcheck?.method || 'GET',
@@ -326,6 +338,24 @@ function modelRowPricing(row: ProviderFormValues['models'][number]): Record<stri
   return Object.keys(rates).length > 0 ? rates : undefined;
 }
 
+function modelPayloads(rows: ProviderFormValues['models'], inherited: boolean): Record<string, unknown>[] {
+  return rows.flatMap((row) => {
+    const name = row.name.trim();
+    if (!name) return [];
+    const local = reasoningDeclaration(row.reasoning);
+    if (inherited) return local === null ? [] : [{ name, encrypted_reasoning: local }];
+    const payload: Record<string, unknown> = { name };
+    if (local !== null) payload.encrypted_reasoning = local;
+    if ((row.displayName ?? '').trim() !== '') payload.display_name = (row.displayName ?? '').trim();
+    if ((row.upstreamName ?? '').trim() !== '') payload.upstream_name = (row.upstreamName ?? '').trim();
+    if ((row.protocol ?? '') !== '') payload.protocol = row.protocol;
+    if ((row.capabilities ?? []).length > 0) payload.capabilities = row.capabilities;
+    const pricing = modelRowPricing(row);
+    if (pricing !== undefined) payload.pricing = pricing;
+    return [payload];
+  });
+}
+
 function buildProviderBody(
   v: ProviderFormValues,
   credentialKind: string,
@@ -335,20 +365,7 @@ function buildProviderBody(
   const changed = (...fields: Array<keyof ProviderFormValues>) =>
     !initial || fields.some((field) => JSON.stringify(v[field]) !== JSON.stringify(initial[field]));
   const inherited = !!v.extendsName?.trim();
-  const modelPayloads = v.models
-    .map((row) => {
-      const trimmed = row.name.trim();
-      if (trimmed === '') return null;
-      const payload: Record<string, unknown> = { name: trimmed };
-      if ((row.displayName ?? '').trim() !== '') payload.display_name = (row.displayName ?? '').trim();
-      if ((row.upstreamName ?? '').trim() !== '') payload.upstream_name = (row.upstreamName ?? '').trim();
-      if ((row.protocol ?? '') !== '') payload.protocol = row.protocol;
-      if ((row.capabilities ?? []).length > 0) payload.capabilities = row.capabilities;
-      const pricing = modelRowPricing(row);
-      if (pricing !== undefined) payload.pricing = pricing;
-      return payload;
-    })
-    .filter((m): m is Record<string, unknown> => m !== null);
+  const models = modelPayloads(v.models, inherited);
   const body: Record<string, unknown> = initial ? {} : { name: v.name.trim() };
   const set = (key: string, field: keyof ProviderFormValues, value: unknown, create = true) => {
     if (changed(field) && (initial || create)) body[key] = value;
@@ -358,8 +375,20 @@ function buildProviderBody(
   set('enabled', 'enabled', !!v.enabled, !v.enabled);
   set('extends', 'extendsName', (v.extendsName ?? '').trim(), inherited);
   set('forward_authorization', 'forwardAuthorization', !!v.forwardAuthorization, !!v.forwardAuthorization);
+  if (changed('reasoning')) {
+    const local = reasoningDeclaration(v.reasoning);
+    if (initial || local !== null) body.encrypted_reasoning = local;
+  }
+  const modelsChanged = !initial || JSON.stringify(models) !== JSON.stringify(modelPayloads(initial.models, inherited));
+  const becomingConcrete = !inherited && !!initial?.extendsName?.trim();
+  if (
+    becomingConcrete ||
+    v.modelsReplacementConfirmed ||
+    (modelsChanged && (!inherited || models.length > 0 || !!initial))
+  ) {
+    body.models = models;
+  }
   if (!inherited) {
-    set('models', 'models', modelPayloads);
     set('base_url', 'baseUrl', (v.baseUrl ?? '').trim(), !!v.baseUrl?.trim());
     set('tls_client_hello', 'tlsClientHello', v.tlsClientHello ?? 'native', v.tlsClientHello !== 'native');
     if (initial?.extendsName?.trim()) body.tls_client_hello = v.tlsClientHello ?? 'native';
@@ -450,6 +479,7 @@ function ProviderForm({
   onCancel,
   lockName,
   providerTypeInfos,
+  inventory,
 }: {
   initial: ProviderFormValues;
   editProvider?: AdminProvider;
@@ -458,9 +488,10 @@ function ProviderForm({
   onCancel?: () => void;
   lockName: boolean;
   providerTypeInfos: ProviderTypeInfo[] | undefined;
+  inventory: AdminProvider[];
 }) {
   const form = useForm<ProviderFormValues>({ resolver: zodResolver(providerFormSchema), defaultValues: initial });
-  const { fields, append, remove } = useFieldArray({ control: form.control, name: 'models' });
+  const { fields, append, remove, replace } = useFieldArray({ control: form.control, name: 'models' });
   const queryClient = useQueryClient();
   const selectedType = form.watch('type');
   const supportsForwardAuthorization = [
@@ -474,7 +505,39 @@ function ProviderForm({
   useEffect(() => {
     if (!supportsForwardAuthorization) form.setValue('forwardAuthorization', false);
   }, [form, supportsForwardAuthorization]);
-  const inherited = !!form.watch('extendsName')?.trim();
+  const extendsName = form.watch('extendsName')?.trim() ?? '';
+  const inherited = !!extendsName;
+  const selectedBase = inventory.find(
+    (p) => p.name === extendsName && !p.extends && p.enabled && p.type === selectedType,
+  );
+  const sameModelScope =
+    lockName && extendsName === (initial.extendsName?.trim() ?? '') && selectedType === initial.type;
+  const modelInventory = sameModelScope && inherited ? editProvider?.models : selectedBase?.models;
+  const modelScope = `${selectedType}/${extendsName}`;
+  const modelScopeRef = useRef(`${initial.type}/${initial.extendsName?.trim() ?? ''}`);
+  const inheritanceTransition = lockName && inherited !== !!initial.extendsName?.trim();
+  const needsModelConfirmation =
+    inheritanceTransition && initial.models.some((m) => reasoningDeclaration(m.reasoning) !== null);
+
+  useEffect(() => {
+    if (modelScopeRef.current === modelScope) return;
+    form.setValue('modelsReplacementConfirmed', false);
+    if (inherited && !modelInventory) return;
+    const current = form.getValues('models');
+    if (inherited && modelInventory) {
+      const rows = modelInventory.map((m) => ({
+        ...modelToFormRow(m),
+        reasoning: current.find((row) => row.name === m.name)?.reasoning ?? reasoningDraft(),
+      }));
+      const missing = current.filter(
+        (row) => reasoningDeclaration(row.reasoning) !== null && !rows.some((m) => m.name === row.name),
+      );
+      replace([...rows, ...missing]);
+    } else if (current.length === 0) {
+      replace([emptyModelRow()]);
+    }
+    modelScopeRef.current = modelScope;
+  }, [form, inherited, modelInventory, modelScope, replace]);
   const showHealthcheck = form.watch('showHealthcheck');
   const typeInfo = providerTypeInfos?.find((t) => t.type === selectedType);
   const credentialKind = typeInfo?.credential ?? 'api_key';
@@ -849,9 +912,35 @@ function ProviderForm({
     );
   };
 
+  const submitValues = (values: ProviderFormValues) => {
+    if (inherited) {
+      if (!sameModelScope && !selectedBase) {
+        form.setError('extendsName', {
+          message:
+            'Base inventory unavailable. Choose an enabled concrete provider of the same type from authorized reads.',
+        });
+        return;
+      }
+      const names = new Set(modelInventory?.map((m) => m.name));
+      if (values.models.some((row) => reasoningDeclaration(row.reasoning) !== null && !names.has(row.name))) {
+        form.setError('models', {
+          message: 'A local overlay names a model unavailable on this base. Remove it or choose another base.',
+        });
+        return;
+      }
+    }
+    if (needsModelConfirmation && !values.modelsReplacementConfirmed) {
+      form.setError('models', {
+        message: 'Confirm the destination model replacement before changing inheritance kind.',
+      });
+      return;
+    }
+    submitMutation.mutate(values);
+  };
+
   return (
     <FormProvider {...form}>
-      <form className="grid gap-4" onSubmit={form.handleSubmit((values) => submitMutation.mutate(values))}>
+      <form className="grid gap-4" onSubmit={form.handleSubmit(submitValues)}>
         {submitMutation.error && (
           <Alert variant="danger">
             <AlertDescription>{errorMessage(submitMutation.error)}</AlertDescription>
@@ -963,6 +1052,25 @@ function ProviderForm({
         )}
 
         <HookFormCheckbox<ProviderFormValues> name="enabled" label="Enabled" />
+
+        <Controller
+          control={form.control}
+          name="reasoning"
+          render={({ field, fieldState }) => (
+            <EncryptedReasoningControl
+              label="Provider encrypted reasoning"
+              value={field.value}
+              onChange={field.onChange}
+              view={editProvider}
+              error={fieldState.error?.message}
+              disabled={submitMutation.isPending}
+            />
+          )}
+        />
+        <p className="text-xs text-slate-500">
+          Provider policy does not override a declared model policy, including one inherited from a base. Root policy
+          remains static configuration; this form adds no global edit permissions.
+        </p>
 
         <Separator />
 
@@ -1207,14 +1315,91 @@ function ProviderForm({
 
         <Separator />
 
+        {form.formState.errors.models?.message && (
+          <p role="alert" className="text-sm text-red-500">
+            {form.formState.errors.models.message}
+          </p>
+        )}
+        {needsModelConfirmation && (
+          <HookFormCheckbox<ProviderFormValues>
+            name="modelsReplacementConfirmed"
+            label={
+              inherited
+                ? 'Confirm destination overlays (replace the complete local model set)'
+                : 'Confirm destination definitions (replace the complete local model set)'
+            }
+          />
+        )}
+        {inherited && (
+          <div className="grid gap-3">
+            <h3 className="text-sm font-medium">Inherited models — definitions are read-only</h3>
+            {!modelInventory?.length && (
+              <p className="text-sm text-slate-500">
+                Base model inventory unavailable. Policy overlays cannot be added without an authorized inventory read.
+              </p>
+            )}
+            {fields.map((field, index) => {
+              const name = form.watch(`models.${index}.name`);
+              if (!name) return null;
+              const definition = modelInventory?.find((m) => m.name === name);
+              if (!definition && reasoningDeclaration(form.getValues(`models.${index}.reasoning`)) === null)
+                return null;
+              if (!definition) {
+                return (
+                  <div key={field.id} className="grid gap-2 rounded-md border p-3">
+                    <p role="alert">
+                      Model {name} is unavailable on base {extendsName}; its local policy has not been discarded.
+                    </p>
+                    <Button type="button" appearance="outline" onClick={() => remove(index)}>
+                      Remove unavailable overlay {name}
+                    </Button>
+                  </div>
+                );
+              }
+              return (
+                <div key={field.id} className="grid gap-2">
+                  <span className="font-mono text-sm">{name} (inherited definition)</span>
+                  <details className="text-xs text-slate-500">
+                    <summary className="cursor-pointer">Definition (read-only)</summary>
+                    <pre className="whitespace-pre-wrap">
+                      {JSON.stringify(
+                        {
+                          name: definition.name,
+                          upstream_name: definition.upstream_name,
+                          display_name: definition.display_name,
+                          protocol: definition.protocol,
+                          capabilities: definition.capabilities,
+                          pricing: definition.pricing,
+                        },
+                        null,
+                        2,
+                      )}
+                    </pre>
+                  </details>
+                  <Controller
+                    control={form.control}
+                    name={`models.${index}.reasoning`}
+                    render={({ field: policy, fieldState }) => (
+                      <EncryptedReasoningControl
+                        label={`Model ${name} encrypted reasoning`}
+                        value={policy.value}
+                        onChange={policy.onChange}
+                        view={sameModelScope ? editProvider?.models.find((m) => m.name === name) : undefined}
+                        error={fieldState.error?.message}
+                        disabled={submitMutation.isPending}
+                      />
+                    )}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {!inherited && (
           <>
             <div className="grid gap-2">
               <span className="text-sm font-medium">Models (at least one required)</span>
-
-              {form.formState.errors.models?.message && (
-                <span className="text-sm text-red-500">{form.formState.errors.models.message}</span>
-              )}
 
               {fields.map((field, index) => (
                 <div key={field.id} className="grid gap-2 rounded-md border p-3">
@@ -1294,6 +1479,25 @@ function ProviderForm({
                       />
                     </div>
                   </div>
+
+                  <Controller
+                    control={form.control}
+                    name={`models.${index}.reasoning`}
+                    render={({ field: policy, fieldState }) => (
+                      <EncryptedReasoningControl
+                        label={`Model ${form.watch(`models.${index}.name`) || index + 1} encrypted reasoning`}
+                        value={policy.value}
+                        onChange={policy.onChange}
+                        view={
+                          sameModelScope
+                            ? editProvider?.models.find((m) => m.name === form.watch(`models.${index}.name`))
+                            : undefined
+                        }
+                        error={fieldState.error?.message}
+                        disabled={submitMutation.isPending}
+                      />
+                    )}
+                  />
 
                   {fields.length > 1 && (
                     <div>
@@ -1447,7 +1651,7 @@ function ProviderForm({
 }
 
 const EditProviderDialog = createTypedDialog<
-  { provider: AdminProvider; typeInfos: ProviderTypeInfo[] | undefined },
+  { provider: AdminProvider; typeInfos: ProviderTypeInfo[] | undefined; inventory: AdminProvider[] },
   boolean
 >(({ open, args, onClose }) => (
   <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
@@ -1463,6 +1667,7 @@ const EditProviderDialog = createTypedDialog<
         submitLabel="Save changes"
         lockName
         providerTypeInfos={args.typeInfos}
+        inventory={args.inventory}
         onSubmit={async (body) => {
           await updateAdminProvider(args.provider.name, body);
           onClose(true);
@@ -1473,29 +1678,31 @@ const EditProviderDialog = createTypedDialog<
   </Dialog>
 ));
 
-const CreateProviderDialog = createTypedDialog<{ typeInfos: ProviderTypeInfo[] | undefined }, boolean>(
-  ({ open, args, onClose }) => (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-auto sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>Create provider</DialogTitle>
-        </DialogHeader>
+const CreateProviderDialog = createTypedDialog<
+  { typeInfos: ProviderTypeInfo[] | undefined; inventory: AdminProvider[] },
+  boolean
+>(({ open, args, onClose }) => (
+  <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
+    <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-auto sm:max-w-3xl">
+      <DialogHeader>
+        <DialogTitle>Create provider</DialogTitle>
+      </DialogHeader>
 
-        <ProviderForm
-          initial={emptyProviderForm()}
-          submitLabel="Create provider"
-          lockName={false}
-          providerTypeInfos={args.typeInfos}
-          onSubmit={async (body) => {
-            await createAdminProvider(body);
-            onClose(true);
-          }}
-          onCancel={() => onClose(false)}
-        />
-      </DialogContent>
-    </Dialog>
-  ),
-);
+      <ProviderForm
+        initial={emptyProviderForm()}
+        submitLabel="Create provider"
+        lockName={false}
+        providerTypeInfos={args.typeInfos}
+        inventory={args.inventory}
+        onSubmit={async (body) => {
+          await createAdminProvider(body);
+          onClose(true);
+        }}
+        onCancel={() => onClose(false)}
+      />
+    </DialogContent>
+  </Dialog>
+));
 
 const credentialSchema = z.object({
   name: z.string().trim().min(1, 'Enter a database provider name.'),
@@ -1570,7 +1777,10 @@ function ManagedProviders() {
 
   const onCreate = async () => {
     try {
-      const created = await openDialog(CreateProviderDialog, { typeInfos: providerTypes.data });
+      const created = await openDialog(CreateProviderDialog, {
+        typeInfos: providerTypes.data,
+        inventory: providers.data ?? [],
+      });
       if (created) {
         setError(null);
         await refresh();
@@ -1582,7 +1792,11 @@ function ManagedProviders() {
 
   const openEdit = async (provider: AdminProvider) => {
     try {
-      const saved = await openDialog(EditProviderDialog, { provider, typeInfos: providerTypes.data });
+      const saved = await openDialog(EditProviderDialog, {
+        provider,
+        typeInfos: providerTypes.data,
+        inventory: providers.data ?? [],
+      });
       if (saved) {
         setError(null);
         await refresh();
@@ -1679,6 +1893,20 @@ function ManagedProviders() {
               {row.original.models.map((m) => m.name).join(', ')}
             </span>
           </span>
+        ),
+      },
+      {
+        id: 'reasoning',
+        header: 'Encrypted reasoning',
+        enableSorting: false,
+        cell: ({ row }) => (
+          <details className="grid gap-2">
+            <summary className="cursor-pointer text-sm">Policies (read-only)</summary>
+            <ReasoningPolicyReadOnly label="Provider policy" view={row.original} />
+            {row.original.models.map((model) => (
+              <ReasoningPolicyReadOnly key={model.name} label={`Model ${model.name} policy`} view={model} />
+            ))}
+          </details>
         ),
       },
       {

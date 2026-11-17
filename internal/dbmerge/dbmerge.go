@@ -37,12 +37,6 @@ type dbSessionAffinity struct {
 	Headers []string `json:"headers"`
 }
 
-type dbEncryptedReasoning struct {
-	Passthrough      bool     `json:"passthrough"`
-	OnCallerMismatch string   `json:"on_caller_mismatch"`
-	MatchMessages    []string `json:"match_messages"`
-}
-
 func jsonPresent(raw []byte) bool {
 	trimmed := strings.TrimSpace(string(raw))
 	return trimmed != "" && !strings.EqualFold(trimmed, "null")
@@ -59,7 +53,9 @@ func MergeCatalog(ctx context.Context, st *store.Store, rt *config.Runtime) (Mer
 		return out, fmt.Errorf("database providers: %w", err)
 	}
 	modelsByProvider := make(map[string][]store.DBProviderModel, len(rows))
+	managedByName := make(map[string]store.DBProvider, len(rows))
 	for _, row := range rows {
+		managedByName[row.Name] = row
 		models, err := st.ListProviderModels(ctx, row.ID)
 		if err != nil {
 			return out, fmt.Errorf("database provider %q models: %w", row.Name, err)
@@ -80,6 +76,14 @@ func MergeCatalog(ctx context.Context, st *store.Store, rt *config.Runtime) (Mer
 		for _, row := range ordered {
 			if (row.Extends != "") != pass {
 				continue
+			}
+			if base, ok := managedByName[row.Extends]; row.Extends != "" && ok {
+				if base.Extends != "" {
+					return out, fmt.Errorf("provider %q: extends %q must reference a concrete provider; inheritance chains are not supported", row.Name, row.Extends)
+				}
+				if !base.Enabled {
+					return out, fmt.Errorf("provider %q: extends %q references a disabled provider", row.Name, row.Extends)
+				}
 			}
 			built, err := BuildProvider(row, modelsByProvider[row.Name], enabled)
 			if err != nil {
@@ -133,20 +137,38 @@ func sortedProviders(byName map[string]config.Provider) []config.Provider {
 
 func cloneProvider(base config.Provider) config.Provider {
 	out := base
-	out.Models = append([]config.Model(nil), base.Models...)
-	out.ModelByName = make(map[string]config.Model, len(base.ModelByName))
-	for name, model := range base.ModelByName {
-		out.ModelByName[name] = model
+	out.APIKey = ""
+	out.APIKeyRef = nil // pragma: allowlist secret
+	out.CopilotCredentialRef = nil
+	out.CopilotToken = ""
+	out.EncryptedReasoning = config.CloneEncryptedReasoning(base.EncryptedReasoning)
+	out.Models = make([]config.Model, 0, len(base.Models)+len(base.ModelByName))
+	out.ModelByName = make(map[string]config.Model, len(base.Models)+len(base.ModelByName))
+	for _, model := range base.Models {
+		indexed := base.ModelByName[model.Name]
+		if model.EncryptedReasoning == nil {
+			model.EncryptedReasoning = indexed.EncryptedReasoning
+			model.EncryptedReasoningInherited = indexed.EncryptedReasoningInherited
+		}
+		if model.DeferredTransport == nil {
+			model.DeferredTransport = indexed.DeferredTransport
+		}
+		out.Models = append(out.Models, cloneModel(model))
+		out.ModelByName[model.Name] = cloneModel(model)
+	}
+	var missing []string
+	for name := range base.ModelByName {
+		if _, ok := out.ModelByName[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(missing)
+	for _, name := range missing {
+		model := base.ModelByName[name]
+		out.Models = append(out.Models, cloneModel(model))
+		out.ModelByName[name] = cloneModel(model)
 	}
 	out.ForwardHeaders = append([]string(nil), base.ForwardHeaders...)
-	if base.APIKeyRef != nil { // pragma: allowlist secret
-		ref := *base.APIKeyRef
-		out.APIKeyRef = &ref
-	}
-	if base.CopilotCredentialRef != nil {
-		ref := *base.CopilotCredentialRef
-		out.CopilotCredentialRef = &ref
-	}
 	if base.Healthcheck != nil {
 		hc := *base.Healthcheck
 		out.Healthcheck = &hc
@@ -154,8 +176,37 @@ func cloneProvider(base config.Provider) config.Provider {
 	return out
 }
 
+func cloneModel(model config.Model) config.Model {
+	model.Capabilities = append([]config.Capability(nil), model.Capabilities...)
+	model.EncryptedReasoning = config.CloneEncryptedReasoning(model.EncryptedReasoning)
+	if model.Pricing != nil {
+		pricing := *model.Pricing
+		model.Pricing = &pricing
+	}
+	if model.DeferredTransport != nil {
+		deferred := *model.DeferredTransport
+		model.DeferredTransport = &deferred
+	}
+	return model
+}
+
 func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases map[string]config.Provider) (config.Provider, error) {
+	p, err := MaterializeProvider(row, models, bases)
+	if err != nil {
+		return config.Provider{}, err
+	}
+	if err := attachCredential(&p, row); err != nil {
+		return config.Provider{}, err
+	}
+	return p, nil
+}
+
+func MaterializeProvider(row store.DBProvider, models []store.DBProviderModel, bases map[string]config.Provider) (config.Provider, error) {
 	name := row.Name
+	reasoning, err := decodeStoredEncryptedReasoning(row.EncryptedReasoning, fmt.Sprintf("provider %q", name))
+	if err != nil {
+		return config.Provider{}, err
+	}
 	if row.Extends != "" && row.TLSClientHello != "" {
 		return config.Provider{}, fmt.Errorf("provider %q: derived provider cannot declare tls_client_hello", name)
 	}
@@ -176,6 +227,12 @@ func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases m
 		if !ok {
 			return config.Provider{}, fmt.Errorf("provider %q: extends %q is not defined", name, row.Extends)
 		}
+		if base.Extends != "" {
+			return config.Provider{}, fmt.Errorf("provider %q: extends %q must reference a concrete provider; inheritance chains are not supported", name, row.Extends)
+		}
+		if !base.Enabled {
+			return config.Provider{}, fmt.Errorf("provider %q: extends %q references a disabled provider", name, row.Extends)
+		}
 		if string(base.Type) != row.Type {
 			return config.Provider{}, fmt.Errorf("provider %q: type %q must match base provider %q type %q", name, row.Type, row.Extends, base.Type)
 		}
@@ -193,23 +250,34 @@ func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases m
 		base.TLSProfile = baseTLS.TLSProfile
 		p := cloneProvider(base)
 		p.Name = name
+		p.DatabaseManaged = true
+		p.Extends = row.Extends
 		p.TLSClientHelloInherited = true
 		p.ForwardAuthorization = row.ForwardAuthorization
 		if row.DisplayName != "" {
 			p.DisplayName = row.DisplayName
 		}
 		p.Enabled = row.Enabled
-		p.APIKey = ""
-		p.APIKeyRef = nil // pragma: allowlist secret
-		p.CopilotCredentialRef = nil
-		p.CopilotToken = ""
-		if err := attachCredential(&p, row); err != nil {
+		p.EncryptedReasoning = config.NormalizeEncryptedReasoning(p.EncryptedReasoning)
+		p.EncryptedReasoningInherited = p.EncryptedReasoning != nil
+		if reasoning != nil {
+			p.EncryptedReasoning = reasoning
+			p.EncryptedReasoningInherited = false
+		}
+		for i := range p.Models {
+			p.Models[i].EncryptedReasoning = config.NormalizeEncryptedReasoning(p.Models[i].EncryptedReasoning)
+			p.Models[i].EncryptedReasoningInherited = p.Models[i].EncryptedReasoning != nil
+		}
+		if err := applyStoredModelOverlays(&p, models); err != nil {
+			return config.Provider{}, err
+		}
+		if err := validateMaterializedEncryptedReasoning(p); err != nil {
 			return config.Provider{}, err
 		}
 		return p, nil
 	}
 	p := config.Provider{
-		Type: config.ProviderType(row.Type), Name: name,
+		Type: config.ProviderType(row.Type), Name: name, DatabaseManaged: true,
 		DisplayName: row.DisplayName, BaseURL: row.BaseURL,
 		TLSClientHello: row.TLSClientHello, HasTLSClientHello: row.TLSClientHello != "", TLSProfile: localTLS.TLSProfile,
 		UserAgent: row.UserAgent, ForwardUserAgent: row.ForwardUserAgent,
@@ -217,15 +285,13 @@ func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases m
 		ForwardAuthorization: row.ForwardAuthorization,
 		AllowInsecureBaseURL: row.AllowInsecureBaseURL,
 		Enabled:              row.Enabled, ModelByName: make(map[string]config.Model),
+		EncryptedReasoning: reasoning,
 	}
 	if row.UpstreamTimeoutMs != nil {
 		if *row.UpstreamTimeoutMs <= 0 {
 			return config.Provider{}, fmt.Errorf("provider %q: invalid upstream_header_timeout: must be greater than zero", name)
 		}
 		p.UpstreamHeaderTimeout = time.Duration(*row.UpstreamTimeoutMs) * time.Millisecond
-	}
-	if err := attachCredential(&p, row); err != nil {
-		return config.Provider{}, err
 	}
 	if len(row.Healthcheck) > 0 && jsonPresent(row.Healthcheck) {
 		var hc dbHealthcheck
@@ -248,6 +314,13 @@ func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases m
 		}
 	}
 	for _, m := range models {
+		if _, ok := p.ModelByName[m.Name]; ok {
+			return config.Provider{}, fmt.Errorf("provider %q: duplicate model %q", name, m.Name)
+		}
+		reasoning, err := decodeStoredEncryptedReasoning(m.EncryptedReasoning, fmt.Sprintf("provider %q: model %q", name, m.Name))
+		if err != nil {
+			return config.Provider{}, err
+		}
 		upstream := m.UpstreamName
 		if upstream == "" {
 			upstream = m.Name
@@ -270,9 +343,12 @@ func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases m
 				}
 			}
 		}
-		model := config.Model{Name: m.Name, DisplayName: m.DisplayName, UpstreamName: upstream, Protocol: config.ModelProtocol(m.Protocol), Capabilities: caps, Pricing: pricing}
-		p.Models = append(p.Models, model)
-		p.ModelByName[m.Name] = model
+		model := config.Model{Name: m.Name, DisplayName: m.DisplayName, UpstreamName: upstream, Protocol: config.ModelProtocol(m.Protocol), Capabilities: caps, Pricing: pricing, EncryptedReasoning: reasoning}
+		p.Models = append(p.Models, cloneModel(model))
+		p.ModelByName[m.Name] = cloneModel(model)
+	}
+	if err := validateMaterializedEncryptedReasoning(p); err != nil {
+		return config.Provider{}, err
 	}
 	return p, nil
 }
@@ -347,7 +423,7 @@ func mergeAliases(ctx context.Context, st *store.Store, static config.Catalog, e
 		if err != nil {
 			return nil, fmt.Errorf("database alias %q targets: %w", row.Name, err)
 		}
-		alias := config.Alias{Name: row.Name, Algorithm: config.Algorithm(row.Algorithm), RetryStatusCodes: append([]int(nil), row.RetryStatusCodes...)}
+		alias := config.Alias{Name: row.Name, DatabaseManaged: true, Algorithm: config.Algorithm(row.Algorithm), RetryStatusCodes: append([]int(nil), row.RetryStatusCodes...)}
 		if jsonPresent(row.SessionAffinity) {
 			var affinity dbSessionAffinity
 			if err := json.Unmarshal(row.SessionAffinity, &affinity); err != nil {
@@ -355,12 +431,9 @@ func mergeAliases(ctx context.Context, st *store.Store, static config.Catalog, e
 			}
 			alias.SessionAffinity = &config.SessionAffinity{Headers: affinity.Headers}
 		}
-		if jsonPresent(row.EncryptedReasoning) {
-			var reasoning dbEncryptedReasoning
-			if err := json.Unmarshal(row.EncryptedReasoning, &reasoning); err != nil {
-				return nil, fmt.Errorf("database alias %q has corrupt encrypted_reasoning: %w", row.Name, err)
-			}
-			alias.EncryptedReasoning = &config.EncryptedReasoning{Passthrough: reasoning.Passthrough, OnCallerMismatch: reasoning.OnCallerMismatch, MatchMessages: reasoning.MatchMessages}
+		alias.EncryptedReasoning, err = decodeStoredEncryptedReasoning(row.EncryptedReasoning, fmt.Sprintf("alias %q", row.Name))
+		if err != nil {
+			return nil, err
 		}
 		for _, t := range targets {
 			alias.Targets = append(alias.Targets, config.AliasTarget{Provider: t.Provider, Model: t.Model})

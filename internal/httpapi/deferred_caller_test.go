@@ -72,6 +72,7 @@ func TestDeferredCallerTypedAndOriginControlOutcomesBypassAliasReasoningHealthAn
 			t.Run(code+"/direct="+map[bool]string{false: "false", true: "true"}[direct], func(t *testing.T) {
 				var calls, closes atomic.Int32
 				rt := callerDispatchRuntime("http://peer", "http://backup")
+				rt.EncryptedReasoning = scopedReasoningPolicy("retry")
 				adapter := deferredAdapterFunc(func(ctx context.Context, request provider.Request) (*provider.Result, error) {
 					calls.Add(1)
 					if request.DeferredTransport == nil || request.APIKey != "peer-token" {

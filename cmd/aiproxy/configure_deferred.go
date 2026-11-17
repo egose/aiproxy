@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"strings"
+
+	"github.com/egose/aiproxy/internal/configedit"
 )
 
 func deferredConfigureUnsupported() error {
@@ -10,14 +12,17 @@ func deferredConfigureUnsupported() error {
 }
 
 func preserveProviderModelDeferredTransports(models, existing []providerModelInput) []providerModelInput {
-	blocks := make(map[string]string, len(existing))
+	blocks := make(map[string]providerModelInput, len(existing))
 	for _, model := range existing {
-		blocks[model.Name] = model.DeferredTransportBlock
+		blocks[model.Name] = model
 	}
 	models = append([]providerModelInput(nil), models...)
 	for i := range models {
 		if models[i].DeferredTransportBlock == "" {
-			models[i].DeferredTransportBlock = blocks[models[i].Name]
+			models[i].DeferredTransportBlock = blocks[models[i].Name].DeferredTransportBlock
+		}
+		if models[i].EncryptedReasoning == nil {
+			models[i].EncryptedReasoning = configedit.CloneEncryptedReasoningInput(blocks[models[i].Name].EncryptedReasoning)
 		}
 	}
 	return models
@@ -29,8 +34,12 @@ func preservedProviderDeferredModelOverlays(existing *providerInput, extends str
 	}
 	var models []providerModelInput
 	for _, model := range existing.Models {
-		if strings.TrimSpace(model.DeferredTransportBlock) != "" {
-			models = append(models, providerModelInput{Name: model.Name, DeferredTransportBlock: model.DeferredTransportBlock})
+		if strings.TrimSpace(model.DeferredTransportBlock) != "" || model.EncryptedReasoning != nil {
+			models = append(models, providerModelInput{
+				Name:                   model.Name,
+				DeferredTransportBlock: model.DeferredTransportBlock,
+				EncryptedReasoning:     configedit.CloneEncryptedReasoningInput(model.EncryptedReasoning),
+			})
 		}
 	}
 	return models

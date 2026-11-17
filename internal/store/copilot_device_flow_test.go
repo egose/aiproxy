@@ -304,7 +304,7 @@ func TestCopilotFlowAtomicRollbackAndBindings(t *testing.T) {
 	}
 	current, err := a.GetProvider(ctx, p.Name)
 	flowOK(t, err)
-	if !reflect.DeepEqual(current, old) {
+	if !sameStoredProvider(current, old) {
 		t.Fatal("model fault changed provider")
 	}
 	gotModels, err := a.ListProviderModels(ctx, p.ID)

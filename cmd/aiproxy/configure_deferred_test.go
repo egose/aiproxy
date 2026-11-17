@@ -128,7 +128,7 @@ func TestConfigureDeferredDerivativePreservesOnlyLocalBlocks(t *testing.T) {
 
 func TestConfigureDeferredInteractivePreservation(t *testing.T) {
 	path := deferredConfigureFixture(t, "")
-	answers := []string{"", "", "", "Interactive", "", "", "", "", "", "", "", "env_expression", "", "y", "y"}
+	answers := []string{"", "", "", "Interactive", "", "", "", "", "", "", "", "env_expression", "", "y", "preserve", "no"}
 	stdout, stderr, err := executeRootCommand(strings.Join(answers, "\n")+"\n", "configure", "provider", "--config", path, "--name", "peer")
 	if err != nil {
 		t.Fatalf("interactive edit: %v\n%s\n%s", err, stdout, stderr)
