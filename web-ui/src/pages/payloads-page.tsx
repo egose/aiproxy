@@ -3,10 +3,11 @@ import { Alert, AlertDescription } from '@egose/shadcn-theme/components/ui/alert
 import { Button } from '@egose/shadcn-theme/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@egose/shadcn-theme/components/ui/card';
 import { Label } from '@egose/shadcn-theme/components/ui/label';
-import { usePayload, usePayloads } from '../hooks';
+import { useDashboardMode, usePayload, usePayloads } from '../hooks';
 import { errorMessage } from '../services/dashboard';
 
 export function PayloadsPage() {
+  const mode = useDashboardMode();
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const list = usePayloads(100, errorsOnly);
@@ -27,7 +28,7 @@ export function PayloadsPage() {
 
           {list.error && (
             <Alert variant="danger">
-              <AlertDescription>{errorMessage(list.error)}</AlertDescription>
+              <AlertDescription>{errorMessage(list.error, mode)}</AlertDescription>
             </Alert>
           )}
 
@@ -58,7 +59,7 @@ export function PayloadsPage() {
 
           {detail.error && (
             <Alert variant="danger">
-              <AlertDescription>{errorMessage(detail.error)}</AlertDescription>
+              <AlertDescription>{errorMessage(detail.error, mode)}</AlertDescription>
             </Alert>
           )}
 

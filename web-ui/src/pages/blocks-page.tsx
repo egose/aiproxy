@@ -7,7 +7,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { useBlock, useBlocks } from '../hooks';
+import { useBlock, useBlocks, useDataAuth } from '../hooks';
 import { decideBlock, errorMessage, type BlockDecisionAction } from '../services/dashboard';
 
 const decisionSchema = z.object({
@@ -17,6 +17,7 @@ const decisionSchema = z.object({
 type DecisionForm = z.infer<typeof decisionSchema>;
 
 export function BlocksPage() {
+  const { mode, credential } = useDataAuth();
   const [selected, setSelected] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -29,7 +30,7 @@ export function BlocksPage() {
       if (!detail.data) throw new Error('Load a block first.');
       const shas = detail.data.findings.map((f) => f.secret_sha256).filter((s): s is string => !!s);
       if (shas.length === 0) throw new Error('Block has no secret fingerprints to decide on.');
-      return decideBlock(detail.data.block_id, action, shas);
+      return decideBlock(credential, detail.data.block_id, action, shas);
     },
     onSuccess: (res) => {
       setResult(`Recorded ${res.action} for ${res.count} finding(s).`);
@@ -37,7 +38,7 @@ export function BlocksPage() {
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'blocks'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'block'] });
     },
-    onError: (err) => setResult(errorMessage(err)),
+    onError: (err) => setResult(errorMessage(err, mode)),
   });
 
   return (
@@ -50,7 +51,7 @@ export function BlocksPage() {
         <CardContent className="grid gap-2 pt-0 text-sm">
           {list.error && (
             <Alert variant="danger">
-              <AlertDescription>{errorMessage(list.error)}</AlertDescription>
+              <AlertDescription>{errorMessage(list.error, mode)}</AlertDescription>
             </Alert>
           )}
 
@@ -85,7 +86,7 @@ export function BlocksPage() {
 
           {detail.error && (
             <Alert variant="danger">
-              <AlertDescription>{errorMessage(detail.error)}</AlertDescription>
+              <AlertDescription>{errorMessage(detail.error, mode)}</AlertDescription>
             </Alert>
           )}
 

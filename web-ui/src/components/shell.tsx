@@ -156,7 +156,7 @@ export function Shell({ children }: { children: ReactNode }) {
             items: [{ name: 'Local server', text: snapshotQuery.data?.address ?? 'serve', active: true }],
           },
     menus: [
-      ...(!multi || dashboardAccess.enabled
+      ...(!multi || !!dashboardAccess.credential
         ? [
             {
               title: 'Dashboard',

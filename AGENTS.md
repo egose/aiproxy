@@ -57,9 +57,11 @@ The CLI also includes:
   with the UI. It requires a `web_ui` block in the config and prints
   `no server running` when unreachable; pass `--open` to also launch the
   default browser. The UI's live views still authenticate against the
-  `dashboard`-gated `/_internal/dashboard/*` APIs with the dashboard token or a
-  JWT for an active, currently stored system administrator. These APIs are global
-  operator surfaces; ordinary users and workspace administrators receive `403`.
+  `dashboard`-gated `/_internal/dashboard/*` APIs. With multi-tenancy enabled,
+  the browser uses the session of a currently stored system administrator,
+  ignoring saved dashboard tokens; otherwise it uses the dashboard token.
+  These APIs are global operator surfaces; ordinary user and workspace
+  administrator sessions receive `403`.
   The UI never claims API surfaces or the reserved `/dashboard` path.
 - `aiproxy paths` to print resolved config and secrets paths
 - `aiproxy examples` for boxed command/config examples

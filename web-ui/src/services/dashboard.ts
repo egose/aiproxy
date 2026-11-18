@@ -1,7 +1,7 @@
 import { ZodError } from 'zod';
 import axios from 'axios';
 
-import { adminStore, dashboardStore, setDashboardToken } from '../store';
+import { setDashboardToken } from '../store';
 import { assertAuthGeneration, authLifecycle } from '../auth-lifecycle';
 import { adminClient } from './admin';
 import { dashboardClient } from './client';
@@ -27,13 +27,16 @@ export interface SnapshotEnvelope {
   [key: string]: unknown;
 }
 
-// Dashboard APIs accept the dashboard secret or a current system administrator.
-function dataClient() {
-  return dashboardStore.token || !adminStore.accessToken ? dashboardClient : adminClient;
+export type DashboardCredential = 'session' | 'token';
+
+function dataClient(credential: DashboardCredential | undefined) {
+  if (credential === 'session') return adminClient;
+  if (credential === 'token') return dashboardClient;
+  throw new Error('Dashboard access required.');
 }
 
-export async function fetchSnapshot(): Promise<Snapshot> {
-  const res = await dataClient().get<unknown>(snapshotPath);
+export async function fetchSnapshot(credential: DashboardCredential | undefined): Promise<Snapshot> {
+  const res = await dataClient(credential).get<unknown>(snapshotPath);
   const envelope = res.data as SnapshotEnvelope;
   return snapshotSchema.parse({ ...envelope, last_seq: envelope.last_seq ?? 0 });
 }
@@ -50,30 +53,39 @@ export async function connectDashboardToken(token: string) {
   setDashboardToken(token);
 }
 
-export async function fetchPayloads(limit = 100, errorsOnly = false): Promise<PayloadList> {
-  const res = await dataClient().get<unknown>(payloadsPath, { params: { limit, errors_only: errorsOnly } });
+export async function fetchPayloads(
+  credential: DashboardCredential | undefined,
+  limit = 100,
+  errorsOnly = false,
+): Promise<PayloadList> {
+  const res = await dataClient(credential).get<unknown>(payloadsPath, { params: { limit, errors_only: errorsOnly } });
   return payloadListSchema.parse(res.data);
 }
 
-export async function fetchPayload(requestId: string): Promise<unknown> {
-  const res = await dataClient().get<unknown>(`${payloadsPath}/${requestId}`);
+export async function fetchPayload(credential: DashboardCredential | undefined, requestId: string): Promise<unknown> {
+  const res = await dataClient(credential).get<unknown>(`${payloadsPath}/${requestId}`);
   return res.data;
 }
 
-export async function fetchBlocks(): Promise<BlockList> {
-  const res = await dataClient().get<unknown>(blocksPath);
+export async function fetchBlocks(credential: DashboardCredential | undefined): Promise<BlockList> {
+  const res = await dataClient(credential).get<unknown>(blocksPath);
   return blockListSchema.parse(res.data);
 }
 
-export async function fetchBlock(blockId: string): Promise<BlockCapture> {
-  const res = await dataClient().get<unknown>(`${blocksPath}/${blockId}`);
+export async function fetchBlock(credential: DashboardCredential | undefined, blockId: string): Promise<BlockCapture> {
+  const res = await dataClient(credential).get<unknown>(`${blocksPath}/${blockId}`);
   return blockCaptureSchema.parse(res.data);
 }
 
 export type BlockDecisionAction = 'allow' | 'redact' | 'deny';
 
-export async function decideBlock(blockId: string, action: BlockDecisionAction, findingShas: string[]) {
-  const res = await dataClient().post(`${blocksPath}/${blockId}/decision`, {
+export async function decideBlock(
+  credential: DashboardCredential | undefined,
+  blockId: string,
+  action: BlockDecisionAction,
+  findingShas: string[],
+) {
+  const res = await dataClient(credential).post(`${blocksPath}/${blockId}/decision`, {
     action,
     finding_shas: findingShas,
   });
@@ -86,7 +98,7 @@ export function isUnauthorized(err: unknown): boolean {
   return status === 401;
 }
 
-export function errorMessage(err: unknown): string {
+export function errorMessage(err: unknown, mode?: DashboardCredential): string {
   if (err instanceof ZodError) {
     const details = err.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
     return `Unexpected dashboard response (${details}).`;
@@ -99,9 +111,15 @@ export function errorMessage(err: unknown): string {
       typeof resp.data === 'string' &&
       resp.data.trim() === 'dashboard operator access required'
     ) {
-      return 'Operator access required. Global dashboard data and decisions are available only to system administrators or dashboard-token holders.';
+      return mode === 'session'
+        ? 'Operator access required. Global dashboard data and decisions are available only to system administrators.'
+        : 'Operator access required. Global dashboard data and decisions are available only to system administrators or dashboard-token holders.';
     }
-    if (resp?.status === 401) return 'Authentication failed. Sign in again or check your dashboard token.';
+    if (resp?.status === 401) {
+      return mode === 'token'
+        ? 'Authentication failed. Check your dashboard token.'
+        : 'Authentication failed. Sign in again.';
+    }
     if (typeof resp?.data === 'string' && resp.data) return resp.data;
     if (resp?.status === 404) return 'Dashboard not configured on this server.';
     if (resp?.status === 429) return 'Rate limited, retry shortly.';

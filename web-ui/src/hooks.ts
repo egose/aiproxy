@@ -18,74 +18,84 @@ import {
   fetchScopeQuota,
   fetchTeamMembers,
 } from './services/admin';
-import { fetchBlock, fetchBlocks, fetchPayload, fetchPayloads, fetchSnapshot } from './services/dashboard';
+import {
+  fetchBlock,
+  fetchBlocks,
+  fetchPayload,
+  fetchPayloads,
+  fetchSnapshot,
+  type DashboardCredential,
+} from './services/dashboard';
 
-export function useDashboardToken() {
-  return useTokenSnapshot(dashboardStore).token;
+export function useDashboardMode(): DashboardCredential | undefined {
+  const { data } = useAdminStatus();
+  if (data) return data.multi_tenancy_enabled ? 'session' : 'token';
 }
 
 export function useDataAuth() {
-  const token = useDashboardToken();
+  const mode = useDashboardMode();
+  const token = useTokenSnapshot(dashboardStore).token;
   const session = useAdminSession();
-  const me = useAdminMe();
-  const operator = !!session.accessToken && !me.error && me.data?.is_admin === true;
-  const authed = token ? 'token' : operator ? 'session' : 'anon';
+  const accountMode = mode === 'session';
+  const me = useAdminMe(accountMode);
+  const signedIn = accountMode && !!session.accessToken;
+  const hasAuth = accountMode ? signedIn && !me.error && me.data?.is_admin === true : mode === 'token' && !!token;
   return {
-    authed,
-    enabled: !!token || operator,
-    pending: !token && !!session.accessToken && me.isPending,
-    error: !token ? me.error : null,
+    mode,
+    credential: hasAuth ? mode : undefined,
+    pending: signedIn && me.isPending,
+    error: signedIn ? me.error : null,
   };
 }
 
 export function useSnapshot(enabled = true) {
-  const { authed, enabled: hasAuth } = useDataAuth();
+  const { credential } = useDataAuth();
   return useQuery({
-    queryKey: ['dashboard', 'snapshot', authed],
-    queryFn: fetchSnapshot,
-    enabled: enabled && hasAuth,
+    queryKey: ['dashboard', 'snapshot', credential ?? 'anon'],
+    queryFn: () => fetchSnapshot(credential),
+    enabled: enabled && !!credential,
     refetchInterval: 10_000,
     retry: false,
   });
 }
 
 export function usePayloads(limit = 100, errorsOnly = false) {
-  const { authed, enabled: hasAuth } = useDataAuth();
+  const { credential } = useDataAuth();
   return useQuery({
-    queryKey: ['dashboard', 'payloads', limit, errorsOnly, authed],
-    queryFn: () => fetchPayloads(limit, errorsOnly),
-    enabled: hasAuth,
+    queryKey: ['dashboard', 'payloads', limit, errorsOnly, credential ?? 'anon'],
+    queryFn: () => fetchPayloads(credential, limit, errorsOnly),
+    enabled: !!credential,
     retry: false,
   });
 }
 
 export function usePayload(requestId: string | null) {
-  const { authed, enabled: hasAuth } = useDataAuth();
+  const { credential } = useDataAuth();
   return useQuery({
-    queryKey: ['dashboard', 'payload', requestId, authed],
-    queryFn: () => fetchPayload(requestId ?? ''),
-    enabled: hasAuth && !!requestId,
+    queryKey: ['dashboard', 'payload', requestId, credential ?? 'anon'],
+    queryFn: () => fetchPayload(credential, requestId ?? ''),
+    enabled: !!credential && !!requestId,
     retry: false,
   });
 }
 
 export function useBlocks() {
-  const { authed, enabled: hasAuth } = useDataAuth();
+  const { credential } = useDataAuth();
   return useQuery({
-    queryKey: ['dashboard', 'blocks', authed],
-    queryFn: fetchBlocks,
-    enabled: hasAuth,
+    queryKey: ['dashboard', 'blocks', credential ?? 'anon'],
+    queryFn: () => fetchBlocks(credential),
+    enabled: !!credential,
     refetchInterval: 10_000,
     retry: false,
   });
 }
 
 export function useBlock(blockId: string | null) {
-  const { authed, enabled: hasAuth } = useDataAuth();
+  const { credential } = useDataAuth();
   return useQuery({
-    queryKey: ['dashboard', 'block', blockId, authed],
-    queryFn: () => fetchBlock(blockId ?? ''),
-    enabled: hasAuth && !!blockId,
+    queryKey: ['dashboard', 'block', blockId, credential ?? 'anon'],
+    queryFn: () => fetchBlock(credential, blockId ?? ''),
+    enabled: !!credential && !!blockId,
     retry: false,
   });
 }

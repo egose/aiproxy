@@ -55,7 +55,7 @@ export function TokenPage() {
 
               {connectMutation.error && (
                 <Alert variant="danger">
-                  <AlertDescription>{errorMessage(connectMutation.error)}</AlertDescription>
+                  <AlertDescription>{errorMessage(connectMutation.error, 'token')}</AlertDescription>
                 </Alert>
               )}
 

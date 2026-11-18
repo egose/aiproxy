@@ -70,6 +70,9 @@ beforeEach(() => {
   setAdminSession('access-secret-A', 'refresh-secret-A');
   setAdminWorkspaceId('ws-A');
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  vi.mocked(admin.fetchAdminStatus).mockResolvedValue(
+    adminStatusSchema.parse({ multi_tenancy_enabled: true, web_ui_enabled: true, db_ok: true }),
+  );
   vi.mocked(admin.fetchAdminMe).mockResolvedValue({ user_id: 'A', email: 'A@example.com', is_admin: true });
 });
 
@@ -92,6 +95,7 @@ describe('every sensitive query hook', () => {
       const oldKeys = client
         .getQueryCache()
         .getAll()
+        .filter((query) => query.meta?.sensitive)
         .map((query) => query.queryKey);
       const held = deferred<never>();
       mock.mockReturnValueOnce(held.promise);

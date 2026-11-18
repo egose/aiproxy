@@ -1391,10 +1391,13 @@ share the proxy listener.
 The embedded web dashboard is served at `/` when a `web_ui` block
 is present. Use `aiproxy webui` to print that URL after probing that a
 running server answers with the UI (`--open` also launches the default
-browser). The UI's live views authenticate against the same
-`dashboard`-gated `/_internal/dashboard/*` APIs with the dashboard token or an
-active stored system-administrator account. Ordinary accounts and workspace
-administrators cannot access these global operator surfaces.
+browser). The UI's live views call the same `dashboard`-gated
+`/_internal/dashboard/*` APIs as the TUI. With multi-tenancy enabled, the Web UI
+uses the signed-in system administrator's session and never falls back to a
+saved dashboard token. With multi-tenancy disabled, the Web UI uses the token
+entered on its Token page. The TUI uses its dashboard token in either mode.
+Ordinary accounts and workspace administrators cannot access these global
+operator surfaces with their account sessions.
 
 Within a loaded browser tab, changing accounts, changing/removing the dashboard
 token, or selecting another workspace clears sensitive cached data and open

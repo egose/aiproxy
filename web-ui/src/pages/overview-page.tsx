@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@egose/shadcn-theme/co
 import { Spinner } from '@egose/shadcn-theme/components/ui/spinner';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { useAdminSession, useDashboardToken, useSnapshot } from '../hooks';
+import { useDataAuth, useSnapshot } from '../hooks';
 import { errorMessage, isUnauthorized } from '../services/dashboard';
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -19,12 +19,11 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 export function OverviewPage() {
-  const token = useDashboardToken();
-  const session = useAdminSession();
+  const { mode, credential } = useDataAuth();
   const queryClient = useQueryClient();
   const snapshot = useSnapshot();
 
-  if (!token && !session.accessToken) {
+  if (mode === 'token' && !credential) {
     return (
       <div className="mx-auto grid w-full max-w-2xl gap-6 p-6">
         <Card>
@@ -35,9 +34,9 @@ export function OverviewPage() {
           <CardContent className="grid gap-4">
             <p className="text-sm">Paste the dashboard bearer token to load live state.</p>
 
-            <Link to="/token">
-              <Button variant="primary">Open token settings</Button>
-            </Link>
+            <Button variant="primary" asChild>
+              <Link to="/token">Open token settings</Link>
+            </Button>
           </CardContent>
         </Card>
       </div>
@@ -56,7 +55,7 @@ export function OverviewPage() {
     return (
       <div className="mx-auto grid w-full max-w-2xl gap-6 p-6">
         <Alert variant="danger">
-          <AlertDescription>{errorMessage(snapshot.error)}</AlertDescription>
+          <AlertDescription>{errorMessage(snapshot.error, mode)}</AlertDescription>
         </Alert>
 
         <div className="flex gap-2">
@@ -65,9 +64,9 @@ export function OverviewPage() {
           </Button>
 
           {isUnauthorized(snapshot.error) && (
-            <Link to="/token">
-              <Button variant="primary">Fix token</Button>
-            </Link>
+            <Button variant="primary" asChild>
+              {mode === 'session' ? <Link to="/login">Sign in again</Link> : <Link to="/token">Fix token</Link>}
+            </Button>
           )}
         </div>
       </div>

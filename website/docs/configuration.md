@@ -1545,9 +1545,10 @@ so API clients keep receiving JSON 404s. This gate is independent of the
 `dashboard` block above: the static UI loads without it, but the live
 snapshot/logs/payloads/blocks views still call the bearer-gated
 `/_internal/dashboard/*` APIs. When `multi_tenancy` is disabled, paste the
-dashboard token on the UI's Token page; when it is enabled, signing in with
-user credentials is enough and no dashboard token is required. Toggling
-`web_ui` applies on `SIGHUP` without restart.
+dashboard token on the UI's Token page. When it is enabled, the browser uses
+the signed-in system administrator's session and ignores any saved dashboard
+token. The TUI still uses its dashboard token in either mode. Toggling `web_ui`
+applies on `SIGHUP` without restart.
 
 ### `ingress_guardrails`
 

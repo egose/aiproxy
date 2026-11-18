@@ -2,6 +2,7 @@ import { Link, Navigate, Route, Routes } from 'react-router';
 import { useSnapshot as useStateSnapshot } from 'valtio';
 import { authLifecycle } from './auth-lifecycle';
 import { DialogManagerProvider } from '@egose/shadcn-theme/components/widgets/dialog-manager';
+import { Button } from '@egose/shadcn-theme/components/ui/button';
 import { Spinner } from '@egose/shadcn-theme/components/ui/spinner';
 import { Shell } from './components/shell';
 import { useAdminMe, useAdminSession, useAdminStatus, useCurrentWorkspace, useDataAuth } from './hooks';
@@ -34,7 +35,6 @@ function RequireAdmin({ children }: { children: React.JSX.Element }) {
 
 function RequireDashboardOperator({ children }: { children: React.JSX.Element }) {
   const access = useDataAuth();
-  const session = useAdminSession();
   if (access.pending) {
     return (
       <div className="p-6">
@@ -42,14 +42,12 @@ function RequireDashboardOperator({ children }: { children: React.JSX.Element })
       </div>
     );
   }
-  if (session.accessToken && !access.enabled) {
+  if (access.mode === 'session' && !access.credential) {
     return (
       <div className="grid gap-4 p-6" role="alert">
         <h1 className="text-lg font-semibold">Operator access required</h1>
 
-        <p>
-          Global dashboard data and decisions are available only to system administrators or dashboard-token holders.
-        </p>
+        <p>Global dashboard data and decisions are available only to system administrators.</p>
         {access.error && <p>Unable to verify your account. Sign in again to check access.</p>}
 
         <Link to="/manage/keys" className="underline">
@@ -93,7 +91,23 @@ export function App() {
 function AppContent() {
   const status = useAdminStatus();
   const session = useAdminSession();
-  const multi = status.data?.multi_tenancy_enabled === true;
+  if (!status.data) {
+    return (
+      <div className="p-6">
+        {status.isError ? (
+          <div className="grid justify-items-start gap-3" role="alert">
+            <p>Unable to load server settings.</p>
+            <Button appearance="outline" onClick={() => void status.refetch()} disabled={status.isFetching}>
+              Retry
+            </Button>
+          </div>
+        ) : (
+          <Spinner size="small">Loading server settings...</Spinner>
+        )}
+      </div>
+    );
+  }
+  const multi = status.data.multi_tenancy_enabled;
   const signedIn = !!session.accessToken;
   if (multi && !signedIn) {
     return (

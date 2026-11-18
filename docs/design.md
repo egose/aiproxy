@@ -2647,8 +2647,11 @@ by user ID and replaces role/email claims with current stored values, so admin
 routes and `/me` agree with dashboard authorization after promotion, demotion,
 disablement, deletion, or email changes. Valid non-operators receive `403`;
 unverifiable identities use the existing throttled authentication-failure path.
-The browser checks `/me` before enabling global queries and navigation, and
-renders an operator-access explanation for direct links or server denials.
+The browser waits for server status before choosing how to authenticate. With
+multi-tenancy enabled it checks `/me` before enabling global queries and
+navigation, and uses the account session exclusively, even if a dashboard token
+is persisted. Without multi-tenancy it uses only the dashboard token. Direct
+links and server denials show mode-appropriate access and recovery guidance.
 
 ### Browser authentication lifetime
 

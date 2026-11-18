@@ -112,13 +112,13 @@ const adminCalls = [
 ] as const;
 
 const dashboardCalls = [
-  ['fetchSnapshot', () => dashboard.fetchSnapshot()],
-  ['fetchPayloads', () => dashboard.fetchPayloads()],
-  ['fetchPayload', () => dashboard.fetchPayload('id')],
-  ['fetchBlocks', () => dashboard.fetchBlocks()],
-  ['fetchBlock', () => dashboard.fetchBlock('id')],
-  ['decideBlock', () => dashboard.decideBlock('id', 'deny', [])],
-] as const;
+  ['fetchSnapshot', dashboard.fetchSnapshot],
+  ['fetchPayloads', dashboard.fetchPayloads],
+  ['fetchPayload', (credential) => dashboard.fetchPayload(credential, 'id')],
+  ['fetchBlocks', dashboard.fetchBlocks],
+  ['fetchBlock', (credential) => dashboard.fetchBlock(credential, 'id')],
+  ['decideBlock', (credential) => dashboard.decideBlock(credential, 'id', 'deny', [])],
+] satisfies [string, (credential: dashboard.DashboardCredential) => Promise<unknown>][];
 
 describe('all authenticated service entry points', () => {
   it('enumerates every admin service, with explicit public/session exceptions', () => {
@@ -155,9 +155,9 @@ describe('all authenticated service entry points', () => {
     expect(adminStore.accessToken).toBe('access-B');
   });
 
-  for (const credential of ['session', 'token']) {
+  for (const credential of ['session', 'token'] as const) {
     it.each(dashboardCalls)(`%s rejects delayed dashboard ${credential} data and decisions`, async (_name, call) => {
-      if (credential === 'token') setDashboardToken('token-A');
+      setDashboardToken('token-A');
       const held = deferred<AxiosResponse>();
       let config!: InternalAxiosRequestConfig;
       const client = credential === 'token' ? dashboardClient : admin.adminClient;
@@ -165,9 +165,10 @@ describe('all authenticated service entry points', () => {
         config = request;
         return held.promise;
       };
-      const pending = call();
+      const pending = call(credential);
       const rejected = expect(pending).rejects.toSatisfy(axios.isCancel);
       expect(config.headers.Authorization).toBe(`Bearer ${credential === 'token' ? 'token-A' : 'access-A'}`);
+      expect(config.headers[admin.adminWorkspaceHeader]).toBeUndefined();
       setDashboardToken('token-B');
       expect(config.signal?.aborted).toBe(true);
       held.resolve(response(config, { secret: 'A' }));
@@ -319,6 +320,29 @@ describe('refresh ownership and authentication entry points', () => {
     expect(authLifecycle.generation).toBe(generation);
     expect(adminWorkspaceStore.workspaceId).toBe('ws-A');
     expect(adminStore.refreshToken).toBe('rotated-A');
+  });
+
+  it('refreshes a dashboard session on 401 without falling back to a stored dashboard token', async () => {
+    setDashboardToken('token-A');
+    const refresh = vi.fn<AxiosAdapter>(async (config) => {
+      expect(config.url).toBe('/_internal/admin/refresh');
+      expect(JSON.parse(config.data).refresh_token).toBe('refresh-A');
+      return response(config, { access_token: 'refreshed-A', refresh_token: 'rotated-A' });
+    });
+    const account = vi.fn<AxiosAdapter>(async (config) => {
+      if (config.headers.Authorization === 'Bearer access-A') throw unauthorized(config);
+      expect(config.headers.Authorization).toBe('Bearer refreshed-A');
+      return response(config, { request_id: 'id' });
+    });
+    const token = vi.fn<AxiosAdapter>();
+    axios.defaults.adapter = refresh;
+    admin.adminClient.defaults.adapter = account;
+    dashboardClient.defaults.adapter = token;
+
+    await expect(dashboard.fetchPayload('session', 'id')).resolves.toEqual({ request_id: 'id' });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(account).toHaveBeenCalledTimes(2);
+    expect(token).not.toHaveBeenCalled();
   });
 
   it('does not refresh a delayed A 401 using B credentials', async () => {
