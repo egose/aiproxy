@@ -732,7 +732,7 @@ function _createMdxContent(props) {
       }), " field when an eligible direct\nrequest can use a ", (0,jsx_runtime.jsx)(_components.a, {
         href: "/docs/configuration#model-id-passthrough",
         children: "model-ID passthrough rule"
-      }), ".\nExact literal models take priority. Rule matches use the same direct provider\nsettings, ingress guardrails and provider/root encrypted-reasoning policy as\nordinary inference; they neither contact model discovery nor use peer transport."]
+      }), ".\nExact literal models take priority. Rule matches use the existing adapter,\ndestination, credential policy and ingress guardrails. Provider/root\nencrypted-reasoning policy still applies to chat and Responses where supported,\nnot native Messages. Rules add no public operations, do not contact discovery,\nand do not use peer transport."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["A rule call requires exactly one top-level ", (0,jsx_runtime.jsx)(_components.code, {
         children: "model"
@@ -742,11 +742,29 @@ function _createMdxContent(props) {
         children: "models"
       }), " or ", (0,jsx_runtime.jsx)(_components.code, {
         children: "preset"
-      }), " (including case\nvariants) are rejected on rule calls before upstream I/O. Literal and alias\npayload handling is unchanged."]
+      }), " (including case\nvariants) are rejected on all rule calls. On native ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /v1/messages"
+      }), " rule\ncalls only, top-level ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "fallbacks"
+      }), " (including case variants) is also rejected.\nThese checks run before upstream I/O, including after guardrail rewrites.\nLiteral and alias payload handling and existing translation limits are unchanged."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["The proxy forwards the admitted suffix as the ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Body-based adapters use the admitted suffix as the upstream ", (0,jsx_runtime.jsx)(_components.code, {
         children: "model"
-      }), " value. It does not verify\nthat the upstream offers the ID, how the upstream interprets virtual IDs or\nother parameters, or what the upstream actually runs or charges. Use a trusted\nupstream and enforce model and spending restrictions there as well."]
+      }), " value.\nGemini and the Zen ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gemini"
+      }), " protocol use a single bare ID segment in the\nadapter's fixed model path. Only the adapter adds ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "alt=sse"
+      }), " for streaming.\nFor Gemini batched embeddings, send the normal OpenAI-style array of strings\nin ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "input"
+      }), "; the adapter sets every upstream ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "requests[].model"
+      }), " to\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "models/<admitted-id>"
+      }), ", matching the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ":batchEmbedContents"
+      }), " path. Callers cannot\nprovide their own subrequest model. Literal and alias batches are unchanged."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "The proxy does not verify that the upstream offers the ID, how it interprets\nvirtual IDs or other parameters, or what it actually runs or charges. Use a\ntrusted upstream and enforce model and spending restrictions there as well."
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "peer-deferred-transport-v1",
       children: "Peer Deferred Transport v1"
@@ -3044,13 +3062,13 @@ function _createMdxContent(props) {
           children: "opencode-zen"
         }), " and ", (0,jsx_runtime.jsx)(_components.code, {
           children: "opencode-go"
-        }), " mix native and translated handling per\nmodel ", (0,jsx_runtime.jsx)(_components.code, {
+        }), " mix native and translated handling per\nliteral model or rule ", (0,jsx_runtime.jsx)(_components.code, {
           children: "protocol"
         }), ": ", (0,jsx_runtime.jsx)(_components.code, {
           children: "chat"
         }), "/", (0,jsx_runtime.jsx)(_components.code, {
           children: "responses"
-        }), " protocols are native pass-through for\none public operation each, ", (0,jsx_runtime.jsx)(_components.code, {
+        }), " are native pass-through for\none public operation each, ", (0,jsx_runtime.jsx)(_components.code, {
           children: "messages"
         }), " is native Anthropic passthrough for\n", (0,jsx_runtime.jsx)(_components.code, {
           children: "POST /v1/messages"

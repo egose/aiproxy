@@ -6,7 +6,7 @@
 <title data-rh="true">Providers and Routing | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/providers-and-routing/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Providers and Routing | aiproxy"><meta data-rh="true" name="description" content="aiproxy separates the client-facing model name from the concrete upstream target."><meta data-rh="true" property="og:description" content="aiproxy separates the client-facing model name from the concrete upstream target."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/providers-and-routing/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/providers-and-routing/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/providers-and-routing/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Providers and Routing","item":"https://aiproxy.pages.dev/docs/providers-and-routing"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
 <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.e50caa8a.css">
-<script src="/assets/js/runtime~main.613c7e99.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.79b31b8a.js" defer="defer"></script>
 <script src="/assets/js/main.f0042d1c.js" defer="defer"></script>
 </head>
 <body>
@@ -33,19 +33,26 @@ denied, the operation is unsupported, or the upstream returns an error.</p>
 can admit a direct request if the enabled static provider has <strong>exactly one</strong>
 matching rule, the operation is declared on that rule, and the static bearer
 has its separate grant (or the operator opted into file-only anonymous use).
-The provider prefix selects the route; the proxy sends the suffix unchanged
-as the upstream <code>model</code>. Rule calls use ordinary transport, including SSE where
-supported, and never switch providers, models, or use peer deferred transport.</p>
+The provider prefix selects the configured provider and its credential policy.
+OpenCode rules pin the protocol in configuration; neither the ID nor caller
+metadata can choose a protocol or switch between Zen and Go. Body-based
+adapters send the unchanged suffix in <code>model</code>. Gemini and Zen&#x27;s <code>gemini</code>
+protocol instead use it as one bare ID segment in a fixed upstream path.
+Rule calls use ordinary transport, including SSE where supported, and never
+fail over to a different provider, model or protocol or use peer deferred transport.</p>
 <p>No match, overlapping matches, or a rule the caller cannot use preserve the
 same literal miss: <code>403 forbidden</code> if <code>allowed_models</code> excludes the name,
 otherwise <code>404 model_not_found</code>. Rule order, operation and grants never break
-a tie. The server logs ambiguity without exposing rule details in the client
-response.</p>
+a tie. Even a match with the wrong ID shape for its protocol counts toward
+ambiguity. The server logs ambiguity without exposing rule details in the
+client response.</p>
 <p>Rules do not discover or register upstream models. If the upstream returns
 <code>404</code> for an unknown ID, the proxy uses its usual upstream error handling
-without trying another model. The rule label is for grants, not a callable
-model registration. Alias targets, inherited models and peer receiver models
-still require literal definitions.</p>
+without trying another model. If the upstream later serves that ID, a matching
+request can work without changing or reloading the proxy configuration. The
+rule label is for grants and <a class="" href="/docs/api-reference/#usage-and-scope">unpriced usage grouping</a>,
+not a model registration. Alias targets, inherited models and peer receiver
+models still require literal definitions.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="alias-routing">Alias Routing<a href="#alias-routing" class="hash-link" aria-label="Direct link to Alias Routing" title="Direct link to Alias Routing" translate="no">​</a></h2>
 <p>Aliases expose a virtual model name backed by one or more concrete targets.</p>
 <div class="language-hcl mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-hcl codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">alias &quot;chat_default&quot; {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  algorithm = &quot;round_robin&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  target {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    provider = &quot;openai&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    model    = &quot;gpt-4o-mini&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  }</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  target {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    provider = &quot;anthropic&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    model    = &quot;claude-sonnet&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  }</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">}</span><br></div></code></pre></div></div>
@@ -199,8 +206,10 @@ requests admitted before advice arrives cannot be retroactively prevented.</li>
 <p>For <code>openai</code>, <code>openai-compatible</code>, <code>zenmux</code>, and <code>openrouter</code>, the proxy stays close to pass-through behavior. For translated providers, the proxy maps between the public OpenAI-style contract and the provider-native request and response shape.</p>
 <p>Apart from explicitly configured ingress guardrails and reasoning stripping,
 pass-through providers preserve request JSON values and unknown extension fields,
-rewriting only the top-level <code>model</code> value before forwarding. Malformed JSON,
-non-object JSON bodies, and duplicate top-level <code>model</code> keys are rejected.</p>
+rewriting the top-level <code>model</code> before forwarding. Malformed JSON, non-object
+JSON bodies, and duplicate top-level <code>model</code> keys are rejected. Rule calls
+have additional <a class="" href="/docs/api-reference/#direct-model-id-passthrough">selector checks</a>;
+those checks do not change literal or alias payload handling.</p>
 <p>Translated providers intentionally support a conservative OpenAI-style request subset. Unsupported top-level controls such as <code>tools</code>, <code>tool_choice</code>, <code>response_format</code>, <code>logprobs</code>, <code>parallel_tool_calls</code>, and unknown extension fields are rejected with <code>invalid_request</code> instead of being silently dropped.</p>
 <p>Translated chat completions support these top-level request fields: <code>model</code>, <code>messages</code>, <code>max_tokens</code>, <code>temperature</code>, <code>top_p</code>, and <code>stream</code>. Message roles are limited to <code>system</code>, <code>user</code>, and <code>assistant</code>, and content may be text or arrays of text parts.</p>
 <p>Translated responses support these top-level request fields: <code>model</code>, <code>input</code>, <code>instructions</code>, <code>max_output_tokens</code>, <code>temperature</code>, <code>top_p</code>, and <code>stream</code>. Input may be a string or an array of message items with text content.</p>
@@ -215,14 +224,15 @@ The type selects the service, never the URL or credential:</p>
 <p><code>base_url</code> is an optional transport override only (same absolute-URL and
 loopback rules as other providers). An override never reclassifies the
 service: auth, header, and protocol behavior stay type-driven.</p>
-<p>Every model declares a required <code>protocol</code>:</p>
+<p>Every literal model and passthrough rule declares a required <code>protocol</code>:</p>
 <table><thead><tr><th><code>protocol</code></th><th>Upstream request</th><th>Serves public operations</th></tr></thead><tbody><tr><td><code>chat</code></td><td><code>POST &lt;base&gt;/chat/completions</code>, model rewrite, JSON/SSE pass-through</td><td><code>chat</code> only</td></tr><tr><td><code>responses</code></td><td><code>POST &lt;base&gt;/responses</code>, model rewrite, JSON/SSE pass-through</td><td><code>responses</code> only</td></tr><tr><td><code>messages</code></td><td><code>POST &lt;base&gt;/messages</code>, model rewrite, JSON/SSE native passthrough (plus Messages translation subset for chat/responses)</td><td><code>chat</code>, <code>responses</code> and <code>messages</code></td></tr><tr><td><code>gemini</code></td><td><code>POST &lt;base&gt;/models/&lt;upstream&gt;:generateContent</code> (JSON) / <code>:streamGenerateContent?alt=sse</code> (SSE); Zen only</td><td><code>chat</code> and <code>responses</code></td></tr></tbody></table>
-<p>A public operation the model&#x27;s protocol does not serve is rejected before any
+<p>A public operation the declared protocol does not serve is rejected before
 upstream I/O, as are <code>embeddings</code>, <code>images</code>, and audio operations on both
-OpenCode types. The same model name may use different protocols per service
-(for example <code>minimax-m3</code>, which is chat-protocol on Zen but
-messages-protocol on Go), so routing comes from explicit configuration, never
-from the model name. There is no generic <code>opencode</code> type.</p>
+OpenCode types. A rule must also list the operation in <code>capabilities</code>; it
+does not inherit a model&#x27;s protocol or defaults. The same model name may use
+different protocols per service (for example <code>minimax-m3</code>, which uses <code>chat</code>
+on Zen and <code>messages</code> on Go), so routing comes from explicit configuration,
+never from the model name. There is no generic <code>opencode</code> type.</p>
 <h3 class="anchor anchorTargetStickyNavbar_T7vg" id="session-and-client-requirements">Session And Client Requirements<a href="#session-and-client-requirements" class="hash-link" aria-label="Direct link to Session And Client Requirements" title="Direct link to Session And Client Requirements" translate="no">​</a></h3>
 <p>Every upstream request sends <code>User-Agent: aiproxy/&lt;version&gt;</code> unless the
 provider declares a <code>user_agent</code> override (any provider type, validated as
@@ -329,7 +339,7 @@ additionally sends OpenRouter attribution headers (<code>HTTP-Referer: https://o
 </ul>
 <p>If <code>capabilities</code> is omitted, the proxy derives defaults from the provider type and then enforces operation support at request time.</p>
 <table><thead><tr><th>Provider type</th><th>Default capabilities when omitted</th><th>Additional supported capabilities</th></tr></thead><tbody><tr><td><code>openai</code></td><td><code>chat</code>, <code>responses</code>, <code>embeddings</code></td><td><code>images</code>, <code>audio_transcriptions</code>, <code>audio_speech</code></td></tr><tr><td><code>openai-compatible</code></td><td><code>chat</code>, <code>responses</code>, <code>embeddings</code></td><td><code>images</code>, <code>audio_transcriptions</code>, <code>audio_speech</code></td></tr><tr><td><code>anthropic</code></td><td><code>chat</code>, <code>responses</code>, <code>messages</code></td><td>None</td></tr><tr><td><code>gemini</code></td><td><code>chat</code>, <code>responses</code></td><td><code>embeddings</code></td></tr><tr><td><code>opencode-zen</code></td><td><code>chat</code>, <code>responses</code>, <code>messages</code>, or more (by protocol)</td><td>None</td></tr><tr><td><code>opencode-go</code></td><td><code>chat</code>, <code>responses</code>, <code>messages</code>, or more (by protocol)</td><td>None</td></tr><tr><td><code>github-copilot</code></td><td><code>chat</code></td><td>None</td></tr><tr><td><code>zenmux</code></td><td><code>chat</code>, <code>responses</code>, <code>embeddings</code></td><td><code>images</code>, <code>audio_transcriptions</code>, <code>audio_speech</code></td></tr><tr><td><code>openrouter</code></td><td><code>chat</code>, <code>responses</code>, <code>embeddings</code></td><td><code>images</code>, <code>audio_transcriptions</code>, <code>audio_speech</code></td></tr></tbody></table>
-<p>Set explicit capabilities when you want the public catalog to reflect a narrower contract than the provider&#x27;s default behavior, or to opt into one of the additional supported capabilities for that provider type. On <code>opencode-zen</code> and <code>opencode-go</code> the omitted default is protocol-aware (<code>chat</code> serves <code>chat</code>, <code>responses</code> serves <code>responses</code>, <code>messages</code> serves <code>chat</code>, <code>responses</code> and <code>messages</code>, <code>gemini</code> serves <code>chat</code> and <code>responses</code>), and capabilities outside the protocol-served set fail validation. <code>POST /v1/messages</code> is native Anthropic passthrough served only by provider type <code>anthropic</code> and <code>messages</code>-protocol Zen/Go models; every other provider type rejects it before upstream I/O.</p>
+<p>Set explicit capabilities when you want the public catalog to reflect a narrower contract than the provider&#x27;s default behavior, or to opt into one of the additional supported capabilities for that provider type. On <code>opencode-zen</code> and <code>opencode-go</code> the omitted default for a literal model is protocol-aware (<code>chat</code> serves <code>chat</code>, <code>responses</code> serves <code>responses</code>, <code>messages</code> serves <code>chat</code>, <code>responses</code> and <code>messages</code>, <code>gemini</code> serves <code>chat</code> and <code>responses</code>), and capabilities outside the protocol-served set fail validation. Rules must declare their capabilities explicitly. <code>POST /v1/messages</code> is native Anthropic passthrough served only by <code>anthropic</code> and by <code>messages</code>-protocol Zen/Go routes; rules must explicitly include <code>messages</code> to serve it.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="get-v1models-metadata"><code>GET /v1/models</code> Metadata<a href="#get-v1models-metadata" class="hash-link" aria-label="Direct link to get-v1models-metadata" title="Direct link to get-v1models-metadata" translate="no">​</a></h2>
 <p>The model catalog includes only literal direct models and aliases available to
 the caller. Rule labels and matched IDs that lack a literal definition do not

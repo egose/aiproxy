@@ -1213,9 +1213,11 @@ function _createMdxContent(props) {
         children: "rule and grant declarations"
       }), "\nin static configuration. There are no CLI flags or managed API/web controls to\nauthor them. Unrelated in-place ", (0,jsx_runtime.jsx)(_components.code, {
         children: "aiproxy configure"
-      }), " edits to HCL preserve rule\nblocks and grant expressions; edits that cannot preserve them safely are\nrejected without rewriting the config. ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " edits to HCL preserve rule\nblocks (including OpenCode ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "protocol"
+      }), ") and grant expressions; edits that\ncannot preserve them safely are rejected without rewriting the config.\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "aiproxy convert"
-      }), " preserves declarations\nbetween HCL and JSON and resolves ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " preserves declarations between HCL and JSON and resolves\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "env()"
       }), " as usual."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
@@ -1223,11 +1225,16 @@ function _createMdxContent(props) {
         children: "aiproxy validate"
       }), " with the candidate config before sending ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
-      }), ".\nRules and grants activate together for new admissions on that replica; an\ninvalid regex or grant rejects the candidate and leaves both on the old\nsnapshot. Already-admitted requests, including streams, finish on their\noriginal runtime. Deploy and reload the file on each replica."]
+      }), ".\nUpdate rule regexes, protocols, capabilities and grants in the same candidate.\nThey activate together for new admissions on that replica. An invalid regex,\nprotocol, path-based ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " or grant rejects the whole candidate and keeps\nthe last active rules and grants. Already-admitted requests, including streams,\nkeep their original protocol and runtime. Deploy and reload the file on each\nreplica."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Grant narrow families. A broad regex can admit newly launched or more expensive\nIDs as soon as the upstream offers them, without a proxy reload or catalog\nupdate. Rule usage is grouped and unpriced locally, not free or cost-capped.\nUse trusted, appropriately scoped upstream credentials and upstream-side model\nand spend controls; the ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Grant narrow families. A broad regex can admit newly launched or more expensive\nIDs as soon as the upstream offers them, without a proxy reload or catalog\nupdate. Rule usage is grouped and unpriced locally, not free or cost-capped.\nUse trusted, appropriately scoped upstream credentials and upstream-side model\nand spend controls; restricting the ", (0,jsx_runtime.jsx)(_components.code, {
         children: "model"
-      }), " field alone cannot guarantee upstream selection\nor cost."]
+      }), " field or path ID cannot guarantee\nwhat the upstream runs or charges. Copilot rules use the configured sidecar\ncredential and never refresh it; follow the existing login and reload procedure\non revocation. ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "#mock-only-copilot-verification",
+        children: "Local Copilot fixtures"
+      }), " do not\nestablish live GitHub access or model availability."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "bounded-replica-convergence",
       children: "Bounded Replica Convergence"

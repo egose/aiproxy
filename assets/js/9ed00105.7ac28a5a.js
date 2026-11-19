@@ -146,6 +146,14 @@ const toc = [{
   "id": "model-id-passthrough",
   "level": 2
 }, {
+  "value": "OpenAI-compatible example",
+  "id": "openai-compatible-example",
+  "level": 3
+}, {
+  "value": "OpenCode and Gemini example",
+  "id": "opencode-and-gemini-example",
+  "level": 3
+}, {
   "value": "Secrets And Environment Variables",
   "id": "secrets-and-environment-variables",
   "level": 2
@@ -2585,15 +2593,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["To let clients address upstream IDs they already know, add named\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "model_passthrough"
-      }), " blocks to a concrete, file-configured ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "openai"
-      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
-        children: "openai-compatible"
-      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "openrouter"
-      }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "zenmux"
-      }), " provider. Static HCL and JSON\n(including inline config) support the same rules. A provider may have rules\nwith or without literal models. Rules are validated even if the provider is\ndisabled, but are active only when it is enabled."]
+      }), " blocks to a concrete static provider of a type listed\nbelow. Static HCL and JSON (including inline config) support the same rules.\nA provider may have rules with or without literal models. Rules are validated\neven on disabled providers, but only enabled providers can serve them.\nManaged and derived providers cannot declare or inherit rules."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
       children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["Rule labels are unique within a provider and use the provider name grammar\n(", (0,jsx_runtime.jsx)(_components.code, {
@@ -2621,46 +2621,251 @@ function _createMdxContent(props) {
           children: "^.+$"
         }), " intentionally matches every valid suffix. There is no glob\nsyntax or capture-based rewriting."]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["The suffix is at most 256 bytes, with one or more ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ["The suffix is at most 256 bytes. Body-based rules keep the existing grammar\nof one or more ", (0,jsx_runtime.jsx)(_components.code, {
           children: "/"
-        }), "-separated\n", (0,jsx_runtime.jsx)(_components.code, {
+        }), "-separated ", (0,jsx_runtime.jsx)(_components.code, {
           children: "[a-z0-9][a-z0-9._-]*"
-        }), " segments. It is not trimmed or lowercased. For IDs\nwith uppercase characters, ", (0,jsx_runtime.jsx)(_components.code, {
-          children: ":free"
-        }), ", or other unsupported syntax, use a\nliteral model with ", (0,jsx_runtime.jsx)(_components.code, {
+        }), " segments. Gemini-style\npath rules (", (0,jsx_runtime.jsx)(_components.code, {
+          children: "gemini"
+        }), " providers and Zen rules with ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "protocol = \"gemini\""
+        }), ")\nrequire one bare segment, not ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "models/<id>"
+        }), " or a full resource name. The\nproxy does not trim, lowercase, URL-decode or remove prefixes from IDs.\nA broad regex cannot allow characters or path components outside this\ngrammar. For IDs with unsupported syntax, use a literal ", (0,jsx_runtime.jsx)(_components.code, {
           children: "upstream_name"
-        }), "."]
+        }), "\nwhere the adapter supports the ID."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "protocol"
+        }), " is required on each OpenCode rule and fixes its upstream\nprotocol. Other provider types must omit it; even an empty or ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "null"
+        }), "\ndeclaration is invalid."]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "capabilities"
-        }), " is required: list one or more distinct operations supported by\nthe provider type. These types accept ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "chat"
-        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "responses"
-        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "embeddings"
-        }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
-          children: "images"
-        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "audio_transcriptions"
-        }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "audio_speech"
-        }), "; there are no rule\ndefaults and no ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "messages"
-        }), " support."]
-      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["Each static bearer needs a named ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "<provider>/<rule>"
-        }), " entry in\n", (0,jsx_runtime.jsx)(_components.code, {
-          children: "allowed_model_passthroughs"
-        }), ", even if its separate literal ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "allowed_models"
-        }), "\nis omitted or empty. Adding a rule label or an upstream ID to ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "allowed_models"
-        }), "\ndoes not grant rule access, and rule grants cannot override literal denials.\nGrants must reference declared rules; a grant to a disabled provider is valid\nbut cannot activate it. Database keys, including System keys, cannot use\nrules. On a file-only ", (0,jsx_runtime.jsx)(_components.code, {
-          children: "auth.mode = \"none\""
-        }), " instance, declaring a rule opts\nanonymous clients into it."]
+        }), " is required and has no rule defaults. List a nonempty subset\nof distinct capabilities from the applicable row:"]
       }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Provider type"
+          }), (0,jsx_runtime.jsxs)(_components.th, {
+            children: ["Rule ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "protocol"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.th, {
+            children: ["Allowed ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "capabilities"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Where the ID goes"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "openai"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "openai-compatible"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "zenmux"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "openrouter"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Omit"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "embeddings"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "images"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_transcriptions"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "audio_speech"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["JSON or multipart ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "model"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "anthropic"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Omit"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "messages"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Messages ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "model"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "github-copilot"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Omit"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Chat ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "model"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-zen"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-go"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Chat ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "model"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-zen"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-go"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Responses ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "model"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-zen"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-go"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "messages"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "messages"
+            })]
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: ["Messages ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "model"
+            })]
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "gemini"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Omit"
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "embeddings"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "One Gemini path segment"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "opencode-zen"
+            }), " only"]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "gemini"
+            })
+          }), (0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "chat"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "responses"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "One Zen Gemini path segment"
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The existing adapter still sets the request format, translation limits,\ndestination and credential policy. Rules add no operations. Path-based rules\nallow ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " path prefixes but reject query or fragment delimiters, even\nan empty ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "?"
+      }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "#"
+      }), ". A static Copilot rule uses the existing loaded\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "credential_ref"
+      }), "; it adds no login or refresh behavior.\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#mock-only-copilot-verification",
+        children: "Copilot verification is mock-only"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Each static bearer needs a named ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "<provider>/<rule>"
+      }), " entry in\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allowed_model_passthroughs"
+      }), ", even if its separate literal ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allowed_models"
+      }), "\nis omitted or empty. Adding a rule label or an upstream ID to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allowed_models"
+      }), "\ndoes not grant rule access, and rule grants cannot override literal denials.\nGrants must reference declared rules; a grant to a disabled provider is valid\nbut cannot activate it. Database keys, including System keys, cannot use\nrules. On a file-only ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "auth.mode = \"none\""
+      }), " instance, declaring a rule opts\nanonymous clients into it."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Rules are direct-only: they do not create model cards, perform discovery,\nregister alias targets or enable peer deferred transport. Usage is\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/api-reference#usage-and-scope",
+        children: "grouped by rule and unpriced"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "openai-compatible-example",
+      children: "OpenAI-compatible example"
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Replace the example ", (0,jsx_runtime.jsx)(_components.code, {
         children: "base_url"
@@ -2697,6 +2902,47 @@ function _createMdxContent(props) {
       }), "; the upstream\ndecides whether it serves that ID. ", (0,jsx_runtime.jsx)(_components.code, {
         children: "router/qwen3-chat"
       }), " is a grant reference, not\na model registration. The embeddings rule uses the same upstream but needs a\nseparate grant. Families that share a policy can use alternation in a single\nrule rather than create overlapping rules."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "opencode-and-gemini-example",
+      children: "OpenCode and Gemini example"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Set ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "OPENCODE_ZEN_API_KEY"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "GEMINI_API_KEY"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "CHAT_APP_TOKEN"
+      }), ". Both\nproviders in this example have rules but no literal models."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        metastring: "title=\"model-id-passthrough-protocols.hcl\"",
+        children: "listener \"http\" \"public\" {\n  address = \"127.0.0.1:8080\"\n}\n\nprovider \"opencode-zen\" \"zen\" {\n  api_key = env(\"OPENCODE_ZEN_API_KEY\")\n\n  model_passthrough \"claude-family\" {\n    match        = \"^claude-(haiku|sonnet|opus)-[a-z0-9._-]+$\"\n    protocol     = \"messages\"\n    capabilities = [\"chat\", \"responses\", \"messages\"]\n  }\n\n  model_passthrough \"gemini-family\" {\n    match        = \"^gemini-[0-9][a-z0-9._-]+$\"\n    protocol     = \"gemini\"\n    capabilities = [\"chat\", \"responses\"]\n  }\n}\n\nprovider \"gemini\" \"google\" {\n  api_key = env(\"GEMINI_API_KEY\")\n\n  model_passthrough \"embeddings\" {\n    match        = \"^gemini-embedding-[a-z0-9._-]+$\"\n    capabilities = [\"embeddings\"]\n  }\n}\n\nauth \"main\" {\n  mode = \"bearer_static\"\n  client \"chat-app\" {\n    token                      = env(\"CHAT_APP_TOKEN\")\n    allowed_model_passthroughs = [\"zen/claude-family\", \"google/embeddings\"]\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-json",
+        metastring: "title=\"model-id-passthrough-protocols.json\"",
+        children: "{\n  \"listener\": {\n    \"http\": { \"public\": { \"address\": \"127.0.0.1:8080\" } }\n  },\n  \"provider\": {\n    \"opencode-zen\": {\n      \"zen\": {\n        \"api_key\": env(\"OPENCODE_ZEN_API_KEY\"),\n        \"model_passthrough\": {\n          \"claude-family\": {\n            \"match\": \"^claude-(haiku|sonnet|opus)-[a-z0-9._-]+$\",\n            \"protocol\": \"messages\",\n            \"capabilities\": [\"chat\", \"responses\", \"messages\"]\n          },\n          \"gemini-family\": {\n            \"match\": \"^gemini-[0-9][a-z0-9._-]+$\",\n            \"protocol\": \"gemini\",\n            \"capabilities\": [\"chat\", \"responses\"]\n          }\n        }\n      }\n    },\n    \"gemini\": {\n      \"google\": {\n        \"api_key\": env(\"GEMINI_API_KEY\"),\n        \"model_passthrough\": {\n          \"embeddings\": {\n            \"match\": \"^gemini-embedding-[a-z0-9._-]+$\",\n            \"capabilities\": [\"embeddings\"]\n          }\n        }\n      }\n    }\n  },\n  \"auth\": {\n    \"main\": {\n      \"mode\": \"bearer_static\",\n      \"client\": {\n        \"chat-app\": {\n          \"token\": env(\"CHAT_APP_TOKEN\"),\n          \"allowed_model_passthroughs\": [\"zen/claude-family\", \"google/embeddings\"]\n        }\n      }\n    }\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat-app"
+      }), " bearer can request ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "zen/claude-sonnet-4-6"
+      }), " on the rule's three\noperations. All three use Zen's Messages protocol, translating chat and\nResponses as usual. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "zen/gemini-2.5-flash"
+      }), " matches a different Zen rule, but\nthe bearer has no grant for it. For ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/v1/embeddings"
+      }), ", use\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "google/gemini-embedding-001"
+      }), ", not ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "google/models/gemini-embedding-001"
+      }), ".\nGemini puts the bare ID in its embeddings path; for a batch, the adapter also\nsets every generated ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "requests[].model"
+      }), " to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "models/gemini-embedding-001"
+      }), ".\nThese names illustrate routing; availability depends on the upstream and\nits credential."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["See ", (0,jsx_runtime.jsx)(_components.a, {
         href: "/docs/providers-and-routing#direct-routing",

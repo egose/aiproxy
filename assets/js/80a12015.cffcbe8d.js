@@ -186,9 +186,11 @@ function _createMdxContent(props) {
         children: "model-ID passthrough"
       }), "\ncan admit a direct request if the enabled static provider has ", (0,jsx_runtime.jsx)(_components.strong, {
         children: "exactly one"
-      }), "\nmatching rule, the operation is declared on that rule, and the static bearer\nhas its separate grant (or the operator opted into file-only anonymous use).\nThe provider prefix selects the route; the proxy sends the suffix unchanged\nas the upstream ", (0,jsx_runtime.jsx)(_components.code, {
+      }), "\nmatching rule, the operation is declared on that rule, and the static bearer\nhas its separate grant (or the operator opted into file-only anonymous use).\nThe provider prefix selects the configured provider and its credential policy.\nOpenCode rules pin the protocol in configuration; neither the ID nor caller\nmetadata can choose a protocol or switch between Zen and Go. Body-based\nadapters send the unchanged suffix in ", (0,jsx_runtime.jsx)(_components.code, {
         children: "model"
-      }), ". Rule calls use ordinary transport, including SSE where\nsupported, and never switch providers, models, or use peer deferred transport."]
+      }), ". Gemini and Zen's ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "gemini"
+      }), "\nprotocol instead use it as one bare ID segment in a fixed upstream path.\nRule calls use ordinary transport, including SSE where supported, and never\nfail over to a different provider, model or protocol or use peer deferred transport."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["No match, overlapping matches, or a rule the caller cannot use preserve the\nsame literal miss: ", (0,jsx_runtime.jsx)(_components.code, {
         children: "403 forbidden"
@@ -196,11 +198,14 @@ function _createMdxContent(props) {
         children: "allowed_models"
       }), " excludes the name,\notherwise ", (0,jsx_runtime.jsx)(_components.code, {
         children: "404 model_not_found"
-      }), ". Rule order, operation and grants never break\na tie. The server logs ambiguity without exposing rule details in the client\nresponse."]
+      }), ". Rule order, operation and grants never break\na tie. Even a match with the wrong ID shape for its protocol counts toward\nambiguity. The server logs ambiguity without exposing rule details in the\nclient response."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Rules do not discover or register upstream models. If the upstream returns\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "404"
-      }), " for an unknown ID, the proxy uses its usual upstream error handling\nwithout trying another model. The rule label is for grants, not a callable\nmodel registration. Alias targets, inherited models and peer receiver models\nstill require literal definitions."]
+      }), " for an unknown ID, the proxy uses its usual upstream error handling\nwithout trying another model. If the upstream later serves that ID, a matching\nrequest can work without changing or reloading the proxy configuration. The\nrule label is for grants and ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/api-reference#usage-and-scope",
+        children: "unpriced usage grouping"
+      }), ",\nnot a model registration. Alias targets, inherited models and peer receiver\nmodels still require literal definitions."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "alias-routing",
       children: "Alias Routing"
@@ -631,11 +636,14 @@ function _createMdxContent(props) {
         children: "openrouter"
       }), ", the proxy stays close to pass-through behavior. For translated providers, the proxy maps between the public OpenAI-style contract and the provider-native request and response shape."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Apart from explicitly configured ingress guardrails and reasoning stripping,\npass-through providers preserve request JSON values and unknown extension fields,\nrewriting only the top-level ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Apart from explicitly configured ingress guardrails and reasoning stripping,\npass-through providers preserve request JSON values and unknown extension fields,\nrewriting the top-level ", (0,jsx_runtime.jsx)(_components.code, {
         children: "model"
-      }), " value before forwarding. Malformed JSON,\nnon-object JSON bodies, and duplicate top-level ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " before forwarding. Malformed JSON, non-object\nJSON bodies, and duplicate top-level ", (0,jsx_runtime.jsx)(_components.code, {
         children: "model"
-      }), " keys are rejected."]
+      }), " keys are rejected. Rule calls\nhave additional ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/api-reference#direct-model-id-passthrough",
+        children: "selector checks"
+      }), ";\nthose checks do not change literal or alias payload handling."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Translated providers intentionally support a conservative OpenAI-style request subset. Unsupported top-level controls such as ", (0,jsx_runtime.jsx)(_components.code, {
         children: "tools"
@@ -722,7 +730,7 @@ function _createMdxContent(props) {
         children: "base_url"
       }), " is an optional transport override only (same absolute-URL and\nloopback rules as other providers). An override never reclassifies the\nservice: auth, header, and protocol behavior stay type-driven."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Every model declares a required ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Every literal model and passthrough rule declares a required ", (0,jsx_runtime.jsx)(_components.code, {
         children: "protocol"
       }), ":"]
     }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
@@ -806,13 +814,19 @@ function _createMdxContent(props) {
         })]
       })]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["A public operation the model's protocol does not serve is rejected before any\nupstream I/O, as are ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["A public operation the declared protocol does not serve is rejected before\nupstream I/O, as are ", (0,jsx_runtime.jsx)(_components.code, {
         children: "embeddings"
       }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "images"
-      }), ", and audio operations on both\nOpenCode types. The same model name may use different protocols per service\n(for example ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ", and audio operations on both\nOpenCode types. A rule must also list the operation in ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "capabilities"
+      }), "; it\ndoes not inherit a model's protocol or defaults. The same model name may use\ndifferent protocols per service (for example ", (0,jsx_runtime.jsx)(_components.code, {
         children: "minimax-m3"
-      }), ", which is chat-protocol on Zen but\nmessages-protocol on Go), so routing comes from explicit configuration, never\nfrom the model name. There is no generic ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ", which uses ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "chat"
+      }), "\non Zen and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "messages"
+      }), " on Go), so routing comes from explicit configuration,\nnever from the model name. There is no generic ", (0,jsx_runtime.jsx)(_components.code, {
         children: "opencode"
       }), " type."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
@@ -1241,7 +1255,7 @@ function _createMdxContent(props) {
         children: "opencode-zen"
       }), " and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "opencode-go"
-      }), " the omitted default is protocol-aware (", (0,jsx_runtime.jsx)(_components.code, {
+      }), " the omitted default for a literal model is protocol-aware (", (0,jsx_runtime.jsx)(_components.code, {
         children: "chat"
       }), " serves ", (0,jsx_runtime.jsx)(_components.code, {
         children: "chat"
@@ -1263,13 +1277,15 @@ function _createMdxContent(props) {
         children: "chat"
       }), " and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "responses"
-      }), "), and capabilities outside the protocol-served set fail validation. ", (0,jsx_runtime.jsx)(_components.code, {
+      }), "), and capabilities outside the protocol-served set fail validation. Rules must declare their capabilities explicitly. ", (0,jsx_runtime.jsx)(_components.code, {
         children: "POST /v1/messages"
-      }), " is native Anthropic passthrough served only by provider type ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " is native Anthropic passthrough served only by ", (0,jsx_runtime.jsx)(_components.code, {
         children: "anthropic"
-      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " and by ", (0,jsx_runtime.jsx)(_components.code, {
         children: "messages"
-      }), "-protocol Zen/Go models; every other provider type rejects it before upstream I/O."]
+      }), "-protocol Zen/Go routes; rules must explicitly include ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "messages"
+      }), " to serve it."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.h2, {
       id: "get-v1models-metadata",
       children: [(0,jsx_runtime.jsx)(_components.code, {

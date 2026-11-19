@@ -6,7 +6,7 @@
 <title data-rh="true">API Reference | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/api-reference/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="API Reference | aiproxy"><meta data-rh="true" name="description" content="aiproxy exposes an OpenAI-compatible HTTP API."><meta data-rh="true" property="og:description" content="aiproxy exposes an OpenAI-compatible HTTP API."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/api-reference/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/api-reference/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/api-reference/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"API Reference","item":"https://aiproxy.pages.dev/docs/api-reference"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
 <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.e50caa8a.css">
-<script src="/assets/js/runtime~main.613c7e99.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.79b31b8a.js" defer="defer"></script>
 <script src="/assets/js/main.f0042d1c.js" defer="defer"></script>
 </head>
 <body>
@@ -39,19 +39,29 @@ which passes Anthropic SSE through verbatim.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="direct-model-id-passthrough">Direct Model-ID Passthrough<a href="#direct-model-id-passthrough" class="hash-link" aria-label="Direct link to Direct Model-ID Passthrough" title="Direct link to Direct Model-ID Passthrough" translate="no">​</a></h2>
 <p>Use <code>&lt;provider&gt;/&lt;upstream-id&gt;</code> in the <code>model</code> field when an eligible direct
 request can use a <a class="" href="/docs/configuration/#model-id-passthrough">model-ID passthrough rule</a>.
-Exact literal models take priority. Rule matches use the same direct provider
-settings, ingress guardrails and provider/root encrypted-reasoning policy as
-ordinary inference; they neither contact model discovery nor use peer transport.</p>
+Exact literal models take priority. Rule matches use the existing adapter,
+destination, credential policy and ingress guardrails. Provider/root
+encrypted-reasoning policy still applies to chat and Responses where supported,
+not native Messages. Rules add no public operations, do not contact discovery,
+and do not use peer transport.</p>
 <p>A rule call requires exactly one top-level <code>model</code> string in a JSON object,
 or one text form field named <code>model</code> in multipart audio transcriptions. Use the
 exact lowercase field name and the unmodified ID, with no duplicates. Top-level
 JSON keys or multipart fields named <code>models</code> or <code>preset</code> (including case
-variants) are rejected on rule calls before upstream I/O. Literal and alias
-payload handling is unchanged.</p>
-<p>The proxy forwards the admitted suffix as the <code>model</code> value. It does not verify
-that the upstream offers the ID, how the upstream interprets virtual IDs or
-other parameters, or what the upstream actually runs or charges. Use a trusted
-upstream and enforce model and spending restrictions there as well.</p>
+variants) are rejected on all rule calls. On native <code>POST /v1/messages</code> rule
+calls only, top-level <code>fallbacks</code> (including case variants) is also rejected.
+These checks run before upstream I/O, including after guardrail rewrites.
+Literal and alias payload handling and existing translation limits are unchanged.</p>
+<p>Body-based adapters use the admitted suffix as the upstream <code>model</code> value.
+Gemini and the Zen <code>gemini</code> protocol use a single bare ID segment in the
+adapter&#x27;s fixed model path. Only the adapter adds <code>alt=sse</code> for streaming.
+For Gemini batched embeddings, send the normal OpenAI-style array of strings
+in <code>input</code>; the adapter sets every upstream <code>requests[].model</code> to
+<code>models/&lt;admitted-id&gt;</code>, matching the <code>:batchEmbedContents</code> path. Callers cannot
+provide their own subrequest model. Literal and alias batches are unchanged.</p>
+<p>The proxy does not verify that the upstream offers the ID, how it interprets
+virtual IDs or other parameters, or what it actually runs or charges. Use a
+trusted upstream and enforce model and spending restrictions there as well.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="peer-deferred-transport-v1">Peer Deferred Transport v1<a href="#peer-deferred-transport-v1" class="hash-link" aria-label="Direct link to Peer Deferred Transport v1" title="Direct link to Peer Deferred Transport v1" translate="no">​</a></h2>
 <p>This private opt-in extension serves chat completions between a statically
 configured caller and executor. It adds <strong>no provider/model capability</strong> and is
@@ -856,7 +866,7 @@ GitHub compatibility unverified.</strong></p>
 <li class=""><code>anthropic</code> and <code>gemini</code> use request and response translation</li>
 <li class="">translated <code>/v1/responses</code> support is intentionally conservative compared with the full upstream provider-native feature set</li>
 <li class=""><code>opencode-zen</code> and <code>opencode-go</code> mix native and translated handling per
-model <code>protocol</code>: <code>chat</code>/<code>responses</code> protocols are native pass-through for
+literal model or rule <code>protocol</code>: <code>chat</code>/<code>responses</code> are native pass-through for
 one public operation each, <code>messages</code> is native Anthropic passthrough for
 <code>POST /v1/messages</code> (plus conservative translation for chat/responses),
 and <code>gemini</code> uses the conservative translation subsets. Operations a protocol does not serve, and
