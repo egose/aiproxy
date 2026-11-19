@@ -5,8 +5,8 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Request Examples | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/request-examples/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Request Examples | aiproxy"><meta data-rh="true" name="description" content="These examples show how clients typically call aiproxy through its OpenAI-compatible API."><meta data-rh="true" property="og:description" content="These examples show how clients typically call aiproxy through its OpenAI-compatible API."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/request-examples/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/request-examples/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/request-examples/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Request Examples","item":"https://aiproxy.pages.dev/docs/request-examples"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
-<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.6e844cd5.css">
-<script src="/assets/js/runtime~main.36cf4f8c.js" defer="defer"></script>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.e50caa8a.css">
+<script src="/assets/js/runtime~main.54eb5342.js" defer="defer"></script>
 <script src="/assets/js/main.f0042d1c.js" defer="defer"></script>
 </head>
 <body>
@@ -47,7 +47,11 @@
 <p>These endpoints usually involve multipart upload or binary output handling on the client side, but the proxy-visible model naming and auth behavior stay the same.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="billing-usage">Billing Usage<a href="#billing-usage" class="hash-link" aria-label="Direct link to Billing Usage" title="Direct link to Billing Usage" translate="no">​</a></h2>
 <div class="language-sh mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-sh codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">curl http://127.0.0.1:8080/v1/billing/usage \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  -H &#x27;Authorization: Bearer your-token&#x27;</span><br></div></code></pre></div></div>
-<p>In <code>bearer_static</code> mode, results are scoped to the caller&#x27;s tenant when present, otherwise to the caller&#x27;s client identity.</p>
+<p>DB bearers see only their immutable key/workspace usage, including earlier labels;
+rotation retains it and a replacement key does not inherit it. Trusted HCL clients
+retain same-tenant reporting among static clients in System, or their own tenantless
+static usage. This is a rolling, process-local estimate, not an invoice or a
+workspace-wide view.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="error-behavior-examples">Error Behavior Examples<a href="#error-behavior-examples" class="hash-link" aria-label="Direct link to Error Behavior Examples" title="Direct link to Error Behavior Examples" translate="no">​</a></h2>
 <ul>
 <li class="">direct request to <code>openai/gpt-4.1</code>: never rerouted to another provider</li>

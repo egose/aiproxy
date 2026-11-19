@@ -5,8 +5,8 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Operations | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/operations/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Operations | aiproxy"><meta data-rh="true" name="description" content="This page covers the commands and operational behavior that matter most for local development and production deployment."><meta data-rh="true" property="og:description" content="This page covers the commands and operational behavior that matter most for local development and production deployment."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/operations/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/operations/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/operations/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Operations","item":"https://aiproxy.pages.dev/docs/operations"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
-<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.6e844cd5.css">
-<script src="/assets/js/runtime~main.36cf4f8c.js" defer="defer"></script>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.e50caa8a.css">
+<script src="/assets/js/runtime~main.54eb5342.js" defer="defer"></script>
 <script src="/assets/js/main.f0042d1c.js" defer="defer"></script>
 </head>
 <body>
@@ -51,16 +51,222 @@ these checks do not exercise a live cluster&#x27;s NetworkPolicy implementation.
 <p><code>aiproxy</code> includes an interactive config editor for the top-level HCL blocks and
 the provider secrets JSON file.</p>
 <p>Interactive entrypoints:</p>
-<div class="language-sh mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-sh codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure provider</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure auth</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure alias</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure listener</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure upstream</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure logging</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure provider-health</span><br></div></code></pre></div></div>
+<div class="language-sh mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-sh codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure provider</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure auth</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure alias</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure listener</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure upstream</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure logging</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure provider-health</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure dashboard</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure multi-tenancy</span><br></div></code></pre></div></div>
 <p>The root <code>aiproxy configure</code> command shows a block selector. The block-specific
 subcommands can also be used directly.</p>
 <p>Supported workflows:</p>
 <ul>
 <li class="">create or update <code>listener</code>, root <code>upstream_header_timeout</code>/<code>encrypted_reasoning</code>, <code>auth</code>, <code>provider</code>, <code>alias</code>, <code>logging</code>, and <code>provider_health</code></li>
 <li class="">update provider secrets when using <code>api_key_ref</code></li>
-<li class="">delete existing blocks with <code>--delete</code></li>
+<li class="">configure the Dashboard API (<code>dashboard</code>) and embedded browser app (<code>web_ui</code>) independently</li>
+<li class="">configure <code>multi_tenancy</code> and its <code>database</code> block together</li>
+<li class="">delete existing blocks on commands that support <code>--delete</code></li>
 </ul>
 <p>For scripted environments, use <code>--non-interactive</code> on block subcommands.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="dashboard-web-ui-and-multi-tenancy">Dashboard, Web UI, and Multi-tenancy<a href="#dashboard-web-ui-and-multi-tenancy" class="hash-link" aria-label="Direct link to Dashboard, Web UI, and Multi-tenancy" title="Direct link to Dashboard, Web UI, and Multi-tenancy" translate="no">​</a></h3>
+<p>In <strong>Dashboard &amp; Web UI</strong>, enable the Dashboard API if you want the TUI or live
+browser dashboard. Enable the embedded Web UI separately if you want browser
+access. The Web UI alone supports workspace management if multi-tenancy is on;
+otherwise it only serves the app shell. No database is needed for the Dashboard
+API or Web UI themselves. The dashboard token defaults to server-generated;
+existing token settings are kept unless you change them or disable the Dashboard
+API, which removes the <code>dashboard</code> block.</p>
+<p>In <strong>Multi-tenancy</strong>, reuse the existing PostgreSQL URL or supply the name of an
+environment variable for the wizard to write as <code>database.url = env(&quot;...&quot;)</code>.
+The wizard defaults public registration to off for new setups and preserves
+existing choices. An enabled, hand-written <code>multi_tenancy {}</code> still implicitly
+allows public registration unless the attribute is explicitly changed.
+Disabling multi-tenancy leaves the database block and stored data in place.</p>
+<p>For an invite-only launch, explicitly close public registration, enable the Web
+UI, then create an invitation in the intended workspace. Direct the recipient to
+the clean <code>/invite</code> page on your deployment and send the one-time code separately
+over a trusted channel. The recipient pastes it into the form. Never put the code
+in a URL (path, query, or fragment). The app does not persist the entered code;
+delivery services, clipboard history, extensions, or password managers may
+retain copies outside the app&#x27;s control.</p>
+<p>Treat old code-bearing links as exposed. Revoke affected pending invitations
+as a system administrator from <strong>Users → Pending invites</strong>, or with authorized
+<code>DELETE /_internal/admin/invites/{id}</code>, then issue new codes and deliver them
+separately. Opening the current page cannot undo an earlier visit: fragments
+can persist in browser history, and path/query values may also be in access or
+proxy logs.</p>
+<p>Acceptance creates the account and intended membership atomically. The
+recipient then signs in with their invited email/password, or with SSO using
+that same existing account.
+SSO never creates unknown accounts, even with public registration open; pending
+invitations must be redeemed first. Returning users keep their memberships,
+without automatic System enrollment. IdP/mock verification is not evidence of
+compatibility with a particular live identity provider.</p>
+<div class="language-sh mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-sh codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure dashboard --config ./config.hcl --non-interactive --dashboard --web-ui</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure multi-tenancy --config ./config.hcl --non-interactive \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --enabled --database-url-env AIPROXY_DB_URL --allow-public-registration=false</span><br></div></code></pre></div></div>
+<p>Use <code>--dashboard=false</code>, <code>--web-ui=false</code>, or <code>--enabled=false</code> to turn the
+respective feature off. Use <code>--token-env NAME</code> to set a dashboard token
+reference or <code>--token-env=</code> to remove the explicit token and use the server&#x27;s
+automatic token handling.</p>
+<p>Enabling the Dashboard API, toggling multi-tenancy, or changing the database URL
+while multi-tenancy is enabled requires a restart. Web UI and public registration
+changes can apply on <code>SIGHUP</code>. The wizard only edits the file. For first-time
+multi-tenancy setup, provide the database URL to the migration and serving
+processes, set <code>AIPROXY_JWT_SECRET</code> for the server, and set <code>AIPROXY_ADMIN_EMAIL</code>
+and <code>AIPROXY_ADMIN_PASSWORD</code> before running <code>aiproxy migrate up --config ./config.hcl</code>
+to seed the first administrator on a fresh database.</p>
+<p>Set <code>auth.mode = &quot;bearer_static&quot;</code> to serve inference in a multi-tenant
+deployment. <code>none</code> still permits management but disables authenticated data-plane
+access; a browser session cannot substitute for an inference bearer. When
+upgrading from a catalog shared in practice, use HCL clients for System and
+issue database keys in the same workspace as their intended models. A new
+workspace starts empty. Repair alias targets and provider inheritance references
+that span workspaces before upgrading: the merged catalog now rejects them at
+startup/reload, including disabled derivatives. Public names do not change.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="workspace-isolation-upgrade-and-recovery">Workspace Isolation Upgrade And Recovery<a href="#workspace-isolation-upgrade-and-recovery" class="hash-link" aria-label="Direct link to Workspace Isolation Upgrade And Recovery" title="Direct link to Workspace Isolation Upgrade And Recovery" translate="no">​</a></h3>
+<p><strong>Compatibility change:</strong> System inventory is not shared with tenants.
+Inheritance bases and all alias targets (including shorthand) must be in the
+resource&#x27;s destination workspace, even for global-administrator-authored rows.
+Disabling a derivative does not make a foreign base valid. A newly added HCL
+provider or alias cannot shadow a managed name, regardless of the provider&#x27;s
+enabled state. Names remain globally unique; there is no automatic rename,
+ownership transfer, sharing mode or per-tenant copy of HCL inventory.</p>
+<p>Before replacing a running binary:</p>
+<ol>
+<li class="">
+<p>Back up the config and database. Use the candidate binary with the same
+config, database URL, secret environment and database encryption key as
+<code>serve</code>. Apply any pending migrations using the normal migration procedure.</p>
+</li>
+<li class="">
+<p>Run the operator preflight:</p>
+<div class="language-sh mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-sh codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy validate --config /etc/aiproxy/config.hcl --check-db</span><br></div></code></pre></div></div>
+<p>This reads and validates the merged catalog without starting a server or
+sending inference. It may resolve configured local credential references.
+Check the <strong>exit status</strong> and <code>database catalog: valid</code> result: the earlier
+<code>config is valid</code> line only validates the file. Plain <code>validate</code> does not
+check managed rows. Preflight reports the first error; repeat after repairs.</p>
+</li>
+<li class="">
+<p>Audit <code>db_providers.extends</code> and <code>db_alias_targets.provider</code>/<code>model</code> against
+the referenced provider&#x27;s <code>workspace_id</code>; file-defined names belong to
+System (<code>00000000-0000-0000-0000-000000000000</code>). Check HCL names against
+<strong>all</strong> managed provider/alias names, including disabled providers.</p>
+</li>
+<li class="">
+<p>Retarget or remove invalid aliases and derivatives. To keep a tenant model,
+configure an independently owned provider/base in that tenant with its own
+credential and a globally unused name; do not copy System credentials.
+Changing a derivative to concrete requires valid local model definitions,
+and policy-bearing inheritance transitions require an explicit <code>models</code>
+replacement. Update callers and allowlists if public names change.</p>
+</li>
+<li class="">
+<p>Repeat preflight until it passes, then restart. Verify each workspace&#x27;s
+model list and own direct/alias calls with its inference key.</p>
+</li>
+</ol>
+<p>If a running instance rejects a reload, its previous runtime remains active;
+do not restart into a known-invalid saved graph. Use authorized management
+updates with known resource names to replace bad references, or remove those
+referrers. Legacy invalid views may return a controlled error rather than foreign
+inventory, so use the operator&#x27;s trusted database audit to locate them.</p>
+<p>Provider and alias updates/deletes, provider credential updates, named Copilot
+device-flow starts, and existing-key policy updates, deletes, rotations and
+revocations now return the same resource-specific <code>404</code> for missing targets,
+hidden targets, and valid workspace selectors that do not match. A <code>404</code> alone
+does not prove absence. Before retrying, verify your account and selected
+workspace against authorized inventory. Check every query and header selector
+and any supported body selector, even as a global administrator. Omit unused
+selectors; empty or malformed IDs return <code>400</code>. These denials save nothing and
+do not trigger a reload or contact the Copilot issuer. See
+<a class="" href="/docs/api-reference/#direct-catalog-writes">direct catalog writes</a> and
+<a class="" href="/docs/api-reference/#direct-key-writes">direct key writes</a>.</p>
+<p>If startup is already blocked, repair the config or perform narrowly scoped,
+transactional database maintenance while serving is stopped. Preserve resource
+and workspace IDs, credentials and key ownership; follow the catalog
+<code>updated_at</code> revision protocol for direct SQL edits. Prefer removing the new HCL
+collision over silently renaming an existing managed resource. A deliberate
+rename requires updating all affected same-workspace aliases, derivatives,
+allowlists and callers. Preflight again before starting.</p>
+<p>The portal validates the saved workspace choice before querying inventory.
+Global administrators default to System even when a tenant sorts first; tenant
+users prefer an authorized non-System workspace. Explicit System members remain
+read-only there, and an account with no memberships has no tenant write target.
+Reference pickers and empty-state creation use only the selected workspace.
+Changing workspace/account discards old views and prevents pending forms,
+credential recovery queries or mutations from reusing the new context.</p>
+<p>Managed catalog writes serialize dependency changes in the database; see
+<a href="#managed-catalog-dependencies-and-cleanup" class="">safe catalog cleanup</a>. An already-admitted
+server mutation cannot be undone by browser cancellation. Saves request immediate
+local activation; other replicas reconcile durable revisions independently, without
+a cluster-wide acknowledgement. See <a href="#bounded-replica-convergence" class="">bounded replica convergence</a>.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="tenant-provider-policy-upgrade">Tenant Provider Policy Upgrade<a href="#tenant-provider-policy-upgrade" class="hash-link" aria-label="Direct link to Tenant Provider Policy Upgrade" title="Direct link to Tenant Provider Policy Upgrade" translate="no">​</a></h3>
+<p><strong>Intentional compatibility change:</strong> non-System managed providers/probes no
+longer have unrestricted outbound destinations, host secret references,
+caller-token forwarding or cleartext exceptions. Even a global administrator
+editing a tenant row must follow the tenant policy. System and file-only
+workflows are unchanged; no new database schema migration is needed for the
+operator&#x27;s <code>allowed_upstream_origins</code> attribute.</p>
+<p>Before upgrading:</p>
+<ol>
+<li class="">
+<p>Back up config and DB, apply pending migrations, and audit <strong>all</strong> non-System
+<code>db_providers</code> rows, including disabled rows. Check nonempty
+<code>api_key_ref_path</code>/<code>api_key_ref_key</code>, <code>copilot_credential_path</code>/
+<code>copilot_credential_name</code>, <code>forward_authorization</code>,
+<code>allow_insecure_base_url</code>, effective/inherited <code>base_url</code> and health targets.</p>
+</li>
+<li class="">
+<p>Approve only needed exact <strong>public HTTPS origins</strong> in
+<code>multi_tenancy.allowed_upstream_origins</code>. Include provider-type defaults and
+absolute health origins/ports where used. Do not approve a private service,
+wildcard or metadata endpoint; there is no production private/mock bypass.
+Approval grants network permission, not resource or credential ownership.</p>
+</li>
+<li class="">
+<p>Replace tenant file references with credentials owned by that tenant:
+encrypted API key writes or its own Copilot database device flow. Do not
+copy System secrets. Clear both path and key/name members of legacy
+references, remove caller forwarding and cleartext flags, and retarget
+upstreams/probes to approved HTTPS destinations. Disabling a provider is
+<strong>not</strong> a policy repair. Repair a derivative&#x27;s effective settings on its
+own same-workspace base; removing an existing healthcheck is unsupported,
+so retarget it.</p>
+</li>
+<li class="">
+<p>Run with the <strong>candidate binary</strong>, serving config/secret environment and
+database encryption key:</p>
+<div class="language-sh mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-sh codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy validate --config /etc/aiproxy/config.hcl --check-db</span><br></div></code></pre></div></div>
+<p>Check the exit status and <code>database catalog: valid</code>, not only the earlier
+<code>config is valid</code> line. Plain <code>validate</code> checks only the file. DB preflight
+materializes and checks all destination policies before DB credential
+decryption or file resolution; forbidden tenant configurations never read
+host credentials. Trusted HCL references may still resolve while loading
+the file, and a valid System DB reference may resolve after preflight.
+This is read-only catalog validation, not DNS/network or live-provider
+verification. Repeat after each reported repair.</p>
+</li>
+<li class="">
+<p>Restart only once preflight passes; verify each tenant&#x27;s own JSON/SSE
+inference and configured probes. DNS answers are checked on every new
+connection, with verified TLS and no environment proxy, so approved names
+that resolve privately or have invalid certificates remain unusable.</p>
+</li>
+</ol>
+<p>Authorized updates can repair known old rows while an instance still serves.
+For a sidecar-to-Copilot-DB switch, first clear the legacy reference and repair
+destinations (temporarily disabling the provider if it has no DB credential).
+Then start an own device flow and consume it in provider PUT. Provider-bound
+device start/poll also reject forbidden effective tenant configurations before
+issuer I/O; standalone authorization retains its fixed trusted issuer workflow
+and does not itself activate any upstream. If startup is blocked, use
+the narrowly scoped transactional maintenance and revision precautions above.
+Never automatically transfer a tenant provider into System or convert a host
+secret into a tenant secret.</p>
+<p>Approvals reload with the file. Removing an approval while a stored provider or
+probe still requires it rejects the candidate; the previous runtime, including
+its previous approvals and already-admitted work, remains active. Retarget/remove
+dependent rows and repeat preflight, then reload; do not treat a failed reload
+as approval revocation. Activation is still local to the receiving instance,
+not cluster acknowledgement; DB changes reconcile as described under
+<a href="#bounded-replica-convergence" class="">bounded replica convergence</a>. File policy changes still
+require deployment to every replica.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="other-configure-examples">Other Configure Examples<a href="#other-configure-examples" class="hash-link" aria-label="Direct link to Other Configure Examples" title="Direct link to Other Configure Examples" translate="no">​</a></h3>
 <p>Provider example:</p>
 <div class="language-sh mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-sh codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure provider \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --config /etc/aiproxy/config.hcl \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --non-interactive \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --name backup \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --type openai-compatible \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --display-name &quot;Backup provider&quot; \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --base-url https://llm.internal/v1 \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --upstream-header-timeout 180s \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --secrets-path /etc/aiproxy/keys.json \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --secrets-key localai \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --api-key &quot;$LOCALAI_API_KEY&quot; \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --model qwen3-32b=qwen/qwen3-32b \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --model-capabilities qwen3-32b=chat,responses</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">aiproxy configure provider \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --config /etc/aiproxy/config.hcl \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --non-interactive \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --name backup-2 \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --type openai-compatible \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --extends backup \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --display-name &quot;Backup provider 2&quot; \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --secrets-key backup-2 \</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  --api-key &quot;$BACKUP_2_API_KEY&quot;</span><br></div></code></pre></div></div>
 <p>OpenCode providers use explicit types with per-model protocols (<code>chat</code>,
@@ -95,7 +301,7 @@ cleanup (100 rows per batch); provider saves set
 <code>X-Aiproxy-Catalog-Saved: true</code> once the database commit is durable, including
 saved-but-activation-failed outcomes where the old runtime stays active.
 Activation applies to the receiving instance only; there is no cluster
-broadcast, so reload or mutate each instance (or let its next mutation pick
+broadcast; durable DB revision polling activates other replicas (or their next mutation picks
 the catalog up). Hermetically verified; live GitHub compatibility unverified
 (see below).</p>
 <p>Inference preserves upstream JSON <code>401</code>/<code>403</code> errors without implicit re-login;
@@ -283,21 +489,22 @@ candidate leaves the old runtime intact. Stripping is lossy, not decryption;
 remain in force across reload.</p>
 <p>When multi-tenancy is enabled, database-backed providers, aliases, and
 inbound keys merge into the serving catalog on the same reload path (and
-automatically after admin API mutations). An invalid row — for example a
+automatically after admin API mutations). An invalid old or externally corrupted
+row — for example a
 provider whose encrypted credential no longer decrypts under the current
 encryption key, or an alias pointing at a removed target — fails the reload
-with the old runtime intact, and blocks server startup the same way an
+with the old catalog retained, independently refreshing keys, and blocks server startup the same way an
 invalid config file does. Use <code>aiproxy validate --check-db</code> to identify the
-offending row without running the server, then fix it (rotate the credential,
-retarget or disable the entry) or delete it via the admin UI/CLI; the next
-mutation or <code>SIGHUP</code> picks the catalog back up.</p>
+offending row without running the server, then repair its credential or references.
+Retarget/delete referencers before disabling/deleting a referenced provider;
+the next valid mutation or <code>SIGHUP</code> picks the catalog back up.</p>
 <p>Database inbound keys with <code>expires_at</code> stop authenticating at that timestamp,
 using the server clock, even if no reload occurs. Model listing, billing usage,
 and new inference requests (including SSE) return the standard JSON <code>401</code>
 <code>auth_failed</code> error (<code>invalid client token</code>) at or after expiry, before upstream
 I/O. Requests and streams already authenticated may finish. Static HCL clients
 and database keys without expiry do not expire. Changing a key&#x27;s expiry,
-rotating it, or disabling/deleting it still uses the catalog reload path above;
+rotating it, or disabling/deleting it uses independent key reconciliation below;
 the stored deadline in an active runtime requires no database access per request.</p>
 <p>These changes still require a restart:</p>
 <ul>
@@ -308,14 +515,146 @@ the stored deadline in an active runtime requires no database access per request
 </ul>
 <p>Provider and alias administrative POST/PUT requests commit their complete aggregate
 before requesting runtime activation, then read the response view. Provider model
-write failures roll back metadata too. A concurrent edit returns <code>409</code>; read the
-current provider/alias and retry. <code>500 could not save catalog edit</code> means no
+write failures roll back metadata too. A concurrent aggregate edit returns <code>409</code>;
+read current state and retry. A dependency conflict returns <code>400</code> without saving
+or requesting activation. <code>500 could not save catalog edit</code> means no
 activation was requested. <code>500 saved but activation failed</code> means the complete
 edit is in the database while the old runtime remains active: inspect server logs,
 resolve the failure and reload. <code>500 saved but response view unavailable</code> means the
 edit was saved and activation succeeded, but the response view failed; read current
 state before retrying, especially before repeating a create. These outcomes do not
 promise a distributed transaction between the database and running proxies.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="bounded-replica-convergence">Bounded Replica Convergence<a href="#bounded-replica-convergence" class="hash-link" aria-label="Direct link to Bounded Replica Convergence" title="Direct link to Bounded Replica Convergence" translate="no">​</a></h3>
+<p>Replicas sharing PostgreSQL reconcile durable catalog and key revisions every two
+seconds, without relying on notifications. Database triggers advance revisions in
+the mutation transaction for providers, models, aliases, targets, inbound keys,
+key grants and owner quota policies, including account/key and workspace deletion
+cascades. Reads certify a snapshot only when before/after revisions match;
+publication rechecks the catalog revision. Continuous edits can postpone application.
+Startup requires a valid current catalog; it does not start from a persisted cache.</p>
+<p><strong>30 seconds is the maximum stale-serving admission window, not a polling interval.</strong>
+Freshness starts at the beginning of the confirmed read, never at poll completion.
+Failed reads, mixed snapshots and failed candidate activation do not renew catalog
+freshness. Keys refresh independently: an invalid provider edit cannot prevent
+revocation. Key policy changes invalidate the local owner quota cache. This is not
+atomic cross-replica spending reservation or a funded workspace cap.</p>
+<p>After freshness expires, new DB-key auth/listing/billing and applicable peer
+controls/replay return <code>503 serving_stale</code>; managed direct/alias inference also
+fails before upstream I/O, including requests authenticated with static keys.
+Trusted HCL inference using HCL clients remains available; their model list omits
+stale managed models. Already-admitted requests, alias attempts, streams and draining
+jobs retain their resources and may finish. Peer jobs are still process-local and
+have no replica failover. Fresh confirmed state restores admission automatically.</p>
+<p><code>/healthz</code> remains liveness. <code>/readyz</code> returns <code>503</code> when either database freshness
+deadline expires, even if HCL traffic remains available. Authenticated system
+administrators can read <code>GET /_internal/admin/serving-status</code> for applied revisions,
+confirmation timestamps and current freshness. These are <strong>local observations</strong>;
+<code>cluster_acknowledged</code> is always false. Catalog mutation responses expose
+<code>X-Aiproxy-Local-Active</code>, <code>X-Aiproxy-Cluster-Acknowledged</code> and applied catalog/key
+revision headers separately from durable-save headers. A failed catalog activation
+can still have successfully applied key revocation. No response proves every
+replica has acknowledged an edit.</p>
+<p>Management/session operations still use their existing live database reads and
+authorization checks; serving freshness is not a management or browser-session
+cache. Database failures deny authorization or fail the operation under the existing
+route error contract, not a universal new outage status. The status endpoint itself
+requires successful live administrator authorization. File changes, credentials in
+sidecars and operator origin approvals still require consistent deployment/reload
+on every replica; durable revisions track DB mutations only. PostgreSQL must provide
+one coherent writable primary, with transactional triggers intact. This does not
+prove behavior under split brain, lagging read replicas, hostile trigger removal,
+process suspension or clock discontinuities. Verification uses two real apps with
+disposable PostgreSQL and mock upstreams, not a live cluster/provider certification.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="account-deletion-and-local-revocation">Account Deletion And Local Revocation<a href="#account-deletion-and-local-revocation" class="hash-link" aria-label="Direct link to Account Deletion And Local Revocation" title="Direct link to Account Deletion And Local Revocation" translate="no">​</a></h3>
+<p>Permitted account deletion cascades to personally owned database keys and requests
+one local reload after commit. A successful response rejects those bearers on new
+requests to the receiving instance. Team-owned and other users&#x27; keys and durable
+spend history survive (the deleted user&#x27;s ledger foreign key becomes null).
+Already-admitted requests/streams may finish. Workspace offboarding still only
+removes management memberships/shares; it does not revoke distributed tokens.
+Key updates, deletes, rotations and revocations for keys hidden after offboarding
+now return <code>404</code>, not <code>403</code>. This does not disable the key; an authorized
+manager must still rotate or revoke it to stop accepting a distributed bearer.</p>
+<p>Confirmed deletion responses carry <code>X-Aiproxy-User-Deleted: true</code>,
+<code>X-Aiproxy-User-ID</code> and <code>Cache-Control: no-store</code>, including
+<code>500 saved but activation failed</code>. In that failure case the database deletion is
+durable. Independent key refresh may already reject deleted bearers even if catalog
+activation failed; otherwise the stale-serving deadline bounds admission. Inspect
+server logs, repair the activation problem and reload with <code>SIGHUP</code> or restart
+the receiving server. Repeating DELETE returns <code>404</code> and does not retry activation.
+If the response was lost, reconcile account presence through the authorized user
+list rather than assuming rollback. Rejections preserve the account and request
+no reload. Responses acknowledge one instance; other replicas reconcile independently.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="database-key-issuance-recovery">Database Key Issuance Recovery<a href="#database-key-issuance-recovery" class="hash-link" aria-label="Direct link to Database Key Issuance Recovery" title="Direct link to Database Key Issuance Recovery" translate="no">​</a></h3>
+<p>Key creation now saves the key, owner and all grants atomically. Binding or
+authorization rejection and key/grant write failures leave no partial issuance
+and request no reload. Successful commit requests activation once. A subsequent
+activation or response-view failure is explicitly <strong>saved</strong>, not rolled back:
+creation and rotation supply <code>X-Aiproxy-Key-Saved: true</code>, <code>X-Aiproxy-Key-ID</code> and a
+<code>Location</code> for the saved key, with the ID and recovery instruction in the error
+body as well. Responses containing issuance results use <code>Cache-Control: no-store</code>.</p>
+<p>If a one-time bearer was not delivered:</p>
+<ol>
+<li class="">Do not create another key under a different name. Read the saved ID from the
+headers/body, or find the original globally unique name in the authorized key
+list if the response was lost. A connection failure can leave the database
+commit outcome unknown; missing saved headers do not prove nothing was saved.</li>
+<li class="">Inspect logs and resolve any activation failure. The saved key&#x27;s intended
+owner/grants are complete, but the receiving instance may still use its old
+runtime. There is no cluster-wide activation acknowledgement.</li>
+<li class="">Rotate that existing key using its management action or
+<code>POST /_internal/admin/keys/&lt;key_id&gt;/rotate</code>. If you send workspace selectors,
+all must match the saved key&#x27;s workspace. Securely distribute the returned
+bearer. Rotation keeps credential identity/workspace/grants and replaces the
+bearer after successful local activation. If rotation also saved without
+delivering a usable response, repeat rotation on the same ID.</li>
+</ol>
+<p>The server never stores/replays plaintext inbound bearers; detail/list reads
+provide only a display prefix. A duplicate-name creation returns <code>409</code> without
+changing the saved key or requesting a reload. Offboarding can remove the
+original caller&#x27;s management access after commit; an authorized workspace/global
+administrator must perform recovery in that case. See the
+<a class="" href="/docs/api-reference/#atomic-key-issuance-and-bearer-recovery">issuance API contract</a>.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="managed-catalog-dependencies-and-cleanup">Managed Catalog Dependencies And Cleanup<a href="#managed-catalog-dependencies-and-cleanup" class="hash-link" aria-label="Direct link to Managed Catalog Dependencies And Cleanup" title="Direct link to Managed Catalog Dependencies And Cleanup" translate="no">​</a></h3>
+<p><strong>Intentional compatibility change:</strong> managed provider deletion, disabling,
+model removal and inheritance/type/capability/protocol changes are rejected
+before durable commit if they invalidate a dependent alias or derivative.
+Aliases must still resolve every target in their destination workspace and share
+at least one supported capability. A disabled derivative still requires its
+enabled, concrete, same-type base and any inherited models named by local policy
+overlays. There is no cascade, automatic retargeting or force-delete option.</p>
+<p>The API returns the generic <code>400</code> message
+<code>catalog dependency conflict; retarget or remove dependent aliases and providers first</code>.
+No dependency names, counts or credentials are returned. Rejection preserves
+provider/model/alias/target rows and revisions, leaves a Copilot device flow ready,
+and requests no reload. Concurrent graph writes serialize on the workspace&#x27;s
+database lock, including alias/child creation, model replacement and Copilot
+aggregate saves; validation rereads the saved graph, not old managed runtime
+inventory. Current effective static System bases remain usable only in System,
+and tenant destination/credential restrictions still apply.</p>
+<p>For planned cleanup:</p>
+<ol>
+<li class="">Retarget or delete aliases using the provider/model, including aliases targeting
+a derivative that inherits that model.</li>
+<li class="">Retarget or delete derivatives before removing/disabling their base or turning
+it into a derivative. Remove/retarget inherited model-policy overlays before
+removing their base model, even on disabled derivatives.</li>
+<li class="">Apply the provider/model edit, then run <code>aiproxy validate --check-db</code> and verify
+routing before restart. If a concurrent dependent write won, reread and repeat
+cleanup rather than blindly retrying the destructive edit.</li>
+</ol>
+<p>Only affected dependencies are checked during a managed save, so unrelated
+corrupted rows do not prevent repairing known references or deleting an
+unreferenced corrupt provider. Full startup/reload/preflight still validates the
+whole catalog. A <strong>valid committed edit</strong> can therefore return
+<code>500 saved but activation failed</code> for an unrelated corrupt row, credential/file
+failure or restart-only listener change. Repair that operational failure and
+reload; the valid edit remains saved. Provider DELETE, like provider/credential
+saves, carries <code>X-Aiproxy-Catalog-Saved: true</code> after commit, including activation
+failure. This is database graph integrity, not replica convergence or live
+upstream compatibility verification. Direct SQL and HCL edits must maintain
+references themselves and pass the candidate binary&#x27;s preflight before restart;
+direct SQL must also follow the <code>updated_at</code> revision protocol.</p>
 <h3 class="anchor anchorTargetStickyNavbar_T7vg" id="managed-reasoning-policy-storage-and-activation">Managed Reasoning Policy Storage And Activation<a href="#managed-reasoning-policy-storage-and-activation" class="hash-link" aria-label="Direct link to Managed Reasoning Policy Storage And Activation" title="Direct link to Managed Reasoning Policy Storage And Activation" translate="no">​</a></h3>
 <p>Existing databases require <code>aiproxy migrate up</code> for the additive nullable
 provider/model policy columns. The migration does not rewrite/delete old model
@@ -338,7 +677,8 @@ submitted as local derivative definitions. See
 <p>Metadata describes saved intent, not successful activation. Durable provider/
 credential saves carry <code>X-Aiproxy-Catalog-Saved: true</code>, including saved-but-
 activation-failed outcomes; old serving state remains active on failure.
-Activation applies only to the receiving instance, with no cluster broadcast.
+Immediate activation applies to the receiving instance; durable revisions reconcile
+other replicas independently, with no cluster-wide acknowledgement.
 Root remains static configuration and existing RBAC is unchanged. Managed
 provider/model/alias web forms offer inherit, safe reset and sparse custom
 policy controls; static rows expose read-only local intent and effective context.</p>
@@ -416,12 +756,94 @@ the original admitted body with its own policy. Recovery permits only one extra
 attempt across the whole request. Read-only context describes saved state, not
 unsaved edits or proof of runtime activation.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="database-key-spend-and-quota-resets">Database Key Spend And Quota Resets<a href="#database-key-spend-and-quota-resets" class="hash-link" aria-label="Direct link to Database Key Spend And Quota Resets" title="Direct link to Database Key Spend And Quota Resets" translate="no">​</a></h2>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="spending-contract-owner-quotas-not-funded-workspace-caps">Spending Contract: Owner Quotas, Not Funded Workspace Caps<a href="#spending-contract-owner-quotas-not-funded-workspace-caps" class="hash-link" aria-label="Direct link to Spending Contract: Owner Quotas, Not Funded Workspace Caps" title="Direct link to Spending Contract: Owner Quotas, Not Funded Workspace Caps" translate="no">​</a></h3>
+<p><strong>This release does not support a funded workspace cap or a hard spending
+bound.</strong> Workspace ownership and usage reporting establish routing/reporting
+scope, not a funded pool, payer assignment or workspace budget authority.
+The proxy does not assign financial responsibility: payment remains outside
+proxy configuration under the operator&#x27;s/provider&#x27;s external agreement.
+User/team <code>budget_micros</code> settings are admission thresholds against recorded
+estimated spend, not prepaid balances or guarantees about upstream invoices.
+There is no workspace budget quota endpoint or workspace quota scope.</p>
+<table><thead><tr><th>Credential</th><th>Durable attribution with multi-tenancy enabled</th><th>Owner quota scope</th></tr></thead><tbody><tr><td>User-owned DB key</td><td>Immutable key/workspace IDs and authenticated owner user</td><td>That user&#x27;s spend across their keys <strong>in that workspace</strong>, plus per-public-model TPM</td></tr><tr><td>Team-owned DB key</td><td>Immutable key/workspace IDs and authenticated owner team</td><td>That team&#x27;s spend across its keys <strong>in that workspace</strong>, plus per-public-model TPM</td></tr><tr><td>Ownerless DB key</td><td>Key/workspace IDs; neither user nor team</td><td>None, even if shared with users/teams</td></tr><tr><td>Static/HCL client</td><td>No entries in the DB spend ledger; separate rolling usage labels/identity (System inventory when hosted)</td><td>None from DB quotas; separate request-rate policy can apply</td></tr><tr><td>Anonymous/file-only request</td><td>No entries in the DB spend ledger; separate process-local usage</td><td>None; hosted inference requires authenticated workspace scope</td></tr></tbody></table>
+<p>The DB schema permits at most one owner. Sharing grants management access,
+not a new charging scope or knowledge of who actually used a distributed bearer.
+Omitting <code>owner_type</code> when a workspace/global administrator issues a key creates
+an ownerless key; an ordinary member defaults to their own user ownership.
+Administrators may explicitly select a workspace-member user or local team;
+non-administrators may issue only personal keys for themselves or team keys for
+teams they administer. Labels and browser roles do not establish a payer.</p>
+<p><strong>Quota authority:</strong> A workspace administrator (or global system administrator)
+can set/reset member user and local team budgets and set TPM ceilings.
+An ordinary user can read their own quota and change its effective TPM within
+a positive administrator ceiling; a team administrator can do the same for
+their team. Ordinary team members may read, not edit, team quotas.
+Self/team administrators cannot set budgets, reset spend or set ceilings by
+virtue of those roles. A zero ceiling imposes no ceiling on an effective setting;
+effective zero falls back to the ceiling, rather than disabling a positive
+ceiling. These permissions concern <strong>owner</strong> quotas, not a workspace-wide budget.</p>
+<p><strong>Admission and overshoot:</strong> A missing or zero budget is unlimited. A positive
+budget rejects new admissions with <code>403 budget_exceeded</code> when cached lifetime
+owner spend minus the reset offset (floored at zero) reaches the threshold.
+TPM checks the requested public model (including an alias name) against completed
+tokens in this process&#x27;s trailing one-minute window, using positive effective
+TPM or else the ceiling. Exhaustion returns <code>429 tpm_exceeded</code>.
+Neither check reserves tokens/money, predicts request cost, or atomically commits
+admission with a charge. Concurrent requests can all pass before any completes;
+a single long request or stream can overshoot by itself. Admission does not
+cancel admitted work or stop a stream at the threshold. Usage is recorded at
+completion, not as tokens stream. There is no promised maximum overshoot.</p>
+<p><strong>Accounting gaps:</strong> Ordinary inference persists available result usage only
+for downstream <code>2xx</code> responses. A failed attempt, interrupted stream or upstream
+billable operation is not guaranteed to have complete reported result usage.
+No positive recognized usage means no ledger entry; durable request counts are
+therefore not all admissions. Tokens use positive <code>total_tokens</code>, otherwise
+prompt plus completion. Missing model pricing, unavailable cost calculation or
+total-only usage can record tokens with zero cost. Incomplete configured rates
+can underprice usage; cost is calculated from reported categories using the
+admitted catalog&#x27;s pricing and truncated to integer micro-USD. Zero ledger cost
+does not establish free upstream service. No missing-data reservation or invoice
+reconciliation is implemented. Ledger-write failures are logged; ordinary
+requests are not undone and there is no durable retry queue. Peer deferred
+finalization reports sink failures separately, not a funded reservation system.</p>
+<p><strong>Lifetimes and replicas:</strong> Durable ledger amounts are stored at completion;
+price edits do not reprice those entries. Owner budgets use lifetime sums minus
+explicit reset offsets, not a calendar billing period. The separate
+<code>GET /v1/billing/usage</code> rolling estimate expires near 24 hours, can reprice with
+current prices and resets on restart; it is neither the quota ledger nor an
+invoice. Spend caches last 30 seconds per tracker and are not updated by each
+completion; a quota edit invalidates only the receiving tracker. Replicas share
+the DB ledger, not cached spend, TPM windows or atomic reservations. Restart
+loses TPM history; it does not erase durable spend. A fresh replica can read
+recorded exhaustion while another still admits against fresh cached headroom.
+Replica credential/catalog convergence is a separate deployment requirement;
+even convergence does not turn these thresholds into financial bounds.</p>
+<p>Any future funded-cap feature is <strong>deferred, not current release readiness</strong>.
+It would first require an explicit payer/coverage/authority contract for every
+credential type; atomic cross-replica reservation before dispatch (including
+streams and retries); settlement and reconciliation rules; fail-closed rules
+for missing usage/prices and store outages; and recovery/idempotency rules for
+cancellation, deletion, lost completions, crashes and reservation expiry.
+No such financial policy or implementation is supplied by this release.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="deletion-and-resets">Deletion And Resets<a href="#deletion-and-resets" class="hash-link" aria-label="Direct link to Deletion And Resets" title="Direct link to Deletion And Resets" translate="no">​</a></h3>
 <p>With multi-tenancy enabled, deleting an inbound key preserves its recorded spend
 and user/team owner attribution. Requests already admitted with that key still
-record their usage when they finish, including streamed responses. Creating a
+can record available usage when they finish, including streamed responses,
+provided the workspace and owner still exist and the ledger write succeeds. Creating a
 replacement key, even with the same name, does not restore the owner&#x27;s budget;
 scope totals survive spend-cache refresh and server restart. Sharing a key does
 not transfer its spend to the other users or teams with access.</p>
+<p>Deleting the <strong>owner account/team</strong> is different from deleting only a key.
+Existing ledger entries retain key/workspace/tokens/cost, but their deleted
+user/team reference becomes null and is no longer included in that owner&#x27;s
+scope sum. Already-admitted work retains the old authentication snapshot;
+a new ledger insert referring to the deleted owner fails its foreign key.
+It is not automatically retried or reattributed to an ownerless scope. The
+rolling usage event can still be recorded under its admitted key/workspace
+identity. Account-deletion revocation does not cancel admitted work or guarantee
+a durable late charge. Workspace deletion cascades ledger and key identities
+and also prevents their late writes. Preserve external billing records if
+account/workspace deletion must not affect financial evidence.</p>
 <p>A workspace administrator can explicitly reset a user/team budget&#x27;s spend
 with <code>reset_spend: true</code> on its quota endpoint. Resetting records an offset against
 the current total; it does not delete historical usage. A request whose usage is
@@ -514,14 +936,19 @@ capped at 2s. Other control errors fail closed. Control <code>Retry-After</code>
 advice, not a model cooldown.</p>
 <h3 class="anchor anchorTargetStickyNavbar_T7vg" id="ownership-cancellation-and-release">Ownership, Cancellation And Release<a href="#ownership-cancellation-and-release" class="hash-link" aria-label="Direct link to Ownership, Cancellation And Release" title="Direct link to Ownership, Cancellation And Release" translate="no">​</a></h3>
 <p>Every control, including DELETE and accepted submit replay, authenticates against
-the <strong>current activated inference auth policy</strong> and checks the admitted public
-model&#x27;s current authorization. Controls do not re-resolve or reselect its target.
-Revocation denies further access but does not undo already-started work.</p>
+the <strong>current activated inference auth policy</strong> and checks the current allowlist
+for the admitted public name. Capabilities and new submissions check workspace
+ownership of the current model and the entire alias pool. Accepted replays and
+controls must match the job&#x27;s admitted owner and workspace; they do not
+re-resolve, reselect, or require a current catalog entry for that job&#x27;s target.
+Revocation denies further access but does not undo already-started work. A peer
+credential for a hosted HCL receiver&#x27;s System models must be scoped to System.</p>
 <ul>
 <li class="">A static owner is the named client plus tenant. Token rotation preserves
 ownership but rejects the old token; reusing a client name/tenant reuses identity.</li>
-<li class="">A database inbound key owns work by its key ID and workspace ID. A replacement
-key is a different owner.</li>
+<li class="">A database inbound key owns work by its key ID and workspace ID, including
+the all-zero ID for System. Rotation preserves ownership; a replacement key
+is a different owner.</li>
 <li class="">Anonymous requests and dashboard/admin JWTs cannot access peer controls.</li>
 <li class="">Unknown/different-owner jobs return <code>404 job_unavailable</code>. Current model denial
 returns <code>403</code>, without revealing a result or permitting deletion.</li>
@@ -896,6 +1323,12 @@ start is at or after <code>snapshot time - 24h</code>. Individual events can the
 almost a minute early. <code>t</code>/<code>e</code> select tenant/error usage; global rates and provider
 counters ignore those filters. <code>u</code> switches between public and resolved upstream
 usage over the same retention window, preserving tenant/client dimensions.</li>
+<li class="">These dashboard views are authorized <strong>global operator aggregates</strong>, not
+credential-scoped billing reads. Their intentional label aggregation does not
+grant an inference bearer access to any other key/workspace. Internal accounting
+retains immutable identities; dashboard serialization explicitly combines
+operator rows without exposing credential IDs. Metrics gain no credential-ID
+or workspace-ID labels.</li>
 <li class="">Alias estimates use the actual retained public-model/tenant/client/operation/status
 attribution. Direct traffic and other aliases sharing a target are not charged
 again. Unused targets do not affect the estimate. <code>-</code> means unavailable (missing
@@ -903,6 +1336,17 @@ attribution, a needed price, or no retained usage), not free. A provider estimat
 is its complete retained subtotal, not a sum of only priced models; another
 provider&#x27;s price gap does not hide its own fully attributed/priced subtotal.</li>
 </ul>
+<p><code>GET /v1/billing/usage</code> instead filters DB requests by the admitted immutable
+key/workspace pair before returning rows or joining alias costs. Earlier labels
+remain visible to that same key after edits and rotation; a deleted/recreated key
+starts a distinct history. Ordinary and deferred completions retain their admitted
+identity and label snapshot even across reload or deletion. HCL tenant reporting
+remains static/System-only, and file-only anonymous reporting remains unfiltered.
+Workspace-wide reads require explicit management/operator authority, not matching
+labels or the roles of a key&#x27;s creator. See <a class="" href="/docs/api-reference/#usage-and-scope">usage scope</a>.
+Both the API and dashboard show a <strong>rolling, process-local estimate, not an invoice</strong>;
+restart loses this window and replicas do not share it. The durable quota ledger
+is separate and retains its existing immutable key/workspace attribution.</p>
 <p>Older servers without the additive rate/billing snapshot data display unavailable
 measurements. The TUI does not estimate rates from recent requests or costs from
 lifetime totals. Paused/stale views retain the received measurement window; the
@@ -922,10 +1366,13 @@ model. Remote dashboard access requires a future explicit transport design.</li>
 <p>The embedded web dashboard is served at <code>/</code> when a <code>web_ui</code> block
 is present. Use <code>aiproxy webui</code> to print that URL after probing that a
 running server answers with the UI (<code>--open</code> also launches the default
-browser). The UI&#x27;s live views authenticate against the same
-<code>dashboard</code>-gated <code>/_internal/dashboard/*</code> APIs with the dashboard token or an
-active stored system-administrator account. Ordinary accounts and workspace
-administrators cannot access these global operator surfaces.</p>
+browser). The UI&#x27;s live views call the same <code>dashboard</code>-gated
+<code>/_internal/dashboard/*</code> APIs as the TUI. With multi-tenancy enabled, the Web UI
+uses the signed-in system administrator&#x27;s session and never falls back to a
+saved dashboard token. With multi-tenancy disabled, the Web UI uses the token
+entered on its Token page. The TUI uses its dashboard token in either mode.
+Ordinary accounts and workspace administrators cannot access these global
+operator surfaces with their account sessions.</p>
 <p>Within a loaded browser tab, changing accounts, changing/removing the dashboard
 token, or selecting another workspace clears sensitive cached data and open
 detail/dialog state. Delayed responses from the previous context are discarded.
@@ -1059,6 +1506,6 @@ unsupported until an explicit transport design is added</li>
 <li class="">explicitly <code>enabled = false</code> any provider you want to keep defined but
 inactive; missing credentials on enabled providers fail validation</li>
 <li class="">use aliases for controlled failover instead of relying on direct model requests</li>
-</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/api-reference/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">API Reference</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/deployment/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Deployment</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_sbaK thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#build-and-run" class="table-of-contents__link toc-highlight">Build And Run</a></li><li><a href="#helm-networkpolicy" class="table-of-contents__link toc-highlight">Helm NetworkPolicy</a></li><li><a href="#configure-wizard" class="table-of-contents__link toc-highlight">Configure Wizard</a><ul><li><a href="#editing-encrypted-reasoning-policies" class="table-of-contents__link toc-highlight">Editing Encrypted Reasoning Policies</a></li><li><a href="#configuring-provider-tls-profiles" class="table-of-contents__link toc-highlight">Configuring Provider TLS Profiles</a></li></ul></li><li><a href="#docker" class="table-of-contents__link toc-highlight">Docker</a></li><li><a href="#local-bun-clienthello-capture" class="table-of-contents__link toc-highlight">Local Bun ClientHello Capture</a><ul><li><a href="#using-a-recipe-with-static-configuration" class="table-of-contents__link toc-highlight">Using A Recipe With Static Configuration</a></li><li><a href="#provider-tls-transport-limits" class="table-of-contents__link toc-highlight">Provider TLS Transport Limits</a></li></ul></li><li><a href="#tests" class="table-of-contents__link toc-highlight">Tests</a></li><li><a href="#reload-behavior" class="table-of-contents__link toc-highlight">Reload Behavior</a><ul><li><a href="#managed-reasoning-policy-storage-and-activation" class="table-of-contents__link toc-highlight">Managed Reasoning Policy Storage And Activation</a></li><li><a href="#editing-database-providers-in-the-web-ui" class="table-of-contents__link toc-highlight">Editing Database Providers In The Web UI</a></li><li><a href="#editing-database-aliases-in-the-web-ui" class="table-of-contents__link toc-highlight">Editing Database Aliases In The Web UI</a></li></ul></li><li><a href="#database-key-spend-and-quota-resets" class="table-of-contents__link toc-highlight">Database Key Spend And Quota Resets</a></li><li><a href="#peer-deferred-transport-v1" class="table-of-contents__link toc-highlight">Peer Deferred Transport v1</a><ul><li><a href="#streaming-and-deployment" class="table-of-contents__link toc-highlight">Streaming And Deployment</a></li><li><a href="#independent-deadlines" class="table-of-contents__link toc-highlight">Independent Deadlines</a></li><li><a href="#ownership-cancellation-and-release" class="table-of-contents__link toc-highlight">Ownership, Cancellation And Release</a></li><li><a href="#resource-bounds" class="table-of-contents__link toc-highlight">Resource Bounds</a></li><li><a href="#peer-reload-and-finalization" class="table-of-contents__link toc-highlight">Peer Reload And Finalization</a></li><li><a href="#peer-diagnostics-and-metrics" class="table-of-contents__link toc-highlight">Peer Diagnostics And Metrics</a></li></ul></li><li><a href="#metrics-and-health" class="table-of-contents__link toc-highlight">Metrics And Health</a></li><li><a href="#shared-provider-health" class="table-of-contents__link toc-highlight">Shared Provider Health</a></li><li><a href="#interactive-dashboard-lifecycle" class="table-of-contents__link toc-highlight">Interactive Dashboard Lifecycle</a></li><li><a href="#dashboard-layout-and-keyboard-controls" class="table-of-contents__link toc-highlight">Dashboard Layout And Keyboard Controls</a></li><li><a href="#dashboard-payload-and-block-inspection" class="table-of-contents__link toc-highlight">Dashboard Payload And Block Inspection</a></li><li><a href="#dashboard-requests-and-search" class="table-of-contents__link toc-highlight">Dashboard Requests And Search</a></li><li><a href="#dashboard-provider-diagnostics" class="table-of-contents__link toc-highlight">Dashboard Provider Diagnostics</a></li><li><a href="#dashboard-stable-inspection-and-pause" class="table-of-contents__link toc-highlight">Dashboard Stable Inspection And Pause</a></li><li><a href="#dashboard-metrics-and-cost-estimates" class="table-of-contents__link toc-highlight">Dashboard Metrics And Cost Estimates</a></li><li><a href="#dashboard-transport-security" class="table-of-contents__link toc-highlight">Dashboard Transport Security</a></li><li><a href="#security-defaults" class="table-of-contents__link toc-highlight">Security Defaults</a></li><li><a href="#logging" class="table-of-contents__link toc-highlight">Logging</a><ul><li><a href="#payload-logging" class="table-of-contents__link toc-highlight">Payload logging</a></li></ul></li><li><a href="#secret-handling" class="table-of-contents__link toc-highlight">Secret Handling</a></li><li><a href="#mock-only-copilot-verification" class="table-of-contents__link toc-highlight">Mock-only Copilot Verification</a></li><li><a href="#production-checklist" class="table-of-contents__link toc-highlight">Production Checklist</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Introduction</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/quickstart/">Quickstart</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/configuration/">Configuration</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/config-examples/">Config Examples</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Reference</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/api-reference/">API Reference</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/operations/">Operations</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/deployment/">Deployment</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/egose/aiproxy" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_hMXl"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 aiproxy. Built with Docusaurus.</div></div></div></footer></div>
+</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/api-reference/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">API Reference</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/deployment/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Deployment</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_sbaK thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#build-and-run" class="table-of-contents__link toc-highlight">Build And Run</a></li><li><a href="#helm-networkpolicy" class="table-of-contents__link toc-highlight">Helm NetworkPolicy</a></li><li><a href="#configure-wizard" class="table-of-contents__link toc-highlight">Configure Wizard</a><ul><li><a href="#dashboard-web-ui-and-multi-tenancy" class="table-of-contents__link toc-highlight">Dashboard, Web UI, and Multi-tenancy</a></li><li><a href="#workspace-isolation-upgrade-and-recovery" class="table-of-contents__link toc-highlight">Workspace Isolation Upgrade And Recovery</a></li><li><a href="#tenant-provider-policy-upgrade" class="table-of-contents__link toc-highlight">Tenant Provider Policy Upgrade</a></li><li><a href="#other-configure-examples" class="table-of-contents__link toc-highlight">Other Configure Examples</a></li><li><a href="#editing-encrypted-reasoning-policies" class="table-of-contents__link toc-highlight">Editing Encrypted Reasoning Policies</a></li><li><a href="#configuring-provider-tls-profiles" class="table-of-contents__link toc-highlight">Configuring Provider TLS Profiles</a></li></ul></li><li><a href="#docker" class="table-of-contents__link toc-highlight">Docker</a></li><li><a href="#local-bun-clienthello-capture" class="table-of-contents__link toc-highlight">Local Bun ClientHello Capture</a><ul><li><a href="#using-a-recipe-with-static-configuration" class="table-of-contents__link toc-highlight">Using A Recipe With Static Configuration</a></li><li><a href="#provider-tls-transport-limits" class="table-of-contents__link toc-highlight">Provider TLS Transport Limits</a></li></ul></li><li><a href="#tests" class="table-of-contents__link toc-highlight">Tests</a></li><li><a href="#reload-behavior" class="table-of-contents__link toc-highlight">Reload Behavior</a><ul><li><a href="#bounded-replica-convergence" class="table-of-contents__link toc-highlight">Bounded Replica Convergence</a></li><li><a href="#account-deletion-and-local-revocation" class="table-of-contents__link toc-highlight">Account Deletion And Local Revocation</a></li><li><a href="#database-key-issuance-recovery" class="table-of-contents__link toc-highlight">Database Key Issuance Recovery</a></li><li><a href="#managed-catalog-dependencies-and-cleanup" class="table-of-contents__link toc-highlight">Managed Catalog Dependencies And Cleanup</a></li><li><a href="#managed-reasoning-policy-storage-and-activation" class="table-of-contents__link toc-highlight">Managed Reasoning Policy Storage And Activation</a></li><li><a href="#editing-database-providers-in-the-web-ui" class="table-of-contents__link toc-highlight">Editing Database Providers In The Web UI</a></li><li><a href="#editing-database-aliases-in-the-web-ui" class="table-of-contents__link toc-highlight">Editing Database Aliases In The Web UI</a></li></ul></li><li><a href="#database-key-spend-and-quota-resets" class="table-of-contents__link toc-highlight">Database Key Spend And Quota Resets</a><ul><li><a href="#spending-contract-owner-quotas-not-funded-workspace-caps" class="table-of-contents__link toc-highlight">Spending Contract: Owner Quotas, Not Funded Workspace Caps</a></li><li><a href="#deletion-and-resets" class="table-of-contents__link toc-highlight">Deletion And Resets</a></li></ul></li><li><a href="#peer-deferred-transport-v1" class="table-of-contents__link toc-highlight">Peer Deferred Transport v1</a><ul><li><a href="#streaming-and-deployment" class="table-of-contents__link toc-highlight">Streaming And Deployment</a></li><li><a href="#independent-deadlines" class="table-of-contents__link toc-highlight">Independent Deadlines</a></li><li><a href="#ownership-cancellation-and-release" class="table-of-contents__link toc-highlight">Ownership, Cancellation And Release</a></li><li><a href="#resource-bounds" class="table-of-contents__link toc-highlight">Resource Bounds</a></li><li><a href="#peer-reload-and-finalization" class="table-of-contents__link toc-highlight">Peer Reload And Finalization</a></li><li><a href="#peer-diagnostics-and-metrics" class="table-of-contents__link toc-highlight">Peer Diagnostics And Metrics</a></li></ul></li><li><a href="#metrics-and-health" class="table-of-contents__link toc-highlight">Metrics And Health</a></li><li><a href="#shared-provider-health" class="table-of-contents__link toc-highlight">Shared Provider Health</a></li><li><a href="#interactive-dashboard-lifecycle" class="table-of-contents__link toc-highlight">Interactive Dashboard Lifecycle</a></li><li><a href="#dashboard-layout-and-keyboard-controls" class="table-of-contents__link toc-highlight">Dashboard Layout And Keyboard Controls</a></li><li><a href="#dashboard-payload-and-block-inspection" class="table-of-contents__link toc-highlight">Dashboard Payload And Block Inspection</a></li><li><a href="#dashboard-requests-and-search" class="table-of-contents__link toc-highlight">Dashboard Requests And Search</a></li><li><a href="#dashboard-provider-diagnostics" class="table-of-contents__link toc-highlight">Dashboard Provider Diagnostics</a></li><li><a href="#dashboard-stable-inspection-and-pause" class="table-of-contents__link toc-highlight">Dashboard Stable Inspection And Pause</a></li><li><a href="#dashboard-metrics-and-cost-estimates" class="table-of-contents__link toc-highlight">Dashboard Metrics And Cost Estimates</a></li><li><a href="#dashboard-transport-security" class="table-of-contents__link toc-highlight">Dashboard Transport Security</a></li><li><a href="#security-defaults" class="table-of-contents__link toc-highlight">Security Defaults</a></li><li><a href="#logging" class="table-of-contents__link toc-highlight">Logging</a><ul><li><a href="#payload-logging" class="table-of-contents__link toc-highlight">Payload logging</a></li></ul></li><li><a href="#secret-handling" class="table-of-contents__link toc-highlight">Secret Handling</a></li><li><a href="#mock-only-copilot-verification" class="table-of-contents__link toc-highlight">Mock-only Copilot Verification</a></li><li><a href="#production-checklist" class="table-of-contents__link toc-highlight">Production Checklist</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Introduction</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/quickstart/">Quickstart</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/configuration/">Configuration</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/config-examples/">Config Examples</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Reference</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/api-reference/">API Reference</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/operations/">Operations</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/deployment/">Deployment</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/egose/aiproxy" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_hMXl"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 aiproxy. Built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>

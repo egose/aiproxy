@@ -234,10 +234,8 @@ function _createMdxContent(props) {
         className: "language-sh",
         children: "curl http://127.0.0.1:8080/v1/billing/usage \\\n  -H 'Authorization: Bearer your-token'\n"
       })
-    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["In ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "bearer_static"
-      }), " mode, results are scoped to the caller's tenant when present, otherwise to the caller's client identity."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "DB bearers see only their immutable key/workspace usage, including earlier labels;\nrotation retains it and a replacement key does not inherit it. Trusted HCL clients\nretain same-tenant reporting among static clients in System, or their own tenantless\nstatic usage. This is a rolling, process-local estimate, not an invoice or a\nworkspace-wide view."
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "error-behavior-examples",
       children: "Error Behavior Examples"

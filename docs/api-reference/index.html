@@ -5,8 +5,8 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">API Reference | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/api-reference/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="API Reference | aiproxy"><meta data-rh="true" name="description" content="aiproxy exposes an OpenAI-compatible HTTP API."><meta data-rh="true" property="og:description" content="aiproxy exposes an OpenAI-compatible HTTP API."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/api-reference/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/api-reference/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/api-reference/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"API Reference","item":"https://aiproxy.pages.dev/docs/api-reference"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
-<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.6e844cd5.css">
-<script src="/assets/js/runtime~main.36cf4f8c.js" defer="defer"></script>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.e50caa8a.css">
+<script src="/assets/js/runtime~main.54eb5342.js" defer="defer"></script>
 <script src="/assets/js/main.f0042d1c.js" defer="defer"></script>
 </head>
 <body>
@@ -142,6 +142,11 @@ preparing duplicate returns <code>409 submission_in_progress</code>. Preparation
 are cached through the ticket window. Accepted records/tombstones remain protected
 through <code>dedup_until_ms = submit_until_ms + execution_timeout_ms + retention_ms + finalization_timeout_ms</code>. Existing accepted entries can replay after ticket
 expiry; absent expired scopes or old generations dispatch nothing.</p>
+<p>With multi-tenancy, discovery and new admissions use the bearer credential&#x27;s
+workspace. Accepted replays and job controls require the same admitted
+credential identity and workspace, and still check the current allowlist for
+the admitted public model. They do not use a replacement catalog to re-resolve
+accepted work. No workspace fields or headers are added to the peer protocol.</p>
 <p>Once submit begins, the caller freezes generation/ticket/key/prepared input.
 Lost acknowledgments retry only that qualified submit, never a fresh capability
 or key. <code>acceptance</code> is <code>not_accepted</code>, <code>accepted</code> or <code>indeterminate</code>; later
@@ -153,7 +158,7 @@ expiry, cancellation or exactly-once external work.</p>
 rejections instead preserve their ordinary <code>{&quot;error&quot;: ...}</code> shape, status/type
 and optional <code>block_id</code>, without protocol fields. Neither is an inference
 success or provider outcome.</p>
-<table><thead><tr><th>Status / type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>400</code></td><td>Invalid envelope, body, headers, model/receiver eligibility or query; <code>invalid_cursor</code> for invalid reads</td></tr><tr><td><code>401 auth_failed</code> / <code>403 forbidden</code></td><td>Current inference authentication / admitted-model authorization failed; no result disclosure</td></tr><tr><td><code>404 job_unavailable</code></td><td>Unknown or different-owner job, including unknown DELETE</td></tr><tr><td><code>404 deferred_disabled</code></td><td>New deferred admission is disabled</td></tr><tr><td><code>405 method_not_allowed</code></td><td>Recognized route, unsupported method; carries <code>Allow</code></td></tr><tr><td><code>409 attempt_conflict</code> / <code>409 submission_in_progress</code></td><td>Conflicting qualified request / preparation still active</td></tr><tr><td><code>410 job_released</code> / <code>410 job_expired</code></td><td>Protected release / retention expiry</td></tr><tr><td><code>410 generation_mismatch</code> / <code>410 submit_scope_expired</code></td><td>Old generation / absent expired submission scope; zero dispatch</td></tr><tr><td><code>413 request_too_large</code></td><td>Oversized decoded/wire submit input</td></tr><tr><td><code>426 unsupported_deferred_version</code></td><td>Wrong path version or missing/wrong version header</td></tr><tr><td><code>429 deferred_owner_limit</code> / <code>429 deferred_control_limited</code></td><td>Owner admission / control pressure</td></tr><tr><td><code>503 deferred_saturated</code></td><td>Global admission/resource pressure</td></tr></tbody></table>
+<table><thead><tr><th>Status / type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>400</code></td><td>Invalid envelope, body, headers, model/receiver eligibility or query; <code>invalid_cursor</code> for invalid reads</td></tr><tr><td><code>401 auth_failed</code> / <code>403 forbidden</code></td><td>Current inference authentication / admitted-model authorization failed; no result disclosure</td></tr><tr><td><code>404 model_not_found</code></td><td>Model or alias unavailable to the caller, including missing names and out-of-workspace inventory</td></tr><tr><td><code>404 job_unavailable</code></td><td>Unknown or different-owner job, including unknown DELETE</td></tr><tr><td><code>404 deferred_disabled</code></td><td>New deferred admission is disabled</td></tr><tr><td><code>405 method_not_allowed</code></td><td>Recognized route, unsupported method; carries <code>Allow</code></td></tr><tr><td><code>409 attempt_conflict</code> / <code>409 submission_in_progress</code></td><td>Conflicting qualified request / preparation still active</td></tr><tr><td><code>410 job_released</code> / <code>410 job_expired</code></td><td>Protected release / retention expiry</td></tr><tr><td><code>410 generation_mismatch</code> / <code>410 submit_scope_expired</code></td><td>Old generation / absent expired submission scope; zero dispatch</td></tr><tr><td><code>413 request_too_large</code></td><td>Oversized decoded/wire submit input</td></tr><tr><td><code>426 unsupported_deferred_version</code></td><td>Wrong path version or missing/wrong version header</td></tr><tr><td><code>429 deferred_owner_limit</code> / <code>429 deferred_control_limited</code></td><td>Owner admission / control pressure</td></tr><tr><td><code>503 deferred_saturated</code></td><td>Global admission/resource pressure</td></tr></tbody></table>
 <p>The ordinary caller sees standard JSON errors before downstream commitment:</p>
 <table><thead><tr><th>Caller status / error type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>502 deferred_protocol_error</code></td><td>Capability/version/marker/schema/identity or terminal-hash validation failed</td></tr><tr><td><code>502 deferred_submit_indeterminate</code></td><td>Unacknowledged submission uncertainty; no fresh inference</td></tr><tr><td><code>502 deferred_request_lost</code></td><td>Accepted work became unavailable; no fresh inference</td></tr><tr><td><code>502 deferred_control_error</code></td><td>Control failure or recovery budgets exhausted</td></tr><tr><td><code>504 deferred_wait_timeout</code></td><td>Overall caller wait expired</td></tr><tr><td><code>504 deferred_execution_timeout</code></td><td>Fixed executor job deadline expired</td></tr><tr><td><code>502 deferred_limit_exceeded</code> / <code>502 deferred_cancelled</code></td><td>Bounded execution failed / observable local cancellation</td></tr></tbody></table>
 <p>Definite terminal provider HTTP/transport outcomes <strong>before downstream
@@ -165,11 +170,46 @@ See <a class="" href="/docs/operations/#ownership-cancellation-and-release">owne
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="authentication">Authentication<a href="#authentication" class="hash-link" aria-label="Direct link to Authentication" title="Direct link to Authentication" translate="no">​</a></h2>
 <p>When <code>bearer_static</code> auth is enabled, requests must send:</p>
 <div class="language-http mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-http codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">Authorization: Bearer &lt;token&gt;</span><br></div></code></pre></div></div>
-<p>When <code>none</code> auth is enabled, no inbound authentication is performed.</p>
-<p>In <code>bearer_static</code> mode, individual clients may also be restricted with <code>allowed_models</code>.</p>
+<p>When <code>none</code> auth is enabled and multi-tenancy is disabled, inference does not
+authenticate incoming requests. With multi-tenancy enabled, <code>none</code> is
+management-only. Model discovery, inference, billing usage, and the private
+deferred API return <code>401</code> without a valid inference bearer with workspace scope.
+Browser login JWTs and workspace-selection headers are not inference credentials.</p>
+<p>In <code>bearer_static</code> mode, configured clients and database keys each have their
+own <code>allowed_models</code> policy and request rate-limit bucket (if configured).
+Matching names or <code>tenant</code> labels do not share policy or capacity. No bearer
+header or token format changes are required.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="model-access-with-multi-tenancy">Model Access With Multi-tenancy<a href="#model-access-with-multi-tenancy" class="hash-link" aria-label="Direct link to Model Access With Multi-tenancy" title="Direct link to Model Access With Multi-tenancy" translate="no">​</a></h3>
+<p><code>GET /v1/models</code> lists only the models and aliases the key can use in its own
+workspace. An empty workspace returns <code>{&quot;object&quot;:&quot;list&quot;,&quot;data&quot;:[]}</code>. HCL
+providers, models and aliases are System-only, and HCL client tokens are scoped
+to System. A database key is scoped to its owning workspace regardless of the
+issuer&#x27;s roles.</p>
+<p><code>allowed_models</code> narrows the workspace by public name; omitting it or setting
+<code>[]</code> never grants access to another workspace. A name excluded by the allowlist
+returns <code>403 forbidden</code> regardless of whether it exists. Otherwise missing
+and out-of-scope names return the same <code>404 model_not_found</code>. An alias with a
+missing or out-of-workspace target is entirely unavailable: it is not listed,
+and no part of its pool is tried. A derived provider whose base is missing or
+belongs to another workspace is likewise unavailable. Allowing an alias does
+not require listing its target names in <code>allowed_models</code>, but cannot widen
+workspace scope.</p>
 <h3 class="anchor anchorTargetStickyNavbar_T7vg" id="invitation-onboarding">Invitation Onboarding<a href="#invitation-onboarding" class="hash-link" aria-label="Direct link to Invitation Onboarding" title="Direct link to Invitation Onboarding" translate="no">​</a></h3>
-<p>With multi-tenancy enabled, <code>POST /_internal/admin/invites/accept</code> accepts a JSON
-body with <code>token</code> and <code>password</code> (at least eight characters). A successful <code>201</code>
+<p>The signed-out browser route <code>/invite</code> works with <code>allow_public_registration = false</code>. Open the clean <code>/invite</code> page on your trusted deployment origin and
+paste the one-time code delivered separately by your inviter. Invitation codes
+are not read from URLs, including query strings and fragments. Treat previously
+shared code-bearing links as exposed: <a class="" href="/docs/operations/#dashboard-web-ui-and-multi-tenancy">revoke and reissue pending invitations</a>.
+Opening the form does not erase URLs that were already visited.</p>
+<p>The app keeps redemption form values in component memory, not in browser
+storage or React Query mutation/query state. The UI uses a <code>no-referrer</code> policy.
+Reloading or leaving the form discards the app&#x27;s copy of the code. After
+acceptance, sign in with the invited email and new password. The portal selects
+the authorized invitation workspace, not System or a stale workspace saved by a
+different session.</p>
+<p><code>POST /_internal/admin/invites</code> returns the one-time code as <code>token</code>. Deliver it
+separately over a trusted channel. With multi-tenancy enabled,
+<code>POST /_internal/admin/invites/accept</code> accepts the code only as <code>token</code> in the
+JSON body, with <code>password</code> (at least eight characters). A successful <code>201</code>
 creates the account, adds the invitation&#x27;s workspace membership when present,
 and consumes the invitation in one database transaction. Email, system-admin
 authority, workspace, and workspace role come from the current stored
@@ -184,7 +224,19 @@ the whole acceptance, leaving an otherwise eligible invitation available to retr
 after the cause is resolved. Successful onboarding supports the normal login flow.
 Acceptance also serializes with workspace deletion. If the stored invitation&#x27;s
 workspace changes while acceptance is acquiring locks, it returns <code>400</code> with
-retry guidance and saves nothing; retry uses the current invitation scope.</p>
+retry guidance and saves nothing; retry uses the current invitation scope.
+Invitation creation and acceptance responses use <code>Cache-Control: no-store</code>.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="sso-admission">SSO Admission<a href="#sso-admission" class="hash-link" aria-label="Direct link to SSO Admission" title="Direct link to SSO Admission" translate="no">​</a></h3>
+<p>OIDC is <strong>existing accounts only</strong>, including invitees after redemption creates
+their accounts. A pending invitation alone is not admission.
+Verified IdP identities without an existing local account receive an error
+redirect, never a user, workspace or refresh session. This rule also applies
+when public password registration is enabled. A user lookup database error is
+distinct from a missing account and fails closed without database details.
+Disabled accounts cannot sign in. Returning accounts keep their memberships;
+SSO does not create personal workspaces or enroll tenant users into System.
+Existing configured admin-claim mapping still applies to admitted accounts;
+it is not authority to provision an unknown identity.</p>
 <h3 class="anchor anchorTargetStickyNavbar_T7vg" id="workspace-model">Workspace Model<a href="#workspace-model" class="hash-link" aria-label="Direct link to Workspace Model" title="Direct link to Workspace Model" translate="no">​</a></h3>
 <p>Tenancy is built on workspaces. Tables are <code>workspaces</code>, <code>workspace_members</code>,
 and <code>workspace_teams</code>; owning rows carry <code>workspace_id</code>. Admin routes live under
@@ -197,9 +249,67 @@ and <code>workspace_name</code>.</p>
 its owner, so teams and additional members are rejected.</li>
 <li class=""><code>organization</code> (kind): created afterwards via <code>POST /_internal/admin/workspaces</code>
 for collaboration with members and teams.</li>
-<li class=""><code>system</code>: the built-in workspace (<code>is_system</code>) that owns global config-backed
-inventory. It is hidden from membership listings and cannot be deleted.</li>
+<li class=""><code>system</code>: the built-in workspace (<code>is_system</code>) that owns config-backed
+inventory. Global administrators and explicit System members can read that
+inventory through the management API. This does not grant System
+administration, and System cannot be deleted.</li>
 </ul>
+<p>The provider, alias, and key management lists and detail reads apply workspace
+access before returning metadata. <code>workspace_id</code> takes precedence over
+<code>X-Workspace-ID</code>; either can narrow access, not grant it. An inaccessible
+workspace or resource returns <code>404</code>. Workspace and invitation lists cover the
+caller&#x27;s authorized workspaces; only global administrators see invitations
+without a workspace. A caller with no memberships and no global authority gets
+empty unfiltered lists. If a required membership lookup fails, these reads
+return <code>500</code> without inventory or database error details.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="workspace-catalog-references">Workspace Catalog References<a href="#workspace-catalog-references" class="hash-link" aria-label="Direct link to Workspace Catalog References" title="Direct link to Workspace Catalog References" translate="no">​</a></h3>
+<p>Provider inheritance and every alias target must belong to the <strong>destination
+workspace</strong>, not merely a workspace the author can administer. This applies to
+provider/alias POST and PUT, including alias <code>providers</code>/<code>model</code> shorthand and
+omitted targets retained on update. A global administrator creating a tenant
+resource cannot use a System or another tenant&#x27;s base or models. Config-backed
+providers, models and aliases belong only to System; a managed System resource
+may reference a compatible System base, subject to the ordinary inheritance
+restrictions.</p>
+<p>Missing and foreign references return the same controlled <code>400</code>, without
+foreign provider types, models, credentials or enabled-state metadata. Rejected
+edits persist nothing and request no activation.</p>
+<p>Provider and alias names remain globally unique, including disabled providers.
+Startup, reload and <code>validate --check-db</code> reject cross-workspace graphs and
+static/managed name collisions rather than overwriting a resource or changing
+its owner. Invalid legacy graph views fail without disclosing referenced
+inventory. See <a class="" href="/docs/operations/#workspace-isolation-upgrade-and-recovery">upgrade and recovery</a>.</p>
+<p>The portal honors a saved choice only when it is authorized. Otherwise global
+administrators start in System; tenant users prefer an authorized non-System
+workspace. Account and workspace resolution must complete before inventory
+queries run. No memberships means no tenant write target. Explicit System
+membership permits reads, not System administration; tenant membership roles
+are retained. Forms, reference pickers, key/credential requests and mutations
+use the selected workspace, and stale forms cannot retarget themselves after a
+workspace or account change.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="direct-catalog-writes">Direct Catalog Writes<a href="#direct-catalog-writes" class="hash-link" aria-label="Direct link to Direct Catalog Writes" title="Direct link to Direct Catalog Writes" translate="no">​</a></h3>
+<p>This applies to <code>PUT</code> and <code>DELETE</code> on <code>/_internal/admin/providers/{name}</code> and
+<code>/_internal/admin/aliases/{name}</code>, and to
+<code>PUT /_internal/admin/providers/{name}/credential</code>. It also applies to
+<a href="#github-copilot-device-authorization" class="">starting a Copilot device flow</a> with
+<code>provider_name</code>.</p>
+<ul>
+<li class="">Each supplied <code>workspace_id</code> query parameter, <code>X-Workspace-ID</code> header, and
+<code>workspace_id</code> body field (provider/alias PUT and named Copilot starts) must
+match the resource&#x27;s workspace. Even global administrators cannot override a
+conflicting selector. Omit unused selectors; empty or invalid IDs return
+<code>400</code> (<code>invalid workspace id</code>). These operations cannot move a resource.</li>
+<li class="">For valid requests, missing names, names outside the caller&#x27;s visibility
+(including hidden System HCL resources), and valid selector mismatches all
+return <code>404</code>. The plain-text body is <code>provider not found</code> or <code>alias not found</code>,
+followed by a newline. These denials save nothing, request no reload, and
+include no save or activation headers.</li>
+<li class="">A required membership lookup failure returns <code>500</code> (<code>could not resolve workspace visibility</code>) without database details. For visible targets in the
+selected scope, write-role requirements are unchanged. Visible HCL resources
+remain read-only (<code>400</code> for PUT and named Copilot starts, <code>403</code> for DELETE).</li>
+</ul>
+<p>Scoped GET selection, graph-reference validation and global name uniqueness on
+creation are unchanged.</p>
 <h3 class="anchor anchorTargetStickyNavbar_T7vg" id="workspace-and-team-membership-changes">Workspace And Team Membership Changes<a href="#workspace-and-team-membership-changes" class="hash-link" aria-label="Direct link to Workspace And Team Membership Changes" title="Direct link to Workspace And Team Membership Changes" translate="no">​</a></h3>
 <p>With multi-tenancy enabled, Add member is insert-only on both
 <code>POST /_internal/admin/workspaces/{workspace_id}/members</code> and
@@ -231,14 +341,95 @@ team-wide key shares, quota records and historical spend are preserved. Re-addin
 an ordinary member does not restore prior team roles or direct sharing grants.</p>
 <p>Current workspace membership is required for non-system key owners/team admins
 to read or manage keys and for team quota access, even with a known resource ID or
-an existing login token. After removal, key detail and team quota GET/PUT return
-<code>404</code>; key update/rotate/revoke/delete return <code>403</code>. System administrators retain
-access. Personal ownership is preserved and becomes usable again if the owner is
-re-added to the workspace. Already-admitted operations are not retroactively
-canceled.</p>
+an existing login token. After removal, key detail, <a href="#direct-key-writes" class="">direct key writes</a>,
+and team quota GET/PUT return <code>404</code>. System administrators retain access. Personal
+ownership is preserved and becomes usable again if the owner is re-added to the
+workspace. Already-admitted operations are not retroactively canceled.</p>
 <p><strong>API bearer credentials are separate:</strong> removing management access does not
 automatically revoke, rotate or disable any key, including a personal key. To stop
 use of previously distributed API tokens, explicitly rotate or revoke the key.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="account-deletion-and-personal-bearers">Account Deletion And Personal Bearers<a href="#account-deletion-and-personal-bearers" class="hash-link" aria-label="Direct link to Account Deletion And Personal Bearers" title="Direct link to Account Deletion And Personal Bearers" translate="no">​</a></h3>
+<p><code>DELETE /_internal/admin/users/{user_id}</code> is a global-administrator action.
+Self-deletion and deleting the last enabled global administrator are rejected;
+workspace/team last-administrator checks remain transactional. Rejected deletion
+requests no activation and preserves the account and its keys.</p>
+<p>After confirmed deletion, the response sets <code>X-Aiproxy-User-Deleted: true</code>,
+<code>X-Aiproxy-User-ID: &lt;user_id&gt;</code> and <code>Cache-Control: no-store</code>, then requests local
+activation once. A <code>200</code> means new requests using personally owned keys removed
+by the account cascade now receive <code>401</code> on that instance. Team-owned and other
+users&#x27; keys retain their identity and workspace; historical spend remains, with
+the deleted user&#x27;s ledger reference set to null. Already-admitted work can finish.
+Workspace membership removal still does not revoke bearers.</p>
+<p>A <code>500 saved but activation failed</code> with the deletion headers means the account
+and personal keys are deleted in PostgreSQL, but the previous runtime remains
+active and may still accept those bearers. Do not repeat account deletion to
+activate it: resolve the logged failure and reload/restart the receiving instance.
+DB changes also reconcile independently on other replicas, without cluster acknowledgement.</p>
+<p><code>GET /_internal/admin/serving-status</code> requires live system-administrator authorization.
+It returns local <code>applied_revisions</code> (<code>catalog</code>, <code>keys</code>), <code>keys_confirmed_at</code>,
+<code>catalog_confirmed_at</code>, <code>keys_fresh</code>, <code>catalog_fresh</code>,
+<code>freshness_deadline_seconds</code> (30) and <code>cluster_acknowledged</code> (false).
+Mutation activation headers distinguish <code>X-Aiproxy-Local-Active</code> from
+<code>X-Aiproxy-Cluster-Acknowledged</code> (always false), alongside
+<code>X-Aiproxy-Applied-Catalog-Revision</code> and <code>X-Aiproxy-Applied-Key-Revision</code>.
+They do not replace durable-save headers or acknowledge other replicas.
+Expired DB-serving freshness returns <code>503 serving_stale</code> on new DB inference,
+listing/billing and applicable peer controls; <code>/readyz</code> becomes unavailable.
+Independent key refresh may revoke keys even when catalog activation fails.
+See <a class="" href="/docs/operations/#bounded-replica-convergence">bounded replica convergence</a>.
+After response loss, reconcile the account&#x27;s presence through the authorized user
+list; missing headers do not establish rollback. This is not a cluster-wide
+revocation acknowledgement.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="atomic-key-issuance-and-bearer-recovery">Atomic Key Issuance And Bearer Recovery<a href="#atomic-key-issuance-and-bearer-recovery" class="hash-link" aria-label="Direct link to Atomic Key Issuance And Bearer Recovery" title="Direct link to Atomic Key Issuance And Bearer Recovery" translate="no">​</a></h3>
+<p><code>POST /_internal/admin/keys</code> commits the new key, its intended user/team owner,
+and both sharing lists in one authorized transaction. The owner&#x27;s share is included
+automatically; repeated binding IDs are deduplicated. Current actor authority,
+owner eligibility and user/team workspace membership are rechecked under the
+membership locks, including concurrent offboarding, demotion and deletion. A
+non-administrator can issue only their own personal key or a key for a team they
+currently administer in that workspace; unowned keys require workspace or global
+administrator authority.</p>
+<p>Validation/authorization failures and key/grant persistence failures roll back
+the entire issuance and request no activation. Lost authority returns <code>403</code>,
+invalid bindings <code>400</code>, and storage failures a controlled <code>500</code> without database
+details. An existing key name returns <code>409</code>: read that key rather than issuing
+under a new name to recover a missing bearer.</p>
+<p>After confirmed commit, creation and rotation responses set
+<code>X-Aiproxy-Key-Saved: true</code>, <code>X-Aiproxy-Key-ID: &lt;key_id&gt;</code>,
+<code>Location: /_internal/admin/keys/&lt;key_id&gt;</code>, and <code>Cache-Control: no-store</code>.
+Activation is requested exactly once after commit, before creating the response
+view. Creation returns <code>201</code> with <code>key</code> and the one-time <code>token</code>; rotation returns
+<code>200</code> with a new one-time <code>token</code>. Only the bearer hash and display prefix are
+stored, never a recoverable plaintext bearer.</p>
+<p>Post-commit activation or creation-view failures return <code>500</code> with those saved
+headers and an explicit key ID and rotation recovery instruction. The complete
+issuance remains saved; an activation failure retains the previous runtime.
+Read the authorized key detail/list, resolve any activation problem, then use
+<code>POST /_internal/admin/keys/&lt;key_id&gt;/rotate</code> to obtain a new bearer. Do not repeat
+creation. Rotation preserves immutable credential identity, workspace, ownership
+and grants, and invalidates the prior bearer after successful local activation.
+If rotation itself commits but activation fails or its response is lost, rotate
+the same key again after resolving the problem; plaintext tokens are not replayed.</p>
+<p>A lost connection/response (including an indeterminate database commit result)
+does not prove rollback, and absence of saved headers alone is not proof either.
+Discover the key by its globally unique name through the authorized list before
+retrying. A duplicate-name rejection does not overwrite or rotate it. These are
+single-instance activation outcomes, not cluster-wide acknowledgements.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="direct-key-writes">Direct Key Writes<a href="#direct-key-writes" class="hash-link" aria-label="Direct link to Direct Key Writes" title="Direct link to Direct Key Writes" translate="no">​</a></h3>
+<p><code>PUT</code> and <code>DELETE</code> on <code>/_internal/admin/keys/{key_id}</code> and <code>POST</code> on its
+<code>/rotate</code> and <code>/revoke</code> subpaths require current visibility and key manager
+authority. Each supplied <code>workspace_id</code> query parameter and <code>X-Workspace-ID</code>
+header must match the key&#x27;s workspace, even for global administrators. Omitting
+selectors preserves authorized access by ID. An empty or malformed selector
+returns <code>400</code> (<code>invalid workspace id</code>) before the key is looked up.</p>
+<p>Missing keys, keys no longer visible to the caller after offboarding, other
+hidden keys, and valid selector mismatches all return <code>404</code> with the plain-text
+body <code>key not found</code> followed by a newline. A visible read-only share still
+returns <code>403</code> (<code>key manager required</code>). Required membership lookups that fail
+return <code>500</code> (<code>could not resolve workspace visibility</code>); key or sharing lookup
+failures return <code>500</code> (<code>could not load key</code>). These denials save nothing, request
+no activation, and include no save or activation headers. Scoped GET continues
+to give the query selector precedence over the header.</p>
 <h3 class="anchor anchorTargetStickyNavbar_T7vg" id="key-policy-and-sharing-updates">Key Policy And Sharing Updates<a href="#key-policy-and-sharing-updates" class="hash-link" aria-label="Direct link to Key Policy And Sharing Updates" title="Direct link to Key Policy And Sharing Updates" translate="no">​</a></h3>
 <p><code>PUT /_internal/admin/keys/{key_id}</code> accepts <code>description</code>, <code>tenant</code>,
 <code>allowed_models</code>, <code>expires_at</code>, <code>user_ids</code>, and <code>team_ids</code>. Policy fields and an
@@ -246,7 +437,8 @@ optional sharing replacement commit in one database transaction. The update keep
 the key&#x27;s name, workspace, ownership, bearer credential, and enabled state.</p>
 <ul>
 <li class="">Omitted or <code>null</code> fields preserve their current values. An empty <code>description</code>
-or <code>tenant</code> clears it; <code>allowed_models: []</code> removes the model restriction.</li>
+or <code>tenant</code> clears it; <code>allowed_models: []</code> removes the explicit list
+restriction, not the key&#x27;s workspace restriction.</li>
 <li class=""><code>expires_at</code> accepts RFC3339; an empty string clears expiry. A past timestamp
 is valid and makes the key stop authenticating after successful activation.</li>
 <li class="">Supplying either non-null binding list replaces <strong>both</strong> user and team shares.
@@ -256,7 +448,8 @@ for example, clears both sets. Omitting both lists preserves both sets.</li>
 <p>Malformed UUIDs, nonmember users, and teams from another workspace return
 <code>400</code>; missing keys/teams return <code>404</code>. Current manager authority and grant
 eligibility are rechecked inside the transaction, serialized with workspace
-offboarding and membership role changes. Lost manager authority returns <code>403</code>.
+offboarding and membership role changes. If manager authority is lost after the
+initial access check, the transactional recheck still returns <code>403</code>.
 Rejected validation and binding-storage failures leave all fields and both sharing
 sets unchanged and do not request runtime activation. Storage failures return
 <code>500</code> (<code>could not update key</code>) without database details. A later reload cannot
@@ -271,19 +464,37 @@ failure that saved nothing.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="usage-and-scope">Usage And Scope<a href="#usage-and-scope" class="hash-link" aria-label="Direct link to Usage And Scope" title="Direct link to Usage And Scope" translate="no">​</a></h2>
 <p><code>GET /v1/billing/usage</code> returns aggregated in-process usage summaries over the
 proxy&#x27;s rolling 24-hour accounting window.</p>
+<p>Hosted requests require a workspace-scoped inference bearer.</p>
 <ul>
-<li class="">When the authenticated client has a <code>tenant</code>, results are scoped to that tenant</li>
-<li class="">Otherwise, results are scoped to the caller&#x27;s tenantless client identity; a
-same-named client in another tenant is excluded</li>
-<li class="">This endpoint is local accounting only; it is not an external billing,
-invoicing, or quota system</li>
+<li class="">A DB bearer sees only its own immutable key/workspace usage, even if its labels
+overlap another key or HCL client, or its creator is a global administrator.
+Neither a <code>tenant</code> label nor an allowed-model list grants workspace-wide reporting.</li>
+<li class="">Label edits do not hide that key&#x27;s earlier usage. Token rotation preserves its
+identity; deleting and recreating a same-named key gives it a new identity and
+no access to the deleted key&#x27;s usage.</li>
+<li class="">Trusted HCL clients with a <code>tenant</code> see same-tenant <strong>static</strong> clients in System
+only, never DB keys with matching labels. Tenantless HCL clients see their own
+tenantless static usage. These file-only reporting contracts remain supported.</li>
+<li class="">File-only <code>auth.mode = &quot;none&quot;</code> retains unfiltered anonymous reporting. Hosted
+inference never uses this anonymous view.</li>
+<li class="">Workspace-wide or global reads require separate explicit management/operator
+authority. This endpoint does not accept scope-broadening query/header selectors
+or inherit browser roles from a key&#x27;s creator.</li>
 </ul>
-<p>Rows are grouped by tenant, client, requested public model, operation, and HTTP
-status. The optional <code>estimated_cost_usd</code> uses current configured model prices.
+<p>Rows are grouped first by internal credential identity and explicit workspace,
+then by the recorded tenant/client labels, requested public model, operation and
+HTTP status. Earlier and later labels can therefore appear as separate own-key
+rows. Credential/workspace identifiers are not emitted in these JSON summaries.
+Ordinary and deferred completions use the identity, scope and labels captured at
+admission, including after a reload, edit, rotation or deletion.</p>
+<p>The optional <code>estimated_cost_usd</code> uses current configured model prices.
 For an alias, it sums the recorded token usage of the targets actually used for
-that alias&#x27;s row. Traffic through another alias or a direct model sharing those
-targets is excluded. Changing alias membership does not redistribute past traffic;
-changing model prices reprices the retained estimate.</p>
+that alias&#x27;s identity-scoped row. Other credentials/workspaces, another alias or
+a direct model sharing those targets are excluded. Changing alias membership does
+not redistribute past traffic; changing model prices reprices the retained estimate.
+Hosted estimates use only current prices from the caller&#x27;s workspace. If a
+retained provider/model name is recreated in another workspace, its foreign
+price is not used; the retained own-key row remains visible without an estimate.</p>
 <p>The estimate is <strong>omitted</strong>, rather than returned as a partial sum, when any
 contributing target lacks pricing or when target attribution does not account for
 all the row&#x27;s recorded requests and tokens. There is no even-split or request-count
@@ -297,8 +508,16 @@ that the upstream reported every billable token.</p>
 <p>Usage and cost share one rolling snapshot, using one-minute buckets retained while
 their start is at or after <code>now - 24h</code>. Consequently, events can expire up to one
 minute before their exact 24-hour age. Data is process-local and resets on restart.
+This is a rolling usage/cost <strong>estimate, not an invoice</strong>, cross-instance total,
+external billing service or quota system.
 The dashboard&#x27;s lifetime provider/upstream counters and the durable quota spend
 ledger have separate lifetimes and pricing semantics.</p>
+<p>Database user/team quotas are completion-based admission thresholds, <strong>not hard
+spending limits or funded workspace caps</strong>. Ownerless DB keys and static/HCL or
+anonymous traffic have no DB owner quota. Workspace reporting does not assign
+a payer or grant workspace budget authority. See the
+<a class="" href="/docs/operations/#spending-contract-owner-quotas-not-funded-workspace-caps">spending contract</a>
+for quota permissions, cache/stream overshoot, missing data and deletion gaps.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="error-behavior">Error Behavior<a href="#error-behavior" class="hash-link" aria-label="Direct link to Error Behavior" title="Direct link to Error Behavior" translate="no">​</a></h2>
 <ul>
 <li class="">Direct requests never fail over to another provider</li>
@@ -348,21 +567,58 @@ exception below. Credential-only PUT uses the same concurrency
 protection and preserves models/policies; it rejects policy/model edits rather
 than silently accepting them. Alias POST/PUT likewise save metadata and targets
 in one transaction, preserving omitted update fields.</p>
-<p>Provider PUT supports explicit <code>true</code>/<code>false</code> for <code>enabled</code>,
-<code>forward_user_agent</code>, <code>forward_authorization</code> and <code>allow_insecure_base_url</code>, <code>[]</code> to clear local <code>forward_headers</code>, and <code>&quot;&quot;</code> to clear
+<p>Provider PUT supports explicit <code>true</code>/<code>false</code> for <code>enabled</code> and
+<code>forward_user_agent</code> (also <code>forward_authorization</code> and <code>allow_insecure_base_url</code>
+in System), <code>[]</code> to clear local <code>forward_headers</code>, and <code>&quot;&quot;</code> to clear
 <code>display_name</code>, <code>base_url</code>, <code>upstream_header_timeout</code>, <code>user_agent</code> or <code>extends</code>,
 subject to normal validation. Clearing an override restores applicable defaults;
 it does not disable root-level forwarding. Omit untouched <code>api_key</code>, <code>api_key_ref</code>
 and <code>credential_ref</code> fields to retain them. Supplied reference objects replace
 their path and key/name together; an empty path selects the default secrets path.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="tenant-provider-credential-and-destination-policy">Tenant Provider Credential And Destination Policy<a href="#tenant-provider-credential-and-destination-policy" class="hash-link" aria-label="Direct link to Tenant Provider Credential And Destination Policy" title="Direct link to Tenant Provider Credential And Destination Policy" translate="no">​</a></h3>
+<p>For non-System database providers, create, update and credential-only PUT
+validate the <strong>destination workspace&#x27;s</strong> effective configuration before
+credential decryption/file resolution or persistence. Global administrators
+authoring tenant rows do not bypass this policy. The operator-controlled
+<code>multi_tenancy.allowed_upstream_origins</code> config attribute approves exact public
+HTTPS upstream/probe origins; omission or <code>[]</code> denies all. It is not a writable
+provider/API field and does not grant access to a System or foreign resource or
+credential. See <a class="" href="/docs/configuration/#tenant-managed-upstreams">configuration</a>.</p>
+<ul>
+<li class="">Tenant <code>api_key</code> values remain write-only and encrypted in the database.
+Own Copilot database credentials still use the actor/workspace-bound device
+authorization flow, never a raw-token or foreign-credential input.</li>
+<li class="">Nonempty <code>api_key_ref</code> and sidecar <code>credential_ref</code> references are
+System-only, including the flat reference fields on credential PUT.
+<code>forward_authorization: true</code> and <code>allow_insecure_base_url: true</code> are likewise
+forbidden in tenant workspaces, even with an approved origin.</li>
+<li class="">Both effective upstream and health destinations must be approved; provider
+defaults and inherited endpoints/healthchecks cannot bypass the check.
+Disabled rows and old stored rows are checked too.</li>
+<li class="">A forbidden edit returns <code>400</code>, has no <code>X-Aiproxy-Catalog-Saved</code> header,
+requests no activation and leaves provider/models/credentials/revision
+unchanged. Correcting legacy intent may explicitly clear both members of a
+reference object and set reserved flags to <code>false</code>. Omission does not repair
+a forbidden old setting.</li>
+</ul>
+<p>At connection time, tenant transports reject any non-public DNS answer and
+pin dialing to the validated IPs, ignore environment proxies and keep TLS
+verification and same-origin redirect limits. A syntactically approved
+hostname can still fail at runtime because DNS or certificate verification
+fails; successful save/preflight is not an upstream compatibility check.
+Trusted System/HCL behavior is unchanged. Run the candidate binary&#x27;s
+<a class="" href="/docs/operations/#tenant-provider-policy-upgrade"><code>validate --check-db</code> preflight</a>
+before upgrading.</p>
 <p><code>allow_insecure_base_url</code> is a provider-only opt-in that accepts a non-loopback
 plain-HTTP <code>base_url</code> (see
 <a class="" href="/docs/configuration/#allowing-plain-http-upstreams">plain-HTTP upstreams</a>).
-Omitting the flag preserves its current value on concrete providers. Enabling
+The opt-in is <strong>System-only</strong> for database providers. Omitting the flag preserves
+its current value on concrete providers. Enabling
 it does not relax any other URL validation. Derived provider POST/PUT rejects
 explicit <code>true</code> or <code>false</code>; setting a non-empty <code>extends</code> without declaring the
 flag clears any previously stored local opt-in so the base&#x27;s value is inherited.</p>
-<p><code>forward_authorization</code> is a provider-only opt-in for supported bearer-header
+<p><code>forward_authorization</code> is a System-only database provider opt-in for supported
+bearer-header
 upstreams, independent of inherited defaults. It cannot coexist with stored
 credentials. To switch an existing keyed provider, explicitly send
 <code>&quot;api_key&quot;: &quot;&quot;</code> and <code>&quot;api_key_ref&quot;: {&quot;path&quot;: &quot;&quot;, &quot;key&quot;: &quot;&quot;}</code> along with
@@ -383,16 +639,37 @@ zero <code>expected_status</code>, <code>failure_threshold</code> and <code>succ
 <code>200</code>, <code>2</code> and <code>1</code>. A nonempty <code>path</code> replaces the path. <strong>Removing the entire
 healthcheck block is unsupported</strong>: omission, null, an empty object or an empty
 path does not delete it.</p>
-<p>Catalog POST/PUT outcomes:</p>
-<table><thead><tr><th>Status</th><th>Meaning and next step</th></tr></thead><tbody><tr><td><code>400</code></td><td>Validation rejected the edit; correct the input.</td></tr><tr><td><code>409</code></td><td>The edited aggregate changed concurrently; read current state and retry.</td></tr><tr><td><code>500</code>, <code>could not save catalog edit</code></td><td>Storage failed before a successful commit; activation was not requested.</td></tr><tr><td><code>500</code>, <code>saved but activation failed</code></td><td>The complete edit is saved; the previous runtime remains active. Consult server logs, correct the activation problem, then reload.</td></tr><tr><td><code>500</code>, <code>saved but response view unavailable; read current state before retrying</code></td><td>The edit is saved and activation was requested successfully, but its response view could not be read. Read current state rather than blindly repeating POST.</td></tr><tr><td><code>201</code> (POST), <code>200</code> (PUT)</td><td>Saved, activation requested successfully, and the response view is available.</td></tr></tbody></table>
+<p>Catalog POST/PUT/DELETE outcomes:</p>
+<table><thead><tr><th>Status</th><th>Meaning and next step</th></tr></thead><tbody><tr><td><code>400</code></td><td>Validation rejected the edit; correct the input.</td></tr><tr><td><code>400</code>, <code>catalog dependency conflict; retarget or remove dependent aliases and providers first</code></td><td>The saved dependency graph would become invalid; retarget/delete referencers first. No rows changed and no activation was requested.</td></tr><tr><td><code>409</code></td><td>The edited aggregate changed concurrently; read current state and retry.</td></tr><tr><td><code>500</code>, <code>could not save catalog edit</code></td><td>Storage failed before a successful commit; activation was not requested.</td></tr><tr><td><code>500</code>, <code>saved but activation failed</code></td><td>The complete edit is saved; the previous runtime remains active. Consult server logs, correct the activation problem, then reload.</td></tr><tr><td><code>500</code>, <code>saved but response view unavailable; read current state before retrying</code></td><td>The edit is saved and activation was requested successfully, but its response view could not be read. Read current state rather than blindly repeating POST.</td></tr><tr><td><code>201</code> (POST), <code>200</code> (PUT/DELETE)</td><td>Saved, activation requested successfully, and any response view is available.</td></tr></tbody></table>
 <p>After each valid commit, activation is requested once before response-view reads.
 Operational failure responses omit storage and credential details. Persistence and
 runtime activation are separate: later reloads can activate a complete saved edit
-after an activation failure. The concurrency check protects the edited aggregate,
-not an atomic snapshot of every catalog dependency or another proxy&#x27;s runtime.
-Successful provider POST/PUT and credential PUT responses carry
+after an activation failure. Aggregate revision checks reject stale edits; the
+workspace database lock also serializes graph-affecting provider/model/alias and
+Copilot aggregate writes. Dependency validation uses current saved definitions and
+effective static System bases, never stale managed runtime inventory.
+Successful provider POST/PUT/DELETE and credential PUT responses carry
 <code>X-Aiproxy-Catalog-Saved: true</code> once the database commit is durable, including
 when activation itself fails.</p>
+<h3 class="anchor anchorTargetStickyNavbar_T7vg" id="managed-catalog-dependency-edits">Managed Catalog Dependency Edits<a href="#managed-catalog-dependency-edits" class="hash-link" aria-label="Direct link to Managed Catalog Dependency Edits" title="Direct link to Managed Catalog Dependency Edits" translate="no">​</a></h3>
+<p>Provider deletion, disabling, model removal, concrete/derived transitions and
+type/capability/protocol changes cannot invalidate an alias or derivative.
+Every alias target must remain defined and enabled in the alias&#x27;s destination
+workspace, with at least one capability shared by all targets. Derivatives must
+retain an enabled, concrete, same-type base; disabled derivatives still require
+that base and inherited models named by local policy overlays. Aliases targeting
+inherited models are checked when their base changes.</p>
+<p>Retarget or delete referencers before removing the referenced provider/model.
+There is no force-delete/cascade or automatic retargeting. Dependency errors are
+generic and reveal no dependent names or counts. Rejection preserves all aggregate
+rows, revisions and credentials, requests no activation, has no saved header, and
+does not consume a ready Copilot device flow.</p>
+<p>Only affected dependencies are validated during a save. Unrelated corrupted rows
+remain repairable; they can still cause full runtime activation to fail <strong>after a
+valid commit</strong>, which retains the saved-but-activation-failed contract above.
+Static file edits and direct SQL are not covered by managed-write serialization.
+This does not acknowledge activation on any other instance. See
+<a class="" href="/docs/operations/#managed-catalog-dependencies-and-cleanup">cleanup and upgrade guidance</a>.</p>
 <h3 class="anchor anchorTargetStickyNavbar_T7vg" id="encrypted-reasoning-policy-intent">Encrypted Reasoning Policy Intent<a href="#encrypted-reasoning-policy-intent" class="hash-link" aria-label="Direct link to Encrypted Reasoning Policy Intent" title="Direct link to Encrypted Reasoning Policy Intent" translate="no">​</a></h3>
 <p>Provider POST/PUT, nested <code>models</code> entries, and alias POST/PUT accept an optional
 <code>encrypted_reasoning</code> object. Members are <code>passthrough</code> (boolean),
@@ -497,17 +774,29 @@ a fixed issuer (<code>https://github.com/login/device/code</code>,
 fixed device-verification page, then stores the result as an encrypted database
 credential. Saving the provider consumes the ready authorization exactly once and
 activates it through the normal catalog reload path. The CLI sidecar login remains
-available as an alternative.</p>
+available for trusted System/HCL workflows, not tenant-managed providers.</p>
 <ul>
 <li class=""><code>POST /_internal/admin/copilot-device-flows</code> starts a flow with
-<code>{client_id, workspace_id?, provider_name?}</code>. The workspace is resolved with the
-normal provider write-workspace policy; <code>provider_name</code> pins an edit target and must
-belong to the same workspace. Responses are <code>201</code> flow-status bodies.</li>
+<code>{client_id, workspace_id?, provider_name?}</code>. With <code>provider_name</code>, the
+<a href="#direct-catalog-writes" class="">direct catalog write rules</a> check visibility, every
+supplied workspace selector, and write authority before loading the full
+provider or checking its type and policy. Missing, hidden, and selector-mismatched
+names return the same <code>404</code> (<code>provider not found</code>). Visible HCL providers cannot
+be edited here. A visible tenant provider requires workspace admin authority;
+an explicit non-global System member cannot start a flow for a System DB
+provider (<code>404</code>, <code>workspace not found</code>). A provider-bound tenant edit must
+also pass effective provider policy. These checks run before saving a flow,
+recording its start for throttling, or contacting the issuer. Standalone
+authorization (without <code>provider_name</code>) keeps the normal provider write-workspace
+selection and uses the same fixed issuer. Provider destination approval is
+checked before its credential can be saved. Successful starts return <code>201</code>
+flow-status bodies.</li>
 <li class=""><code>GET /_internal/admin/copilot-device-flows/{id}</code> returns the sanitized flow
 status without any upstream calls.</li>
 <li class=""><code>POST /_internal/admin/copilot-device-flows/{id}/poll</code> performs at most one
 upstream token request when the stored schedule and lease permit; early or
-competing calls return the pending status and delay with no extra upstream call.</li>
+competing calls return the pending status and delay with no extra upstream call.
+Provider-bound tenant policy is checked before claiming/decrypting the flow.</li>
 <li class=""><code>DELETE /_internal/admin/copilot-device-flows/{id}</code> cancels a live flow and is
 idempotent for terminal flows.</li>
 </ul>
@@ -524,11 +813,14 @@ foreign IDs return <code>404</code>, invalid logins <code>401</code>, insufficie
 credential) instead of a credential reference. Edit saves that consume a flow
 require <code>expected_updated_at</code>, the opaque revision from the provider view
 (<code>updated_at</code>). A stale revision returns <code>409</code> and preserves the ready flow for
-an explicit reread and retry. Provider views expose
+an explicit reread and retry. The ready flow&#x27;s workspace and create/edit provider
+binding are checked before decrypting its credential; an approved tenant
+destination cannot consume a System or foreign-workspace flow, even if a global
+author initiated it. Provider views expose
 <code>copilot_credential_source</code> (<code>database</code>, <code>sidecar</code>, or <code>none</code> alongside the
 existing <code>has_credential</code>), and <code>GET /_internal/admin/provider-types</code> advertises
 <code>supports_device_authorization</code> for <code>github-copilot</code>. The legacy credential
-endpoint switches sources the same way (a nonempty sidecar reference clears the
+endpoint switches sources in System the same way (a nonempty sidecar reference clears the
 database ciphertext) but never consumes flows. <strong>Hermetically verified; live
 GitHub compatibility unverified.</strong></p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="provider-coverage-notes">Provider Coverage Notes<a href="#provider-coverage-notes" class="hash-link" aria-label="Direct link to Provider Coverage Notes" title="Direct link to Provider Coverage Notes" translate="no">​</a></h2>
@@ -551,6 +843,6 @@ serves JSON and SSE, and every other operation (including <code>responses</code>
 upstream calls. <strong>Hermetically verified; live GitHub compatibility unverified.</strong>
 These capability matrices describe implemented behavior, not verified GitHub
 access. See <a class="" href="/docs/operations/#mock-only-copilot-verification">mock-only verification</a>.</li>
-</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/request-examples/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Request Examples</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/operations/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Operations</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_sbaK thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#endpoint-and-provider-support-matrix" class="table-of-contents__link toc-highlight">Endpoint And Provider Support Matrix</a></li><li><a href="#provider-capability-defaults" class="table-of-contents__link toc-highlight">Provider Capability Defaults</a></li><li><a href="#streaming" class="table-of-contents__link toc-highlight">Streaming</a></li><li><a href="#peer-deferred-transport-v1" class="table-of-contents__link toc-highlight">Peer Deferred Transport v1</a><ul><li><a href="#peer-routes-and-recognition" class="table-of-contents__link toc-highlight">Peer Routes And Recognition</a></li><li><a href="#peer-json-schema" class="table-of-contents__link toc-highlight">Peer JSON Schema</a></li><li><a href="#peer-state-and-byte-delivery" class="table-of-contents__link toc-highlight">Peer State And Byte Delivery</a></li><li><a href="#acceptance-and-deduplication" class="table-of-contents__link toc-highlight">Acceptance And Deduplication</a></li><li><a href="#peer-control-errors" class="table-of-contents__link toc-highlight">Peer Control Errors</a></li></ul></li><li><a href="#authentication" class="table-of-contents__link toc-highlight">Authentication</a><ul><li><a href="#invitation-onboarding" class="table-of-contents__link toc-highlight">Invitation Onboarding</a></li><li><a href="#workspace-model" class="table-of-contents__link toc-highlight">Workspace Model</a></li><li><a href="#workspace-and-team-membership-changes" class="table-of-contents__link toc-highlight">Workspace And Team Membership Changes</a></li><li><a href="#key-policy-and-sharing-updates" class="table-of-contents__link toc-highlight">Key Policy And Sharing Updates</a></li></ul></li><li><a href="#usage-and-scope" class="table-of-contents__link toc-highlight">Usage And Scope</a></li><li><a href="#error-behavior" class="table-of-contents__link toc-highlight">Error Behavior</a></li><li><a href="#administrative-provider-and-alias-saves" class="table-of-contents__link toc-highlight">Administrative Provider And Alias Saves</a><ul><li><a href="#encrypted-reasoning-policy-intent" class="table-of-contents__link toc-highlight">Encrypted Reasoning Policy Intent</a></li><li><a href="#provider-tls-clienthello-settings" class="table-of-contents__link toc-highlight">Provider TLS ClientHello Settings</a></li></ul></li><li><a href="#github-copilot-device-authorization" class="table-of-contents__link toc-highlight">GitHub Copilot Device Authorization</a></li><li><a href="#provider-coverage-notes" class="table-of-contents__link toc-highlight">Provider Coverage Notes</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Introduction</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/quickstart/">Quickstart</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/configuration/">Configuration</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/config-examples/">Config Examples</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Reference</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/api-reference/">API Reference</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/operations/">Operations</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/deployment/">Deployment</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/egose/aiproxy" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_hMXl"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 aiproxy. Built with Docusaurus.</div></div></div></footer></div>
+</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/request-examples/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Request Examples</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/operations/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Operations</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_sbaK thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#endpoint-and-provider-support-matrix" class="table-of-contents__link toc-highlight">Endpoint And Provider Support Matrix</a></li><li><a href="#provider-capability-defaults" class="table-of-contents__link toc-highlight">Provider Capability Defaults</a></li><li><a href="#streaming" class="table-of-contents__link toc-highlight">Streaming</a></li><li><a href="#peer-deferred-transport-v1" class="table-of-contents__link toc-highlight">Peer Deferred Transport v1</a><ul><li><a href="#peer-routes-and-recognition" class="table-of-contents__link toc-highlight">Peer Routes And Recognition</a></li><li><a href="#peer-json-schema" class="table-of-contents__link toc-highlight">Peer JSON Schema</a></li><li><a href="#peer-state-and-byte-delivery" class="table-of-contents__link toc-highlight">Peer State And Byte Delivery</a></li><li><a href="#acceptance-and-deduplication" class="table-of-contents__link toc-highlight">Acceptance And Deduplication</a></li><li><a href="#peer-control-errors" class="table-of-contents__link toc-highlight">Peer Control Errors</a></li></ul></li><li><a href="#authentication" class="table-of-contents__link toc-highlight">Authentication</a><ul><li><a href="#model-access-with-multi-tenancy" class="table-of-contents__link toc-highlight">Model Access With Multi-tenancy</a></li><li><a href="#invitation-onboarding" class="table-of-contents__link toc-highlight">Invitation Onboarding</a></li><li><a href="#sso-admission" class="table-of-contents__link toc-highlight">SSO Admission</a></li><li><a href="#workspace-model" class="table-of-contents__link toc-highlight">Workspace Model</a></li><li><a href="#workspace-catalog-references" class="table-of-contents__link toc-highlight">Workspace Catalog References</a></li><li><a href="#direct-catalog-writes" class="table-of-contents__link toc-highlight">Direct Catalog Writes</a></li><li><a href="#workspace-and-team-membership-changes" class="table-of-contents__link toc-highlight">Workspace And Team Membership Changes</a></li><li><a href="#account-deletion-and-personal-bearers" class="table-of-contents__link toc-highlight">Account Deletion And Personal Bearers</a></li><li><a href="#atomic-key-issuance-and-bearer-recovery" class="table-of-contents__link toc-highlight">Atomic Key Issuance And Bearer Recovery</a></li><li><a href="#direct-key-writes" class="table-of-contents__link toc-highlight">Direct Key Writes</a></li><li><a href="#key-policy-and-sharing-updates" class="table-of-contents__link toc-highlight">Key Policy And Sharing Updates</a></li></ul></li><li><a href="#usage-and-scope" class="table-of-contents__link toc-highlight">Usage And Scope</a></li><li><a href="#error-behavior" class="table-of-contents__link toc-highlight">Error Behavior</a></li><li><a href="#administrative-provider-and-alias-saves" class="table-of-contents__link toc-highlight">Administrative Provider And Alias Saves</a><ul><li><a href="#tenant-provider-credential-and-destination-policy" class="table-of-contents__link toc-highlight">Tenant Provider Credential And Destination Policy</a></li><li><a href="#managed-catalog-dependency-edits" class="table-of-contents__link toc-highlight">Managed Catalog Dependency Edits</a></li><li><a href="#encrypted-reasoning-policy-intent" class="table-of-contents__link toc-highlight">Encrypted Reasoning Policy Intent</a></li><li><a href="#provider-tls-clienthello-settings" class="table-of-contents__link toc-highlight">Provider TLS ClientHello Settings</a></li></ul></li><li><a href="#github-copilot-device-authorization" class="table-of-contents__link toc-highlight">GitHub Copilot Device Authorization</a></li><li><a href="#provider-coverage-notes" class="table-of-contents__link toc-highlight">Provider Coverage Notes</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Introduction</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/quickstart/">Quickstart</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/configuration/">Configuration</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/config-examples/">Config Examples</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Reference</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/api-reference/">API Reference</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/operations/">Operations</a></li><li class="footer__item"><a class="footer__link-item" href="/docs/deployment/">Deployment</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/egose/aiproxy" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_hMXl"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 aiproxy. Built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>

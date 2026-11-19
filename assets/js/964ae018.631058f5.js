@@ -78,16 +78,44 @@ const toc = [{
   "id": "authentication",
   "level": 2
 }, {
+  "value": "Model Access With Multi-tenancy",
+  "id": "model-access-with-multi-tenancy",
+  "level": 3
+}, {
   "value": "Invitation Onboarding",
   "id": "invitation-onboarding",
+  "level": 3
+}, {
+  "value": "SSO Admission",
+  "id": "sso-admission",
   "level": 3
 }, {
   "value": "Workspace Model",
   "id": "workspace-model",
   "level": 3
 }, {
+  "value": "Workspace Catalog References",
+  "id": "workspace-catalog-references",
+  "level": 3
+}, {
+  "value": "Direct Catalog Writes",
+  "id": "direct-catalog-writes",
+  "level": 3
+}, {
   "value": "Workspace And Team Membership Changes",
   "id": "workspace-and-team-membership-changes",
+  "level": 3
+}, {
+  "value": "Account Deletion And Personal Bearers",
+  "id": "account-deletion-and-personal-bearers",
+  "level": 3
+}, {
+  "value": "Atomic Key Issuance And Bearer Recovery",
+  "id": "atomic-key-issuance-and-bearer-recovery",
+  "level": 3
+}, {
+  "value": "Direct Key Writes",
+  "id": "direct-key-writes",
   "level": 3
 }, {
   "value": "Key Policy And Sharing Updates",
@@ -105,6 +133,14 @@ const toc = [{
   "value": "Administrative Provider And Alias Saves",
   "id": "administrative-provider-and-alias-saves",
   "level": 2
+}, {
+  "value": "Tenant Provider Credential And Destination Policy",
+  "id": "tenant-provider-credential-and-destination-policy",
+  "level": 3
+}, {
+  "value": "Managed Catalog Dependency Edits",
+  "id": "managed-catalog-dependency-edits",
+  "level": 3
 }, {
   "value": "Encrypted Reasoning Policy Intent",
   "id": "encrypted-reasoning-policy-intent",
@@ -1292,6 +1328,8 @@ function _createMdxContent(props) {
       }), ". Preparation rejections\nare cached through the ticket window. Accepted records/tombstones remain protected\nthrough ", (0,jsx_runtime.jsx)(_components.code, {
         children: "dedup_until_ms = submit_until_ms + execution_timeout_ms + retention_ms + finalization_timeout_ms"
       }), ". Existing accepted entries can replay after ticket\nexpiry; absent expired scopes or old generations dispatch nothing."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "With multi-tenancy, discovery and new admissions use the bearer credential's\nworkspace. Accepted replays and job controls require the same admitted\ncredential identity and workspace, and still check the current allowlist for\nthe admitted public model. They do not use a replacement catalog to re-resolve\naccepted work. No workspace fields or headers are added to the peer protocol."
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Once submit begins, the caller freezes generation/ticket/key/prepared input.\nLost acknowledgments retry only that qualified submit, never a fresh capability\nor key. ", (0,jsx_runtime.jsx)(_components.code, {
         children: "acceptance"
@@ -1342,6 +1380,14 @@ function _createMdxContent(props) {
             })]
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Current inference authentication / admitted-model authorization failed; no result disclosure"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: (0,jsx_runtime.jsx)(_components.code, {
+              children: "404 model_not_found"
+            })
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Model or alias unavailable to the caller, including missing names and out-of-workspace inventory"
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -1531,22 +1577,68 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["When ", (0,jsx_runtime.jsx)(_components.code, {
         children: "none"
-      }), " auth is enabled, no inbound authentication is performed."]
+      }), " auth is enabled and multi-tenancy is disabled, inference does not\nauthenticate incoming requests. With multi-tenancy enabled, ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "none"
+      }), " is\nmanagement-only. Model discovery, inference, billing usage, and the private\ndeferred API return ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "401"
+      }), " without a valid inference bearer with workspace scope.\nBrowser login JWTs and workspace-selection headers are not inference credentials."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["In ", (0,jsx_runtime.jsx)(_components.code, {
         children: "bearer_static"
-      }), " mode, individual clients may also be restricted with ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " mode, configured clients and database keys each have their\nown ", (0,jsx_runtime.jsx)(_components.code, {
         children: "allowed_models"
-      }), "."]
+      }), " policy and request rate-limit bucket (if configured).\nMatching names or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "tenant"
+      }), " labels do not share policy or capacity. No bearer\nheader or token format changes are required."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "model-access-with-multi-tenancy",
+      children: "Model Access With Multi-tenancy"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "GET /v1/models"
+      }), " lists only the models and aliases the key can use in its own\nworkspace. An empty workspace returns ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "{\"object\":\"list\",\"data\":[]}"
+      }), ". HCL\nproviders, models and aliases are System-only, and HCL client tokens are scoped\nto System. A database key is scoped to its owning workspace regardless of the\nissuer's roles."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "allowed_models"
+      }), " narrows the workspace by public name; omitting it or setting\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "[]"
+      }), " never grants access to another workspace. A name excluded by the allowlist\nreturns ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "403 forbidden"
+      }), " regardless of whether it exists. Otherwise missing\nand out-of-scope names return the same ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "404 model_not_found"
+      }), ". An alias with a\nmissing or out-of-workspace target is entirely unavailable: it is not listed,\nand no part of its pool is tried. A derived provider whose base is missing or\nbelongs to another workspace is likewise unavailable. Allowing an alias does\nnot require listing its target names in ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allowed_models"
+      }), ", but cannot widen\nworkspace scope."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "invitation-onboarding",
       children: "Invitation Onboarding"
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["With multi-tenancy enabled, ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "POST /_internal/admin/invites/accept"
-      }), " accepts a JSON\nbody with ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["The signed-out browser route ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/invite"
+      }), " works with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allow_public_registration = false"
+      }), ". Open the clean ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/invite"
+      }), " page on your trusted deployment origin and\npaste the one-time code delivered separately by your inviter. Invitation codes\nare not read from URLs, including query strings and fragments. Treat previously\nshared code-bearing links as exposed: ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#dashboard-web-ui-and-multi-tenancy",
+        children: "revoke and reissue pending invitations"
+      }), ".\nOpening the form does not erase URLs that were already visited."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The app keeps redemption form values in component memory, not in browser\nstorage or React Query mutation/query state. The UI uses a ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "no-referrer"
+      }), " policy.\nReloading or leaving the form discards the app's copy of the code. After\nacceptance, sign in with the invited email and new password. The portal selects\nthe authorized invitation workspace, not System or a stale workspace saved by a\ndifferent session."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /_internal/admin/invites"
+      }), " returns the one-time code as ", (0,jsx_runtime.jsx)(_components.code, {
         children: "token"
-      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ". Deliver it\nseparately over a trusted channel. With multi-tenancy enabled,\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /_internal/admin/invites/accept"
+      }), " accepts the code only as ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "token"
+      }), " in the\nJSON body, with ", (0,jsx_runtime.jsx)(_components.code, {
         children: "password"
       }), " (at least eight characters). A successful ", (0,jsx_runtime.jsx)(_components.code, {
         children: "201"
@@ -1562,7 +1654,16 @@ function _createMdxContent(props) {
         children: "500"
       }), " without database details. An account or membership write failure rolls back\nthe whole acceptance, leaving an otherwise eligible invitation available to retry\nafter the cause is resolved. Successful onboarding supports the normal login flow.\nAcceptance also serializes with workspace deletion. If the stored invitation's\nworkspace changes while acceptance is acquiring locks, it returns ", (0,jsx_runtime.jsx)(_components.code, {
         children: "400"
-      }), " with\nretry guidance and saves nothing; retry uses the current invitation scope."]
+      }), " with\nretry guidance and saves nothing; retry uses the current invitation scope.\nInvitation creation and acceptance responses use ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Cache-Control: no-store"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "sso-admission",
+      children: "SSO Admission"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["OIDC is ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "existing accounts only"
+      }), ", including invitees after redemption creates\ntheir accounts. A pending invitation alone is not admission.\nVerified IdP identities without an existing local account receive an error\nredirect, never a user, workspace or refresh session. This rule also applies\nwhen public password registration is enabled. A user lookup database error is\ndistinct from a missing account and fails closed without database details.\nDisabled accounts cannot sign in. Returning accounts keep their memberships;\nSSO does not create personal workspaces or enroll tenant users into System.\nExisting configured admin-claim mapping still applies to admitted accounts;\nit is not authority to provision an unknown identity."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "workspace-model",
       children: "Workspace Model"
@@ -1612,8 +1713,96 @@ function _createMdxContent(props) {
           children: "system"
         }), ": the built-in workspace (", (0,jsx_runtime.jsx)(_components.code, {
           children: "is_system"
-        }), ") that owns global config-backed\ninventory. It is hidden from membership listings and cannot be deleted."]
+        }), ") that owns config-backed\ninventory. Global administrators and explicit System members can read that\ninventory through the management API. This does not grant System\nadministration, and System cannot be deleted."]
       }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The provider, alias, and key management lists and detail reads apply workspace\naccess before returning metadata. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "workspace_id"
+      }), " takes precedence over\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Workspace-ID"
+      }), "; either can narrow access, not grant it. An inaccessible\nworkspace or resource returns ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "404"
+      }), ". Workspace and invitation lists cover the\ncaller's authorized workspaces; only global administrators see invitations\nwithout a workspace. A caller with no memberships and no global authority gets\nempty unfiltered lists. If a required membership lookup fails, these reads\nreturn ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "500"
+      }), " without inventory or database error details."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "workspace-catalog-references",
+      children: "Workspace Catalog References"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Provider inheritance and every alias target must belong to the ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "destination\nworkspace"
+      }), ", not merely a workspace the author can administer. This applies to\nprovider/alias POST and PUT, including alias ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "providers"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), " shorthand and\nomitted targets retained on update. A global administrator creating a tenant\nresource cannot use a System or another tenant's base or models. Config-backed\nproviders, models and aliases belong only to System; a managed System resource\nmay reference a compatible System base, subject to the ordinary inheritance\nrestrictions."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Missing and foreign references return the same controlled ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "400"
+      }), ", without\nforeign provider types, models, credentials or enabled-state metadata. Rejected\nedits persist nothing and request no activation."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Provider and alias names remain globally unique, including disabled providers.\nStartup, reload and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "validate --check-db"
+      }), " reject cross-workspace graphs and\nstatic/managed name collisions rather than overwriting a resource or changing\nits owner. Invalid legacy graph views fail without disclosing referenced\ninventory. See ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#workspace-isolation-upgrade-and-recovery",
+        children: "upgrade and recovery"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "The portal honors a saved choice only when it is authorized. Otherwise global\nadministrators start in System; tenant users prefer an authorized non-System\nworkspace. Account and workspace resolution must complete before inventory\nqueries run. No memberships means no tenant write target. Explicit System\nmembership permits reads, not System administration; tenant membership roles\nare retained. Forms, reference pickers, key/credential requests and mutations\nuse the selected workspace, and stale forms cannot retarget themselves after a\nworkspace or account change."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "direct-catalog-writes",
+      children: "Direct Catalog Writes"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["This applies to ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "PUT"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "DELETE"
+      }), " on ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/_internal/admin/providers/{name}"
+      }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/_internal/admin/aliases/{name}"
+      }), ", and to\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "PUT /_internal/admin/providers/{name}/credential"
+      }), ". It also applies to\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "#github-copilot-device-authorization",
+        children: "starting a Copilot device flow"
+      }), " with\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "provider_name"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Each supplied ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "workspace_id"
+        }), " query parameter, ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "X-Workspace-ID"
+        }), " header, and\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "workspace_id"
+        }), " body field (provider/alias PUT and named Copilot starts) must\nmatch the resource's workspace. Even global administrators cannot override a\nconflicting selector. Omit unused selectors; empty or invalid IDs return\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "400"
+        }), " (", (0,jsx_runtime.jsx)(_components.code, {
+          children: "invalid workspace id"
+        }), "). These operations cannot move a resource."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["For valid requests, missing names, names outside the caller's visibility\n(including hidden System HCL resources), and valid selector mismatches all\nreturn ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "404"
+        }), ". The plain-text body is ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "provider not found"
+        }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "alias not found"
+        }), ",\nfollowed by a newline. These denials save nothing, request no reload, and\ninclude no save or activation headers."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["A required membership lookup failure returns ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "500"
+        }), " (", (0,jsx_runtime.jsx)(_components.code, {
+          children: "could not resolve workspace visibility"
+        }), ") without database details. For visible targets in the\nselected scope, write-role requirements are unchanged. Visible HCL resources\nremain read-only (", (0,jsx_runtime.jsx)(_components.code, {
+          children: "400"
+        }), " for PUT and named Copilot starts, ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "403"
+        }), " for DELETE)."]
+      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Scoped GET selection, graph-reference validation and global name uniqueness on\ncreation are unchanged."
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "workspace-and-team-membership-changes",
       children: "Workspace And Team Membership Changes"
@@ -1664,15 +1853,164 @@ function _createMdxContent(props) {
         children: "400"
       }), " with handoff guidance and changes nothing. Assign\nanother team administrator, then retry. Other workspaces, key ownership,\nteam-wide key shares, quota records and historical spend are preserved. Re-adding\nan ordinary member does not restore prior team roles or direct sharing grants."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Current workspace membership is required for non-system key owners/team admins\nto read or manage keys and for team quota access, even with a known resource ID or\nan existing login token. After removal, key detail and team quota GET/PUT return\n", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Current workspace membership is required for non-system key owners/team admins\nto read or manage keys and for team quota access, even with a known resource ID or\nan existing login token. After removal, key detail, ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "#direct-key-writes",
+        children: "direct key writes"
+      }), ",\nand team quota GET/PUT return ", (0,jsx_runtime.jsx)(_components.code, {
         children: "404"
-      }), "; key update/rotate/revoke/delete return ", (0,jsx_runtime.jsx)(_components.code, {
-        children: "403"
-      }), ". System administrators retain\naccess. Personal ownership is preserved and becomes usable again if the owner is\nre-added to the workspace. Already-admitted operations are not retroactively\ncanceled."]
+      }), ". System administrators retain access. Personal\nownership is preserved and becomes usable again if the owner is re-added to the\nworkspace. Already-admitted operations are not retroactively canceled."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.strong, {
         children: "API bearer credentials are separate:"
       }), " removing management access does not\nautomatically revoke, rotate or disable any key, including a personal key. To stop\nuse of previously distributed API tokens, explicitly rotate or revoke the key."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "account-deletion-and-personal-bearers",
+      children: "Account Deletion And Personal Bearers"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "DELETE /_internal/admin/users/{user_id}"
+      }), " is a global-administrator action.\nSelf-deletion and deleting the last enabled global administrator are rejected;\nworkspace/team last-administrator checks remain transactional. Rejected deletion\nrequests no activation and preserves the account and its keys."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["After confirmed deletion, the response sets ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Aiproxy-User-Deleted: true"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Aiproxy-User-ID: <user_id>"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Cache-Control: no-store"
+      }), ", then requests local\nactivation once. A ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "200"
+      }), " means new requests using personally owned keys removed\nby the account cascade now receive ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "401"
+      }), " on that instance. Team-owned and other\nusers' keys retain their identity and workspace; historical spend remains, with\nthe deleted user's ledger reference set to null. Already-admitted work can finish.\nWorkspace membership removal still does not revoke bearers."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["A ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "500 saved but activation failed"
+      }), " with the deletion headers means the account\nand personal keys are deleted in PostgreSQL, but the previous runtime remains\nactive and may still accept those bearers. Do not repeat account deletion to\nactivate it: resolve the logged failure and reload/restart the receiving instance.\nDB changes also reconcile independently on other replicas, without cluster acknowledgement."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "GET /_internal/admin/serving-status"
+      }), " requires live system-administrator authorization.\nIt returns local ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "applied_revisions"
+      }), " (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "catalog"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "keys"
+      }), "), ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "keys_confirmed_at"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "catalog_confirmed_at"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "keys_fresh"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "catalog_fresh"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "freshness_deadline_seconds"
+      }), " (30) and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "cluster_acknowledged"
+      }), " (false).\nMutation activation headers distinguish ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Aiproxy-Local-Active"
+      }), " from\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Aiproxy-Cluster-Acknowledged"
+      }), " (always false), alongside\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Aiproxy-Applied-Catalog-Revision"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Aiproxy-Applied-Key-Revision"
+      }), ".\nThey do not replace durable-save headers or acknowledge other replicas.\nExpired DB-serving freshness returns ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "503 serving_stale"
+      }), " on new DB inference,\nlisting/billing and applicable peer controls; ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/readyz"
+      }), " becomes unavailable.\nIndependent key refresh may revoke keys even when catalog activation fails.\nSee ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#bounded-replica-convergence",
+        children: "bounded replica convergence"
+      }), ".\nAfter response loss, reconcile the account's presence through the authorized user\nlist; missing headers do not establish rollback. This is not a cluster-wide\nrevocation acknowledgement."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "atomic-key-issuance-and-bearer-recovery",
+      children: "Atomic Key Issuance And Bearer Recovery"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /_internal/admin/keys"
+      }), " commits the new key, its intended user/team owner,\nand both sharing lists in one authorized transaction. The owner's share is included\nautomatically; repeated binding IDs are deduplicated. Current actor authority,\nowner eligibility and user/team workspace membership are rechecked under the\nmembership locks, including concurrent offboarding, demotion and deletion. A\nnon-administrator can issue only their own personal key or a key for a team they\ncurrently administer in that workspace; unowned keys require workspace or global\nadministrator authority."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Validation/authorization failures and key/grant persistence failures roll back\nthe entire issuance and request no activation. Lost authority returns ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "403"
+      }), ",\ninvalid bindings ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "400"
+      }), ", and storage failures a controlled ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "500"
+      }), " without database\ndetails. An existing key name returns ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "409"
+      }), ": read that key rather than issuing\nunder a new name to recover a missing bearer."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["After confirmed commit, creation and rotation responses set\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Aiproxy-Key-Saved: true"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Aiproxy-Key-ID: <key_id>"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Location: /_internal/admin/keys/<key_id>"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Cache-Control: no-store"
+      }), ".\nActivation is requested exactly once after commit, before creating the response\nview. Creation returns ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "201"
+      }), " with ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "key"
+      }), " and the one-time ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "token"
+      }), "; rotation returns\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "200"
+      }), " with a new one-time ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "token"
+      }), ". Only the bearer hash and display prefix are\nstored, never a recoverable plaintext bearer."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Post-commit activation or creation-view failures return ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "500"
+      }), " with those saved\nheaders and an explicit key ID and rotation recovery instruction. The complete\nissuance remains saved; an activation failure retains the previous runtime.\nRead the authorized key detail/list, resolve any activation problem, then use\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST /_internal/admin/keys/<key_id>/rotate"
+      }), " to obtain a new bearer. Do not repeat\ncreation. Rotation preserves immutable credential identity, workspace, ownership\nand grants, and invalidates the prior bearer after successful local activation.\nIf rotation itself commits but activation fails or its response is lost, rotate\nthe same key again after resolving the problem; plaintext tokens are not replayed."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "A lost connection/response (including an indeterminate database commit result)\ndoes not prove rollback, and absence of saved headers alone is not proof either.\nDiscover the key by its globally unique name through the authorized list before\nretrying. A duplicate-name rejection does not overwrite or rotate it. These are\nsingle-instance activation outcomes, not cluster-wide acknowledgements."
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "direct-key-writes",
+      children: "Direct Key Writes"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "PUT"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "DELETE"
+      }), " on ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/_internal/admin/keys/{key_id}"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "POST"
+      }), " on its\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/rotate"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/revoke"
+      }), " subpaths require current visibility and key manager\nauthority. Each supplied ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "workspace_id"
+      }), " query parameter and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Workspace-ID"
+      }), "\nheader must match the key's workspace, even for global administrators. Omitting\nselectors preserves authorized access by ID. An empty or malformed selector\nreturns ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "400"
+      }), " (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "invalid workspace id"
+      }), ") before the key is looked up."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Missing keys, keys no longer visible to the caller after offboarding, other\nhidden keys, and valid selector mismatches all return ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "404"
+      }), " with the plain-text\nbody ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "key not found"
+      }), " followed by a newline. A visible read-only share still\nreturns ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "403"
+      }), " (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "key manager required"
+      }), "). Required membership lookups that fail\nreturn ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "500"
+      }), " (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "could not resolve workspace visibility"
+      }), "); key or sharing lookup\nfailures return ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "500"
+      }), " (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "could not load key"
+      }), "). These denials save nothing, request\nno activation, and include no save or activation headers. Scoped GET continues\nto give the query selector precedence over the header."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "key-policy-and-sharing-updates",
       children: "Key Policy And Sharing Updates"
@@ -1702,7 +2040,7 @@ function _createMdxContent(props) {
           children: "tenant"
         }), " clears it; ", (0,jsx_runtime.jsx)(_components.code, {
           children: "allowed_models: []"
-        }), " removes the model restriction."]
+        }), " removes the explicit list\nrestriction, not the key's workspace restriction."]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "expires_at"
@@ -1719,7 +2057,7 @@ function _createMdxContent(props) {
         children: "400"
       }), "; missing keys/teams return ", (0,jsx_runtime.jsx)(_components.code, {
         children: "404"
-      }), ". Current manager authority and grant\neligibility are rechecked inside the transaction, serialized with workspace\noffboarding and membership role changes. Lost manager authority returns ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ". Current manager authority and grant\neligibility are rechecked inside the transaction, serialized with workspace\noffboarding and membership role changes. If manager authority is lost after the\ninitial access check, the transactional recheck still returns ", (0,jsx_runtime.jsx)(_components.code, {
         children: "403"
       }), ".\nRejected validation and binding-storage failures leave all fields and both sharing\nsets unchanged and do not request runtime activation. Storage failures return\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "500"
@@ -1741,20 +2079,34 @@ function _createMdxContent(props) {
       children: [(0,jsx_runtime.jsx)(_components.code, {
         children: "GET /v1/billing/usage"
       }), " returns aggregated in-process usage summaries over the\nproxy's rolling 24-hour accounting window."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Hosted requests require a workspace-scoped inference bearer."
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
       children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
-        children: ["When the authenticated client has a ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ["A DB bearer sees only its own immutable key/workspace usage, even if its labels\noverlap another key or HCL client, or its creator is a global administrator.\nNeither a ", (0,jsx_runtime.jsx)(_components.code, {
           children: "tenant"
-        }), ", results are scoped to that tenant"]
+        }), " label nor an allowed-model list grants workspace-wide reporting."]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
-        children: "Otherwise, results are scoped to the caller's tenantless client identity; a\nsame-named client in another tenant is excluded"
+        children: "Label edits do not hide that key's earlier usage. Token rotation preserves its\nidentity; deleting and recreating a same-named key gives it a new identity and\nno access to the deleted key's usage."
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Trusted HCL clients with a ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "tenant"
+        }), " see same-tenant ", (0,jsx_runtime.jsx)(_components.strong, {
+          children: "static"
+        }), " clients in System\nonly, never DB keys with matching labels. Tenantless HCL clients see their own\ntenantless static usage. These file-only reporting contracts remain supported."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["File-only ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "auth.mode = \"none\""
+        }), " retains unfiltered anonymous reporting. Hosted\ninference never uses this anonymous view."]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
-        children: "This endpoint is local accounting only; it is not an external billing,\ninvoicing, or quota system"
+        children: "Workspace-wide or global reads require separate explicit management/operator\nauthority. This endpoint does not accept scope-broadening query/header selectors\nor inherit browser roles from a key's creator."
       }), "\n"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Rows are grouped first by internal credential identity and explicit workspace,\nthen by the recorded tenant/client labels, requested public model, operation and\nHTTP status. Earlier and later labels can therefore appear as separate own-key\nrows. Credential/workspace identifiers are not emitted in these JSON summaries.\nOrdinary and deferred completions use the identity, scope and labels captured at\nadmission, including after a reload, edit, rotation or deletion."
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Rows are grouped by tenant, client, requested public model, operation, and HTTP\nstatus. The optional ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["The optional ", (0,jsx_runtime.jsx)(_components.code, {
         children: "estimated_cost_usd"
-      }), " uses current configured model prices.\nFor an alias, it sums the recorded token usage of the targets actually used for\nthat alias's row. Traffic through another alias or a direct model sharing those\ntargets is excluded. Changing alias membership does not redistribute past traffic;\nchanging model prices reprices the retained estimate."]
+      }), " uses current configured model prices.\nFor an alias, it sums the recorded token usage of the targets actually used for\nthat alias's identity-scoped row. Other credentials/workspaces, another alias or\na direct model sharing those targets are excluded. Changing alias membership does\nnot redistribute past traffic; changing model prices reprices the retained estimate.\nHosted estimates use only current prices from the caller's workspace. If a\nretained provider/model name is recreated in another workspace, its foreign\nprice is not used; the retained own-key row remains visible without an estimate."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["The estimate is ", (0,jsx_runtime.jsx)(_components.strong, {
         children: "omitted"
@@ -1762,7 +2114,16 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Usage and cost share one rolling snapshot, using one-minute buckets retained while\ntheir start is at or after ", (0,jsx_runtime.jsx)(_components.code, {
         children: "now - 24h"
-      }), ". Consequently, events can expire up to one\nminute before their exact 24-hour age. Data is process-local and resets on restart.\nThe dashboard's lifetime provider/upstream counters and the durable quota spend\nledger have separate lifetimes and pricing semantics."]
+      }), ". Consequently, events can expire up to one\nminute before their exact 24-hour age. Data is process-local and resets on restart.\nThis is a rolling usage/cost ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "estimate, not an invoice"
+      }), ", cross-instance total,\nexternal billing service or quota system.\nThe dashboard's lifetime provider/upstream counters and the durable quota spend\nledger have separate lifetimes and pricing semantics."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Database user/team quotas are completion-based admission thresholds, ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "not hard\nspending limits or funded workspace caps"
+      }), ". Ownerless DB keys and static/HCL or\nanonymous traffic have no DB owner quota. Workspace reporting does not assign\na payer or grant workspace budget authority. See the\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#spending-contract-owner-quotas-not-funded-workspace-caps",
+        children: "spending contract"
+      }), "\nfor quota permissions, cache/stream overshoot, missing data and deletion gaps."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "error-behavior",
       children: "Error Behavior"
@@ -1862,13 +2223,13 @@ function _createMdxContent(props) {
         children: "false"
       }), " for ", (0,jsx_runtime.jsx)(_components.code, {
         children: "enabled"
-      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "forward_user_agent"
-      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " (also ", (0,jsx_runtime.jsx)(_components.code, {
         children: "forward_authorization"
       }), " and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "allow_insecure_base_url"
-      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+      }), "\nin System), ", (0,jsx_runtime.jsx)(_components.code, {
         children: "[]"
       }), " to clear local ", (0,jsx_runtime.jsx)(_components.code, {
         children: "forward_headers"
@@ -1891,6 +2252,53 @@ function _createMdxContent(props) {
       }), "\nand ", (0,jsx_runtime.jsx)(_components.code, {
         children: "credential_ref"
       }), " fields to retain them. Supplied reference objects replace\ntheir path and key/name together; an empty path selects the default secrets path."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "tenant-provider-credential-and-destination-policy",
+      children: "Tenant Provider Credential And Destination Policy"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["For non-System database providers, create, update and credential-only PUT\nvalidate the ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "destination workspace's"
+      }), " effective configuration before\ncredential decryption/file resolution or persistence. Global administrators\nauthoring tenant rows do not bypass this policy. The operator-controlled\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "multi_tenancy.allowed_upstream_origins"
+      }), " config attribute approves exact public\nHTTPS upstream/probe origins; omission or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "[]"
+      }), " denies all. It is not a writable\nprovider/API field and does not grant access to a System or foreign resource or\ncredential. See ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#tenant-managed-upstreams",
+        children: "configuration"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Tenant ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "api_key"
+        }), " values remain write-only and encrypted in the database.\nOwn Copilot database credentials still use the actor/workspace-bound device\nauthorization flow, never a raw-token or foreign-credential input."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Nonempty ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "api_key_ref"
+        }), " and sidecar ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "credential_ref"
+        }), " references are\nSystem-only, including the flat reference fields on credential PUT.\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "forward_authorization: true"
+        }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "allow_insecure_base_url: true"
+        }), " are likewise\nforbidden in tenant workspaces, even with an approved origin."]
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "Both effective upstream and health destinations must be approved; provider\ndefaults and inherited endpoints/healthchecks cannot bypass the check.\nDisabled rows and old stored rows are checked too."
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["A forbidden edit returns ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "400"
+        }), ", has no ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "X-Aiproxy-Catalog-Saved"
+        }), " header,\nrequests no activation and leaves provider/models/credentials/revision\nunchanged. Correcting legacy intent may explicitly clear both members of a\nreference object and set reserved flags to ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "false"
+        }), ". Omission does not repair\na forbidden old setting."]
+      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["At connection time, tenant transports reject any non-public DNS answer and\npin dialing to the validated IPs, ignore environment proxies and keep TLS\nverification and same-origin redirect limits. A syntactically approved\nhostname can still fail at runtime because DNS or certificate verification\nfails; successful save/preflight is not an upstream compatibility check.\nTrusted System/HCL behavior is unchanged. Run the candidate binary's\n", (0,jsx_runtime.jsxs)(_components.a, {
+        href: "/docs/operations#tenant-provider-policy-upgrade",
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "validate --check-db"
+        }), " preflight"]
+      }), "\nbefore upgrading."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.code, {
         children: "allow_insecure_base_url"
@@ -1899,7 +2307,9 @@ function _createMdxContent(props) {
       }), " (see\n", (0,jsx_runtime.jsx)(_components.a, {
         href: "/docs/configuration#allowing-plain-http-upstreams",
         children: "plain-HTTP upstreams"
-      }), ").\nOmitting the flag preserves its current value on concrete providers. Enabling\nit does not relax any other URL validation. Derived provider POST/PUT rejects\nexplicit ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ").\nThe opt-in is ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "System-only"
+      }), " for database providers. Omitting the flag preserves\nits current value on concrete providers. Enabling\nit does not relax any other URL validation. Derived provider POST/PUT rejects\nexplicit ", (0,jsx_runtime.jsx)(_components.code, {
         children: "true"
       }), " or ", (0,jsx_runtime.jsx)(_components.code, {
         children: "false"
@@ -1909,7 +2319,7 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.code, {
         children: "forward_authorization"
-      }), " is a provider-only opt-in for supported bearer-header\nupstreams, independent of inherited defaults. It cannot coexist with stored\ncredentials. To switch an existing keyed provider, explicitly send\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), " is a System-only database provider opt-in for supported\nbearer-header\nupstreams, independent of inherited defaults. It cannot coexist with stored\ncredentials. To switch an existing keyed provider, explicitly send\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "\"api_key\": \"\""
       }), " and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "\"api_key_ref\": {\"path\": \"\", \"key\": \"\"}"
@@ -1967,7 +2377,7 @@ function _createMdxContent(props) {
         children: "Removing the entire\nhealthcheck block is unsupported"
       }), ": omission, null, an empty object or an empty\npath does not delete it."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
-      children: "Catalog POST/PUT outcomes:"
+      children: "Catalog POST/PUT/DELETE outcomes:"
     }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
       children: [(0,jsx_runtime.jsx)(_components.thead, {
         children: (0,jsx_runtime.jsxs)(_components.tr, {
@@ -1985,6 +2395,16 @@ function _createMdxContent(props) {
             })
           }), (0,jsx_runtime.jsx)(_components.td, {
             children: "Validation rejected the edit; correct the input."
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsxs)(_components.td, {
+            children: [(0,jsx_runtime.jsx)(_components.code, {
+              children: "400"
+            }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+              children: "catalog dependency conflict; retarget or remove dependent aliases and providers first"
+            })]
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "The saved dependency graph would become invalid; retarget/delete referencers first. No rows changed and no activation was requested."
           })]
         }), (0,jsx_runtime.jsxs)(_components.tr, {
           children: [(0,jsx_runtime.jsx)(_components.td, {
@@ -2030,16 +2450,30 @@ function _createMdxContent(props) {
               children: "201"
             }), " (POST), ", (0,jsx_runtime.jsx)(_components.code, {
               children: "200"
-            }), " (PUT)"]
+            }), " (PUT/DELETE)"]
           }), (0,jsx_runtime.jsx)(_components.td, {
-            children: "Saved, activation requested successfully, and the response view is available."
+            children: "Saved, activation requested successfully, and any response view is available."
           })]
         })]
       })]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["After each valid commit, activation is requested once before response-view reads.\nOperational failure responses omit storage and credential details. Persistence and\nruntime activation are separate: later reloads can activate a complete saved edit\nafter an activation failure. The concurrency check protects the edited aggregate,\nnot an atomic snapshot of every catalog dependency or another proxy's runtime.\nSuccessful provider POST/PUT and credential PUT responses carry\n", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["After each valid commit, activation is requested once before response-view reads.\nOperational failure responses omit storage and credential details. Persistence and\nruntime activation are separate: later reloads can activate a complete saved edit\nafter an activation failure. Aggregate revision checks reject stale edits; the\nworkspace database lock also serializes graph-affecting provider/model/alias and\nCopilot aggregate writes. Dependency validation uses current saved definitions and\neffective static System bases, never stale managed runtime inventory.\nSuccessful provider POST/PUT/DELETE and credential PUT responses carry\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "X-Aiproxy-Catalog-Saved: true"
       }), " once the database commit is durable, including\nwhen activation itself fails."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "managed-catalog-dependency-edits",
+      children: "Managed Catalog Dependency Edits"
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Provider deletion, disabling, model removal, concrete/derived transitions and\ntype/capability/protocol changes cannot invalidate an alias or derivative.\nEvery alias target must remain defined and enabled in the alias's destination\nworkspace, with at least one capability shared by all targets. Derivatives must\nretain an enabled, concrete, same-type base; disabled derivatives still require\nthat base and inherited models named by local policy overlays. Aliases targeting\ninherited models are checked when their base changes."
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Retarget or delete referencers before removing the referenced provider/model.\nThere is no force-delete/cascade or automatic retargeting. Dependency errors are\ngeneric and reveal no dependent names or counts. Rejection preserves all aggregate\nrows, revisions and credentials, requests no activation, has no saved header, and\ndoes not consume a ready Copilot device flow."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Only affected dependencies are validated during a save. Unrelated corrupted rows\nremain repairable; they can still cause full runtime activation to fail ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "after a\nvalid commit"
+      }), ", which retains the saved-but-activation-failed contract above.\nStatic file edits and direct SQL are not covered by managed-write serialization.\nThis does not acknowledge activation on any other instance. See\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#managed-catalog-dependencies-and-cleanup",
+        children: "cleanup and upgrade guidance"
+      }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "encrypted-reasoning-policy-intent",
       children: "Encrypted Reasoning Policy Intent"
@@ -2405,18 +2839,31 @@ function _createMdxContent(props) {
         children: "https://github.com/login/oauth/access_token"
       }), "), fixed ", (0,jsx_runtime.jsx)(_components.code, {
         children: "read:user"
-      }), " scope, and the\nfixed device-verification page, then stores the result as an encrypted database\ncredential. Saving the provider consumes the ready authorization exactly once and\nactivates it through the normal catalog reload path. The CLI sidecar login remains\navailable as an alternative."]
+      }), " scope, and the\nfixed device-verification page, then stores the result as an encrypted database\ncredential. Saving the provider consumes the ready authorization exactly once and\nactivates it through the normal catalog reload path. The CLI sidecar login remains\navailable for trusted System/HCL workflows, not tenant-managed providers."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
       children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "POST /_internal/admin/copilot-device-flows"
         }), " starts a flow with\n", (0,jsx_runtime.jsx)(_components.code, {
           children: "{client_id, workspace_id?, provider_name?}"
-        }), ". The workspace is resolved with the\nnormal provider write-workspace policy; ", (0,jsx_runtime.jsx)(_components.code, {
+        }), ". With ", (0,jsx_runtime.jsx)(_components.code, {
           children: "provider_name"
-        }), " pins an edit target and must\nbelong to the same workspace. Responses are ", (0,jsx_runtime.jsx)(_components.code, {
+        }), ", the\n", (0,jsx_runtime.jsx)(_components.a, {
+          href: "#direct-catalog-writes",
+          children: "direct catalog write rules"
+        }), " check visibility, every\nsupplied workspace selector, and write authority before loading the full\nprovider or checking its type and policy. Missing, hidden, and selector-mismatched\nnames return the same ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "404"
+        }), " (", (0,jsx_runtime.jsx)(_components.code, {
+          children: "provider not found"
+        }), "). Visible HCL providers cannot\nbe edited here. A visible tenant provider requires workspace admin authority;\nan explicit non-global System member cannot start a flow for a System DB\nprovider (", (0,jsx_runtime.jsx)(_components.code, {
+          children: "404"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "workspace not found"
+        }), "). A provider-bound tenant edit must\nalso pass effective provider policy. These checks run before saving a flow,\nrecording its start for throttling, or contacting the issuer. Standalone\nauthorization (without ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "provider_name"
+        }), ") keeps the normal provider write-workspace\nselection and uses the same fixed issuer. Provider destination approval is\nchecked before its credential can be saved. Successful starts return ", (0,jsx_runtime.jsx)(_components.code, {
           children: "201"
-        }), " flow-status bodies."]
+        }), "\nflow-status bodies."]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "GET /_internal/admin/copilot-device-flows/{id}"
@@ -2424,7 +2871,7 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "POST /_internal/admin/copilot-device-flows/{id}/poll"
-        }), " performs at most one\nupstream token request when the stored schedule and lease permit; early or\ncompeting calls return the pending status and delay with no extra upstream call."]
+        }), " performs at most one\nupstream token request when the stored schedule and lease permit; early or\ncompeting calls return the pending status and delay with no extra upstream call.\nProvider-bound tenant policy is checked before claiming/decrypting the flow."]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "DELETE /_internal/admin/copilot-device-flows/{id}"
@@ -2487,7 +2934,7 @@ function _createMdxContent(props) {
         children: "updated_at"
       }), "). A stale revision returns ", (0,jsx_runtime.jsx)(_components.code, {
         children: "409"
-      }), " and preserves the ready flow for\nan explicit reread and retry. Provider views expose\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), " and preserves the ready flow for\nan explicit reread and retry. The ready flow's workspace and create/edit provider\nbinding are checked before decrypting its credential; an approved tenant\ndestination cannot consume a System or foreign-workspace flow, even if a global\nauthor initiated it. Provider views expose\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "copilot_credential_source"
       }), " (", (0,jsx_runtime.jsx)(_components.code, {
         children: "database"
@@ -2503,7 +2950,7 @@ function _createMdxContent(props) {
         children: "supports_device_authorization"
       }), " for ", (0,jsx_runtime.jsx)(_components.code, {
         children: "github-copilot"
-      }), ". The legacy credential\nendpoint switches sources the same way (a nonempty sidecar reference clears the\ndatabase ciphertext) but never consumes flows. ", (0,jsx_runtime.jsx)(_components.strong, {
+      }), ". The legacy credential\nendpoint switches sources in System the same way (a nonempty sidecar reference clears the\ndatabase ciphertext) but never consumes flows. ", (0,jsx_runtime.jsx)(_components.strong, {
         children: "Hermetically verified; live\nGitHub compatibility unverified."
       })]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {

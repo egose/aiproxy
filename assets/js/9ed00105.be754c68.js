@@ -62,6 +62,10 @@ const toc = [{
   "id": "providers",
   "level": 2
 }, {
+  "value": "Tenant-Managed Upstreams",
+  "id": "tenant-managed-upstreams",
+  "level": 3
+}, {
   "value": "Forwarding Client Authorization",
   "id": "forwarding-client-authorization",
   "level": 3
@@ -480,13 +484,23 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.code, {
         children: "none"
-      }), " is only appropriate for trusted environments."]
+      }), " allows anonymous inference only when multi-tenancy is disabled. With\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "multi_tenancy"
+      }), " enabled it is a management-only choice: model discovery,\ninference, billing usage, and deferred controls require workspace-scoped bearer\nauthentication and return ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "401"
+      }), " in ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "none"
+      }), " mode. Browser sign-in uses separate\nsession credentials."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: [(0,jsx_runtime.jsx)(_components.code, {
+      children: ["Use ", (0,jsx_runtime.jsx)(_components.code, {
         children: "bearer_static"
-      }), " validates client bearer tokens against statically configured ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " to serve inference with multi-tenancy enabled. It validates\nbearer tokens from statically configured ", (0,jsx_runtime.jsx)(_components.code, {
         children: "client"
-      }), " blocks. Each client may also define:"]
+      }), " blocks and, with multi-tenancy,\ndatabase-issued keys. File-managed providers, models, and aliases belong to\n", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "System"
+      }), "; an HCL client can use only System's catalog. A database key can use\nonly its owning workspace, even if a system administrator issued it."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Each static client may also define:"
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
       children: ["\n", (0,jsx_runtime.jsx)(_components.li, {
         children: (0,jsx_runtime.jsx)(_components.code, {
@@ -505,16 +519,22 @@ function _createMdxContent(props) {
       children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["In ", (0,jsx_runtime.jsx)(_components.code, {
           children: "bearer_static"
-        }), " mode, it is keyed per authenticated client"]
+        }), " mode, each configured client and each database key gets its\nown bucket, even if they have the same name. A database key's bucket follows\nits UUID across token rotation when rate settings remain unchanged. A deleted\nkey's replacement gets a new bucket."]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["In ", (0,jsx_runtime.jsx)(_components.code, {
           children: "none"
-        }), " mode, it applies to a shared anonymous bucket"]
+        }), " mode, all requests share the anonymous bucket."]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Use ", (0,jsx_runtime.jsx)(_components.code, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
         children: "allowed_models"
-      }), " when you want a static allow-list at the proxy boundary rather than relying only on application-level policy."]
+      }), " narrows access to public names (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "<provider>/<model>"
+      }), " or\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "alias/<name>"
+      }), "). Omit it or use ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "[]"
+      }), " for all models and aliases available in\nthe credential's own workspace. An alias can be allowed without granting its\ntarget names separately, but every target must still be available in the same\nworkspace, as must a derived provider's base. An invalid cross-workspace pool\nis unavailable as a whole, not a partially usable fallback route. Without\nmulti-tenancy, the allowlist applies to the file-only catalog as before."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "providers",
       children: "Providers"
@@ -666,6 +686,93 @@ function _createMdxContent(props) {
         children: "api_key_ref"
       }), ", including on a disabled provider."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "tenant-managed-upstreams",
+      children: "Tenant-Managed Upstreams"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["For invite-only onboarding, explicitly set ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allow_public_registration = false"
+      }), "\ninside ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "multi_tenancy"
+      }), ". A bare HCL ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "multi_tenancy {}"
+      }), " enables tenancy and defaults public\npassword registration to ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "true"
+      }), "; the configure wizard defaults it to ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "false"
+      }), "\nfor new setups and preserves existing choices. Neither setting enables OIDC\njust-in-time provisioning: SSO signs in existing accounts only, including users\nwho redeem an invitation first. With registration closed, recipients can still\npaste a separately delivered one-time code on the clean ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/invite"
+      }), " page.\nSee ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/api-reference#invitation-onboarding",
+        children: "invitation and SSO admission"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Enabling tenancy does not configure a funded workspace budget or assign a payer.\nDatabase serving changes reconcile across replicas with a fixed 30-second\nfreshness admission deadline; there is no configurable stale-serving bypass.\nSee ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#bounded-replica-convergence",
+        children: "bounded replica convergence"
+      }), "\nfor independent key revocation, readiness and file-rollout limitations.\nDatabase user/team quotas are owner-scoped completion-based admission thresholds,\nnot hard spending limits; ownerless keys and static/HCL traffic have no such\nquota scope. See the ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#spending-contract-owner-quotas-not-funded-workspace-caps",
+        children: "spending contract"
+      }), "\nbefore offering usage limits."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["With multi-tenancy enabled, ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "non-System database providers are denied outbound\naccess by default"
+      }), ". The operator approves exact public HTTPS origins in the\nHCL or JSON config, never through a provider API or tenant portal field:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        metastring: "title=\"tenant-upstream-policy.hcl\"",
+        children: "listener \"http\" \"public\" { address = \"127.0.0.1:8080\" }\nauth \"main\" {\n  mode = \"bearer_static\"\n  client \"operator\" { token = env(\"AIPROXY_OPERATOR_TOKEN\") }\n}\ndatabase { url = env(\"AIPROXY_DATABASE_URL\") }\nmulti_tenancy {\n  allow_public_registration = false\n  allowed_upstream_origins = [\n    \"https://api.openai.com\",\n    \"https://api.githubcopilot.com\",\n    \"https://probe.example.com:8443\",\n  ]\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The equivalent JSON config uses the same attribute and the usual bare ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env()"
+      }), "\nvalues:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-json",
+        metastring: "title=\"tenant-upstream-policy.json\"",
+        children: "{\n  \"listener\": { \"http\": { \"public\": { \"address\": \"127.0.0.1:8080\" } } },\n  \"auth\": {\n    \"main\": {\n      \"mode\": \"bearer_static\",\n      \"client\": { \"operator\": { \"token\": env(\"AIPROXY_OPERATOR_TOKEN\") } }\n    }\n  },\n  \"database\": { \"url\": env(\"AIPROXY_DATABASE_URL\") },\n  \"multi_tenancy\": {\n    \"allow_public_registration\": false,\n    \"allowed_upstream_origins\": [\n      \"https://api.openai.com\",\n      \"https://api.githubcopilot.com\",\n      \"https://probe.example.com:8443\"\n    ]\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Omission or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "[]"
+      }), " approves nothing. At most ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "128"
+      }), " unique origins are accepted.\nAn entry contains only ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "https://hostname[:port]"
+      }), ": no wildcard, path (even ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/"
+      }), "),\nuserinfo, query or fragment. Hostnames are ASCII fully qualified names without a\ntrailing dot; local/internal names and non-public IP literals are rejected.\nMatching uses the exact scheme, case-insensitive hostname and numeric port;\nomitted HTTPS port and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ":443"
+      }), " are equivalent. A parent domain does not approve\nsubdomains, and another port requires its own entry."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The effective upstream URL, including provider-type defaults and inherited\nsettings, must match an approval. Relative health paths use that upstream\norigin; an absolute health URL needs its own exact approval. This policy applies\nto the ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "destination workspace"
+      }), ", including edits authored by global\nadministrators, disabled rows, credential-only updates and startup/reload of\nexisting rows. It does not grant System or foreign provider/model/alias access,\ninheritance, or credential rights."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Tenant providers may use their own write-only, encrypted database API keys,\ntheir own encrypted Copilot device-flow database credentials, or supported\nkeyless Zen access. Nonempty host ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "api_key_ref"
+      }), " and sidecar ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "credential_ref"
+      }), "\nreferences, ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "forward_authorization = true"
+      }), " and\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allow_insecure_base_url = true"
+      }), " are reserved for System. Approval does not\noverride those restrictions. The portal hides these controls in tenant\nworkspaces; the server enforces them independently."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Every new restricted connection resolves DNS, rejects the ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "entire"
+      }), " answer set\nif any address is non-public, then dials only the validated numeric IPs while\nretaining the original TLS hostname/SNI and certificate verification. Loopback,\nprivate, link-local, metadata, multicast, documentation/reserved and transition\naddresses are rejected, including mapped IPv4 and IPv6 answers. DNS lookup and\nTCP attempts share a 30-second budget and at most 64 answers are accepted.\nEnvironment HTTP/HTTPS/SOCKS proxies are not used for tenant upstreams. Native\nand built-in TLS profiles use this same restriction. Existing same-origin\nredirects remain supported; even a separately approved origin cannot be reached\nby a cross-origin redirect."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "LoadFile"
+      }), ", operator inline config and HCL/JSON conversion use the same approval\nvalidation. Conversion preserves the attribute and resolves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env()"
+      }), " as usual;\nnone of these operations proves DNS reachability or sends a probe. Runtime IP\nenforcement is not a validation-time DNS check. System-managed providers, HCL\nproviders and file-only operation retain their trusted transport/credential\nbehavior. See ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#tenant-provider-policy-upgrade",
+        children: "upgrade and preflight"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "forwarding-client-authorization",
       children: "Forwarding Client Authorization"
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
@@ -724,7 +831,9 @@ function _createMdxContent(props) {
         children: "aiproxy configure provider --non-interactive ... --forward-authorization"
       }), " and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "--forward-authorization=false"
-      }), ". Administrative\nprovider POST/PUT also accepts ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ". Administrative\nprovider POST/PUT in the ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "System workspace"
+      }), " also accepts ", (0,jsx_runtime.jsx)(_components.code, {
         children: "forward_authorization"
       }), "; existing credentials\nmust be explicitly cleared when switching modes. Existing databases require\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "aiproxy migrate up"
@@ -756,9 +865,9 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.strong, {
         children: "Credentials and payloads travel unencrypted."
-      }), " Only enable this for networks\nwhere cleartext HTTP is acceptable. ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " Only enable this for networks\nwhere cleartext HTTP is acceptable. For trusted System/HCL providers, ", (0,jsx_runtime.jsx)(_components.code, {
         children: "https"
-      }), " base URLs are always allowed and\nthe flag has no effect on them; non-http(s) schemes, userinfo, and\nnon-absolute URLs remain rejected. Derived providers cannot declare the\nattribute — it is inherited from the base provider together with the base URL.\nThe admin API rejects explicit ", (0,jsx_runtime.jsx)(_components.code, {
+      }), "\nbase URLs are always allowed and\nthe flag has no effect on them; non-http(s) schemes, userinfo, and\nnon-absolute URLs remain rejected. Derived providers cannot declare the\nattribute — it is inherited from the base provider together with the base URL.\nThe admin API rejects explicit ", (0,jsx_runtime.jsx)(_components.code, {
         children: "true"
       }), " and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "false"
@@ -768,7 +877,9 @@ function _createMdxContent(props) {
         children: "aiproxy configure provider --non-interactive ... --allow-insecure-base-url"
       }), " (and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "--allow-insecure-base-url=false"
-      }), "), with a\nplain-HTTP confirmation prompt in interactive flows. Administrative provider\nPOST/PUT also accepts ", (0,jsx_runtime.jsx)(_components.code, {
+      }), "), with a\nplain-HTTP confirmation prompt in interactive flows. Administrative provider\nPOST/PUT in the ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "System workspace"
+      }), " also accepts ", (0,jsx_runtime.jsx)(_components.code, {
         children: "allow_insecure_base_url"
       }), ", and existing databases require\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "aiproxy migrate up"
@@ -985,6 +1096,13 @@ function _createMdxContent(props) {
       }), " declarations are rejected instead of ignored, including explicit TLS defaults. Local ", (0,jsx_runtime.jsx)(_components.code, {
         children: "model"
       }), " declarations are rejected except for existing-name policy overlays described below."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["With multi-tenancy enabled, these HCL providers and their models belong only to\nSystem. Database-managed inheritance requires a base in the derived provider's\nown workspace, even when a global administrator authors the row or the\nderivative is disabled. Tenant providers cannot inherit System provider/model\ninventory or another tenant's inventory. Alias targets, including shorthand, have the same\nworkspace restriction. Provider and alias names remain globally unique:\nstartup/reload rejects a static/managed name collision, including disabled\nproviders, instead of replacing or reassigning a resource. File-only operation\nis unchanged. Existing deployments should run\n", (0,jsx_runtime.jsxs)(_components.a, {
+        href: "/docs/operations#workspace-isolation-upgrade-and-recovery",
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "validate --check-db"
+        }), " before upgrading"]
+      }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Derived providers are flattened during config loading and reload. After a successful load, direct model strings, health, metrics, billing, and dashboard inventory use the derived provider's own name. Aliases still list each provider target explicitly."
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
@@ -2815,9 +2933,9 @@ function _createMdxContent(props) {
         children: "/_internal/dashboard/*"
       }), " APIs. When ", (0,jsx_runtime.jsx)(_components.code, {
         children: "multi_tenancy"
-      }), " is disabled, paste the\ndashboard token on the UI's Token page; when it is enabled, signing in with\nuser credentials is enough and no dashboard token is required. Toggling\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), " is disabled, paste the\ndashboard token on the UI's Token page. When it is enabled, the browser uses\nthe signed-in system administrator's session and ignores any saved dashboard\ntoken. The TUI still uses its dashboard token in either mode. Toggling ", (0,jsx_runtime.jsx)(_components.code, {
         children: "web_ui"
-      }), " applies on ", (0,jsx_runtime.jsx)(_components.code, {
+      }), "\napplies on ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
       }), " without restart."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
