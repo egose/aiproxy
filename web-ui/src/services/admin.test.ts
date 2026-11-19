@@ -38,9 +38,15 @@ import {
   pollCopilotDeviceFlow,
   startCopilotDeviceFlow,
 } from './admin';
+import { authLifecycle } from '../auth-lifecycle';
+import { setAdminSession, setAdminWorkspaceId } from '../store';
+
+const context = () => ({ workspaceId: 'ws-1', generation: authLifecycle.generation, session: authLifecycle.session });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  setAdminSession('service-fixture', '');
+  setAdminWorkspaceId('ws-1');
 });
 
 describe('admin service envelopes', () => {
@@ -54,14 +60,14 @@ describe('admin service envelopes', () => {
       throw new Error(`unexpected GET ${url}`);
     });
 
-    const providers = await fetchAdminProviders();
+    const providers = await fetchAdminProviders(context());
     expect(Array.isArray(providers)).toBe(true);
     expect(providers).toHaveLength(1);
 
-    const aliases = await fetchAdminAliases();
+    const aliases = await fetchAdminAliases(context());
     expect(Array.isArray(aliases)).toBe(true);
 
-    const keys = await fetchAdminKeys();
+    const keys = await fetchAdminKeys(context());
     expect(Array.isArray(keys)).toBe(true);
 
     const users = await fetchAdminUsers();
@@ -77,9 +83,9 @@ describe('admin service envelopes', () => {
       throw new Error(`unexpected POST ${url}`);
     });
 
-    expect(await createAdminProvider({ name: 'p' })).toMatchObject({ name: 'p' });
-    expect(await createAdminAlias({ name: 'a' })).toMatchObject({ name: 'a' });
-    const created = await createAdminKey({ name: 'k' });
+    expect(await createAdminProvider({ name: 'p' }, context())).toMatchObject({ name: 'p' });
+    expect(await createAdminAlias({ name: 'a' }, context())).toMatchObject({ name: 'a' });
+    const created = await createAdminKey({ name: 'k' }, context());
     expect(created.key).toMatchObject({ name: 'k' });
     expect(created.token).toBe('sekret');
     expect(await createAdminUser({ email: 'a@b.c' })).toMatchObject({ email: 'a@b.c' });
@@ -104,14 +110,14 @@ describe('admin service envelopes', () => {
     });
     mocks.get.mockResolvedValue({ data: pending });
     mocks.delete.mockResolvedValue({ data: { ...pending, status: 'cancelled' } });
-    const started = await startCopilotDeviceFlow({ client_id: 'Iv1.test' });
+    const started = await startCopilotDeviceFlow({ client_id: 'Iv1.test' }, context());
     expect(started.user_code).toBe('ABCD-1234');
     expect(started).not.toHaveProperty('device_code');
     expect(started).not.toHaveProperty('access_token');
     expect(JSON.stringify(started)).not.toContain('token');
-    const polled = await pollCopilotDeviceFlow('flow-1');
+    const polled = await pollCopilotDeviceFlow('flow-1', context());
     expect(polled.status).toBe('ready');
-    expect(await fetchCopilotDeviceFlow('flow-1')).toMatchObject({ id: 'flow-1' });
-    expect(await cancelCopilotDeviceFlow('flow-1')).toMatchObject({ status: 'cancelled' });
+    expect(await fetchCopilotDeviceFlow('flow-1', context())).toMatchObject({ id: 'flow-1' });
+    expect(await cancelCopilotDeviceFlow('flow-1', context())).toMatchObject({ status: 'cancelled' });
   });
 });

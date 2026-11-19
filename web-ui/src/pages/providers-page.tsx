@@ -31,16 +31,17 @@ import { useConfirm } from '../components/dialogs';
 import { SourceBadge } from '../components/source-badge';
 import { EncryptedReasoningControl, ReasoningPolicyReadOnly } from '../components/encrypted-reasoning-control';
 import { WorkspaceBadge } from '../components/workspace-select';
+import { WorkspaceAccessNotice } from '../components/workspace-access';
 import {
   useAdminWorkspace,
   useAdminProviders,
   useAdminSession,
   useAdminStatus,
+  useCurrentWorkspace,
   useProviderTypes,
   useSnapshot,
 } from '../hooks';
 import { authLifecycle } from '../auth-lifecycle';
-import { adminWorkspaceStore } from '../store';
 import {
   cancelCopilotDeviceFlow,
   createAdminProvider,
@@ -56,6 +57,12 @@ import { errorMessage } from '../services/dashboard';
 import { builtinTLSClientHelloSelectors, copilotDeviceFlowStatusSchema } from '../types';
 import type { AdminModel, AdminProvider, CopilotDeviceFlowStatus, Provider, ProviderTypeInfo } from '../types';
 import { reasoningDeclaration, reasoningDraft, reasoningDraftSchema } from '../lib/encrypted-reasoning-form';
+import {
+  assertWorkspaceContext,
+  resourceInWorkspace,
+  systemWorkspaceId,
+  type WorkspaceContext,
+} from '../workspace-selection';
 
 type SnapshotSortKey = 'name' | 'type' | 'models' | 'display';
 type SnapshotSort = { key: SnapshotSortKey; desc: boolean } | null;
@@ -360,7 +367,13 @@ function buildProviderBody(
   v: ProviderFormValues,
   credentialKind: string,
   initial?: ProviderFormValues,
-  device?: { flowId?: string; expectedUpdatedAt?: string; suppressCopilotRef?: boolean; workspaceId?: string },
+  device?: {
+    flowId?: string;
+    expectedUpdatedAt?: string;
+    suppressCopilotRef?: boolean;
+    workspaceId?: string;
+    tenantWorkspace?: boolean;
+  },
 ): Record<string, unknown> {
   const changed = (...fields: Array<keyof ProviderFormValues>) =>
     !initial || fields.some((field) => JSON.stringify(v[field]) !== JSON.stringify(initial[field]));
@@ -374,7 +387,9 @@ function buildProviderBody(
   set('display_name', 'displayName', (v.displayName ?? '').trim(), !!v.displayName?.trim());
   set('enabled', 'enabled', !!v.enabled, !v.enabled);
   set('extends', 'extendsName', (v.extendsName ?? '').trim(), inherited);
-  set('forward_authorization', 'forwardAuthorization', !!v.forwardAuthorization, !!v.forwardAuthorization);
+  if (!device?.tenantWorkspace) {
+    set('forward_authorization', 'forwardAuthorization', !!v.forwardAuthorization, !!v.forwardAuthorization);
+  }
   if (changed('reasoning')) {
     const local = reasoningDeclaration(v.reasoning);
     if (initial || local !== null) body.encrypted_reasoning = local;
@@ -392,7 +407,9 @@ function buildProviderBody(
     set('base_url', 'baseUrl', (v.baseUrl ?? '').trim(), !!v.baseUrl?.trim());
     set('tls_client_hello', 'tlsClientHello', v.tlsClientHello ?? 'native', v.tlsClientHello !== 'native');
     if (initial?.extendsName?.trim()) body.tls_client_hello = v.tlsClientHello ?? 'native';
-    set('allow_insecure_base_url', 'allowInsecureBaseUrl', !!v.allowInsecureBaseUrl, !!v.allowInsecureBaseUrl);
+    if (!device?.tenantWorkspace) {
+      set('allow_insecure_base_url', 'allowInsecureBaseUrl', !!v.allowInsecureBaseUrl, !!v.allowInsecureBaseUrl);
+    }
     set('upstream_header_timeout', 'timeout', (v.timeout ?? '').trim(), !!v.timeout?.trim());
     set('user_agent', 'userAgent', v.userAgent ?? '', !!v.userAgent);
     set('forward_user_agent', 'forwardUserAgent', !!v.forwardUserAgent, !!v.forwardUserAgent);
@@ -402,7 +419,7 @@ function buildProviderBody(
       .filter(Boolean);
     set('forward_headers', 'forwardHeaders', headers, headers.length > 0);
   }
-  if (v.forwardAuthorization) {
+  if (v.forwardAuthorization && !device?.tenantWorkspace) {
     if (initial && changed('forwardAuthorization')) {
       body.api_key = '';
       body.api_key_ref = { path: '', key: '' };
@@ -410,12 +427,12 @@ function buildProviderBody(
   } else if (credentialKind === 'credential_ref') {
     if (device?.flowId) {
       body.copilot_device_flow_id = device.flowId;
-    } else if (!device?.suppressCopilotRef && changed('credentialPath', 'credentialName')) {
+    } else if (!device?.tenantWorkspace && !device?.suppressCopilotRef && changed('credentialPath', 'credentialName')) {
       body.credential_ref = { path: (v.credentialPath ?? '').trim(), name: (v.credentialName ?? '').trim() };
     }
   } else {
     if ((v.apiKey ?? '') !== '') body.api_key = v.apiKey;
-    if (changed('apiKeyRefPath', 'apiKeyRefKey') && (initial || v.apiKeyRefKey?.trim())) {
+    if (!device?.tenantWorkspace && changed('apiKeyRefPath', 'apiKeyRefKey') && (initial || v.apiKeyRefKey?.trim())) {
       body.api_key_ref = { path: (v.apiKeyRefPath ?? '').trim(), key: (v.apiKeyRefKey ?? '').trim() };
     }
   }
@@ -480,6 +497,7 @@ function ProviderForm({
   lockName,
   providerTypeInfos,
   inventory,
+  workspaceContext,
 }: {
   initial: ProviderFormValues;
   editProvider?: AdminProvider;
@@ -489,25 +507,31 @@ function ProviderForm({
   lockName: boolean;
   providerTypeInfos: ProviderTypeInfo[] | undefined;
   inventory: AdminProvider[];
+  workspaceContext: WorkspaceContext;
 }) {
   const form = useForm<ProviderFormValues>({ resolver: zodResolver(providerFormSchema), defaultValues: initial });
   const { fields, append, remove, replace } = useFieldArray({ control: form.control, name: 'models' });
   const queryClient = useQueryClient();
   const selectedType = form.watch('type');
-  const supportsForwardAuthorization = [
-    'openai',
-    'openai-compatible',
-    'opencode-zen',
-    'opencode-go',
-    'zenmux',
-    'openrouter',
-  ].includes(selectedType);
+  const tenantWorkspace = workspaceContext.workspaceId !== systemWorkspaceId;
+  const supportsForwardAuthorization =
+    !tenantWorkspace &&
+    ['openai', 'openai-compatible', 'opencode-zen', 'opencode-go', 'zenmux', 'openrouter'].includes(selectedType);
   useEffect(() => {
     if (!supportsForwardAuthorization) form.setValue('forwardAuthorization', false);
   }, [form, supportsForwardAuthorization]);
   const extendsName = form.watch('extendsName')?.trim() ?? '';
   const inherited = !!extendsName;
-  const selectedBase = inventory.find(
+  const baseInventory = inventory.filter(
+    (p) =>
+      resourceInWorkspace(p, workspaceContext.workspaceId) &&
+      !p.extends &&
+      p.enabled &&
+      (!lockName || p.name !== initial.name) &&
+      p.type === selectedType &&
+      !p.tls_client_hello_static_only,
+  );
+  const selectedBase = baseInventory.find(
     (p) => p.name === extendsName && !p.extends && p.enabled && p.type === selectedType,
   );
   const sameModelScope =
@@ -549,6 +573,10 @@ function ProviderForm({
 
   const { workspaceId: ambientWorkspaceId } = useAdminWorkspace();
   const authSnap = useValtioSnapshot(authLifecycle);
+  const contextChanged =
+    workspaceContext.generation !== authSnap.generation ||
+    workspaceContext.session !== authSnap.session ||
+    workspaceContext.workspaceId !== ambientWorkspaceId;
   const [copilotSource, setCopilotSource] = useState<'device' | 'sidecar' | 'keep'>(lockName ? 'keep' : 'device');
   const [copilotClientId, setCopilotClientId] = useState('');
   const [copilotFlow, setCopilotFlow] = useState<CopilotDeviceFlowStatus | null>(null);
@@ -591,7 +619,7 @@ function ProviderForm({
   const bestEffortCancel = (flowId: string | null | undefined, generation: number | null) => {
     if (!flowId) return;
     if (generation !== null && generation !== authLifecycle.generation) return;
-    void cancelCopilotDeviceFlow(flowId).catch(() => undefined);
+    void cancelCopilotDeviceFlow(flowId, workspaceContext).catch(() => undefined);
   };
 
   useEffect(() => {
@@ -618,7 +646,7 @@ function ProviderForm({
     abortRef.current = controller;
     void (async () => {
       try {
-        const status = await pollCopilotDeviceFlow(flowId, { signal: controller.signal });
+        const status = await pollCopilotDeviceFlow(flowId, workspaceContext, { signal: controller.signal });
         installFlowStatus(attempt, generation, status);
       } catch (err) {
         if (axios.isCancel(err)) return;
@@ -708,7 +736,7 @@ function ProviderForm({
     }
     const generation = authLifecycle.generation;
     const session = authLifecycle.session;
-    const pinnedWorkspace = ambientWorkspaceId ?? adminWorkspaceStore.workspaceId ?? '';
+    const pinnedWorkspace = workspaceContext.workspaceId;
     const providerName = lockName ? initial.name.trim() : '';
     const controller = new AbortController();
     abortRef.current = controller;
@@ -723,7 +751,7 @@ function ProviderForm({
     }
     void (async () => {
       try {
-        const status = await startCopilotDeviceFlow(body, { signal: controller.signal });
+        const status = await startCopilotDeviceFlow(body, workspaceContext, { signal: controller.signal });
         if (attempt !== attemptRef.current || generation !== authLifecycle.generation) return;
         setCopilotPinned({ workspaceId: status.workspace_id ?? pinnedWorkspace, providerName, generation, session });
         setCopilotFlow(status);
@@ -747,7 +775,7 @@ function ProviderForm({
     abortRef.current = controller;
     void (async () => {
       try {
-        const status = await cancelCopilotDeviceFlow(live.id, { signal: controller.signal });
+        const status = await cancelCopilotDeviceFlow(live.id, workspaceContext, { signal: controller.signal });
         installFlowStatus(attempt, generation, status);
       } catch (err) {
         if (axios.isCancel(err)) return;
@@ -797,6 +825,7 @@ function ProviderForm({
 
   const submitMutation = useMutation({
     mutationFn: async (values: ProviderFormValues) => {
+      assertWorkspaceContext(workspaceContext);
       const info = providerTypeInfos?.find((t) => t.type === values.type);
       const kind = info?.credential ?? 'api_key';
       const copilotDevice = kind === 'credential_ref' && values.type === 'github-copilot';
@@ -813,6 +842,7 @@ function ProviderForm({
         expectedUpdatedAt: lockName && revision ? revision : undefined,
         suppressCopilotRef,
         workspaceId: !lockName && flowId && copilotPinned?.workspaceId ? copilotPinned.workspaceId : undefined,
+        tenantWorkspace,
       });
       setSaveNote(null);
       setSaveConflict(false);
@@ -849,7 +879,7 @@ function ProviderForm({
   const rereadRevision = async () => {
     setSaveRecovery(null);
     try {
-      const providers = await fetchAdminProviders();
+      const providers = await fetchAdminProviders(workspaceContext);
       const current = providers.find((p) => p.name === initial.name.trim());
       if (current?.updated_at) {
         setRevision(current.updated_at);
@@ -870,12 +900,12 @@ function ProviderForm({
   const checkSavedState = async () => {
     setSaveRecovery(null);
     try {
-      const providers = await fetchAdminProviders();
+      const providers = await fetchAdminProviders(workspaceContext);
       const current = lockName ? providers.find((p) => p.name === initial.name.trim()) : undefined;
       let flowText = '';
       if (copilotFlow?.id) {
         try {
-          const status = await fetchCopilotDeviceFlow(copilotFlow.id);
+          const status = await fetchCopilotDeviceFlow(copilotFlow.id, workspaceContext);
           setCopilotFlow(status);
           if (status.status === 'consumed') flowText = ' Device authorization shows consumed (saved).';
           else if (status.status === 'ready') flowText = ' Device authorization is still ready; safe to retry.';
@@ -941,6 +971,22 @@ function ProviderForm({
   return (
     <FormProvider {...form}>
       <form className="grid gap-4" onSubmit={form.handleSubmit(submitValues)}>
+        {contextChanged && (
+          <Alert variant="danger">
+            <AlertDescription>
+              Workspace or account changed. Reopen this form in the selected workspace.
+            </AlertDescription>
+          </Alert>
+        )}
+        {tenantWorkspace && (
+          <Alert>
+            <AlertDescription>
+              Upstreams and healthchecks require exact operator-approved public HTTPS origins. Use your own encrypted
+              database API key or Connect GitHub credential. Host secret references, caller Authorization forwarding and
+              plain-HTTP exceptions are reserved for System, including when a global administrator edits a tenant.
+            </AlertDescription>
+          </Alert>
+        )}
         {submitMutation.error && (
           <Alert variant="danger">
             <AlertDescription>{errorMessage(submitMutation.error)}</AlertDescription>
@@ -996,10 +1042,17 @@ function ProviderForm({
 
         <HookFormTextInput<ProviderFormValues> name="displayName" label="Display name (optional)" />
 
-        <HookFormTextInput<ProviderFormValues>
+        <HookFormNativeSelect<ProviderFormValues>
           name="extendsName"
-          label="Extends (optional, static base provider of the same type)"
-          placeholder="base provider name"
+          label="Extends (optional, same-workspace base provider)"
+          data={[
+            { label: 'No inheritance', value: '' },
+            ...baseInventory.map((p) => ({ label: p.display_name || p.name, value: p.name })),
+            ...[...new Set([initial.extendsName?.trim(), extendsName])]
+              .filter((name): name is string => !!name && !baseInventory.some((p) => p.name === name))
+              .map((name) => ({ label: `${name} (saved base unavailable)`, value: name })),
+          ]}
+          disabled={contextChanged}
         />
 
         {inherited && (
@@ -1037,12 +1090,14 @@ function ProviderForm({
               here. This changes ClientHello only, not the full browser or Bun networking stack.
             </p>
 
-            <HookFormCheckbox<ProviderFormValues>
-              name="allowInsecureBaseUrl"
-              label="Allow plain-HTTP (non-HTTPS) base URL"
-            />
+            {!tenantWorkspace && (
+              <HookFormCheckbox<ProviderFormValues>
+                name="allowInsecureBaseUrl"
+                label="Allow plain-HTTP (non-HTTPS) base URL"
+              />
+            )}
 
-            {form.watch('allowInsecureBaseUrl') && (
+            {!tenantWorkspace && form.watch('allowInsecureBaseUrl') && (
               <p className="text-sm text-amber-600" role="note">
                 The upstream is contacted over cleartext HTTP; credentials and payloads are not encrypted in transit.
                 Only enable this for trusted in-cluster or otherwise protected networks.
@@ -1076,8 +1131,8 @@ function ProviderForm({
 
         {lockName && (
           <p className="text-sm text-slate-500">
-            Leave the API key blank to keep the stored secret. Unchanged credential references are preserved without
-            being resent.
+            Leave the API key blank to keep the stored secret.
+            {!tenantWorkspace && ' Unchanged credential references are preserved without being resent.'}
           </p>
         )}
 
@@ -1101,10 +1156,10 @@ function ProviderForm({
                 onChange={(e) => handleSourceChange(e.target.value as 'device' | 'sidecar' | 'keep')}
               >
                 {!lockName && <option value="device">Authorize with GitHub</option>}
-                {!lockName && <option value="sidecar">Existing CLI sidecar</option>}
+                {!lockName && !tenantWorkspace && <option value="sidecar">Existing CLI sidecar</option>}
                 {lockName && <option value="keep">Keep current credential</option>}
                 {lockName && <option value="device">Reauthorize with GitHub</option>}
-                {lockName && <option value="sidecar">Switch to CLI sidecar</option>}
+                {lockName && !tenantWorkspace && <option value="sidecar">Switch to CLI sidecar</option>}
               </select>
             </label>
 
@@ -1127,7 +1182,7 @@ function ProviderForm({
                     <Button
                       type="button"
                       variant="primary"
-                      disabled={copilotStarting || !copilotClientId.trim()}
+                      disabled={copilotStarting || !copilotClientId.trim() || contextChanged}
                       onClick={startDeviceFlow}
                     >
                       {copilotStarting ? 'Starting...' : 'Connect GitHub'}
@@ -1247,7 +1302,7 @@ function ProviderForm({
               </div>
             )}
 
-            {copilotSource === 'sidecar' && (
+            {!tenantWorkspace && copilotSource === 'sidecar' && (
               <>
                 <HookFormTextInput<ProviderFormValues>
                   name="credentialName"
@@ -1265,7 +1320,7 @@ function ProviderForm({
               </p>
             )}
           </div>
-        ) : credentialKind === 'credential_ref' ? (
+        ) : credentialKind === 'credential_ref' && !tenantWorkspace ? (
           <>
             <HookFormTextInput<ProviderFormValues>
               name="credentialName"
@@ -1301,13 +1356,20 @@ function ProviderForm({
                   placeholder="sk-..."
                 />
 
-                <HookFormTextInput<ProviderFormValues>
-                  name="apiKeyRefKey"
-                  label="API key reference key (alternative to API key)"
-                  placeholder="key name in the secrets file"
-                />
+                {!tenantWorkspace && (
+                  <>
+                    <HookFormTextInput<ProviderFormValues>
+                      name="apiKeyRefKey"
+                      label="API key reference key (alternative to API key)"
+                      placeholder="key name in the secrets file"
+                    />
 
-                <HookFormTextInput<ProviderFormValues> name="apiKeyRefPath" label="API key reference path (optional)" />
+                    <HookFormTextInput<ProviderFormValues>
+                      name="apiKeyRefPath"
+                      label="API key reference path (optional)"
+                    />
+                  </>
+                )}
               </>
             )}
           </>
@@ -1629,7 +1691,11 @@ function ProviderForm({
         )}
 
         <div className="flex gap-2">
-          <Button variant="primary" type="submit" disabled={submitMutation.isPending || deviceBlocksSave}>
+          <Button
+            variant="primary"
+            type="submit"
+            disabled={submitMutation.isPending || deviceBlocksSave || contextChanged}
+          >
             {submitMutation.isPending ? 'Saving...' : submitLabel}
           </Button>
 
@@ -1651,7 +1717,12 @@ function ProviderForm({
 }
 
 const EditProviderDialog = createTypedDialog<
-  { provider: AdminProvider; typeInfos: ProviderTypeInfo[] | undefined; inventory: AdminProvider[] },
+  {
+    provider: AdminProvider;
+    typeInfos: ProviderTypeInfo[] | undefined;
+    inventory: AdminProvider[];
+    workspaceContext: WorkspaceContext;
+  },
   boolean
 >(({ open, args, onClose }) => (
   <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
@@ -1668,8 +1739,9 @@ const EditProviderDialog = createTypedDialog<
         lockName
         providerTypeInfos={args.typeInfos}
         inventory={args.inventory}
+        workspaceContext={args.workspaceContext}
         onSubmit={async (body) => {
-          await updateAdminProvider(args.provider.name, body);
+          await updateAdminProvider(args.provider.name, body, args.workspaceContext);
           onClose(true);
         }}
         onCancel={() => onClose(false)}
@@ -1679,7 +1751,7 @@ const EditProviderDialog = createTypedDialog<
 ));
 
 const CreateProviderDialog = createTypedDialog<
-  { typeInfos: ProviderTypeInfo[] | undefined; inventory: AdminProvider[] },
+  { typeInfos: ProviderTypeInfo[] | undefined; inventory: AdminProvider[]; workspaceContext: WorkspaceContext },
   boolean
 >(({ open, args, onClose }) => (
   <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
@@ -1694,8 +1766,9 @@ const CreateProviderDialog = createTypedDialog<
         lockName={false}
         providerTypeInfos={args.typeInfos}
         inventory={args.inventory}
+        workspaceContext={args.workspaceContext}
         onSubmit={async (body) => {
-          await createAdminProvider(body);
+          await createAdminProvider(body, args.workspaceContext);
           onClose(true);
         }}
         onCancel={() => onClose(false)}
@@ -1753,6 +1826,7 @@ const RotateCredentialDialog = createTypedDialog<{ name?: string }, { name: stri
 );
 
 function ManagedProviders() {
+  const selection = useCurrentWorkspace();
   const providers = useAdminProviders(true);
   const providerTypes = useProviderTypes(true);
   const queryClient = useQueryClient();
@@ -1763,23 +1837,27 @@ function ManagedProviders() {
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin', 'providers'] });
 
   const deleteMutation = useMutation({
-    mutationFn: deleteAdminProvider,
+    mutationFn: ({ name, context }: { name: string; context: WorkspaceContext }) => deleteAdminProvider(name, context),
     onSuccess: refresh,
     onError: (err) => setError(errorMessage(err)),
   });
 
   const credentialMutation = useMutation({
-    mutationFn: async ({ name, api_key }: { name: string; api_key: string }) =>
-      setProviderCredential(name, { api_key }),
+    mutationFn: async ({ name, api_key, context }: { name: string; api_key: string; context: WorkspaceContext }) =>
+      setProviderCredential(name, { api_key }, context),
     onSuccess: refresh,
     onError: (err) => setError(errorMessage(err)),
   });
 
   const onCreate = async () => {
     try {
+      const context = selection.context;
+      assertWorkspaceContext(context);
+      if (!selection.canManage) return;
       const created = await openDialog(CreateProviderDialog, {
         typeInfos: providerTypes.data,
         inventory: providers.data ?? [],
+        workspaceContext: context,
       });
       if (created) {
         setError(null);
@@ -1792,10 +1870,14 @@ function ManagedProviders() {
 
   const openEdit = async (provider: AdminProvider) => {
     try {
+      const context = selection.context;
+      assertWorkspaceContext(context);
+      if (!selection.canManage || !resourceInWorkspace(provider, context.workspaceId)) return;
       const saved = await openDialog(EditProviderDialog, {
         provider,
         typeInfos: providerTypes.data,
         inventory: providers.data ?? [],
+        workspaceContext: context,
       });
       if (saved) {
         setError(null);
@@ -1807,6 +1889,8 @@ function ManagedProviders() {
   };
 
   const askDelete = async (name: string) => {
+    const context = selection.context;
+    if (!context || !selection.canManage) return;
     const ok = await confirm({
       title: 'Delete provider',
       description: `Delete provider "${name}"?`,
@@ -1814,7 +1898,7 @@ function ManagedProviders() {
     });
     if (ok) {
       setError(null);
-      deleteMutation.mutate(name);
+      deleteMutation.mutate({ name, context });
     }
   };
 
@@ -1825,18 +1909,23 @@ function ManagedProviders() {
       return;
     }
     try {
+      const context = selection.context;
+      assertWorkspaceContext(context);
+      if (!selection.canManage || !target || !resourceInWorkspace(target, context.workspaceId)) return;
       const name = typeof provider === 'string' ? provider : provider?.name;
       const values = await openDialog(RotateCredentialDialog, name ? { name } : {});
       if (values) {
         setError(null);
-        credentialMutation.mutate(values);
+        credentialMutation.mutate({ ...values, context });
       }
     } catch {
       return;
     }
   };
 
-  const rows = providers.data ?? [];
+  const rows = (providers.data ?? []).filter(
+    (p) => selection.context && resourceInWorkspace(p, selection.context.workspaceId),
+  );
   const busy = deleteMutation.isPending || credentialMutation.isPending;
 
   const columns: ManagementColumnDef<AdminProvider>[] = useMemo(
@@ -1916,7 +2005,7 @@ function ManagedProviders() {
         enableGlobalFilter: false,
         cell: ({ row }) => {
           const p = row.original;
-          return p.source === 'database' ? (
+          return p.source === 'database' && selection.canManage ? (
             <ActionMenu
               trigger={
                 <Button variant="secondary" appearance="outline-filled" size="sm" aria-label={`Actions for ${p.name}`}>
@@ -1938,8 +2027,17 @@ function ManagedProviders() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [busy, providerTypes.data],
+    [
+      busy,
+      providerTypes.data,
+      selection.canManage,
+      selection.context?.workspaceId,
+      selection.context?.generation,
+      providers.data,
+    ],
   );
+
+  if (!selection.context) return <WorkspaceAccessNotice pending={selection.pending} error={selection.error} />;
 
   return (
     <>
@@ -1953,7 +2051,12 @@ function ManagedProviders() {
         <CardHeader className="flex flex-row items-center justify-between gap-2">
           <CardTitle>Providers ({rows.length})</CardTitle>
 
-          <Button variant="primary" type="button" onClick={onCreate} disabled={!providerTypes.data}>
+          <Button
+            variant="primary"
+            type="button"
+            onClick={onCreate}
+            disabled={!selection.canManage || !providerTypes.data || !providers.isSuccess}
+          >
             Create provider
           </Button>
         </CardHeader>
@@ -1964,7 +2067,7 @@ function ManagedProviders() {
             data={rows}
             filterPlaceholder="Filter providers..."
             getRowId={(row) => row.name}
-            emptyText="No providers."
+            emptyText="No providers. Create a provider in this workspace to add models."
           />
 
           {providers.isLoading && (

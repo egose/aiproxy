@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/store"
 	"github.com/google/uuid"
 )
@@ -14,10 +15,31 @@ import (
 type Principal struct {
 	Name        string
 	Tenant      string
-	KeyID       uuid.UUID
-	WorkspaceID uuid.UUID
 	OwnerUserID uuid.UUID
 	OwnerTeamID uuid.UUID
+
+	credential identity.CredentialID
+	workspace  identity.WorkspaceScope
+}
+
+func (p *Principal) CredentialID() identity.CredentialID {
+	if p == nil {
+		return identity.CredentialID{}
+	}
+	return p.credential
+}
+
+func (p *Principal) WorkspaceScope() identity.WorkspaceScope {
+	if p == nil {
+		return identity.WorkspaceScope{}
+	}
+	return p.workspace
+}
+
+func (p *Principal) DatabaseKey() (keyID, workspaceID uuid.UUID, ok bool) {
+	keyID, isKey := p.CredentialID().DatabaseKeyID()
+	workspaceID, scoped := p.WorkspaceScope().ID()
+	return keyID, workspaceID, isKey && scoped
 }
 
 type DynamicClient struct {
@@ -27,9 +49,16 @@ type DynamicClient struct {
 	Tenant        string
 	AllowedModels []string
 	KeyID         uuid.UUID
-	WorkspaceID   uuid.UUID
+	Workspace     identity.WorkspaceScope
 	OwnerUserID   uuid.UUID
 	OwnerTeamID   uuid.UUID
+}
+
+func (c DynamicClient) credentialID() identity.CredentialID {
+	if _, scoped := c.Workspace.ID(); !scoped || c.TokenHash == "" {
+		return identity.CredentialID{}
+	}
+	return identity.DatabaseKeyID(c.KeyID)
 }
 
 type Authenticator interface {
@@ -49,10 +78,7 @@ func (f AuthorizerFunc) Allow(principal *Principal, model string) bool {
 type nopAuthenticator struct{}
 
 func NewAuthenticator(cfg config.Auth) Authenticator {
-	if cfg.Mode == config.AuthModeNone {
-		return nopAuthenticator{}
-	}
-	return &staticAuthenticator{tokens: staticTokens(cfg), hashed: nil}
+	return NewAuthenticatorWithClients(cfg, nil)
 }
 
 func NewAuthenticatorWithClients(cfg config.Auth, dyn []DynamicClient) Authenticator {
@@ -68,11 +94,15 @@ func NewAuthenticatorWithClientsAndClock(cfg config.Auth, dyn []DynamicClient, n
 	}
 	hashed := make(map[string]dynamicCredential, len(dyn))
 	for _, d := range dyn {
-		if d.TokenHash == "" {
+		id := d.credentialID()
+		if !id.Valid() {
 			continue
 		}
 		hashed[d.TokenHash] = dynamicCredential{
-			principal: Principal{Name: d.Name, Tenant: d.Tenant, KeyID: d.KeyID, WorkspaceID: d.WorkspaceID, OwnerUserID: d.OwnerUserID, OwnerTeamID: d.OwnerTeamID},
+			principal: Principal{
+				Name: d.Name, Tenant: d.Tenant, OwnerUserID: d.OwnerUserID, OwnerTeamID: d.OwnerTeamID,
+				credential: id, workspace: d.Workspace,
+			},
 			expiresAt: d.ExpiresAt,
 		}
 	}
@@ -82,48 +112,43 @@ func NewAuthenticatorWithClientsAndClock(cfg config.Auth, dyn []DynamicClient, n
 func staticTokens(cfg config.Auth) map[string]Principal {
 	tokens := make(map[string]Principal, len(cfg.Clients))
 	for name, c := range cfg.Clients {
-		tokens[c.Token] = Principal{Name: name, Tenant: c.Tenant}
+		tokens[c.Token] = Principal{
+			Name: name, Tenant: c.Tenant,
+			credential: identity.StaticClientID(name), workspace: identity.InWorkspace(store.SystemWorkspaceID),
+		}
 	}
 	return tokens
 }
 
 func NewAuthorizer(cfg config.Auth) Authorizer {
-	if cfg.Mode == config.AuthModeNone {
-		return AuthorizerFunc(func(*Principal, string) bool { return true })
-	}
-	clients, allowed := clientAllowLists(cfg, nil)
-	return &staticAuthorizer{clients: clients, allowed: allowed}
+	return NewAuthorizerWithClients(cfg, nil)
 }
 
 func NewAuthorizerWithClients(cfg config.Auth, dyn []DynamicClient) Authorizer {
 	if cfg.Mode == config.AuthModeNone {
 		return AuthorizerFunc(func(*Principal, string) bool { return true })
 	}
-	clients, allowed := clientAllowLists(cfg, dyn)
-	return &staticAuthorizer{clients: clients, allowed: allowed}
-}
-
-func clientAllowLists(cfg config.Auth, dyn []DynamicClient) (map[string]struct{}, map[string]map[string]struct{}) {
-	allowed := make(map[string]map[string]struct{}, len(cfg.Clients)+len(dyn))
-	clients := make(map[string]struct{}, len(cfg.Clients)+len(dyn))
-	add := func(name string, models []string) {
-		clients[name] = struct{}{}
+	allowed := make(map[identity.CredentialID]map[string]struct{}, len(cfg.Clients)+len(dyn))
+	add := func(id identity.CredentialID, models []string) {
 		if len(models) == 0 {
+			allowed[id] = nil
 			return
 		}
 		set := make(map[string]struct{}, len(models))
 		for _, model := range models {
 			set[model] = struct{}{}
 		}
-		allowed[name] = set
+		allowed[id] = set
 	}
 	for name, c := range cfg.Clients {
-		add(name, c.AllowedModels)
+		add(identity.StaticClientID(name), c.AllowedModels)
 	}
 	for _, d := range dyn {
-		add(d.Name, d.AllowedModels)
+		if id := d.credentialID(); id.Valid() {
+			add(id, d.AllowedModels)
+		}
 	}
-	return clients, allowed
+	return &staticAuthorizer{allowed: allowed}
 }
 
 func (nopAuthenticator) Authenticate(r *http.Request) (*Principal, error) {
@@ -142,8 +167,7 @@ type dynamicCredential struct {
 }
 
 type staticAuthorizer struct {
-	clients map[string]struct{}
-	allowed map[string]map[string]struct{}
+	allowed map[identity.CredentialID]map[string]struct{}
 }
 
 func (s *staticAuthenticator) Authenticate(r *http.Request) (*Principal, error) {
@@ -177,14 +201,11 @@ func (s *staticAuthenticator) Authenticate(r *http.Request) (*Principal, error) 
 }
 
 func (s *staticAuthorizer) Allow(principal *Principal, model string) bool {
-	if principal == nil {
-		return false
-	}
-	if _, ok := s.clients[principal.Name]; !ok {
-		return false
-	}
-	allowed, ok := s.allowed[principal.Name]
+	allowed, ok := s.allowed[principal.CredentialID()]
 	if !ok {
+		return false
+	}
+	if allowed == nil {
 		return true
 	}
 	_, ok = allowed[model]

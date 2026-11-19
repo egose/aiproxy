@@ -19,13 +19,17 @@ type AliasTargetCard struct {
 	DisplayName string `json:"display_name,omitempty"`
 }
 
-func BuildModelCatalog(catalog config.Catalog) []ModelCard {
-	cards := make([]ModelCard, 0, countCatalogSize(catalog))
+func buildModelCatalog(catalog config.Catalog, allow func(string) bool) []ModelCard {
+	var cards []ModelCard
 	for _, provider := range catalog.Providers() {
 		for _, model := range provider.Models {
+			name := provider.Name + "/" + model.Name
+			if !allow(name) {
+				continue
+			}
 			caps := config.EffectiveCapabilities(provider.Type, model)
 			cards = append(cards, ModelCard{
-				ID:           provider.Name + "/" + model.Name,
+				ID:           name,
 				Object:       "model",
 				Created:      0,
 				OwnedBy:      provider.Name,
@@ -36,9 +40,13 @@ func BuildModelCatalog(catalog config.Catalog) []ModelCard {
 		}
 	}
 	for _, alias := range catalog.Aliases() {
+		name := "alias/" + alias.Name
+		if !allow(name) {
+			continue
+		}
 		caps := catalog.AliasEffectiveCapabilities(alias)
 		cards = append(cards, ModelCard{
-			ID:           "alias/" + alias.Name,
+			ID:           name,
 			Object:       "model",
 			Created:      0,
 			OwnedBy:      "alias",
@@ -47,14 +55,6 @@ func BuildModelCatalog(catalog config.Catalog) []ModelCard {
 		})
 	}
 	return cards
-}
-
-func countCatalogSize(catalog config.Catalog) int {
-	total := catalog.AliasCount()
-	for _, provider := range catalog.Providers() {
-		total += len(provider.Models)
-	}
-	return total
 }
 
 func capabilityStrings(caps []config.Capability) []string {

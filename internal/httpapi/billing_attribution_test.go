@@ -13,8 +13,10 @@ import (
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/provider"
+	"github.com/egose/aiproxy/internal/store"
 )
 
 func TestBillingRetainedAliasAttribution(t *testing.T) {
@@ -34,10 +36,10 @@ func TestBillingRetainedAliasAttribution(t *testing.T) {
 			})
 			usage := accounting.NewAggregator()
 			clients := map[string]config.Client{}
-			for i, identity := range []struct{ tenant, client string }{
+			for i, labels := range []struct{ tenant, client string }{
 				{"team-a", "a1"}, {"team-a", "a2"}, {"team-b", "b1"}, {"", "c1"}, {"", "c2"},
 			} {
-				clients[identity.client] = config.Client{Name: identity.client, Token: identity.client, Tenant: identity.tenant}
+				clients[labels.client] = config.Client{Name: labels.client, Token: labels.client, Tenant: labels.tenant}
 				for _, traffic := range []struct {
 					model, provider string
 					tokens          int64
@@ -46,7 +48,8 @@ func TestBillingRetainedAliasAttribution(t *testing.T) {
 					{"alias/b", "cheap", 3000000}, {"cheap/m", "cheap", 4000000},
 				} {
 					n := traffic.tokens * int64(i+1)
-					usage.Record(accounting.Event{Tenant: identity.tenant, Client: identity.client,
+					usage.Record(accounting.Event{CredentialID: identity.StaticClientID(labels.client), WorkspaceScope: identity.InWorkspace(store.SystemWorkspaceID),
+						Tenant: labels.tenant, Client: labels.client,
 						Model: traffic.model, Provider: traffic.provider, UpstreamModel: "m",
 						Operation: "responses", StatusCode: 200, PromptTokens: n, CompletionTokens: n, TotalTokens: 2 * n})
 				}

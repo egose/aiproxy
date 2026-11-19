@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AliasesPage } from './aliases-page';
 import { adminClient } from '../services/admin';
 import { clearAdminSession, setAdminSession } from '../store';
-import { adminAliasSchema, type AdminAlias, type EncryptedReasoningDeclaration } from '../types';
+import { adminAliasSchema, adminProviderSchema, type AdminAlias, type EncryptedReasoningDeclaration } from '../types';
+import { systemWorkspaceId } from '../workspace-selection';
 
 const originalAdapter = axios.defaults.adapter;
 const originalAdminAdapter = adminClient.defaults.adapter;
@@ -28,6 +29,7 @@ const alias = (overrides: Record<string, unknown> = {}) =>
     name: 'fast',
     algorithm: 'round_robin',
     source: 'database',
+    workspace_id: 'ws-1',
     targets,
     encrypted_reasoning: null,
     encrypted_reasoning_effective: null,
@@ -56,6 +58,7 @@ afterEach(() => {
 
 function mount(initial?: AdminAlias, savedViews: AdminAlias[] = [], saveError?: string, denyList = false) {
   let current = initial;
+  const workspace = initial?.source === 'config' ? systemWorkspaceId : 'ws-1';
   axios.defaults.adapter = async (config) => {
     if (config.url === '/_internal/admin/status') {
       return response(config, { multi_tenancy_enabled: true, web_ui_enabled: true, db_ok: true });
@@ -73,7 +76,38 @@ function mount(initial?: AdminAlias, savedViews: AdminAlias[] = [], saveError?: 
     }
     adminReads.push(config.url ?? '');
     if (config.url === '/_internal/admin/me') {
-      return response(config, { user_id: 'form-user', email: 'form@example.test', is_admin: false });
+      return response(config, {
+        user_id: 'form-user',
+        email: 'form@example.test',
+        is_admin: workspace === systemWorkspaceId,
+      });
+    }
+    if (config.url === '/_internal/admin/workspaces') {
+      return response(config, {
+        workspaces: [
+          {
+            id: workspace,
+            name: workspace === systemWorkspaceId ? 'system' : 'tenant',
+            is_system: workspace === systemWorkspaceId,
+            role: 'admin',
+          },
+        ],
+      });
+    }
+    if (config.url === '/_internal/admin/providers') {
+      const models = ['gpt-4o-mini', 'z-ai', 'z-ai/glm-5.2', 'org_1/family.v2/3-model'];
+      return response(config, {
+        providers: ['gateway', 'backup_2.eu'].map((name) =>
+          adminProviderSchema.parse({
+            name,
+            type: 'openai',
+            source: 'database',
+            workspace_id: workspace,
+            enabled: true,
+            models: models.map((name) => ({ name })),
+          }),
+        ),
+      });
     }
     if (config.url === '/_internal/admin/aliases') {
       listReads++;
@@ -97,7 +131,9 @@ function mount(initial?: AdminAlias, savedViews: AdminAlias[] = [], saveError?: 
 }
 
 async function create() {
-  fireEvent.click(await screen.findByRole('button', { name: 'Create alias' }));
+  const button = await screen.findByRole('button', { name: 'Create alias' });
+  await waitFor(() => expect(button).toBeEnabled());
+  fireEvent.click(button);
   const form = within(await screen.findByRole('dialog', { name: 'Create alias' }));
   fireEvent.change(form.getByLabelText(/^Name/), { target: { value: 'fast' } });
   return form;
@@ -536,7 +572,16 @@ describe('mounted alias sparse reasoning intent and saved context', { timeout: 1
       targets: twoModels,
       encrypted_reasoning: { on_caller_mismatch: 'strip_and_retry' },
     });
-    expect(adminReads.every((url) => ['/_internal/admin/me', '/_internal/admin/aliases'].includes(url))).toBe(true);
+    expect(
+      adminReads.every((url) =>
+        [
+          '/_internal/admin/me',
+          '/_internal/admin/workspaces',
+          '/_internal/admin/aliases',
+          '/_internal/admin/providers',
+        ].includes(url),
+      ),
+    ).toBe(true);
     await edit();
     expect(policy().getByText('Saved effective policy: explicit alias override')).toBeInTheDocument();
     expect(policy().queryByText(/target-dependent/)).not.toBeInTheDocument();
@@ -667,13 +712,22 @@ describe('mounted alias sparse reasoning intent and saved context', { timeout: 1
       undefined,
       true,
     );
-    expect(await screen.findByText('No aliases.')).toBeInTheDocument();
+    expect(await screen.findByText('Unable to load aliases for this workspace.')).toBeInTheDocument();
     await waitFor(() => expect(listReads).toBe(1));
     expect(screen.queryByRole('button', { name: 'Actions for fast' })).not.toBeInTheDocument();
     expect(screen.queryByText('Policy (read-only)')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Policy mode')).not.toBeInTheDocument();
     expect(adminReads).toContain('/_internal/admin/aliases');
-    expect(adminReads.every((url) => ['/_internal/admin/me', '/_internal/admin/aliases'].includes(url))).toBe(true);
+    expect(
+      adminReads.every((url) =>
+        [
+          '/_internal/admin/me',
+          '/_internal/admin/workspaces',
+          '/_internal/admin/providers',
+          '/_internal/admin/aliases',
+        ].includes(url),
+      ),
+    ).toBe(true);
     expect(writes).toEqual([]);
   });
 

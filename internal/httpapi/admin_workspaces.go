@@ -58,7 +58,11 @@ func (h *Handler) requireWorkspaceMember(deps Dependencies, w http.ResponseWrite
 		return store.Workspace{}, nil, false
 	}
 	if _, err := deps.AdminStore.GetMembership(r.Context(), mustParseUUID(claims.Subject), workspaceID); err != nil {
-		http.Error(w, "workspace not found", http.StatusNotFound)
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "workspace not found", http.StatusNotFound)
+		} else {
+			http.Error(w, workspaceVisibilityError, http.StatusInternalServerError)
+		}
 		return store.Workspace{}, nil, false
 	}
 	return workspace, claims, true
@@ -180,19 +184,24 @@ func (h *Handler) requireTeamManager(deps Dependencies, w http.ResponseWriter, r
 	return store.Workspace{}, nil, store.WorkspaceTeam{}, false
 }
 
-func (h *Handler) callerWorkspaces(deps Dependencies, r *http.Request, claims *adminauth.Claims) ([]store.Workspace, error) {
-	if claims.IsAdmin {
-		return deps.AdminStore.ListWorkspaces(r.Context())
+func visibleWorkspaces(ctx context.Context, deps Dependencies, visibility workspaceVisibility) ([]store.Workspace, error) {
+	if visibility.filter != nil {
+		if !visibility.allows(visibility.filter.ID) {
+			return nil, nil
+		}
+		return []store.Workspace{*visibility.filter}, nil
 	}
-	memberships, err := deps.AdminStore.ListMembershipsByUser(r.Context(), mustParseUUID(claims.Subject))
-	if err != nil {
-		return nil, err
+	if visibility.global {
+		return deps.AdminStore.ListWorkspaces(ctx)
 	}
-	out := make([]store.Workspace, 0, len(memberships))
-	for _, m := range memberships {
-		workspace, err := deps.AdminStore.GetWorkspace(r.Context(), m.WorkspaceID)
-		if err != nil {
+	out := make([]store.Workspace, 0, len(visibility.roles))
+	for id := range visibility.roles {
+		workspace, err := deps.AdminStore.GetWorkspace(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
 			continue
+		}
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, workspace)
 	}
@@ -209,25 +218,20 @@ func (h *Handler) adminWorkspaces(deps Dependencies, w http.ResponseWriter, r *h
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			workspaces, err := h.callerWorkspaces(deps, r, claims)
+			ctx := r.Context()
+			visibility, err := resolveWorkspaceVisibility(ctx, deps, claims)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				http.Error(w, workspaceVisibilityError, http.StatusInternalServerError)
 				return
 			}
-			roleByWorkspace := map[string]string{}
-			if !claims.IsAdmin {
-				memberships, err := deps.AdminStore.ListMembershipsByUser(r.Context(), mustParseUUID(claims.Subject))
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
-				for _, m := range memberships {
-					roleByWorkspace[m.WorkspaceID.String()] = m.Role
-				}
+			workspaces, err := visibleWorkspaces(ctx, deps, visibility)
+			if err != nil {
+				http.Error(w, "could not list workspaces", http.StatusInternalServerError)
+				return
 			}
 			views := make([]adminWorkspaceView, 0, len(workspaces))
 			for _, workspace := range workspaces {
-				views = append(views, adminWorkspaceView{ID: workspace.ID.String(), Name: workspace.Name, DisplayName: workspace.DisplayName, IsSystem: workspace.IsSystem, Role: roleByWorkspace[workspace.ID.String()]})
+				views = append(views, adminWorkspaceView{ID: workspace.ID.String(), Name: workspace.Name, DisplayName: workspace.DisplayName, IsSystem: workspace.IsSystem, Role: visibility.roles[workspace.ID]})
 			}
 			writeAdminJSON(w, http.StatusOK, map[string]interface{}{"workspaces": views})
 			return
@@ -945,7 +949,7 @@ func (h *Handler) resolveWriteWorkspace(deps Dependencies, w http.ResponseWriter
 	}
 	memberships, err := deps.AdminStore.ListMembershipsByUser(ctx, mustParseUUID(claims.Subject))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, workspaceVisibilityError, http.StatusInternalServerError)
 		return store.Workspace{}, false
 	}
 	if claims.IsAdmin && len(memberships) == 0 {
@@ -979,66 +983,100 @@ func (h *Handler) resolveWriteWorkspace(deps Dependencies, w http.ResponseWriter
 	return store.Workspace{}, false
 }
 
-func (h *Handler) visibleWorkspaceIDs(deps Dependencies, r *http.Request, claims *adminauth.Claims) (map[string]bool, bool) {
-	if claims.IsAdmin {
-		return nil, true
-	}
-	memberships, err := deps.AdminStore.ListMembershipsByUser(r.Context(), mustParseUUID(claims.Subject))
-	if err != nil {
-		return nil, false
-	}
-	out := make(map[string]bool, len(memberships))
-	for _, m := range memberships {
-		out[m.WorkspaceID.String()] = true
-	}
-	return out, true
+const workspaceVisibilityError = "could not resolve workspace visibility"
+
+type workspaceVisibility struct {
+	global bool
+	roles  map[uuid.UUID]string
+	filter *store.Workspace
 }
 
-func (h *Handler) canSeeSystemWorkspace(deps Dependencies, r *http.Request, claims *adminauth.Claims, filterWorkspace string) bool {
-	if filterWorkspace != "" && filterWorkspace != store.SystemWorkspaceID.String() {
+func (v workspaceVisibility) allows(id uuid.UUID) bool {
+	if v.filter != nil && id != v.filter.ID {
 		return false
 	}
-	visible, _ := h.visibleWorkspaceIDs(deps, r, claims)
-	return visible == nil || visible[store.SystemWorkspaceID.String()]
+	_, member := v.roles[id]
+	return v.global || member
 }
 
-func (h *Handler) workspaceNameMap(deps Dependencies, r *http.Request, claims *adminauth.Claims) map[string]string {
-	out := map[string]string{}
-	var workspaces []store.Workspace
-	var err error
+func (v workspaceVisibility) empty() bool {
+	return !v.global && len(v.roles) == 0
+}
+
+func (v workspaceVisibility) allowsWriteSelectors(ids []uuid.UUID) bool {
+	if v.empty() {
+		return false
+	}
+	for _, id := range ids {
+		if id != ids[0] || !v.allows(id) {
+			return false
+		}
+	}
+	return true
+}
+
+func resolveWorkspaceVisibility(ctx context.Context, deps Dependencies, claims *adminauth.Claims) (workspaceVisibility, error) {
 	if claims.IsAdmin {
-		workspaces, err = deps.AdminStore.ListWorkspaces(r.Context())
-	} else {
-		workspaces, err = h.callerWorkspaces(deps, r, claims)
+		return workspaceVisibility{global: true}, nil
 	}
+	memberships, err := deps.AdminStore.ListMembershipsByUser(ctx, mustParseUUID(claims.Subject))
 	if err != nil {
-		return out
+		return workspaceVisibility{}, err
 	}
+	roles := make(map[uuid.UUID]string, len(memberships))
+	for _, m := range memberships {
+		roles[m.WorkspaceID] = m.Role
+	}
+	return workspaceVisibility{roles: roles}, nil
+}
+
+func workspaceNameMap(ctx context.Context, deps Dependencies, visibility workspaceVisibility) map[string]string {
+	workspaces, err := visibleWorkspaces(ctx, deps, visibility)
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]string, len(workspaces))
 	for _, workspace := range workspaces {
 		out[workspace.ID.String()] = workspace.Name
 	}
 	return out
 }
 
-func (h *Handler) resolveWorkspaceFilter(deps Dependencies, w http.ResponseWriter, r *http.Request, claims *adminauth.Claims, queryWorkspace string) (string, bool) {
-	queryWorkspace = h.requestWorkspaceID(r, queryWorkspace)
-	if queryWorkspace == "" {
-		return "", true
+func (h *Handler) resolveWorkspaceFilter(deps Dependencies, w http.ResponseWriter, r *http.Request, claims *adminauth.Claims) (workspaceVisibility, bool) {
+	raw := h.requestWorkspaceID(r, r.URL.Query().Get("workspace_id"))
+	var id uuid.UUID
+	if raw != "" {
+		var err error
+		id, err = uuid.Parse(raw)
+		if err != nil {
+			http.Error(w, "invalid workspace id", http.StatusBadRequest)
+			return workspaceVisibility{}, false
+		}
 	}
-	if _, err := uuid.Parse(queryWorkspace); err != nil {
-		http.Error(w, "invalid workspace id", http.StatusBadRequest)
-		return "", false
+	ctx := r.Context()
+	visibility, err := resolveWorkspaceVisibility(ctx, deps, claims)
+	if err != nil {
+		http.Error(w, workspaceVisibilityError, http.StatusInternalServerError)
+		return workspaceVisibility{}, false
 	}
-	visible, _ := h.visibleWorkspaceIDs(deps, r, claims)
-	if visible != nil && !visible[queryWorkspace] {
+	if raw == "" {
+		return visibility, true
+	}
+	if !visibility.allows(id) {
 		http.Error(w, "workspace not found", http.StatusNotFound)
-		return "", false
+		return workspaceVisibility{}, false
 	}
-	if _, err := deps.AdminStore.GetWorkspace(r.Context(), mustParseUUID(queryWorkspace)); err != nil {
-		http.Error(w, "workspace not found", http.StatusNotFound)
-		return "", false
+	workspace, err := deps.AdminStore.GetWorkspace(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "workspace not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "could not load workspace", http.StatusInternalServerError)
+		}
+		return workspaceVisibility{}, false
 	}
-	return queryWorkspace, true
+	visibility.filter = &workspace
+	return visibility, true
 }
 
 func (h *Handler) requireResourceWorkspace(deps Dependencies, w http.ResponseWriter, r *http.Request, claims *adminauth.Claims, workspaceID uuid.UUID) bool {

@@ -8,11 +8,13 @@ import { ProvidersPage } from './providers-page';
 import { adminClient } from '../services/admin';
 import { clearAdminSession, setAdminWorkspaceId, setAdminSession } from '../store';
 import { adminProviderSchema, builtinTLSClientHelloSelectors, type AdminProvider } from '../types';
+import { systemWorkspaceId } from '../workspace-selection';
 
 const originalAdapter = axios.defaults.adapter;
 const originalAdminAdapter = adminClient.defaults.adapter;
 let client: QueryClient;
 let writes: Array<{ method: string | undefined; url: string | undefined; body: unknown }>;
+let writeWorkspaces: string[];
 let listReads = 0;
 
 const provider = (overrides: Record<string, unknown> = {}) =>
@@ -20,6 +22,7 @@ const provider = (overrides: Record<string, unknown> = {}) =>
     name: 'primary',
     type: 'openai',
     source: 'database',
+    workspace_id: systemWorkspaceId,
     enabled: true,
     has_credential: true,
     models: [{ name: 'gpt-4o-mini' }],
@@ -56,6 +59,7 @@ beforeEach(() => {
   setAdminSession('form-admin', 'form-refresh');
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   writes = [];
+  writeWorkspaces = [];
   listReads = 0;
 });
 
@@ -72,8 +76,10 @@ function mount(
   savedViews: AdminProvider[] = [],
   inventory: AdminProvider[] = [],
   denyTypes = false,
+  scope = { workspaceId: systemWorkspaceId, globalAdmin: true },
 ) {
   let current = initial;
+  setAdminWorkspaceId(scope.workspaceId);
   axios.defaults.adapter = async (config) => {
     if (config.url === '/_internal/admin/status') {
       return response(config, { multi_tenancy_enabled: true, web_ui_enabled: true, db_ok: true });
@@ -81,8 +87,24 @@ function mount(
     throw new Error(`Unexpected public request: ${config.url}`);
   };
   adminClient.defaults.adapter = async (config) => {
+    if (config.url === '/_internal/admin/me') {
+      return response(config, { user_id: 'form-user', email: 'form@example.test', is_admin: scope.globalAdmin });
+    }
+    if (config.url === '/_internal/admin/workspaces') {
+      return response(config, {
+        workspaces: [
+          {
+            id: scope.workspaceId,
+            name: scope.workspaceId === systemWorkspaceId ? 'system' : 'tenant',
+            is_system: scope.workspaceId === systemWorkspaceId,
+            role: 'admin',
+          },
+        ],
+      });
+    }
     if (config.method === 'put' || config.method === 'post') {
       writes.push({ method: config.method, url: config.url, body: JSON.parse(config.data) });
+      writeWorkspaces.push(String(config.headers['X-Workspace-ID'] ?? ''));
       const saved = savedViews.shift();
       if (!saved) throw new Error('Unexpected save');
       current = saved;
@@ -141,7 +163,9 @@ async function create() {
 
 async function save() {
   const reads = listReads;
-  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  const button = screen.getByRole('button', { name: 'Save changes' });
+  await waitFor(() => expect(button).toBeEnabled());
+  fireEvent.click(button);
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   await waitFor(() => expect(listReads).toBeGreaterThan(reads));
 }
@@ -903,6 +927,7 @@ describe('mounted sparse provider and model reasoning policies', { timeout: 1500
   it('fails clearly without guessing model inventory when the changed base is unavailable', async () => {
     mount(provider());
     const form = await edit();
+    (form.getByLabelText(/^Extends/) as HTMLSelectElement).add(new Option('unreadable', 'unreadable'));
     change(/^Extends/, 'unreadable');
     expect(form.queryByRole('button', { name: 'Add model' })).not.toBeInTheDocument();
     expect(form.getByText(/Policy overlays cannot be added without an authorized inventory read/)).toBeInTheDocument();
@@ -1080,11 +1105,60 @@ describe('TLS ClientHello management', { timeout: 15000 }, () => {
   });
 });
 
+describe('tenant provider credential and destination controls', () => {
+  for (const globalAdmin of [false, true]) {
+    it(`reserves host fields in a tenant workspace for ${globalAdmin ? 'global' : 'tenant'} authors`, async () => {
+      const scope = { workspaceId: 'tenant-policy', globalAdmin };
+      const own = provider({ workspace_id: scope.workspaceId, base_url: 'https://api.example.com/v1' });
+      mount(own, [own], [], false, scope);
+      const form = await edit();
+      expect(form.getByText(/exact operator-approved public HTTPS origins/)).toBeInTheDocument();
+      expect(form.queryByRole('checkbox', { name: 'Forward client Authorization' })).not.toBeInTheDocument();
+      expect(form.queryByRole('checkbox', { name: 'Allow plain-HTTP (non-HTTPS) base URL' })).not.toBeInTheDocument();
+      expect(form.queryByLabelText(/API key reference/)).not.toBeInTheDocument();
+      expect(form.queryByLabelText(/^Credential path/)).not.toBeInTheDocument();
+      expect(form.getByLabelText('API key (stored encrypted, write-only)')).toBeInTheDocument();
+      expect(form.getByLabelText('TLS ClientHello profile')).toBeInTheDocument();
+      fireEvent.change(form.getByLabelText('API key (stored encrypted, write-only)'), {
+        target: { value: 'own-db-key' },
+      });
+      await save();
+      expect(writes[0].body).toEqual({ api_key: 'own-db-key' }); // pragma: allowlist secret
+    });
+  }
+
+  it('offers empty-tenant creation with an own API key and no host-secret or cleartext fields', async () => {
+    const scope = { workspaceId: 'tenant-policy', globalAdmin: false };
+    const saved = provider({ name: 'own', workspace_id: scope.workspaceId, base_url: 'https://api.example.com/v1' });
+    mount(undefined, [saved], [], false, scope);
+    const form = await create();
+    change('Name (lowercase, no spaces)', 'own');
+    change('Name', 'm');
+    fireEvent.change(form.getByLabelText(/^Base URL/), { target: { value: 'https://api.example.com/v1' } });
+    fireEvent.change(form.getByLabelText('API key (stored encrypted, write-only)'), {
+      target: { value: 'own-db-key' },
+    });
+    expect(form.queryByLabelText(/API key reference/)).not.toBeInTheDocument();
+    fireEvent.click(form.getByRole('button', { name: 'Create provider' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(writes[0].body).toMatchObject({
+      name: 'own',
+      api_key: 'own-db-key', // pragma: allowlist secret
+      base_url: 'https://api.example.com/v1',
+    });
+    expect(writeWorkspaces[0]).toBe(scope.workspaceId);
+    for (const field of ['api_key_ref', 'credential_ref', 'forward_authorization', 'allow_insecure_base_url']) {
+      expect(writes[0].body).not.toHaveProperty(field);
+    }
+  });
+});
+
 describe('copilot device authorization panel', { timeout: 20000 }, () => {
   const copilotProvider = (overrides: Record<string, unknown> = {}) =>
     provider({
       type: 'github-copilot',
       models: [{ name: 'gpt-4o', protocol: 'chat' }],
+      workspace_id: 'ws-1',
       copilot_credential_source: 'database',
       updated_at: '2026-09-27T10:00:00.000000000Z',
       ...overrides,
@@ -1145,6 +1219,17 @@ describe('copilot device authorization panel', { timeout: 20000 }, () => {
     adminClient.defaults.adapter = async (config) => {
       const url = config.url ?? '';
       const method = config.method;
+      if (url === '/_internal/admin/me') {
+        return response(config, { user_id: 'form-user', email: 'form@example.test', is_admin: false });
+      }
+      if (url === '/_internal/admin/workspaces') {
+        return response(config, {
+          workspaces: [
+            { id: 'ws-1', name: 'tenant', is_system: false, role: 'admin' },
+            { id: 'ws-other', name: 'other', is_system: false, role: 'admin' },
+          ],
+        });
+      }
       if (url === '/_internal/admin/copilot-device-flows' && method === 'post') {
         const body = JSON.parse(config.data as string) as Record<string, unknown>;
         flowCalls.starts.push(body);
@@ -1291,17 +1376,18 @@ describe('copilot device authorization panel', { timeout: 20000 }, () => {
     expect(writes[1].body).not.toHaveProperty('credential_ref');
   });
 
-  it('switches to sidecar and never shows an API-key form for Copilot', async () => {
+  it('keeps own DB Copilot credentials available but never offers tenant sidecar references', async () => {
     const before = copilotProvider({ name: 'primary', copilot_credential_source: 'database' });
     mountDevice({ initial: before, savedViews: [before] });
     const form = await edit();
     expect(form.queryByLabelText('API key (stored encrypted, write-only)')).not.toBeInTheDocument();
     expect(form.queryByLabelText('API key reference key (alternative to API key)')).not.toBeInTheDocument();
-    fireEvent.change(form.getByLabelText('Credential source'), { target: { value: 'sidecar' } });
-    fireEvent.change(form.getByLabelText(/^Credential name/), { target: { value: 'cli-name' } });
+    expect(form.queryByRole('option', { name: /CLI sidecar/ })).not.toBeInTheDocument();
+    expect(form.queryByLabelText(/^Credential name/)).not.toBeInTheDocument();
+    expect(form.queryByLabelText(/^Credential path/)).not.toBeInTheDocument();
+    expect(form.getByRole('option', { name: 'Reauthorize with GitHub' })).toBeInTheDocument();
     await save();
     expect(writes[0].body).toEqual({
-      credential_ref: { path: '', name: 'cli-name' },
       expected_updated_at: '2026-09-27T10:00:00.000000000Z',
     });
   });
@@ -1353,6 +1439,7 @@ describe('copilot device authorization panel', { timeout: 20000 }, () => {
     fireEvent.change(form.getByLabelText('GitHub OAuth client ID'), { target: { value: 'Iv1.c' } });
     fireEvent.click(form.getByRole('button', { name: 'Connect GitHub' }));
     expect(await form.findByText('Authorized; save provider to apply.')).toBeInTheDocument();
+    await waitFor(() => expect(form.getByRole('button', { name: 'Save changes' })).toBeEnabled());
     fireEvent.click(form.getByRole('button', { name: 'Save changes' }));
     expect(await form.findByText(/reread current state/)).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).toBeInTheDocument();
@@ -1382,6 +1469,7 @@ describe('copilot device authorization panel', { timeout: 20000 }, () => {
     fireEvent.change(form.getByLabelText('GitHub OAuth client ID'), { target: { value: 'Iv1.s' } });
     fireEvent.click(form.getByRole('button', { name: 'Connect GitHub' }));
     expect(await form.findByText('Authorized; save provider to apply.')).toBeInTheDocument();
+    await waitFor(() => expect(form.getByRole('button', { name: 'Save changes' })).toBeEnabled());
     fireEvent.click(form.getByRole('button', { name: 'Save changes' }));
     expect(await form.findByText(/saved, but activation failed/)).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).toBeInTheDocument();
@@ -1408,6 +1496,7 @@ describe('copilot device authorization panel', { timeout: 20000 }, () => {
     });
     let pollStarted = false;
     const state = mountDevice({
+      initial: copilotProvider({ name: 'primary' }),
       onStart: () => flowPending('flow-late', { poll_after_ms: 10 }),
       onPoll: () => {
         pollStarted = true;
@@ -1415,14 +1504,14 @@ describe('copilot device authorization panel', { timeout: 20000 }, () => {
       },
     });
     void state;
-    const form = await create();
-    fireEvent.change(form.getByLabelText('Type'), { target: { value: 'github-copilot' } });
+    const form = await edit();
+    fireEvent.change(form.getByLabelText('Credential source'), { target: { value: 'device' } });
     change('Name', 'gpt-4o');
     fireEvent.change(form.getByLabelText('GitHub OAuth client ID'), { target: { value: 'Iv1.late' } });
     fireEvent.click(form.getByRole('button', { name: 'Connect GitHub' }));
     expect(await form.findByText(/Waiting for GitHub approval/)).toBeInTheDocument();
     await waitFor(() => expect(pollStarted).toBe(true));
-    fireEvent.change(form.getByLabelText('Credential source'), { target: { value: 'sidecar' } });
+    fireEvent.change(form.getByLabelText('Credential source'), { target: { value: 'keep' } });
     expect(form.queryByText(/Waiting for GitHub approval/)).not.toBeInTheDocument();
     releasePoll(flowReady('flow-late'));
     await vi.waitFor(() => expect(form.queryByText('Authorized; save provider to apply.')).not.toBeInTheDocument());
@@ -1432,6 +1521,6 @@ describe('copilot device authorization panel', { timeout: 20000 }, () => {
     expect(await form.findByText(/Waiting for GitHub approval/, undefined, { timeout: 5000 })).toBeInTheDocument();
     setAdminWorkspaceId('ws-other');
     await waitFor(() => expect(form.getByText(/Workspace changed/)).toBeInTheDocument());
-    expect(form.getByRole('button', { name: 'Create provider' })).toBeDisabled();
+    expect(form.getByRole('button', { name: 'Save changes' })).toBeDisabled();
   });
 });

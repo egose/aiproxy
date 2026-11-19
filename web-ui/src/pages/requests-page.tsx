@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@egose/shadcn-theme/co
 import { Input } from '@egose/shadcn-theme/components/ui/input';
 import { Alert, AlertDescription } from '@egose/shadcn-theme/components/ui/alert';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@egose/shadcn-theme/components/ui/table';
-import { useSnapshot } from '../hooks';
+import { useDashboardMode, useSnapshot } from '../hooks';
 import { errorMessage } from '../services/dashboard';
 import type { Recent } from '../types';
 
@@ -40,6 +40,7 @@ function cellValue(row: Recent, key: RequestSortKey): string {
 }
 
 export function RequestsPage() {
+  const mode = useDashboardMode();
   const snapshot = useSnapshot();
   const [sorting, setSorting] = useState<RequestSort>({ key: 'Model', desc: false });
   const [filter, setFilter] = useState('');
@@ -75,7 +76,7 @@ export function RequestsPage() {
     return (
       <div className="p-6">
         <Alert variant="danger">
-          <AlertDescription>{errorMessage(snapshot.error)}</AlertDescription>
+          <AlertDescription>{errorMessage(snapshot.error, mode)}</AlertDescription>
         </Alert>
       </div>
     );

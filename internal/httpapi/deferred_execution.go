@@ -393,6 +393,7 @@ func (e *deferredExecution) publishCompletion(h *Handler, outcome deferred.Outco
 	}
 	u := outcome.Usage
 	event := accounting.Event{
+		CredentialID: e.principal.CredentialID(), WorkspaceScope: e.principal.WorkspaceScope(),
 		RequestID: e.requestID, PublicModel: e.model, Model: e.model, Operation: provider.OpChatCompletions.String(),
 		Timestamp: time.Now(), Client: e.principal.Name, Tenant: e.principal.Tenant,
 		StatusCode: status, ReasoningEffort: e.effort, Duration: time.Since(e.start),

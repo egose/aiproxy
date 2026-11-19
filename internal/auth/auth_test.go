@@ -7,18 +7,28 @@ import (
 	"time"
 
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/store"
 	"github.com/google/uuid"
 )
 
 func TestNoneAuthenticator(t *testing.T) {
-	a := NewAuthenticator(config.Auth{Mode: config.AuthModeNone})
-	p, err := a.Authenticate(httptest.NewRequest(http.MethodGet, "/", nil))
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+	cfg := config.Auth{Mode: config.AuthModeNone}
+	dyn := []DynamicClient{{
+		TokenHash: store.TokenHash("db-fixture"), KeyID: uuid.New(),
+		Workspace: identity.InWorkspace(store.SystemWorkspaceID),
+	}}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Authorization", "Bearer db-fixture")
+	for _, a := range []Authenticator{NewAuthenticator(cfg), NewAuthenticatorWithClients(cfg, dyn)} {
+		if p, err := a.Authenticate(r); err != nil || p != nil {
+			t.Errorf("none mode returned principal = %+v, error = %v", p, err)
+		}
 	}
-	if p != nil {
-		t.Errorf("expected nil principal for none mode")
+	for _, a := range []Authorizer{NewAuthorizer(cfg), NewAuthorizerWithClients(cfg, dyn)} {
+		if !a.Allow(nil, "fixture/model") {
+			t.Error("none mode denied anonymous model access")
+		}
 	}
 }
 
@@ -29,17 +39,15 @@ func TestBearerStaticAcceptsKnownToken(t *testing.T) {
 			"ci": {Name: "ci", Token: "tok", Tenant: "team-a"},
 		},
 	})
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.Header.Set("Authorization", "Bearer tok")
-	p, err := a.Authenticate(r)
-	if err != nil {
-		t.Fatalf("auth: %v", err)
-	}
+	p := authenticatedPrincipal(t, a, "tok")
 	if p.Name != "ci" {
 		t.Errorf("principal = %+v", p)
 	}
 	if p.Tenant != "team-a" {
 		t.Errorf("tenant = %q", p.Tenant)
+	}
+	if p.CredentialID() != identity.StaticClientID("ci") {
+		t.Error("file-only client lost its configured identity")
 	}
 }
 
@@ -69,87 +77,135 @@ func TestBearerStaticRejectsBadToken(t *testing.T) {
 }
 
 func TestBearerStaticAuthorizerAllowsConfiguredModels(t *testing.T) {
-	a := NewAuthorizer(config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{
+	cfg := config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{
 		"ci": {Name: "ci", Token: "tok", AllowedModels: []string{"openai/gpt-4o-mini", "alias/chat_default"}},
-	}})
-	if !a.Allow(&Principal{Name: "ci"}, "openai/gpt-4o-mini") {
+	}}
+	p := authenticatedPrincipal(t, NewAuthenticator(cfg), "tok")
+	a := NewAuthorizer(cfg)
+	if !a.Allow(p, "openai/gpt-4o-mini") {
 		t.Fatal("expected direct model to be allowed")
 	}
-	if !a.Allow(&Principal{Name: "ci"}, "alias/chat_default") {
+	if !a.Allow(p, "alias/chat_default") {
 		t.Fatal("expected alias model to be allowed")
 	}
-	if a.Allow(&Principal{Name: "ci"}, "openai/gpt-4.1") {
+	if a.Allow(p, "openai/gpt-4.1") {
 		t.Fatal("expected unrelated model to be denied")
 	}
 }
 
 func TestBearerStaticAuthorizerAllowsClientWithoutAllowedModels(t *testing.T) {
-	a := NewAuthorizer(config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{
+	cfg := config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{
 		"ci": {Name: "ci", Token: "tok"},
-	}})
-	if !a.Allow(&Principal{Name: "ci"}, "openai/gpt-4o-mini") {
+	}}
+	p := authenticatedPrincipal(t, NewAuthenticator(cfg), "tok")
+	if !NewAuthorizer(cfg).Allow(p, "openai/gpt-4o-mini") {
 		t.Fatal("expected unrestricted client to be allowed")
 	}
 }
 
 func TestBearerStaticAuthorizerRejectsUnknownPrincipal(t *testing.T) {
-	a := NewAuthorizer(config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{
+	cfg := config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{
 		"ci": {Name: "ci", Token: "tok"},
-	}})
-	if a.Allow(&Principal{Name: "unknown"}, "openai/gpt-4o-mini") {
-		t.Fatal("expected unknown principal to be denied")
+	}}
+	unknown := config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{"unknown": {Token: "unknown"}}}
+	a := NewAuthorizer(cfg)
+	for _, p := range []*Principal{nil, {Name: "ci"}, authenticatedPrincipal(t, NewAuthenticator(unknown), "unknown")} {
+		if a.Allow(p, "openai/gpt-4o-mini") {
+			t.Fatal("expected anonymous, label-only, and unregistered principals to be denied")
+		}
 	}
 }
 
-func TestDynamicClientsAuthenticateByHash(t *testing.T) {
+func TestStaticAndDatabaseCredentialsHaveIndependentModelPolicies(t *testing.T) {
 	cfg := config.Auth{
 		Mode: config.AuthModeBearerStatic,
 		Clients: map[string]config.Client{
-			"ci": {Name: "ci", Token: "tok"},
+			"shared": {Token: "file-fixture", Tenant: "label", AllowedModels: []string{"fixture/static"}},
 		},
 	}
-	raw := "dynamic-secret-token"
-	dyn := []DynamicClient{{TokenHash: store.TokenHash(raw), Name: "db-key", Tenant: "team-b", AllowedModels: []string{"openai/gpt-4o-mini"}}}
+	keyID, workspaceID := uuid.New(), uuid.New()
+	dyn := []DynamicClient{{
+		TokenHash: store.TokenHash("db-fixture"), Name: "shared", Tenant: "label",
+		AllowedModels: []string{"alias/managed"}, KeyID: keyID, Workspace: identity.InWorkspace(workspaceID),
+	}}
 	a := NewAuthenticatorWithClients(cfg, dyn)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.Header.Set("Authorization", "Bearer "+raw)
-	p, err := a.Authenticate(r)
-	if err != nil {
-		t.Fatalf("auth: %v", err)
+	file := authenticatedPrincipal(t, a, "file-fixture")
+	db := authenticatedPrincipal(t, a, "db-fixture")
+	if db.Name != "shared" || db.Tenant != "label" || file.Name != db.Name || file.Tenant != db.Tenant {
+		t.Fatal("authentication changed the reporting labels")
 	}
-	if p.Name != "db-key" || p.Tenant != "team-b" {
-		t.Errorf("principal = %+v", p)
+	if id, workspace, ok := db.DatabaseKey(); id != keyID || workspace != workspaceID || !ok {
+		t.Fatalf("managed principal = (%v, %v, %v)", id, workspace, ok)
 	}
-	r2 := httptest.NewRequest(http.MethodGet, "/", nil)
-	r2.Header.Set("Authorization", "Bearer tok")
-	if _, err := a.Authenticate(r2); err != nil {
-		t.Errorf("static token stopped working: %v", err)
+
+	relabeled := *db
+	relabeled.Name, relabeled.Tenant = "new-name", "new-label"
+	for _, policy := range []struct {
+		file, db           []string
+		fileOther, dbOther bool
+	}{
+		{file: cfg.Clients["shared"].AllowedModels, db: dyn[0].AllowedModels},
+		{file: cfg.Clients["shared"].AllowedModels, dbOther: true},
+		{fileOther: true, db: dyn[0].AllowedModels},
+	} {
+		client := cfg.Clients["shared"]
+		client.AllowedModels = policy.file
+		cfg.Clients["shared"] = client
+		dyn[0].AllowedModels = policy.db
+		z := NewAuthorizerWithClients(cfg, dyn)
+		if !z.Allow(file, "fixture/static") || z.Allow(file, "alias/managed") != policy.fileOther ||
+			!z.Allow(db, "alias/managed") || z.Allow(db, "fixture/static") != policy.dbOther {
+			t.Fatalf("file/DB allowlists did not stay independent: %+v", policy)
+		}
+		if !z.Allow(&relabeled, "alias/managed") || z.Allow(&relabeled, "fixture/static") != policy.dbOther {
+			t.Fatal("reporting label edit changed authorization")
+		}
 	}
-	r3 := httptest.NewRequest(http.MethodGet, "/", nil)
-	r3.Header.Set("Authorization", "Bearer nope")
-	if _, err := a.Authenticate(r3); err == nil {
-		t.Errorf("bad token accepted")
+}
+
+func TestWorkspaceScopeDistinguishesSystemFromAbsent(t *testing.T) {
+	system := identity.InWorkspace(store.SystemWorkspaceID)
+	systemKey := DynamicClient{TokenHash: store.TokenHash("system"), KeyID: uuid.New(), Workspace: system}
+	dyn := []DynamicClient{
+		systemKey,
+		{TokenHash: store.TokenHash("unscoped"), KeyID: uuid.New()},
+		{TokenHash: store.TokenHash("no-id"), Workspace: system},
 	}
-	z := NewAuthorizerWithClients(cfg, dyn)
-	if !z.Allow(&Principal{Name: "db-key"}, "openai/gpt-4o-mini") {
-		t.Errorf("allowed model rejected")
+	cfg := config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{"static": {Token: "static"}}}
+	a := NewAuthenticatorWithClients(cfg, dyn)
+	p := authenticatedPrincipal(t, a, "system")
+	if keyID, workspaceID, ok := p.DatabaseKey(); !ok || keyID != systemKey.KeyID || workspaceID != store.SystemWorkspaceID ||
+		p.WorkspaceScope() != system {
+		t.Fatalf("authenticated System key lost scope: (%v, %v, %v)", keyID, workspaceID, ok)
 	}
-	if z.Allow(&Principal{Name: "db-key"}, "other/model") {
-		t.Errorf("unlisted model allowed")
+	file := authenticatedPrincipal(t, a, "static")
+	if _, _, ok := file.DatabaseKey(); ok || file.WorkspaceScope() != system {
+		t.Fatal("static client must belong to System without becoming a database key")
 	}
-	if !z.Allow(&Principal{Name: "ci"}, "anything/at-all") {
-		t.Errorf("unrestricted static client rejected")
+	for _, token := range []string{"unscoped", "no-id", "unknown"} {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Authorization", "Bearer "+token)
+		if principal, err := a.Authenticate(r); principal != nil || err != ErrInvalidToken {
+			t.Errorf("%s: principal = %+v, error = %v; want nil, ErrInvalidToken", token, principal, err)
+		}
+	}
+	for _, principal := range []*Principal{nil, {Name: "system", Tenant: "system"}} {
+		if _, scoped := principal.WorkspaceScope().ID(); scoped || principal.CredentialID().Valid() || principal.WorkspaceScope() == system {
+			t.Error("absent or label-only principal acquired a System identity")
+		}
 	}
 }
 
 func TestDynamicClientExpirationWithoutReload(t *testing.T) {
 	deadline := time.Date(2030, 1, 2, 3, 4, 5, 123456000, time.UTC)
 	now := deadline.Add(-time.Nanosecond)
-	want := Principal{Name: "expiring", Tenant: "tenant", KeyID: uuid.New(), WorkspaceID: uuid.New(), OwnerUserID: uuid.New(), OwnerTeamID: uuid.New()}
+	keyID := uuid.New()
+	want := Principal{Name: "expiring", Tenant: "tenant", OwnerUserID: uuid.New(), OwnerTeamID: uuid.New(),
+		credential: identity.DatabaseKeyID(keyID), workspace: identity.InWorkspace(uuid.New())}
 	dyn := []DynamicClient{
 		{TokenHash: store.TokenHash("expiring"), ExpiresAt: deadline, Name: want.Name, Tenant: want.Tenant,
-			KeyID: want.KeyID, WorkspaceID: want.WorkspaceID, OwnerUserID: want.OwnerUserID, OwnerTeamID: want.OwnerTeamID},
-		{TokenHash: store.TokenHash("permanent"), Name: "permanent"},
+			KeyID: keyID, Workspace: want.workspace, OwnerUserID: want.OwnerUserID, OwnerTeamID: want.OwnerTeamID},
+		{TokenHash: store.TokenHash("permanent"), Name: "permanent", KeyID: uuid.New(), Workspace: want.workspace},
 	}
 	cfg := config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{"static": {Token: "static"}}}
 	a := NewAuthenticatorWithClientsAndClock(cfg, dyn, func() time.Time { return now })
@@ -182,7 +238,8 @@ func TestDynamicClientExpirationWithoutReload(t *testing.T) {
 }
 
 func TestDynamicClientExpirationDefaultClock(t *testing.T) {
-	dyn := []DynamicClient{{TokenHash: store.TokenHash("expired"), Name: "expired", ExpiresAt: time.Unix(1, 0)}}
+	dyn := []DynamicClient{{TokenHash: store.TokenHash("expired"), Name: "expired", ExpiresAt: time.Unix(1, 0),
+		KeyID: uuid.New(), Workspace: identity.InWorkspace(store.SystemWorkspaceID)}}
 	cfg := config.Auth{Mode: config.AuthModeBearerStatic}
 	for _, a := range []Authenticator{NewAuthenticatorWithClients(cfg, dyn), NewAuthenticatorWithClientsAndClock(cfg, dyn, nil)} {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -191,4 +248,15 @@ func TestDynamicClientExpirationDefaultClock(t *testing.T) {
 			t.Errorf("principal = %+v, error = %v; want nil, ErrInvalidToken", p, err)
 		}
 	}
+}
+
+func authenticatedPrincipal(t *testing.T, a Authenticator, token string) *Principal {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Authorization", "Bearer "+token)
+	p, err := a.Authenticate(r)
+	if err != nil || p == nil {
+		t.Fatalf("auth = %+v, %v; want an authenticated principal", p, err)
+	}
+	return p
 }

@@ -51,7 +51,71 @@ func (h *Handler) authenticateInference(deps Dependencies, r *http.Request) (*au
 	if deps.Auth == nil {
 		return nil, auth.ErrNoToken
 	}
-	return deps.Auth.Authenticate(r)
+	principal, err := deps.Auth.Authenticate(r)
+	if err != nil {
+		if deps.ServingRevisions.Keys > 0 && !servingFresh(deps.KeysConfirmedAt) {
+			return nil, ErrServingStale
+		}
+		return nil, err
+	}
+	if _, _, database := principal.DatabaseKey(); database && deps.ServingRevisions.Keys > 0 && !servingFresh(deps.KeysConfirmedAt) {
+		return nil, ErrServingStale
+	}
+	if principal != nil && !principal.CredentialID().Valid() {
+		return nil, auth.ErrInvalidToken
+	}
+	if deps.MultiTenancy.Enabled {
+		if _, scoped := principal.WorkspaceScope().ID(); !scoped {
+			return nil, auth.ErrInvalidToken
+		}
+	}
+	return principal, nil
+}
+
+const modelForbiddenMessage = "client is not allowed to access this model"
+const modelUnavailableMessage = "model is unavailable"
+
+type inferenceModelDenial struct {
+	status  int
+	code    string
+	message string
+}
+
+func checkInferenceModel(deps Dependencies, principal *auth.Principal, publicModel string) *inferenceModelDenial {
+	if _, _, database := principal.DatabaseKey(); database && deps.ServingRevisions.Keys > 0 && !servingFresh(deps.KeysConfirmedAt) {
+		return &inferenceModelDenial{http.StatusServiceUnavailable, "serving_stale", ErrServingStale.Error()}
+	}
+	if !deps.Authorizer.Allow(principal, publicModel) {
+		return &inferenceModelDenial{http.StatusForbidden, "forbidden", modelForbiddenMessage}
+	}
+	if deps.MultiTenancy.Enabled && !deps.Resolver.ModelVisibleInWorkspace(publicModel, principal.WorkspaceScope()) {
+		return &inferenceModelDenial{http.StatusNotFound, "model_not_found", modelUnavailableMessage}
+	}
+	if deps.ServingRevisions.Catalog > 0 && !servingFresh(deps.CatalogConfirmedAt) && databaseModel(deps, publicModel) {
+		return &inferenceModelDenial{http.StatusServiceUnavailable, "serving_stale", ErrServingStale.Error()}
+	}
+	return nil
+}
+
+func resolveInferenceModel(deps Dependencies, principal *auth.Principal, publicModel string) (modelresolver.ResolveResult, *inferenceModelDenial) {
+	if denial := checkInferenceModel(deps, principal, publicModel); denial != nil {
+		return modelresolver.ResolveResult{}, denial
+	}
+	var resolved modelresolver.ResolveResult
+	var err error
+	if deps.MultiTenancy.Enabled {
+		resolved, err = deps.Resolver.ResolveInWorkspace(publicModel, principal.WorkspaceScope())
+	} else {
+		resolved, err = deps.Resolver.Resolve(publicModel)
+	}
+	if err != nil {
+		message := modelUnavailableMessage
+		if !deps.MultiTenancy.Enabled {
+			message = err.Error()
+		}
+		return modelresolver.ResolveResult{}, &inferenceModelDenial{http.StatusNotFound, "model_not_found", message}
+	}
+	return resolved, nil
 }
 
 func (h *Handler) readInferenceInput(deps Dependencies, w http.ResponseWriter, r *http.Request, principal *auth.Principal, input []byte, limit int64) ([]byte, bool) {
@@ -119,16 +183,15 @@ func (h *Handler) admitInferenceBody(deps Dependencies, w http.ResponseWriter, r
 	if deps.AccessLog {
 		logger.Info("request received", "method", r.Method, "path", r.URL.Path, "request_bytes", len(body))
 	}
-	if !deps.Authorizer.Allow(principal, publicModel) {
-		admission.AccountingModel = accountingModelForbidden
-		h.writeRequestError(deps.Metrics, w, r, http.StatusForbidden, "forbidden", "client is not allowed to access this model")
-		return admission, false
-	}
-	resolved, err := deps.Resolver.Resolve(publicModel)
-	if err != nil {
+	resolved, denial := resolveInferenceModel(deps, principal, publicModel)
+	if denial != nil {
 		admission.AccountingModel = accountingModelNotFound
-		logger.Info("resolve failed", "error", err)
-		h.writeRequestError(deps.Metrics, w, r, http.StatusNotFound, "model_not_found", err.Error())
+		if denial.status == http.StatusForbidden {
+			admission.AccountingModel = accountingModelForbidden
+		} else {
+			logger.Info("resolve failed", "error", denial.message)
+		}
+		h.writeRequestError(deps.Metrics, w, r, denial.status, denial.code, denial.message)
 		return admission, false
 	}
 	admission.Resolved = resolved

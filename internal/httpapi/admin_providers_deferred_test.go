@@ -72,7 +72,7 @@ func TestManagedDeferredDeclarationsRejectBeforeMutationOrStoreAccess(t *testing
 			if _, err := h.updateDBProvider(context.Background(), Dependencies{}, nil, nil, provider); err == nil || !strings.Contains(err.Error(), "static-config-only") {
 				t.Fatalf("update did not reject before accessing the store: %v", err)
 			}
-			if err := h.setProviderCredential(context.Background(), Dependencies{}, nil, "managed", credential); err == nil || !strings.Contains(err.Error(), "static-config-only") {
+			if err := h.setProviderCredential(context.Background(), Dependencies{}, nil, nil, "managed", credential); err == nil || !strings.Contains(err.Error(), "static-config-only") {
 				t.Fatalf("credential update did not reject before accessing the store: %v", err)
 			}
 		})
@@ -115,7 +115,7 @@ func assertManagedDeferredPayloadRejectedBeforeStore(t *testing.T, raw []byte) {
 	if _, err := h.updateDBProvider(context.Background(), Dependencies{}, nil, nil, provider); err == nil || !strings.Contains(err.Error(), "static-config-only") {
 		t.Fatalf("update reached the store for a nested declaration: %v", err)
 	}
-	if err := h.setProviderCredential(context.Background(), Dependencies{}, nil, "managed", credential); err == nil || !strings.Contains(err.Error(), "static-config-only") {
+	if err := h.setProviderCredential(context.Background(), Dependencies{}, nil, nil, "managed", credential); err == nil || !strings.Contains(err.Error(), "static-config-only") {
 		t.Fatalf("credential update reached the store for an ignored nested declaration: %v", err)
 	}
 }
@@ -520,7 +520,7 @@ func TestAdminDeferredOptedBaseRejectedOnCreateUpdateAndCredential(t *testing.T)
 		t.Fatal("rejected inheritance create committed")
 	}
 	before.Extends = base.Name
-	if err := st.UpdateProvider(ctx, &before); err != nil {
+	if _, err := st.DB.NewUpdate().Model(&before).Column("extends").WherePK().Exec(ctx); err != nil {
 		t.Fatal(err)
 	}
 	before, _ = st.GetProvider(ctx, name)
@@ -583,7 +583,7 @@ func TestAdminDeferredModelOptedBaseRejectedBeforeDurableMutation(t *testing.T) 
 					t.Fatal("rejected model-opted inheritance create committed")
 				}
 				before.Extends = base.Name
-				if err := st.UpdateProvider(ctx, &before); err != nil {
+				if _, err := st.DB.NewUpdate().Model(&before).Column("extends").WherePK().Exec(ctx); err != nil {
 					t.Fatal(err)
 				}
 				before, _ = st.GetProvider(ctx, name)

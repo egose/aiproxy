@@ -100,19 +100,27 @@ expiry up to almost a minute before an individual event reaches 24 hours.
 The legacy `usage` field carries the same public rows; `provider_stats` and legacy
 `upstream` remain lifetime counters. The TUI's upstream usage toggle instead groups
 retained attributed rows by tenant/client/provider/model/operation/status.
+These are explicitly authorized global operator aggregates. Accounting first
+partitions retained and lifetime upstream rows by immutable credential/workspace;
+`OperatorBillingSnapshot` and `OperatorUpstreamSummaries` deliberately combine
+labels for dashboard transport only. Dropping the hidden IDs without combining
+both views would leave duplicate-label rows with ambiguous alias-cost joins.
+The source storage is unchanged by this detached transformation.
 
 `internal/usagecost` owns billing/TUI estimates at current configured model prices.
-Alias attribution must reconcile every count/token field for the exact public
-model, tenant, client, operation and status. No configured-target, count-weight or
+Alias attribution must reconcile every count/token field for the exact credential,
+workspace, public model, tenant, client, operation and status. No configured-target,
+count-weight or
 even-split estimate substitutes for missing attribution. Used target price gaps
 make the alias estimate unavailable; unused targets do not affect it. A provider
 subtotal includes its direct and attributed alias traffic once and is unavailable
 if any of its used models lacks the necessary price. A different provider's price
 gap does not invalidate a fully attributed, fully priced subtotal. Incomplete alias
 attribution conservatively invalidates provider subtotals, since the missing
-provider cannot be inferred. Public billing retains tenant-first filtering, or
-tenantless client-only filtering, before cost calculation; exact attribution
-matching also preserves empty tenant/client dimensions.
+provider cannot be inferred. Public DB billing filters both views by immutable
+credential/workspace before cost calculation. Static tenant reporting is limited
+to the matching static/System scope, with tenantless own-static reporting preserved.
+Exact attribution matching also preserves empty tenant/client dimensions.
 
 Provider requests/errors/429/tokens are labeled global lifetime, including when a
 provider becomes disabled. P95/n is nearest-rank P95 and the provider's positive-
@@ -128,7 +136,8 @@ time and reconnect status remain independent.
 
 Refresh anchors provider and usage top rows, and both selected and top rows for
 aliases, payloads and blocks. Provider/alias names, request IDs and block IDs are
-stable keys; usage keys include exact tenant/client/model/operation/status, never
+stable keys; local usage keys include credential/workspace plus exact
+tenant/client/model/operation/status, never
 counts or token totals. Anchors resolve against the displayed ordering (including
 oldest-first payloads). Missing rows fall back to the old index clamped to the new
 list. Viewport bounds and keeping selection visible take precedence over the top
@@ -506,8 +515,11 @@ Initial auth modes:
 
 ### `none`
 
-No inbound authentication is performed. This mode is intended only for trusted
-deployments.
+No inbound authentication is performed by this authenticator. With multi-tenancy
+disabled this allows anonymous requests in trusted deployments. With
+multi-tenancy enabled, the data-plane gate rejects requests without valid
+credential identity and workspace scope. Management may still start in `none`
+mode, using its separate browser session authentication.
 
 ### `bearer_static`
 
@@ -532,16 +544,48 @@ Rotation, disabling/deletion, and edits to expiry still activate through the
 existing catalog reload path (automatically after admin API mutations or on
 `SIGHUP`); a failed reload preserves the previous snapshot and its deadlines.
 
+Model allowlists and request buckets use a typed credential ID. For a static
+client, the ID is its HCL client name in the static namespace; for a database
+key, it is the row UUID in the database namespace. A database key's `name` and
+`tenant` are reporting labels, not inputs to these decisions. Rotation preserves
+the credential ID; deleting a key and issuing a new one gives it a new UUID.
+
+Workspace scope is a separate value with explicit presence. A static client has
+System scope; a database key has the scope of its persisted workspace. The
+all-zero System UUID is valid when scope is present, not a wildcard or evidence
+of missing authentication. `none` returns no principal and therefore no workspace
+scope. A DB credential without an explicit workspace or valid key ID is not
+published by the authenticator.
+
 Each static client may also define:
 
 - optional `tenant`
 - optional `allowed_models`
 
-`allowed_models` applies a static allow-list against the proxy-visible model
+`allowed_models` applies a per-credential allowlist against the proxy-visible model
 name, including both direct `<provider>/<model>` strings and `alias/<name>`.
+
+The hosted merge attaches explicit workspace ownership to each provider and
+alias in the immutable serving catalog; a model belongs to its provider.
+File-managed entries get the stable System ID, and managed entries take their
+row's workspace. The serving check is the intersection of the public-name
+allowlist and that workspace's inventory. Before resolution or capability and
+target selection, it requires every alias target to exist in the same
+workspace and checks the base of a derived provider as well. It neither prunes
+the alias pool nor checks target names against the credential's allowlist. A
+workspace denial uses the same response as a missing name. Listing applies the
+same check before rendering cards and alias targets. Scoped resolution carries
+the admitted workspace into dispatch; hosted direct dispatch rejects an
+unscoped result, and alias dispatch resolves its frozen pool within that scope.
+A selector cannot introduce a target outside that pool. Reload publishes auth
+and ownership with the routing snapshot, without per-request catalog database
+reads. Admitted inference and deferred execution retain their old snapshot
+instead of consulting a replacement catalog during retries or finalization.
 
 The proxy also records in-process accounting events keyed by:
 
+- immutable credential ID, with distinct static and database namespaces
+- workspace scope with explicit presence (System is not an anonymous wildcard)
 - tenant
 - client
 - model
@@ -553,20 +597,38 @@ rolling 24-hour window to form the first billing/accounting scaffold. The
 window is maintained with bounded one-minute buckets whose start times are in
 the rolling window, rather than lifetime totals or idle-key eviction.
 
-`GET /v1/billing/usage` exposes those aggregated summaries. In static bearer
-auth mode, responses are scoped to the caller's tenant when present, otherwise
-to the caller's tenantless client identity. A same-named client in another tenant
-does not enter that scope.
+`Event`, `Summary`, all retained grouping keys and lifetime `UpstreamSummary` keep
+credential/workspace identity internally. These fields use `json:"-"`; metrics
+retain their existing operator label dimensions without adding immutable-ID labels.
+Ordinary request completion captures the authenticated principal from its admitted
+dependency snapshot; deferred execution copies that principal before scheduling.
+Later auth/catalog publication cannot relabel or reassign an admitted completion.
+
+`GET /v1/billing/usage` exposes DB rows only for the caller's immutable
+credential/workspace pair. Both public and attributed upstream rows are filtered
+before cost joins. A `Filter` defaults to deny; all-usage and trusted static tenant
+filters are explicit. DB labels do not authorize another key, even within the same
+workspace. A label edit partitions display rows while preserving access to all of
+that key's retained label snapshots. Rotation preserves identity; deletion/recreation
+cannot inherit history. No query/header selector or creator role grants a wider view.
+HCL tenant reporting combines only same-tenant static clients in System; tenantless
+static reporting keeps only that client's tenantless rows. File-only anonymous
+reporting remains unfiltered. Workspace-wide reads require separate explicit
+management/operator authority; this change adds no RBAC endpoint.
 
 Billing buckets additionally distinguish the requested public model from the
 resolved provider and configured target model (not its wire `upstream_name`).
 `BillingSummaries` returns public usage and attributed upstream usage from one
 locked, pruned snapshot. Both views therefore have identical retention, including
 under concurrent recording and at the window boundary. Alias cost sums only the
-targets actually recorded for that exact public model, tenant, client, operation,
-and status; direct traffic and other aliases sharing a target cannot contribute.
+targets actually recorded for that exact credential/workspace, public model, tenant,
+client, operation and status; other keys, direct traffic and other aliases sharing a
+target cannot contribute.
 Current alias membership is not used to reconstruct historical routing. A removed
 target can still be priced if its provider/model price remains in the current catalog.
+Hosted price lookup is restricted to the caller's workspace, so recreating a
+retained provider/model name in another workspace cannot contribute a foreign
+price. The retained row remains available but its estimate becomes unavailable.
 
 The one-minute bucket cutoff is inclusive: a bucket is removed when its start is
 strictly older than `now - 24h`. This can expire an event up to one minute before
@@ -576,12 +638,14 @@ recorder clock for bucket placement. At most 1,441 minute buckets remain at a ti
 entries scale with distinct identity/public-model/target/operation/status combinations
 within that window, not event count. Idle expired state is reclaimed on the next
 record or billing read. The test-only memory recorder retains all its events.
-Provider and upstream dashboard counters (`ProviderSummaries`/`UpstreamSummaries`)
-remain lifetime counters with their existing aggregation dimensions; the recent
-event ring also retains its independent bounded policy.
+Provider counters (`ProviderSummaries`) remain global lifetime counters. Lifetime
+`UpstreamSummaries` retain credential/workspace partitioning internally and the
+dashboard explicitly combines them for its existing operator label aggregates.
+The recent event ring retains its independent bounded policy.
 
-`estimated_cost_usd` is an optional estimate using **current catalog prices**, not
-historical price snapshots or an upstream invoice. For aliases, every retained
+`estimated_cost_usd` is a rolling, process-local estimate using **current catalog
+prices**, not historical price snapshots, a cross-instance total or an upstream
+invoice. For aliases, every retained
 request and token counter must reconcile with attributed target usage, and every
 contributing target must have pricing. Otherwise the field is omitted for the
 entire row, never emitted as a partial sum or an even/request-weighted split.
@@ -608,6 +672,8 @@ deletion cannot leave a gap. Applied migrations are unchanged.
 The ledger references `(key_id, workspace_id)` in this identity table instead of the
 live credential. Key deletion therefore preserves both existing entries and the
 ability to insert usage from an already-admitted request, including SSE completion.
+This requires surviving owner/workspace references and a successful insert;
+it is not a guarantee of durable billing after owner or workspace deletion.
 Unknown keys and cross-workspace key references still fail at the database
 boundary. No HTTP-layer fallback, ignored foreign-key error, or join against live
 keys is needed. Existing store insertion and aggregation methods retain their
@@ -631,6 +697,24 @@ cascades to ledger and identities; user/team deletion retains the existing
 by older key deletions. Accounting remains completion-based with the existing
 cache lag and possible concurrent budget overshoot; database failures are logged
 by the caller and are not covered by a durable retry queue.
+
+The current release has no funded workspace pool, hard spending bound or payer
+allocation. `scope_quotas` permits only user/team scopes. Ownerless DB keys retain
+key/workspace ledger attribution without either owner quota; static and anonymous
+traffic bypass the DB ledger. Budget checks use lifetime recorded owner cost minus
+reset offsets with 30-second process-local spend caches; TPM windows count only
+completed tokens locally. There is no admission reservation or cross-replica
+settlement. Missing usage can omit entries and missing/incomplete prices can
+produce zero/underestimated cost. The durable ledger is not the rolling estimate
+and neither is an upstream invoice.
+
+Existing entries survive user/team deletion with the relevant owner foreign key
+set null. New completions carrying a deleted owner's admission snapshot instead
+fail that foreign key; rolling identity capture does not repair the durable gap.
+Do not erase or silently reattribute durable ownership to promise funded bounds.
+The [spending contract](../website/docs/operations.md#spending-contract-owner-quotas-not-funded-workspace-caps)
+records current authority, overshoot and clearly deferred reservation,
+reconciliation, missing-data and crash/recovery prerequisites.
 
 ### Quota Read Availability
 
@@ -701,9 +785,25 @@ Acceptance calls transaction-local `insertMembership`
 after locking the current invite and creating its new user. Registration uses it after inserting
 a new user and new workspace. Neither can change an existing membership role. Bootstrap
 uses `AddMembership` and ignores only the explicit duplicate error, preserving
-its idempotent insert-only semantics; personal-workspace/OIDC initialization uses the
+its idempotent insert-only semantics; personal-workspace initialization uses the
 same add boundary. Whole-workspace/team deletion destroys that scope rather than
 transitioning a surviving membership set.
+
+Signed-out `/invite` uses the existing atomic redemption API even when public
+password registration is closed, then offers normal sign-in. The recipient pastes
+a separately delivered code on the clean route; the browser app does not read
+codes from URLs. Redemption sends the code only as the POST body's `token` and
+keeps form/service state out of persistent storage and query/mutation caches.
+Request failures are sanitized rather than retaining an Axios request body. The
+HTML referrer policy is `no-referrer`. Invitation responses are non-cacheable and
+application access logging excludes bodies. Previously shared code-bearing URLs
+must be treated as exposed, even if the address no longer shows the code. Bare
+`multi_tenancy {}` retains its public-registration default of
+true; new wizard setups default false. Neither controls SSO provisioning: OIDC
+admits existing accounts only, including previously redeemed invitees. Missing
+users and database lookup errors fail closed distinctly; no SSO-created account,
+workspace or System enrollment is permitted. Disabled users are rejected before
+admin-claim updates; failed updates cannot issue a session.
 
 `DeleteMembership` takes the workspace lock and checks every affected team membership
 with `protectTeamAdmin` before deleting anything. It atomically deletes that user's
@@ -724,6 +824,46 @@ share; preserved personal ownership becomes usable again with current membership
 API bearer credentials are separate from account management access: offboarding
 does not rotate, revoke or disable keys, including personal keys. Operators must
 explicitly rotate/revoke previously distributed credentials when required.
+
+Account deletion is different: `owner_user_id ON DELETE CASCADE` removes personal
+keys in the existing user/membership transaction. The HTTP delete boundary marks
+confirmed deletion with user-deleted/ID headers and requests catalog activation
+once after commit, before reporting success. A failed activation retains the old
+credential map and returns the controlled saved-but-activation-failed response;
+the deletion is not rolled back. Recovery is operational reload/restart, not
+repeated DELETE. Team/other-user key identities and spend-key identities remain;
+ledger user references follow the existing SET NULL behavior. No per-request
+membership lookup or cancellation of previously admitted work is introduced.
+This is receiving-instance activation, not replica convergence.
+
+### Atomic Key Issuance
+
+`IssueInboundKey` is the authorized HTTP issuance store boundary. It copies the
+candidate, includes the intended owner's grant, deduplicates proposed grants,
+and commits the inbound key and both binding tables together at READ COMMITTED.
+It locks actor/recipient/owner users in UUID order with SHARE, then the workspace
+with NO KEY UPDATE, then referenced teams with KEY SHARE in UUID order before
+insertion. Current enabled actor authority and owner/grant eligibility are
+rechecked inside that critical section. `validateKeyManager` preserves global/
+workspace administrator, own-personal and team-administrator restrictions;
+non-global actors require current workspace membership. The existing user-first
+deletion and workspace membership/offboarding mutexes prevent stale issuance
+from racing a membership change or user deletion. Trusted `CreateInboundKey`
+remains a low-level insertion helper, not the HTTP issuance path.
+
+Only successful commit publishes the candidate ID back to the caller. Key/grant
+write failures roll back everything and never request reload. Confirmed commits
+set saved/ID/Location response headers and request activation once before the
+creation view is read. Activation/view failures identify the durable key and
+direct the caller to authorized read plus rotation, without returning a bearer.
+Rotation shares this saved/activation/recovery response contract. Only a hash
+and display prefix persist; there is no plaintext storage or replay mechanism.
+The globally unique key name prevents a repeated creation from silently issuing
+a duplicate: conflict directs the caller to read and rotate the existing key.
+Transport loss or an indeterminate commit must be reconciled through that name,
+not inferred to have rolled back from missing response headers. Database commit,
+presentation and local activation are separate outcomes, not a distributed
+transaction or multi-replica acknowledgement.
 
 ### Atomic Key Policy Updates
 
@@ -760,6 +900,24 @@ multi-step persistence/activation flow is outside this PUT transaction contract.
 
 ### Catalog Aggregate Writes And Publication
 
+Managed provider materialization checks its inheritance base's ownership before
+inspecting base inventory or attaching credentials. The management inventory
+uses the destination row's workspace, not the author's global authority.
+Alias write validation builds only the referenced providers and their bases from
+that workspace's saved inventory and
+checks every expanded target against the same ownership-aware catalog rule
+used by serving. Missing and foreign references are indistinguishable in
+validation responses. Config-backed resources are explicitly System-owned in
+hosted merges and management reads. A managed System derivative can use a
+System static base, but tenants cannot.
+
+Merge/startup validates disabled derivatives too, and refuses provider or alias
+names present in both static config and managed storage. Previously activated
+managed snapshots are not static definitions and are rematerialized from storage.
+No map assignment can silently override static inventory or reassign ownership.
+Failed merges publish no partial catalog and leave admitted runtime state intact.
+The existing CLI database validation runs this same full graph preflight.
+
 Provider creation commits metadata and models in one store transaction. Provider
 updates commit metadata and an optional model replacement together; omitted/null
 models preserve the existing model rows, including their identities. Credential
@@ -777,17 +935,58 @@ or credential edit. A conflict requires a fresh read and validation; this also
 preserves omitted fields in alias updates. Direct SQL writers must maintain this
 revision protocol. These locks do not change the LIFE membership/key lock order.
 
+All managed provider/model and alias aggregate creates, updates and deletes take
+the existing workspace row `FOR NO KEY UPDATE` lock before aggregate row locks.
+The lock is held through graph validation and commit/rollback, including standalone
+model replacement and Copilot device-flow consumption. User/actor locks, when
+required by the existing lifecycle/flow boundary, remain before the workspace;
+flow/provider/alias locks follow it. No referencer-first, provider-before-workspace,
+workspace-before-user or cross-workspace lock inversion is introduced. Catalog
+names and workspace identities are immutable on aggregate updates.
+
+The store's graph guard reads minimal current provider identity/reference metadata,
+then lazily reads models and referenced providers in the same transaction.
+It validates the edited provider, its reverse derivative closure and every affected
+alias's complete target set. Disabled derivatives require enabled, concrete,
+same-type bases, and active local model-policy overlays require existing inherited
+names. Alias targets must remain enabled/same-workspace and share supported
+effective capabilities, including protocol-derived defaults. Static, dynamic and
+store graph checks share the same model protocol/capability validator. Provider deletion
+rejects existing incoming alias/derivative references before removing models or
+device-flow state; referencers must be explicitly retargeted/deleted first.
+
+`CatalogEditOptions` supplies immutable effective static definitions and a
+credential-free provider preparer. The mandatory store graph projection checks
+reference/inherited-inventory/capability integrity even for direct store writes;
+all admin provider, credential, alias and Copilot aggregate paths additionally use
+the canonical DB materializer and destination-workspace upstream policy under the
+lock. Only actual static System definitions are eligible as external bases;
+previously published managed inventory is ignored. No secret decryption, credential
+file resolution or upstream I/O occurs in this graph guard. Rechecking current
+bases closes alias/child creation versus destructive-edit races without trusting
+pre-transaction API validation.
+
+The guard deliberately validates affected dependencies rather than running a full
+catalog merge for every save. Unrelated malformed rows therefore do not block
+repairing known references or deleting an unreferenced corrupt provider. Full
+activation/startup still checks every row. Raw SQL writers and operator HCL edits
+are outside managed-write serialization and must preserve references and pass
+preflight; this is not a runtime/DB or replica-wide transaction.
+
 Catalog create/update handlers separate persistence from fallible presentation:
 after commit they request activation exactly once, then query the response view.
-Validation returns 400, concurrent edits return 409, and storage errors return a
+Validation and generic dependency rejection return 400, concurrent aggregate edits
+return 409, and storage errors return a
 controlled 500 (`could not save catalog edit`); none requests activation. Activation
 failure returns `saved but activation failed`, retaining the complete DB edit and
 old runtime. A subsequent view failure returns `saved but response view unavailable;
 read current state before retrying`. Storage/activation/view causes are logged
 server-side rather than included in public failure responses. Runtime publication
 and database persistence are separate operations, not a distributed transaction:
-dependency edits may still cause activation failure, and later valid reloads load
-the latest saved catalog. A response view may reflect a subsequent committed edit.
+unrelated operational/config/credential failures can still reject activation of a
+valid committed graph edit, and later valid reloads load the latest saved catalog.
+Provider deletion also reports the durable saved header before activation.
+A response view may reflect a subsequent committed edit.
 
 Database catalog merging receives the runtime's root defaults on startup, reload
 and CLI database validation. Concrete rows inherit an omitted timeout/user-agent,
@@ -802,6 +1001,61 @@ their enabled state and credentials remain local. Defaults are never persisted i
 the database row or its admin response view, so clearing a local override and later
 changing a root setting remain effective without rewriting saved providers.
 
+### Delegated Provider Credentials And Destinations
+
+`multi_tenancy.allowed_upstream_origins` is operator-controlled HCL/JSON intent,
+not managed provider data. `internal/upstreampolicy` compiles at most 128 unique,
+exact public HTTPS origins into an immutable policy. Omission/empty lists deny
+all; matching canonicalizes hostname case and numeric ports, not paths,
+wildcards, subdomains or resource permissions. Configuration load/conversion
+validates syntax and public literals without performing DNS or network I/O.
+
+`dbmerge.PrepareProvider` materializes same-workspace inheritance and validates
+the destination row's policy before attaching/decrypting credentials. Non-System
+rows cannot carry host API-key/sidecar references, caller Authorization
+forwarding or cleartext exceptions. Own encrypted API keys and actor/workspace-
+bound Copilot database credentials remain supported. Defaults and inherited
+effective base URLs and absolute/relative health URLs require approval, even on
+disabled rows or when authored by a global administrator. A merge preflights
+every provider's destination policy and graph before any DB credential resolution,
+so an earlier valid System row cannot trigger a file read ahead of a later
+forbidden tenant row. Management reads remain non-secret materialization for
+diagnosis; no resolved credential is a response field.
+
+Provider writes and credential-only updates share that preflight. Copilot
+provider-bound device starts/polls also check the destination workspace before
+creating/claiming a flow, decrypting its challenge or contacting the fixed issuer. A minimal,
+read-only actor/authority-checked binding lookup does not select encrypted
+columns. Provider saves check effective configuration before resolving a ready
+credential. This adds no foreign flow adoption, System membership or credential
+rights. Ready flow bindings must match the destination workspace and
+create/edit provider identity before any credential decryption, even for a
+global author's own System or foreign-workspace flow. Standalone authorization has no provider configuration yet; its fixed
+trusted OAuth issuer workflow/transport remains unchanged and separate from
+provider destination approval, which is checked before saving/resolving the
+resulting provider credential.
+
+Restricted providers carry an internal immutable `OutboundPolicy` snapshot,
+never a writable/serialized provider field. Native and built-in-profile
+transports check each request's origin and Host authority, disable environment
+proxy routing and install a connection-time public dialer. DNS/TCP share a
+30-second budget; an empty, invalid, oversized (over 64) or mixed-public/private
+answer set fails before any TCP dial. Numeric public addresses are deduplicated
+and dialed directly without another lookup; TLS still verifies the original
+hostname/SNI. IPv4 special/reserved ranges, metadata addresses, mapped non-public
+IPv4, and IPv6 outside ordinary public allocation or in special/documentation/
+transition ranges are denied conservatively. There is no production test/private
+exception or insecure verification fallback.
+
+Client-pool keys and probe fingerprints include the restriction identity as
+well as TLS profile/timeouts. Trusted and restricted clients cannot share cached
+connections; changes publish through existing generation ownership/retirement.
+Inference, discovery and absolute probes receive the same policy. Same-origin
+redirect behavior is unchanged; approving another origin does not relax it.
+Failed reloads retain the previous runtime and approvals, so removing a needed
+approval requires repairing dependent rows before successful publication.
+System/HCL and file-only transport/credential behavior is unchanged.
+
 ### Optional Local Rate Limit
 
 The `auth` block may include a `rate_limit` sub-block:
@@ -811,7 +1065,8 @@ The `auth` block may include a `rate_limit` sub-block:
 
 The current implementation is local to a single proxy instance.
 
-- In `bearer_static` mode, the limiter is keyed by authenticated client name.
+- In `bearer_static` mode, the limiter uses the authenticated credential ID.
+  Unchanged rate settings preserve buckets across reloads, including key rotation.
 - In `none` mode, the limiter applies to a shared anonymous bucket.
 
 Exceeded requests return `429 Too Many Requests` with `Retry-After`.
@@ -1182,9 +1437,10 @@ or automatic fingerprint cycling is introduced. Native remains standard Go TLS.
 
 ### HTTP Transport And Generation Ownership
 
-`internal/upstreamhttp.NewTransport` accepts an immutable profile and exact response
-header timeout. Native clones the standard Go transport unchanged except for that
-existing header-timeout option. Non-native transports keep Go 1.27 HTTP/1.1/HTTP/2
+`internal/upstreamhttp.NewTransport` accepts an immutable profile, optional delegated
+outbound policy and exact response header timeout. Trusted native transports clone
+the standard Go transport unchanged except for that existing header-timeout option;
+tenant restrictions apply as described above. Non-native transports keep Go 1.27 HTTP/1.1/HTTP/2
 and expose standard `crypto/tls.ConnectionState` through an internal UConn adapter
 so protocol selection follows negotiated ALPN. A bare UConn or a TLS dial hook
 alone would not cover HTTP/2 and proxy CONNECT correctly.
@@ -1208,7 +1464,7 @@ one minute, bounded by earlier context deadlines. Header timeout remains header-
 and bodies/SSE retain cancellation and existing unrestricted post-header lifetimes.
 
 Application runtime generations prepare their clients before activation and pool by
-effective header timeout and profile identity, including custom content rather than
+effective header timeout, outbound restriction identity and profile identity, including custom content rather than
 just its path. After successful publication, new work uses the new generation;
 retirement closes old idle connections immediately and again as response bodies
 reach EOF/Close/error. Already-admitted requests, later alias attempts in their
@@ -1217,7 +1473,7 @@ reloads discard candidate resources and keep the old immutable bytes and clients
 including after a malformed replacement of the same custom file.
 
 Health probes use fixed probe-owned clients prepared before activation, restarting
-on profile-identity changes while unchanged probes keep their own clients. Failed
+on profile/restriction-identity changes while unchanged probes keep their own clients. Failed
 preparation leaves active probes intact. Discovery uses one operation-owned retiring
 transport across pages and retires it on every exit. Neither path retains retired
 inference generations or reopens custom files. Existing probe deadlines and
@@ -2021,13 +2277,18 @@ manifests hash those final retained bytes, including the empty body.
 | Existing ordinary admission rejection                       | Preserve its status/error type/block ID; do not classify it as a provider outcome |
 
 `Owner{Kind, ID, Tenant, Workspace string}` is internal, never a wire identity.
-Every control authorizes its admitted public model using current activated auth,
-including delete; never re-resolve/select its target. Revocation does not undo work.
+New capabilities and submissions use the workspace-aware serving check. An
+accepted job is bound to the admitted workspace by its owner (for static
+clients that workspace is System). Every control and accepted replay checks
+that owner using current activated auth and checks the admitted public model
+against the current allowlist. Never re-resolve or select its target using the
+current catalog; this permits authorized draining after catalog removal.
+Revocation does not undo work.
 
 | Identity                               | Ownership / control rule                                                                                                                                    |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Static bearer                          | `Kind="static"`, ID=named client, Tenant=declared tenant, Workspace empty; rotation retains ownership but rejects the old token; name reuse reuses identity |
-| Dynamic inbound key                    | `Kind="key"`, ID=canonical `KeyID`, Workspace=canonical `WorkspaceID`, Tenant empty; replacement keys are different owners                                  |
+| Dynamic inbound key                    | `Kind="key"`, ID=canonical key UUID, Workspace=canonical workspace UUID (including zero for System), Tenant empty; replacement keys are different owners    |
 | Anonymous / dashboard-admin JWT        | No admission/control access; only ordinary inference authentication is accepted                                                                             |
 | Different owner / current model denial | No result disclosure or deletion; expiry/deadline remains cleanup backstop                                                                                  |
 | Shared peer credential                 | Identifies the caller proxy, not end users behind it; identity headers are untrusted                                                                        |
@@ -2647,10 +2908,30 @@ by user ID and replaces role/email claims with current stored values, so admin
 routes and `/me` agree with dashboard authorization after promotion, demotion,
 disablement, deletion, or email changes. Valid non-operators receive `403`;
 unverifiable identities use the existing throttled authentication-failure path.
-The browser checks `/me` before enabling global queries and navigation, and
-renders an operator-access explanation for direct links or server denials.
+The browser waits for server status before choosing how to authenticate. With
+multi-tenancy enabled it checks `/me` before enabling global queries and
+navigation, and uses the account session exclusively, even if a dashboard token
+is persisted. Without multi-tenancy it uses only the dashboard token. Direct
+links and server denials show mode-appropriate access and recovery guidance.
 
 ### Browser authentication lifetime
+
+The shell and all workspace resource hooks share one selection rule: an
+authorized saved ID wins, otherwise global administrators prefer the System
+flag and tenant users prefer an authorized non-System workspace. A tenant with
+only explicit System membership may read there but never gains a tenant write
+target or System administration from that membership. Selection waits for both
+the current account and workspace list; failure or no authorized choice cannot
+be interpreted as an unfiltered inventory query.
+
+Provider/alias/key and device-credential services require an explicit workspace
+context containing the chosen ID and authentication/session epochs. They pin
+the workspace header and reject stale/unresolved contexts before HTTP I/O;
+the ambient persisted ID is never injected into unrelated account/global queries.
+Forms, confirmations, rotations and recovery reads retain their original context.
+Credential-dialog membership/team queries stop rather than reissuing for a stale
+workspace after a transition. Pickers and management actions retain workspace
+roles and use only the destination workspace's inventory.
 
 The browser has a process-local, monotonically increasing authentication generation.
 Explicit account installation (password login, OIDC callback, or direct replacement),
@@ -3094,3 +3375,19 @@ The chosen design allows fallback only for alias-based requests.
   `retry_status_codes` in the `400`-`599` range
 - direct provider/model requests do not fall back to different targets
 - streaming chat completions and responses are part of the current supported API
+
+## Database serving convergence
+
+Catalog and key revisions are durable transactional PostgreSQL trigger counters.
+Monotonic before/after reads reject mixed snapshots; candidates recheck revisions
+before publication. Polling every two seconds closes missed-event gaps without
+distributed acknowledgements. Read-start timestamps bound stale admission to
+30 seconds even when reconciliation or activation takes longer. Catalog failure
+never certifies freshness, while independent key publication applies revocation
+and invalidates owner quota caches without changing immutable identities.
+Resource leases preserve admitted requests, streams and deferred drains.
+Trusted HCL inference does not depend on database freshness. Management sessions
+retain live DB authorization rather than borrowing serving freshness. This assumes
+a coherent writable PostgreSQL primary and intact triggers, not read-replica lag,
+split brain, suspended-process or clock-jump safety. File policy rollout, distributed
+spending reservations and peer-job failover remain separate concerns.

@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/egose/aiproxy/internal/upstreampolicy"
 )
 
 func buildRuntime(raw *rawFile, filename string) (*Runtime, error) {
@@ -116,6 +118,10 @@ func buildRuntime(raw *rawFile, filename string) (*Runtime, error) {
 		}
 		if raw.MultiTenancy[0].AllowPublicRegistration != nil {
 			rt.MultiTenancy.AllowPublicRegistration = *raw.MultiTenancy[0].AllowPublicRegistration
+		}
+		rt.MultiTenancy.AllowedUpstreamOrigins = append([]string(nil), raw.MultiTenancy[0].AllowedUpstreamOrigins...)
+		if _, err := upstreampolicy.New(rt.MultiTenancy.AllowedUpstreamOrigins); err != nil {
+			return nil, fmt.Errorf("multi_tenancy: %w", err)
 		}
 	}
 	if rt.MultiTenancy.Enabled && rt.Database.URL == "" {

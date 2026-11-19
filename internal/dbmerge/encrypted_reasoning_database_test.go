@@ -51,10 +51,42 @@ func openReasoningMergeStore(t *testing.T) *store.Store {
 	return st
 }
 
-func createReasoningProvider(t *testing.T, st *store.Store, row store.DBProvider, models []store.DBProviderModel) store.DBProvider {
+func createReasoningProvider(t *testing.T, st *store.Store, row store.DBProvider, models []store.DBProviderModel, options ...store.CatalogEditOptions) store.DBProvider {
 	t.Helper()
-	if err := st.CreateProviderAggregate(context.Background(), &row, models); err != nil {
+	if err := st.CreateProviderAggregate(context.Background(), &row, models, options...); err != nil {
 		t.Fatal(err)
+	}
+	return row
+}
+
+func corruptReasoningProvider(t *testing.T, st *store.Store, row store.DBProvider, models []store.DBProviderModel) store.DBProvider {
+	t.Helper()
+	ctx := context.Background()
+	row.ID = uuid.New()
+	if _, err := st.DB.NewInsert().Model(&row).Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range models {
+		model.ID, model.ProviderID = uuid.New(), row.ID
+		if _, err := st.DB.NewInsert().Model(&model).Exec(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return row
+}
+
+func corruptReasoningAlias(t *testing.T, st *store.Store, row store.DBAlias, targets []store.DBAliasTarget) store.DBAlias {
+	t.Helper()
+	ctx := context.Background()
+	row.ID = uuid.New()
+	if _, err := st.DB.NewInsert().Model(&row).Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range targets {
+		target.ID, target.AliasID = uuid.New(), row.ID
+		if _, err := st.DB.NewInsert().Model(&target).Exec(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return row
 }
@@ -105,7 +137,8 @@ func TestMergeCatalogEncryptedReasoningMaterialization(t *testing.T) {
 		staticBase.Models[i].Capabilities = []config.Capability{config.CapabilityChat}
 		staticBase.ModelByName[staticBase.Models[i].Name] = cloneModel(staticBase.Models[i])
 	}
-	staticChild := createReasoningProvider(t, st, store.DBProvider{Name: "static-child", Type: string(staticBase.Type), Extends: staticBase.Name, Enabled: true}, []store.DBProviderModel{{Name: "m", EncryptedReasoning: storedReasoningJSON("null")}})
+	staticChild := createReasoningProvider(t, st, store.DBProvider{Name: "static-child", Type: string(staticBase.Type), Extends: staticBase.Name, Enabled: true}, []store.DBProviderModel{{Name: "m", EncryptedReasoning: storedReasoningJSON("null")}},
+		store.CatalogEditOptions{Static: config.NewCatalog([]config.Provider{staticBase}, nil, nil)})
 	alias := store.DBAlias{Name: "inherited-inventory", Algorithm: "round_robin", EncryptedReasoning: storedReasoningJSON("reset")}
 	if err := st.CreateAlias(context.Background(), &alias, []store.DBAliasTarget{{Provider: child.Name, Model: "unconfigured"}}); err != nil {
 		t.Fatal(err)
@@ -230,7 +263,7 @@ func TestMergeCatalogEncryptedReasoningAliasStoredContract(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			row := store.DBAlias{Name: "alias-" + tc.name, Algorithm: "round_robin", EncryptedReasoning: json.RawMessage(tc.raw)}
-			if err := st.CreateAlias(context.Background(), &row, []store.DBAliasTarget{{Provider: base.Name, Model: "m"}}); err != nil {
+			if err := st.CreateAlias(context.Background(), &row, []store.DBAliasTarget{{Provider: base.Name, Model: "m"}}, store.CatalogEditOptions{Static: rt.Catalog}); err != nil {
 				t.Fatal(err)
 			}
 			if tc.name == "null" {
@@ -383,9 +416,13 @@ func TestMergeCatalogEncryptedReasoningRejectsBaseChains(t *testing.T) {
 					static = append(static, config.Provider{Name: "z-middle", Type: config.ProviderTypeOpenCodeZen, Enabled: true, Models: []config.Model{{Name: "m", UpstreamName: "m", Protocol: config.ModelProtocolChat}}})
 				}
 			}
-			createReasoningProvider(t, st, store.DBProvider{Name: "a-child", Type: root.Type, Extends: "z-middle", Enabled: true, EncryptedReasoning: storedReasoningJSON("reset")}, nil)
+			corruptReasoningProvider(t, st, store.DBProvider{Name: "a-child", Type: root.Type, Extends: "z-middle", Enabled: true, EncryptedReasoning: storedReasoningJSON("reset")}, nil)
 			rt := &config.Runtime{Catalog: config.NewCatalog(static, nil, nil)}
-			if _, err := MergeCatalog(context.Background(), st, rt); err == nil || !strings.Contains(err.Error(), "inheritance chains") {
+			want := "inheritance chains"
+			if kind == "shadowed-managed" {
+				want = "already defined in static config"
+			}
+			if _, err := MergeCatalog(context.Background(), st, rt); err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("base chain passed based on row order or flattened/static shadow provenance: %v", err)
 			}
 		})

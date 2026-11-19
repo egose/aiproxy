@@ -18,6 +18,7 @@ import (
 
 	"github.com/egose/aiproxy/internal/deferred"
 	"github.com/egose/aiproxy/internal/httpapi"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/providerhealth"
 )
 
@@ -313,7 +314,7 @@ type appDeferredAdmissionLimiter struct {
 	calls   atomic.Int32
 }
 
-func (l *appDeferredAdmissionLimiter) Allow(string) (bool, time.Duration) {
+func (l *appDeferredAdmissionLimiter) Allow(identity.CredentialID) (bool, time.Duration) {
 	l.calls.Add(1)
 	l.once.Do(func() { close(l.entered) })
 	<-l.gate

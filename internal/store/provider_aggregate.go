@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
@@ -34,7 +35,10 @@ func replaceProviderModels(ctx context.Context, tx bun.Tx, id uuid.UUID, models 
 	return nil
 }
 
-func createProviderAggregateTx(ctx context.Context, tx bun.Tx, p *DBProvider, models []DBProviderModel) (DBProvider, error) {
+func createProviderAggregateTx(ctx context.Context, tx bun.Tx, p *DBProvider, models []DBProviderModel, options ...CatalogEditOptions) (DBProvider, error) {
+	if err := lockMembershipWorkspace(ctx, tx, p.WorkspaceID); err != nil {
+		return DBProvider{}, err
+	}
 	next := *p
 	next.EncryptedReasoning = nullableEncryptedReasoning(next.EncryptedReasoning)
 	next.ID = uuid.New()
@@ -46,10 +50,23 @@ func createProviderAggregateTx(ctx context.Context, tx bun.Tx, p *DBProvider, mo
 	if err := replaceProviderModels(ctx, tx, next.ID, models); err != nil {
 		return DBProvider{}, err
 	}
+	if err := validateProviderGraph(ctx, tx, next, options); err != nil {
+		return DBProvider{}, err
+	}
 	return next, nil
 }
 
-func updateProviderAggregateTx(ctx context.Context, tx bun.Tx, p *DBProvider, models *[]DBProviderModel) (DBProvider, error) {
+func updateProviderAggregateTx(ctx context.Context, tx bun.Tx, p *DBProvider, models *[]DBProviderModel, options ...CatalogEditOptions) (DBProvider, error) {
+	current, err := lockCatalogProvider(ctx, tx, p.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DBProvider{}, ErrCatalogConflict
+	}
+	if err != nil {
+		return DBProvider{}, err
+	}
+	if current.Name != p.Name || current.WorkspaceID != p.WorkspaceID || !current.UpdatedAt.Equal(p.UpdatedAt) {
+		return DBProvider{}, ErrCatalogConflict
+	}
 	next := *p
 	next.EncryptedReasoning = nullableEncryptedReasoning(next.EncryptedReasoning)
 	next.UpdatedAt = nextCatalogRevision(p.UpdatedAt)
@@ -67,14 +84,17 @@ func updateProviderAggregateTx(ctx context.Context, tx bun.Tx, p *DBProvider, mo
 			return DBProvider{}, err
 		}
 	}
+	if err := validateProviderGraph(ctx, tx, next, options); err != nil {
+		return DBProvider{}, err
+	}
 	return next, nil
 }
 
-func (s *Store) CreateProviderAggregate(ctx context.Context, p *DBProvider, models []DBProviderModel) error {
+func (s *Store) CreateProviderAggregate(ctx context.Context, p *DBProvider, models []DBProviderModel, options ...CatalogEditOptions) error {
 	var next DBProvider
 	err := s.DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		var err error
-		next, err = createProviderAggregateTx(ctx, tx, p, models)
+		next, err = createProviderAggregateTx(ctx, tx, p, models, options...)
 		return err
 	})
 	if err != nil {
@@ -84,11 +104,11 @@ func (s *Store) CreateProviderAggregate(ctx context.Context, p *DBProvider, mode
 	return nil
 }
 
-func (s *Store) UpdateProviderAggregate(ctx context.Context, p *DBProvider, models *[]DBProviderModel) error {
+func (s *Store) UpdateProviderAggregate(ctx context.Context, p *DBProvider, models *[]DBProviderModel, options ...CatalogEditOptions) error {
 	var next DBProvider
 	err := s.DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		var err error
-		next, err = updateProviderAggregateTx(ctx, tx, p, models)
+		next, err = updateProviderAggregateTx(ctx, tx, p, models, options...)
 		return err
 	})
 	if err != nil {

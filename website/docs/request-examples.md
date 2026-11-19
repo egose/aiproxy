@@ -166,7 +166,11 @@ curl http://127.0.0.1:8080/v1/billing/usage \
   -H 'Authorization: Bearer your-token'
 ```
 
-In `bearer_static` mode, results are scoped to the caller's tenant when present, otherwise to the caller's client identity.
+DB bearers see only their immutable key/workspace usage, including earlier labels;
+rotation retains it and a replacement key does not inherit it. Trusted HCL clients
+retain same-tenant reporting among static clients in System, or their own tenantless
+static usage. This is a rolling, process-local estimate, not an invoice or a
+workspace-wide view.
 
 ## Error Behavior Examples
 

@@ -21,7 +21,7 @@ import (
 	"github.com/egose/aiproxy/internal/deferred"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/provider"
-	"github.com/google/uuid"
+	"github.com/egose/aiproxy/internal/store"
 )
 
 const deferredPath = "/_internal/deferred"
@@ -74,17 +74,16 @@ func deferredMetricsPath(path, method string) string {
 }
 
 func deferredOwner(principal *auth.Principal) (deferred.Owner, error) {
-	if principal == nil {
-		return deferred.Owner{}, auth.ErrInvalidToken
-	}
 	var owner deferred.Owner
-	if principal.KeyID != uuid.Nil {
-		if principal.WorkspaceID == uuid.Nil {
+	if keyID, workspaceID, ok := principal.DatabaseKey(); ok {
+		owner = deferred.Owner{Kind: "key", ID: keyID.String(), Workspace: workspaceID.String()}
+	} else if name, ok := principal.CredentialID().StaticClientName(); ok {
+		if workspaceID, scoped := principal.WorkspaceScope().ID(); !scoped || workspaceID != store.SystemWorkspaceID {
 			return owner, auth.ErrInvalidToken
 		}
-		owner = deferred.Owner{Kind: "key", ID: principal.KeyID.String(), Workspace: principal.WorkspaceID.String()}
+		owner = deferred.Owner{Kind: "static", ID: name, Tenant: principal.Tenant}
 	} else {
-		owner = deferred.Owner{Kind: "static", ID: principal.Name, Tenant: principal.Tenant}
+		return owner, auth.ErrInvalidToken
 	}
 	if deferred.ValidateOwner(owner) != nil {
 		return deferred.Owner{}, auth.ErrInvalidToken
@@ -116,7 +115,14 @@ func deferredReceiverLimits(deps Dependencies, resolved modelresolver.ResolveRes
 		return limits, fmt.Errorf("deferred alias has no eligible target pool")
 	}
 	for _, target := range resolved.Alias.Targets {
-		p, model, ok := deps.Resolver.Model(target.Provider, target.Model)
+		var p config.Provider
+		var model config.Model
+		var ok bool
+		if deps.MultiTenancy.Enabled {
+			p, model, ok = deps.Resolver.ModelInWorkspace(target.Provider, target.Model, resolved.Workspace)
+		} else {
+			p, model, ok = deps.Resolver.Model(target.Provider, target.Model)
+		}
 		if !ok {
 			return limits, fmt.Errorf("deferred alias target is unavailable")
 		}
@@ -299,6 +305,10 @@ func (h *Handler) handleDeferred(deps Dependencies, w http.ResponseWriter, origi
 	}
 	principal, err := h.authenticateInference(deps, r)
 	if err != nil {
+		if errors.Is(err, ErrServingStale) {
+			fail(503, "serving_stale", ErrServingStale.Error())
+			return true, false
+		}
 		fail(401, "auth_failed", "current inference bearer authentication is required")
 		return true, false
 	}
@@ -335,13 +345,9 @@ func (h *Handler) handleDeferred(deps Dependencies, w http.ResponseWriter, origi
 			return true, false
 		}
 		model := query.Get("model")
-		if !deps.Authorizer.Allow(principal, model) {
-			fail(403, "forbidden", "client is not allowed to access this model")
-			return true, false
-		}
-		resolved, err := deps.Resolver.Resolve(model)
-		if err != nil {
-			fail(404, "model_not_found", err.Error())
+		resolved, denial := resolveInferenceModel(deps, principal, model)
+		if denial != nil {
+			fail(denial.status, denial.code, denial.message)
 			return true, false
 		}
 		limits, err := deferredReceiverLimits(deps, resolved)
@@ -368,7 +374,7 @@ func (h *Handler) handleDeferred(deps Dependencies, w http.ResponseWriter, origi
 		return true, false
 	}
 	if !deps.Authorizer.Allow(principal, model) {
-		fail(403, "forbidden", "client is not allowed to access this model")
+		fail(403, "forbidden", modelForbiddenMessage)
 		return true, false
 	}
 	logger = logger.With("job_id", id)
@@ -502,7 +508,7 @@ func (h *Handler) submitDeferred(deps Dependencies, w http.ResponseWriter, r *ht
 	}
 	if replay != nil {
 		if !deps.Authorizer.Allow(principal, replay.PublicModel) {
-			fail(deferredFailure(403, "forbidden", "client is not allowed to access this model", deferred.AcceptanceAccepted))
+			fail(deferredFailure(403, "forbidden", modelForbiddenMessage, deferred.AcceptanceAccepted))
 			return false
 		}
 		w.Header().Set("Location", deferred.Prefix+"/jobs/"+replay.ID)

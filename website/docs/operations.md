@@ -98,6 +98,8 @@ aiproxy configure listener
 aiproxy configure upstream
 aiproxy configure logging
 aiproxy configure provider-health
+aiproxy configure dashboard
+aiproxy configure multi-tenancy
 ```
 
 The root `aiproxy configure` command shows a block selector. The block-specific
@@ -107,9 +109,231 @@ Supported workflows:
 
 - create or update `listener`, root `upstream_header_timeout`/`encrypted_reasoning`, `auth`, `provider`, `alias`, `logging`, and `provider_health`
 - update provider secrets when using `api_key_ref`
-- delete existing blocks with `--delete`
+- configure the Dashboard API (`dashboard`) and embedded browser app (`web_ui`) independently
+- configure `multi_tenancy` and its `database` block together
+- delete existing blocks on commands that support `--delete`
 
 For scripted environments, use `--non-interactive` on block subcommands.
+
+### Dashboard, Web UI, and Multi-tenancy
+
+In **Dashboard & Web UI**, enable the Dashboard API if you want the TUI or live
+browser dashboard. Enable the embedded Web UI separately if you want browser
+access. The Web UI alone supports workspace management if multi-tenancy is on;
+otherwise it only serves the app shell. No database is needed for the Dashboard
+API or Web UI themselves. The dashboard token defaults to server-generated;
+existing token settings are kept unless you change them or disable the Dashboard
+API, which removes the `dashboard` block.
+
+In **Multi-tenancy**, reuse the existing PostgreSQL URL or supply the name of an
+environment variable for the wizard to write as `database.url = env("...")`.
+The wizard defaults public registration to off for new setups and preserves
+existing choices. An enabled, hand-written `multi_tenancy {}` still implicitly
+allows public registration unless the attribute is explicitly changed.
+Disabling multi-tenancy leaves the database block and stored data in place.
+
+For an invite-only launch, explicitly close public registration, enable the Web
+UI, then create an invitation in the intended workspace. Direct the recipient to
+the clean `/invite` page on your deployment and send the one-time code separately
+over a trusted channel. The recipient pastes it into the form. Never put the code
+in a URL (path, query, or fragment). The app does not persist the entered code;
+delivery services, clipboard history, extensions, or password managers may
+retain copies outside the app's control.
+
+Treat old code-bearing links as exposed. Revoke affected pending invitations
+as a system administrator from **Users → Pending invites**, or with authorized
+`DELETE /_internal/admin/invites/{id}`, then issue new codes and deliver them
+separately. Opening the current page cannot undo an earlier visit: fragments
+can persist in browser history, and path/query values may also be in access or
+proxy logs.
+
+Acceptance creates the account and intended membership atomically. The
+recipient then signs in with their invited email/password, or with SSO using
+that same existing account.
+SSO never creates unknown accounts, even with public registration open; pending
+invitations must be redeemed first. Returning users keep their memberships,
+without automatic System enrollment. IdP/mock verification is not evidence of
+compatibility with a particular live identity provider.
+
+```sh
+aiproxy configure dashboard --config ./config.hcl --non-interactive --dashboard --web-ui
+aiproxy configure multi-tenancy --config ./config.hcl --non-interactive \
+  --enabled --database-url-env AIPROXY_DB_URL --allow-public-registration=false
+```
+
+Use `--dashboard=false`, `--web-ui=false`, or `--enabled=false` to turn the
+respective feature off. Use `--token-env NAME` to set a dashboard token
+reference or `--token-env=` to remove the explicit token and use the server's
+automatic token handling.
+
+Enabling the Dashboard API, toggling multi-tenancy, or changing the database URL
+while multi-tenancy is enabled requires a restart. Web UI and public registration
+changes can apply on `SIGHUP`. The wizard only edits the file. For first-time
+multi-tenancy setup, provide the database URL to the migration and serving
+processes, set `AIPROXY_JWT_SECRET` for the server, and set `AIPROXY_ADMIN_EMAIL`
+and `AIPROXY_ADMIN_PASSWORD` before running `aiproxy migrate up --config ./config.hcl`
+to seed the first administrator on a fresh database.
+
+Set `auth.mode = "bearer_static"` to serve inference in a multi-tenant
+deployment. `none` still permits management but disables authenticated data-plane
+access; a browser session cannot substitute for an inference bearer. When
+upgrading from a catalog shared in practice, use HCL clients for System and
+issue database keys in the same workspace as their intended models. A new
+workspace starts empty. Repair alias targets and provider inheritance references
+that span workspaces before upgrading: the merged catalog now rejects them at
+startup/reload, including disabled derivatives. Public names do not change.
+
+### Workspace Isolation Upgrade And Recovery
+
+**Compatibility change:** System inventory is not shared with tenants.
+Inheritance bases and all alias targets (including shorthand) must be in the
+resource's destination workspace, even for global-administrator-authored rows.
+Disabling a derivative does not make a foreign base valid. A newly added HCL
+provider or alias cannot shadow a managed name, regardless of the provider's
+enabled state. Names remain globally unique; there is no automatic rename,
+ownership transfer, sharing mode or per-tenant copy of HCL inventory.
+
+Before replacing a running binary:
+
+1. Back up the config and database. Use the candidate binary with the same
+   config, database URL, secret environment and database encryption key as
+   `serve`. Apply any pending migrations using the normal migration procedure.
+2. Run the operator preflight:
+
+   ```sh
+   aiproxy validate --config /etc/aiproxy/config.hcl --check-db
+   ```
+
+   This reads and validates the merged catalog without starting a server or
+   sending inference. It may resolve configured local credential references.
+   Check the **exit status** and `database catalog: valid` result: the earlier
+   `config is valid` line only validates the file. Plain `validate` does not
+   check managed rows. Preflight reports the first error; repeat after repairs.
+
+3. Audit `db_providers.extends` and `db_alias_targets.provider`/`model` against
+   the referenced provider's `workspace_id`; file-defined names belong to
+   System (`00000000-0000-0000-0000-000000000000`). Check HCL names against
+   **all** managed provider/alias names, including disabled providers.
+4. Retarget or remove invalid aliases and derivatives. To keep a tenant model,
+   configure an independently owned provider/base in that tenant with its own
+   credential and a globally unused name; do not copy System credentials.
+   Changing a derivative to concrete requires valid local model definitions,
+   and policy-bearing inheritance transitions require an explicit `models`
+   replacement. Update callers and allowlists if public names change.
+5. Repeat preflight until it passes, then restart. Verify each workspace's
+   model list and own direct/alias calls with its inference key.
+
+If a running instance rejects a reload, its previous runtime remains active;
+do not restart into a known-invalid saved graph. Use authorized management
+updates with known resource names to replace bad references, or remove those
+referrers. Legacy invalid views may return a controlled error rather than foreign
+inventory, so use the operator's trusted database audit to locate them.
+
+Provider and alias updates/deletes, provider credential updates, named Copilot
+device-flow starts, and existing-key policy updates, deletes, rotations and
+revocations now return the same resource-specific `404` for missing targets,
+hidden targets, and valid workspace selectors that do not match. A `404` alone
+does not prove absence. Before retrying, verify your account and selected
+workspace against authorized inventory. Check every query and header selector
+and any supported body selector, even as a global administrator. Omit unused
+selectors; empty or malformed IDs return `400`. These denials save nothing and
+do not trigger a reload or contact the Copilot issuer. See
+[direct catalog writes](api-reference.md#direct-catalog-writes) and
+[direct key writes](api-reference.md#direct-key-writes).
+
+If startup is already blocked, repair the config or perform narrowly scoped,
+transactional database maintenance while serving is stopped. Preserve resource
+and workspace IDs, credentials and key ownership; follow the catalog
+`updated_at` revision protocol for direct SQL edits. Prefer removing the new HCL
+collision over silently renaming an existing managed resource. A deliberate
+rename requires updating all affected same-workspace aliases, derivatives,
+allowlists and callers. Preflight again before starting.
+
+The portal validates the saved workspace choice before querying inventory.
+Global administrators default to System even when a tenant sorts first; tenant
+users prefer an authorized non-System workspace. Explicit System members remain
+read-only there, and an account with no memberships has no tenant write target.
+Reference pickers and empty-state creation use only the selected workspace.
+Changing workspace/account discards old views and prevents pending forms,
+credential recovery queries or mutations from reusing the new context.
+
+Managed catalog writes serialize dependency changes in the database; see
+[safe catalog cleanup](#managed-catalog-dependencies-and-cleanup). An already-admitted
+server mutation cannot be undone by browser cancellation. Saves request immediate
+local activation; other replicas reconcile durable revisions independently, without
+a cluster-wide acknowledgement. See [bounded replica convergence](#bounded-replica-convergence).
+
+### Tenant Provider Policy Upgrade
+
+**Intentional compatibility change:** non-System managed providers/probes no
+longer have unrestricted outbound destinations, host secret references,
+caller-token forwarding or cleartext exceptions. Even a global administrator
+editing a tenant row must follow the tenant policy. System and file-only
+workflows are unchanged; no new database schema migration is needed for the
+operator's `allowed_upstream_origins` attribute.
+
+Before upgrading:
+
+1. Back up config and DB, apply pending migrations, and audit **all** non-System
+   `db_providers` rows, including disabled rows. Check nonempty
+   `api_key_ref_path`/`api_key_ref_key`, `copilot_credential_path`/
+   `copilot_credential_name`, `forward_authorization`,
+   `allow_insecure_base_url`, effective/inherited `base_url` and health targets.
+2. Approve only needed exact **public HTTPS origins** in
+   `multi_tenancy.allowed_upstream_origins`. Include provider-type defaults and
+   absolute health origins/ports where used. Do not approve a private service,
+   wildcard or metadata endpoint; there is no production private/mock bypass.
+   Approval grants network permission, not resource or credential ownership.
+3. Replace tenant file references with credentials owned by that tenant:
+   encrypted API key writes or its own Copilot database device flow. Do not
+   copy System secrets. Clear both path and key/name members of legacy
+   references, remove caller forwarding and cleartext flags, and retarget
+   upstreams/probes to approved HTTPS destinations. Disabling a provider is
+   **not** a policy repair. Repair a derivative's effective settings on its
+   own same-workspace base; removing an existing healthcheck is unsupported,
+   so retarget it.
+4. Run with the **candidate binary**, serving config/secret environment and
+   database encryption key:
+
+   ```sh
+   aiproxy validate --config /etc/aiproxy/config.hcl --check-db
+   ```
+
+   Check the exit status and `database catalog: valid`, not only the earlier
+   `config is valid` line. Plain `validate` checks only the file. DB preflight
+   materializes and checks all destination policies before DB credential
+   decryption or file resolution; forbidden tenant configurations never read
+   host credentials. Trusted HCL references may still resolve while loading
+   the file, and a valid System DB reference may resolve after preflight.
+   This is read-only catalog validation, not DNS/network or live-provider
+   verification. Repeat after each reported repair.
+
+5. Restart only once preflight passes; verify each tenant's own JSON/SSE
+   inference and configured probes. DNS answers are checked on every new
+   connection, with verified TLS and no environment proxy, so approved names
+   that resolve privately or have invalid certificates remain unusable.
+
+Authorized updates can repair known old rows while an instance still serves.
+For a sidecar-to-Copilot-DB switch, first clear the legacy reference and repair
+destinations (temporarily disabling the provider if it has no DB credential).
+Then start an own device flow and consume it in provider PUT. Provider-bound
+device start/poll also reject forbidden effective tenant configurations before
+issuer I/O; standalone authorization retains its fixed trusted issuer workflow
+and does not itself activate any upstream. If startup is blocked, use
+the narrowly scoped transactional maintenance and revision precautions above.
+Never automatically transfer a tenant provider into System or convert a host
+secret into a tenant secret.
+
+Approvals reload with the file. Removing an approval while a stored provider or
+probe still requires it rejects the candidate; the previous runtime, including
+its previous approvals and already-admitted work, remains active. Retarget/remove
+dependent rows and repeat preflight, then reload; do not treat a failed reload
+as approval revocation. Activation is still local to the receiving instance,
+not cluster acknowledgement; DB changes reconcile as described under
+[bounded replica convergence](#bounded-replica-convergence). File policy changes still
+require deployment to every replica.
+
+### Other Configure Examples
 
 Provider example:
 
@@ -205,7 +429,7 @@ cleanup (100 rows per batch); provider saves set
 `X-Aiproxy-Catalog-Saved: true` once the database commit is durable, including
 saved-but-activation-failed outcomes where the old runtime stays active.
 Activation applies to the receiving instance only; there is no cluster
-broadcast, so reload or mutate each instance (or let its next mutation pick
+broadcast; durable DB revision polling activates other replicas (or their next mutation picks
 the catalog up). Hermetically verified; live GitHub compatibility unverified
 (see below).
 
@@ -543,14 +767,15 @@ remain in force across reload.
 
 When multi-tenancy is enabled, database-backed providers, aliases, and
 inbound keys merge into the serving catalog on the same reload path (and
-automatically after admin API mutations). An invalid row — for example a
+automatically after admin API mutations). An invalid old or externally corrupted
+row — for example a
 provider whose encrypted credential no longer decrypts under the current
 encryption key, or an alias pointing at a removed target — fails the reload
-with the old runtime intact, and blocks server startup the same way an
+with the old catalog retained, independently refreshing keys, and blocks server startup the same way an
 invalid config file does. Use `aiproxy validate --check-db` to identify the
-offending row without running the server, then fix it (rotate the credential,
-retarget or disable the entry) or delete it via the admin UI/CLI; the next
-mutation or `SIGHUP` picks the catalog back up.
+offending row without running the server, then repair its credential or references.
+Retarget/delete referencers before disabling/deleting a referenced provider;
+the next valid mutation or `SIGHUP` picks the catalog back up.
 
 Database inbound keys with `expires_at` stop authenticating at that timestamp,
 using the server clock, even if no reload occurs. Model listing, billing usage,
@@ -558,7 +783,7 @@ and new inference requests (including SSE) return the standard JSON `401`
 `auth_failed` error (`invalid client token`) at or after expiry, before upstream
 I/O. Requests and streams already authenticated may finish. Static HCL clients
 and database keys without expiry do not expire. Changing a key's expiry,
-rotating it, or disabling/deleting it still uses the catalog reload path above;
+rotating it, or disabling/deleting it uses independent key reconciliation below;
 the stored deadline in an active runtime requires no database access per request.
 
 These changes still require a restart:
@@ -570,14 +795,162 @@ These changes still require a restart:
 
 Provider and alias administrative POST/PUT requests commit their complete aggregate
 before requesting runtime activation, then read the response view. Provider model
-write failures roll back metadata too. A concurrent edit returns `409`; read the
-current provider/alias and retry. `500 could not save catalog edit` means no
+write failures roll back metadata too. A concurrent aggregate edit returns `409`;
+read current state and retry. A dependency conflict returns `400` without saving
+or requesting activation. `500 could not save catalog edit` means no
 activation was requested. `500 saved but activation failed` means the complete
 edit is in the database while the old runtime remains active: inspect server logs,
 resolve the failure and reload. `500 saved but response view unavailable` means the
 edit was saved and activation succeeded, but the response view failed; read current
 state before retrying, especially before repeating a create. These outcomes do not
 promise a distributed transaction between the database and running proxies.
+
+### Bounded Replica Convergence
+
+Replicas sharing PostgreSQL reconcile durable catalog and key revisions every two
+seconds, without relying on notifications. Database triggers advance revisions in
+the mutation transaction for providers, models, aliases, targets, inbound keys,
+key grants and owner quota policies, including account/key and workspace deletion
+cascades. Reads certify a snapshot only when before/after revisions match;
+publication rechecks the catalog revision. Continuous edits can postpone application.
+Startup requires a valid current catalog; it does not start from a persisted cache.
+
+**30 seconds is the maximum stale-serving admission window, not a polling interval.**
+Freshness starts at the beginning of the confirmed read, never at poll completion.
+Failed reads, mixed snapshots and failed candidate activation do not renew catalog
+freshness. Keys refresh independently: an invalid provider edit cannot prevent
+revocation. Key policy changes invalidate the local owner quota cache. This is not
+atomic cross-replica spending reservation or a funded workspace cap.
+
+After freshness expires, new DB-key auth/listing/billing and applicable peer
+controls/replay return `503 serving_stale`; managed direct/alias inference also
+fails before upstream I/O, including requests authenticated with static keys.
+Trusted HCL inference using HCL clients remains available; their model list omits
+stale managed models. Already-admitted requests, alias attempts, streams and draining
+jobs retain their resources and may finish. Peer jobs are still process-local and
+have no replica failover. Fresh confirmed state restores admission automatically.
+
+`/healthz` remains liveness. `/readyz` returns `503` when either database freshness
+deadline expires, even if HCL traffic remains available. Authenticated system
+administrators can read `GET /_internal/admin/serving-status` for applied revisions,
+confirmation timestamps and current freshness. These are **local observations**;
+`cluster_acknowledged` is always false. Catalog mutation responses expose
+`X-Aiproxy-Local-Active`, `X-Aiproxy-Cluster-Acknowledged` and applied catalog/key
+revision headers separately from durable-save headers. A failed catalog activation
+can still have successfully applied key revocation. No response proves every
+replica has acknowledged an edit.
+
+Management/session operations still use their existing live database reads and
+authorization checks; serving freshness is not a management or browser-session
+cache. Database failures deny authorization or fail the operation under the existing
+route error contract, not a universal new outage status. The status endpoint itself
+requires successful live administrator authorization. File changes, credentials in
+sidecars and operator origin approvals still require consistent deployment/reload
+on every replica; durable revisions track DB mutations only. PostgreSQL must provide
+one coherent writable primary, with transactional triggers intact. This does not
+prove behavior under split brain, lagging read replicas, hostile trigger removal,
+process suspension or clock discontinuities. Verification uses two real apps with
+disposable PostgreSQL and mock upstreams, not a live cluster/provider certification.
+
+### Account Deletion And Local Revocation
+
+Permitted account deletion cascades to personally owned database keys and requests
+one local reload after commit. A successful response rejects those bearers on new
+requests to the receiving instance. Team-owned and other users' keys and durable
+spend history survive (the deleted user's ledger foreign key becomes null).
+Already-admitted requests/streams may finish. Workspace offboarding still only
+removes management memberships/shares; it does not revoke distributed tokens.
+Key updates, deletes, rotations and revocations for keys hidden after offboarding
+now return `404`, not `403`. This does not disable the key; an authorized
+manager must still rotate or revoke it to stop accepting a distributed bearer.
+
+Confirmed deletion responses carry `X-Aiproxy-User-Deleted: true`,
+`X-Aiproxy-User-ID` and `Cache-Control: no-store`, including
+`500 saved but activation failed`. In that failure case the database deletion is
+durable. Independent key refresh may already reject deleted bearers even if catalog
+activation failed; otherwise the stale-serving deadline bounds admission. Inspect
+server logs, repair the activation problem and reload with `SIGHUP` or restart
+the receiving server. Repeating DELETE returns `404` and does not retry activation.
+If the response was lost, reconcile account presence through the authorized user
+list rather than assuming rollback. Rejections preserve the account and request
+no reload. Responses acknowledge one instance; other replicas reconcile independently.
+
+### Database Key Issuance Recovery
+
+Key creation now saves the key, owner and all grants atomically. Binding or
+authorization rejection and key/grant write failures leave no partial issuance
+and request no reload. Successful commit requests activation once. A subsequent
+activation or response-view failure is explicitly **saved**, not rolled back:
+creation and rotation supply `X-Aiproxy-Key-Saved: true`, `X-Aiproxy-Key-ID` and a
+`Location` for the saved key, with the ID and recovery instruction in the error
+body as well. Responses containing issuance results use `Cache-Control: no-store`.
+
+If a one-time bearer was not delivered:
+
+1. Do not create another key under a different name. Read the saved ID from the
+   headers/body, or find the original globally unique name in the authorized key
+   list if the response was lost. A connection failure can leave the database
+   commit outcome unknown; missing saved headers do not prove nothing was saved.
+2. Inspect logs and resolve any activation failure. The saved key's intended
+   owner/grants are complete, but the receiving instance may still use its old
+   runtime. There is no cluster-wide activation acknowledgement.
+3. Rotate that existing key using its management action or
+   `POST /_internal/admin/keys/<key_id>/rotate`. If you send workspace selectors,
+   all must match the saved key's workspace. Securely distribute the returned
+   bearer. Rotation keeps credential identity/workspace/grants and replaces the
+   bearer after successful local activation. If rotation also saved without
+   delivering a usable response, repeat rotation on the same ID.
+
+The server never stores/replays plaintext inbound bearers; detail/list reads
+provide only a display prefix. A duplicate-name creation returns `409` without
+changing the saved key or requesting a reload. Offboarding can remove the
+original caller's management access after commit; an authorized workspace/global
+administrator must perform recovery in that case. See the
+[issuance API contract](api-reference.md#atomic-key-issuance-and-bearer-recovery).
+
+### Managed Catalog Dependencies And Cleanup
+
+**Intentional compatibility change:** managed provider deletion, disabling,
+model removal and inheritance/type/capability/protocol changes are rejected
+before durable commit if they invalidate a dependent alias or derivative.
+Aliases must still resolve every target in their destination workspace and share
+at least one supported capability. A disabled derivative still requires its
+enabled, concrete, same-type base and any inherited models named by local policy
+overlays. There is no cascade, automatic retargeting or force-delete option.
+
+The API returns the generic `400` message
+`catalog dependency conflict; retarget or remove dependent aliases and providers first`.
+No dependency names, counts or credentials are returned. Rejection preserves
+provider/model/alias/target rows and revisions, leaves a Copilot device flow ready,
+and requests no reload. Concurrent graph writes serialize on the workspace's
+database lock, including alias/child creation, model replacement and Copilot
+aggregate saves; validation rereads the saved graph, not old managed runtime
+inventory. Current effective static System bases remain usable only in System,
+and tenant destination/credential restrictions still apply.
+
+For planned cleanup:
+
+1. Retarget or delete aliases using the provider/model, including aliases targeting
+   a derivative that inherits that model.
+2. Retarget or delete derivatives before removing/disabling their base or turning
+   it into a derivative. Remove/retarget inherited model-policy overlays before
+   removing their base model, even on disabled derivatives.
+3. Apply the provider/model edit, then run `aiproxy validate --check-db` and verify
+   routing before restart. If a concurrent dependent write won, reread and repeat
+   cleanup rather than blindly retrying the destructive edit.
+
+Only affected dependencies are checked during a managed save, so unrelated
+corrupted rows do not prevent repairing known references or deleting an
+unreferenced corrupt provider. Full startup/reload/preflight still validates the
+whole catalog. A **valid committed edit** can therefore return
+`500 saved but activation failed` for an unrelated corrupt row, credential/file
+failure or restart-only listener change. Repair that operational failure and
+reload; the valid edit remains saved. Provider DELETE, like provider/credential
+saves, carries `X-Aiproxy-Catalog-Saved: true` after commit, including activation
+failure. This is database graph integrity, not replica convergence or live
+upstream compatibility verification. Direct SQL and HCL edits must maintain
+references themselves and pass the candidate binary's preflight before restart;
+direct SQL must also follow the `updated_at` revision protocol.
 
 ### Managed Reasoning Policy Storage And Activation
 
@@ -605,7 +978,8 @@ submitted as local derivative definitions. See
 Metadata describes saved intent, not successful activation. Durable provider/
 credential saves carry `X-Aiproxy-Catalog-Saved: true`, including saved-but-
 activation-failed outcomes; old serving state remains active on failure.
-Activation applies only to the receiving instance, with no cluster broadcast.
+Immediate activation applies to the receiving instance; durable revisions reconcile
+other replicas independently, with no cluster-wide acknowledgement.
 Root remains static configuration and existing RBAC is unchanged. Managed
 provider/model/alias web forms offer inherit, safe reset and sparse custom
 policy controls; static rows expose read-only local intent and effective context.
@@ -699,12 +1073,111 @@ unsaved edits or proof of runtime activation.
 
 ## Database Key Spend And Quota Resets
 
+### Spending Contract: Owner Quotas, Not Funded Workspace Caps
+
+**This release does not support a funded workspace cap or a hard spending
+bound.** Workspace ownership and usage reporting establish routing/reporting
+scope, not a funded pool, payer assignment or workspace budget authority.
+The proxy does not assign financial responsibility: payment remains outside
+proxy configuration under the operator's/provider's external agreement.
+User/team `budget_micros` settings are admission thresholds against recorded
+estimated spend, not prepaid balances or guarantees about upstream invoices.
+There is no workspace budget quota endpoint or workspace quota scope.
+
+| Credential                  | Durable attribution with multi-tenancy enabled                                                           | Owner quota scope                                                                    |
+| --------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| User-owned DB key           | Immutable key/workspace IDs and authenticated owner user                                                 | That user's spend across their keys **in that workspace**, plus per-public-model TPM |
+| Team-owned DB key           | Immutable key/workspace IDs and authenticated owner team                                                 | That team's spend across its keys **in that workspace**, plus per-public-model TPM   |
+| Ownerless DB key            | Key/workspace IDs; neither user nor team                                                                 | None, even if shared with users/teams                                                |
+| Static/HCL client           | No entries in the DB spend ledger; separate rolling usage labels/identity (System inventory when hosted) | None from DB quotas; separate request-rate policy can apply                          |
+| Anonymous/file-only request | No entries in the DB spend ledger; separate process-local usage                                          | None; hosted inference requires authenticated workspace scope                        |
+
+The DB schema permits at most one owner. Sharing grants management access,
+not a new charging scope or knowledge of who actually used a distributed bearer.
+Omitting `owner_type` when a workspace/global administrator issues a key creates
+an ownerless key; an ordinary member defaults to their own user ownership.
+Administrators may explicitly select a workspace-member user or local team;
+non-administrators may issue only personal keys for themselves or team keys for
+teams they administer. Labels and browser roles do not establish a payer.
+
+**Quota authority:** A workspace administrator (or global system administrator)
+can set/reset member user and local team budgets and set TPM ceilings.
+An ordinary user can read their own quota and change its effective TPM within
+a positive administrator ceiling; a team administrator can do the same for
+their team. Ordinary team members may read, not edit, team quotas.
+Self/team administrators cannot set budgets, reset spend or set ceilings by
+virtue of those roles. A zero ceiling imposes no ceiling on an effective setting;
+effective zero falls back to the ceiling, rather than disabling a positive
+ceiling. These permissions concern **owner** quotas, not a workspace-wide budget.
+
+**Admission and overshoot:** A missing or zero budget is unlimited. A positive
+budget rejects new admissions with `403 budget_exceeded` when cached lifetime
+owner spend minus the reset offset (floored at zero) reaches the threshold.
+TPM checks the requested public model (including an alias name) against completed
+tokens in this process's trailing one-minute window, using positive effective
+TPM or else the ceiling. Exhaustion returns `429 tpm_exceeded`.
+Neither check reserves tokens/money, predicts request cost, or atomically commits
+admission with a charge. Concurrent requests can all pass before any completes;
+a single long request or stream can overshoot by itself. Admission does not
+cancel admitted work or stop a stream at the threshold. Usage is recorded at
+completion, not as tokens stream. There is no promised maximum overshoot.
+
+**Accounting gaps:** Ordinary inference persists available result usage only
+for downstream `2xx` responses. A failed attempt, interrupted stream or upstream
+billable operation is not guaranteed to have complete reported result usage.
+No positive recognized usage means no ledger entry; durable request counts are
+therefore not all admissions. Tokens use positive `total_tokens`, otherwise
+prompt plus completion. Missing model pricing, unavailable cost calculation or
+total-only usage can record tokens with zero cost. Incomplete configured rates
+can underprice usage; cost is calculated from reported categories using the
+admitted catalog's pricing and truncated to integer micro-USD. Zero ledger cost
+does not establish free upstream service. No missing-data reservation or invoice
+reconciliation is implemented. Ledger-write failures are logged; ordinary
+requests are not undone and there is no durable retry queue. Peer deferred
+finalization reports sink failures separately, not a funded reservation system.
+
+**Lifetimes and replicas:** Durable ledger amounts are stored at completion;
+price edits do not reprice those entries. Owner budgets use lifetime sums minus
+explicit reset offsets, not a calendar billing period. The separate
+`GET /v1/billing/usage` rolling estimate expires near 24 hours, can reprice with
+current prices and resets on restart; it is neither the quota ledger nor an
+invoice. Spend caches last 30 seconds per tracker and are not updated by each
+completion; a quota edit invalidates only the receiving tracker. Replicas share
+the DB ledger, not cached spend, TPM windows or atomic reservations. Restart
+loses TPM history; it does not erase durable spend. A fresh replica can read
+recorded exhaustion while another still admits against fresh cached headroom.
+Replica credential/catalog convergence is a separate deployment requirement;
+even convergence does not turn these thresholds into financial bounds.
+
+Any future funded-cap feature is **deferred, not current release readiness**.
+It would first require an explicit payer/coverage/authority contract for every
+credential type; atomic cross-replica reservation before dispatch (including
+streams and retries); settlement and reconciliation rules; fail-closed rules
+for missing usage/prices and store outages; and recovery/idempotency rules for
+cancellation, deletion, lost completions, crashes and reservation expiry.
+No such financial policy or implementation is supplied by this release.
+
+### Deletion And Resets
+
 With multi-tenancy enabled, deleting an inbound key preserves its recorded spend
 and user/team owner attribution. Requests already admitted with that key still
-record their usage when they finish, including streamed responses. Creating a
+can record available usage when they finish, including streamed responses,
+provided the workspace and owner still exist and the ledger write succeeds. Creating a
 replacement key, even with the same name, does not restore the owner's budget;
 scope totals survive spend-cache refresh and server restart. Sharing a key does
 not transfer its spend to the other users or teams with access.
+
+Deleting the **owner account/team** is different from deleting only a key.
+Existing ledger entries retain key/workspace/tokens/cost, but their deleted
+user/team reference becomes null and is no longer included in that owner's
+scope sum. Already-admitted work retains the old authentication snapshot;
+a new ledger insert referring to the deleted owner fails its foreign key.
+It is not automatically retried or reattributed to an ownerless scope. The
+rolling usage event can still be recorded under its admitted key/workspace
+identity. Account-deletion revocation does not cancel admitted work or guarantee
+a durable late charge. Workspace deletion cascades ledger and key identities
+and also prevents their late writes. Preserve external billing records if
+account/workspace deletion must not affect financial evidence.
 
 A workspace administrator can explicitly reset a user/team budget's spend
 with `reset_spend: true` on its quota endpoint. Resetting records an offset against
@@ -830,14 +1303,19 @@ advice, not a model cooldown.
 ### Ownership, Cancellation And Release
 
 Every control, including DELETE and accepted submit replay, authenticates against
-the **current activated inference auth policy** and checks the admitted public
-model's current authorization. Controls do not re-resolve or reselect its target.
-Revocation denies further access but does not undo already-started work.
+the **current activated inference auth policy** and checks the current allowlist
+for the admitted public name. Capabilities and new submissions check workspace
+ownership of the current model and the entire alias pool. Accepted replays and
+controls must match the job's admitted owner and workspace; they do not
+re-resolve, reselect, or require a current catalog entry for that job's target.
+Revocation denies further access but does not undo already-started work. A peer
+credential for a hosted HCL receiver's System models must be scoped to System.
 
 - A static owner is the named client plus tenant. Token rotation preserves
   ownership but rejects the old token; reusing a client name/tenant reuses identity.
-- A database inbound key owns work by its key ID and workspace ID. A replacement
-  key is a different owner.
+- A database inbound key owns work by its key ID and workspace ID, including
+  the all-zero ID for System. Rotation preserves ownership; a replacement key
+  is a different owner.
 - Anonymous requests and dashboard/admin JWTs cannot access peer controls.
 - Unknown/different-owner jobs return `404 job_unavailable`. Current model denial
   returns `403`, without revealing a result or permitting deletion.
@@ -1320,12 +1798,30 @@ deliberate reopen.
   almost a minute early. `t`/`e` select tenant/error usage; global rates and provider
   counters ignore those filters. `u` switches between public and resolved upstream
   usage over the same retention window, preserving tenant/client dimensions.
+- These dashboard views are authorized **global operator aggregates**, not
+  credential-scoped billing reads. Their intentional label aggregation does not
+  grant an inference bearer access to any other key/workspace. Internal accounting
+  retains immutable identities; dashboard serialization explicitly combines
+  operator rows without exposing credential IDs. Metrics gain no credential-ID
+  or workspace-ID labels.
 - Alias estimates use the actual retained public-model/tenant/client/operation/status
   attribution. Direct traffic and other aliases sharing a target are not charged
   again. Unused targets do not affect the estimate. `-` means unavailable (missing
   attribution, a needed price, or no retained usage), not free. A provider estimate
   is its complete retained subtotal, not a sum of only priced models; another
   provider's price gap does not hide its own fully attributed/priced subtotal.
+
+`GET /v1/billing/usage` instead filters DB requests by the admitted immutable
+key/workspace pair before returning rows or joining alias costs. Earlier labels
+remain visible to that same key after edits and rotation; a deleted/recreated key
+starts a distinct history. Ordinary and deferred completions retain their admitted
+identity and label snapshot even across reload or deletion. HCL tenant reporting
+remains static/System-only, and file-only anonymous reporting remains unfiltered.
+Workspace-wide reads require explicit management/operator authority, not matching
+labels or the roles of a key's creator. See [usage scope](api-reference.md#usage-and-scope).
+Both the API and dashboard show a **rolling, process-local estimate, not an invoice**;
+restart loses this window and replicas do not share it. The durable quota ledger
+is separate and retains its existing immutable key/workspace attribution.
 
 Older servers without the additive rate/billing snapshot data display unavailable
 measurements. The TUI does not estimate rates from recent requests or costs from
@@ -1348,10 +1844,13 @@ share the proxy listener.
 The embedded web dashboard is served at `/` when a `web_ui` block
 is present. Use `aiproxy webui` to print that URL after probing that a
 running server answers with the UI (`--open` also launches the default
-browser). The UI's live views authenticate against the same
-`dashboard`-gated `/_internal/dashboard/*` APIs with the dashboard token or an
-active stored system-administrator account. Ordinary accounts and workspace
-administrators cannot access these global operator surfaces.
+browser). The UI's live views call the same `dashboard`-gated
+`/_internal/dashboard/*` APIs as the TUI. With multi-tenancy enabled, the Web UI
+uses the signed-in system administrator's session and never falls back to a
+saved dashboard token. With multi-tenancy disabled, the Web UI uses the token
+entered on its Token page. The TUI uses its dashboard token in either mode.
+Ordinary accounts and workspace administrators cannot access these global
+operator surfaces with their account sessions.
 
 Within a loaded browser tab, changing accounts, changing/removing the dashboard
 token, or selecting another workspace clears sensitive cached data and open

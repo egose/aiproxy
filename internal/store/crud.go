@@ -23,28 +23,47 @@ func (s *Store) GetProvider(ctx context.Context, name string) (DBProvider, error
 	return p, err
 }
 
-func (s *Store) CreateProvider(ctx context.Context, p *DBProvider) error {
-	return s.CreateProviderAggregate(ctx, p, nil)
+func (s *Store) GetProviderByIDInWorkspace(ctx context.Context, id, workspaceID uuid.UUID) (DBProvider, error) {
+	var p DBProvider
+	err := s.DB.NewSelect().Model(&p).Where("id = ? AND workspace_id = ?", id, workspaceID).Scan(ctx)
+	return p, err
 }
 
-func (s *Store) UpdateProvider(ctx context.Context, p *DBProvider) error {
-	return s.UpdateProviderAggregate(ctx, p, nil)
+func (s *Store) CreateProvider(ctx context.Context, p *DBProvider, options ...CatalogEditOptions) error {
+	return s.CreateProviderAggregate(ctx, p, nil, options...)
 }
 
-func (s *Store) DeleteProvider(ctx context.Context, id uuid.UUID) error {
+func (s *Store) UpdateProvider(ctx context.Context, p *DBProvider, options ...CatalogEditOptions) error {
+	return s.UpdateProviderAggregate(ctx, p, nil, options...)
+}
+
+func (s *Store) DeleteProvider(ctx context.Context, id uuid.UUID, options ...CatalogEditOptions) error {
 	return s.DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		var p DBProvider
-		if err := tx.NewSelect().Model(&p).Where("id = ?", id).Scan(ctx); err != nil {
+		p, err := lockCatalogProvider(ctx, tx, id)
+		if err != nil {
 			return err
 		}
-		if err := lockMembershipWorkspace(ctx, tx, p.WorkspaceID); err != nil {
+		referenced, err := tx.NewSelect().Model((*DBProvider)(nil)).Where("extends = ?", p.Name).Exists(ctx)
+		if err != nil {
 			return err
+		}
+		if referenced {
+			return ErrCatalogDependency
+		}
+		referenced, err = tx.NewSelect().Model((*DBAliasTarget)(nil)).Where("provider = ?", p.Name).Exists(ctx)
+		if err != nil {
+			return err
+		}
+		if referenced {
+			return ErrCatalogDependency
 		}
 		if _, err := tx.NewDelete().Model((*copilotDeviceFlow)(nil)).Where("provider_id = ?", id).Exec(ctx); err != nil {
 			return err
 		}
-		_, err := tx.NewDelete().Model((*DBProvider)(nil)).Where("id = ?", id).Exec(ctx)
-		return err
+		if _, err := tx.NewDelete().Model((*DBProvider)(nil)).Where("id = ?", id).Exec(ctx); err != nil {
+			return err
+		}
+		return validateProviderGraph(ctx, tx, p, options)
 	})
 }
 
@@ -54,12 +73,19 @@ func (s *Store) ListProviderModels(ctx context.Context, providerID uuid.UUID) ([
 	return out, err
 }
 
-func (s *Store) ReplaceProviderModels(ctx context.Context, providerID uuid.UUID, models []DBProviderModel) error {
+func (s *Store) ReplaceProviderModels(ctx context.Context, providerID uuid.UUID, models []DBProviderModel, options ...CatalogEditOptions) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	p, err := lockCatalogProvider(ctx, tx, providerID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrCatalogConflict
+	}
+	if err != nil {
+		return err
+	}
 	result, err := tx.NewUpdate().Model((*DBProvider)(nil)).Set("updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')").Where("id = ?", providerID).Exec(ctx)
 	if err != nil {
 		return err
@@ -70,6 +96,9 @@ func (s *Store) ReplaceProviderModels(ctx context.Context, providerID uuid.UUID,
 		return ErrCatalogConflict
 	}
 	if err := replaceProviderModels(ctx, tx, providerID, models); err != nil {
+		return err
+	}
+	if err := validateProviderGraph(ctx, tx, p, options); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -87,7 +116,13 @@ func (s *Store) GetAlias(ctx context.Context, name string) (DBAlias, error) {
 	return a, err
 }
 
-func (s *Store) CreateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTarget) error {
+func (s *Store) GetAliasByIDInWorkspace(ctx context.Context, id, workspaceID uuid.UUID) (DBAlias, error) {
+	var a DBAlias
+	err := s.DB.NewSelect().Model(&a).Where("id = ? AND workspace_id = ?", id, workspaceID).Scan(ctx)
+	return a, err
+}
+
+func (s *Store) CreateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTarget, options ...CatalogEditOptions) error {
 	output := a
 	copy := *a
 	copy.EncryptedReasoning = nullableEncryptedReasoning(copy.EncryptedReasoning)
@@ -95,6 +130,10 @@ func (s *Store) CreateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTa
 	targets = append([]DBAliasTarget(nil), targets...)
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockMembershipWorkspace(ctx, tx, a.WorkspaceID); err != nil {
 		return err
 	}
 	a.ID = uuid.New()
@@ -112,6 +151,9 @@ func (s *Store) CreateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTa
 			return err
 		}
 	}
+	if err := validateAliasGraph(ctx, tx, *a, targets, options); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -119,7 +161,7 @@ func (s *Store) CreateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTa
 	return nil
 }
 
-func (s *Store) UpdateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTarget) error {
+func (s *Store) UpdateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTarget, options ...CatalogEditOptions) error {
 	output := a
 	copy := *a
 	copy.EncryptedReasoning = nullableEncryptedReasoning(copy.EncryptedReasoning)
@@ -130,6 +172,16 @@ func (s *Store) UpdateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTa
 		return err
 	}
 	defer tx.Rollback()
+	current, err := lockCatalogAlias(ctx, tx, a.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrCatalogConflict
+	}
+	if err != nil {
+		return err
+	}
+	if current.Name != a.Name || current.WorkspaceID != a.WorkspaceID || !current.UpdatedAt.Equal(a.UpdatedAt) {
+		return ErrCatalogConflict
+	}
 	previous := a.UpdatedAt
 	a.UpdatedAt = nextCatalogRevision(previous)
 	result, err := tx.NewUpdate().Model(a).Where("id = ? AND updated_at = ?", a.ID, previous).Exec(ctx)
@@ -154,6 +206,9 @@ func (s *Store) UpdateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTa
 			return err
 		}
 	}
+	if err := validateAliasGraph(ctx, tx, *a, targets, options); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -162,8 +217,13 @@ func (s *Store) UpdateAlias(ctx context.Context, a *DBAlias, targets []DBAliasTa
 }
 
 func (s *Store) DeleteAlias(ctx context.Context, id uuid.UUID) error {
-	_, err := s.DB.NewDelete().Model((*DBAlias)(nil)).Where("id = ?", id).Exec(ctx)
-	return err
+	return s.DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := lockCatalogAlias(ctx, tx, id); err != nil {
+			return err
+		}
+		_, err := tx.NewDelete().Model((*DBAlias)(nil)).Where("id = ?", id).Exec(ctx)
+		return err
+	})
 }
 
 func (s *Store) ListAliasTargets(ctx context.Context, aliasID uuid.UUID) ([]DBAliasTarget, error) {
@@ -176,6 +236,12 @@ func (s *Store) ListInboundKeys(ctx context.Context) ([]InboundKey, error) {
 	var out []InboundKey
 	err := s.DB.NewSelect().Model(&out).Order("name ASC").Scan(ctx)
 	return out, err
+}
+
+func (s *Store) GetInboundKey(ctx context.Context, id uuid.UUID) (InboundKey, error) {
+	var k InboundKey
+	err := s.DB.NewSelect().Model(&k).Where("id = ?", id).Scan(ctx)
+	return k, err
 }
 
 func (s *Store) CreateInboundKey(ctx context.Context, k *InboundKey) error {
@@ -243,6 +309,14 @@ func (s *Store) ListInboundKeysVisibleToMember(ctx context.Context, userID uuid.
 		Order("name ASC").
 		Scan(ctx)
 	return out, err
+}
+
+func (s *Store) InboundKeySharedWithMember(ctx context.Context, keyID, userID uuid.UUID) (bool, error) {
+	var shared bool
+	err := s.DB.NewRaw(`SELECT EXISTS (SELECT 1 FROM key_users WHERE key_id = ? AND user_id = ?)
+		OR EXISTS (SELECT 1 FROM key_teams AS kt JOIN team_members AS tm ON tm.team_id = kt.team_id
+			WHERE kt.key_id = ? AND tm.user_id = ?)`, keyID, userID, keyID, userID).Scan(ctx, &shared)
+	return shared, err
 }
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) {

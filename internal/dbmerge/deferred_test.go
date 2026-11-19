@@ -69,9 +69,7 @@ func TestMergeCatalogDeferredBaseRejectionPreservesStaticPolicy(t *testing.T) {
 	base := testBases()["base"]
 	base.Name = fmt.Sprintf("deferred-base-%d", time.Now().UnixNano())
 	row := store.DBProvider{Name: fmt.Sprintf("deferred-derived-%d", time.Now().UnixNano()), Type: "openai", Extends: base.Name, Enabled: false}
-	if err := st.CreateProviderAggregate(ctx, &row, nil); err != nil {
-		t.Fatal(err)
-	}
+	row = corruptReasoningProvider(t, st, row, nil)
 	t.Cleanup(func() { _ = st.DeleteProvider(ctx, row.ID) })
 	for _, caller := range []bool{false, true} {
 		base.DeferredTransport, base.DeferredReceiver = nil, nil
@@ -165,9 +163,7 @@ func TestMergeCatalogDeferredModelBaseRejectionPreservesStaticPolicy(t *testing.
 	}
 	baseName := fmt.Sprintf("deferred-model-base-%d", time.Now().UnixNano())
 	row := store.DBProvider{Name: fmt.Sprintf("deferred-model-derived-%d", time.Now().UnixNano()), Type: "openai-compatible", Extends: baseName, Enabled: false}
-	if err := st.CreateProviderAggregate(ctx, &row, nil); err != nil {
-		t.Fatal(err)
-	}
+	row = corruptReasoningProvider(t, st, row, nil)
 	t.Cleanup(func() { _ = st.DeleteProvider(ctx, row.ID) })
 	for _, view := range []string{"ordered", "indexed-with-nil-ordered", "index-only", "conflicting"} {
 		for _, empty := range []bool{false, true} {

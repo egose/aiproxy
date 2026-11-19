@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,8 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/store"
 	"github.com/google/uuid"
@@ -49,7 +52,7 @@ func TestQuotaSpendSurvivesKeyDeletion(t *testing.T) {
 					}
 					key := body["key"].(map[string]interface{})
 					id, token := mustParseUUID(key["id"].(string)), body["token"].(string)
-					dyn := auth.DynamicClient{KeyID: id, WorkspaceID: workspaceUUID, Name: keyName, TokenHash: store.TokenHash(token)}
+					dyn := auth.DynamicClient{KeyID: id, Workspace: identity.InWorkspace(workspaceUUID), Name: keyName, TokenHash: store.TokenHash(token)}
 					if scopeType == "user" {
 						dyn.OwnerUserID = scope.id
 					} else {
@@ -94,13 +97,16 @@ func TestQuotaSpendSurvivesKeyDeletion(t *testing.T) {
 					Auth: config.Auth{Mode: config.AuthModeBearerStatic},
 					Catalog: config.NewCatalog([]config.Provider{{
 						Name: "openai", Type: config.ProviderTypeOpenAI, BaseURL: upstream.URL, APIKey: "test",
-						Models: []config.Model{{Name: "m", UpstreamName: "m", Pricing: &config.ModelPricing{InputPerMillion: 1000, OutputPerMillion: 2000}}},
+						Workspace: identity.InWorkspace(workspaceUUID),
+						Models:    []config.Model{{Name: "m", UpstreamName: "m", Pricing: &config.ModelPricing{InputPerMillion: 1000, OutputPerMillion: 2000}}},
 					}}, nil, nil),
 				}
 				tracker := NewQuotaTracker(st)
+				rolling := accounting.NewAggregator()
 				deps := Dependencies{
 					Resolver: modelresolver.New(rt), Catalog: rt.Catalog, MultiTenancy: config.MultiTenancy{Enabled: true},
 					AdminStore: st, Quota: tracker, Auth: auth.NewAuthenticatorWithClients(rt.Auth, []auth.DynamicClient{dyn}),
+					Accounting: rolling, Usage: rolling,
 				}
 				proxy := NewHandler(deps)
 				callProxy := func(token string) *httptest.ResponseRecorder {
@@ -190,12 +196,29 @@ func TestQuotaSpendSurvivesKeyDeletion(t *testing.T) {
 					t.Fatalf("explicit reset = %d, %v", code, body)
 				}
 				assertSpend(20000)
-				principal := &auth.Principal{KeyID: replacementID, WorkspaceID: workspaceUUID, OwnerUserID: replacement.OwnerUserID, OwnerTeamID: replacement.OwnerTeamID}
+				principal := authenticatedTestPrincipal(t, deps.Auth, replacementToken)
 				if !proxy.allowQuota(deps, httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), principal, "openai/m") {
 					t.Fatal("explicit reset did not restore budget headroom")
 				}
 				release(1)
 				finishRequest(late)
+				retained := accounting.FilterSummaries(rolling.Summaries(), accounting.CredentialUsage(identity.DatabaseKeyID(keyID), dyn.Workspace))
+				if len(retained) != 1 || retained[0].Count != 2 || retained[0].TotalTokens != 30 {
+					t.Fatalf("late completion lost its admitted billing identity: %+v", retained)
+				}
+				billing := httptest.NewRecorder()
+				billingRequest := httptest.NewRequest(http.MethodGet, "/v1/billing/usage", nil)
+				billingRequest.Header.Set("Authorization", "Bearer "+replacementToken)
+				proxy.ServeHTTP(billing, billingRequest)
+				var replacementUsage billingUsageResponse
+				if billing.Code != http.StatusOK || json.Unmarshal(billing.Body.Bytes(), &replacementUsage) != nil {
+					t.Fatalf("replacement billing = %d %s", billing.Code, billing.Body.String())
+				}
+				for _, row := range replacementUsage.Data {
+					if row.TotalTokens != 0 || row.StatusCode == http.StatusOK || row.EstimatedCostUSD != nil && *row.EstimatedCostUSD != 0 {
+						t.Fatalf("same-label replacement saw deleted key totals/cost: %+v", row)
+					}
+				}
 				assertSpend(40000)
 				expireSpendCache()
 				assertBlocked()

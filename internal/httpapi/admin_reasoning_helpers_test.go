@@ -80,9 +80,11 @@ func newAdminReasoningFixture(t *testing.T, rt *config.Runtime) *adminReasoningF
 	if rt == nil {
 		rt = newRT()
 	}
+	rt.MultiTenancy.AllowedUpstreamOrigins = []string{"https://api.openai.com"}
 	fixture := &adminReasoningFixture{store: st, handler: h, access: access, runtime: rt}
 	deps := h.current()
 	deps.Catalog = rt.Catalog
+	deps.MultiTenancy.AllowedUpstreamOrigins = append([]string(nil), rt.MultiTenancy.AllowedUpstreamOrigins...)
 	deps.Resolver = modelresolver.New(rt)
 	deps.HasAccessLog, deps.AccessLog = true, false
 	deps.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))

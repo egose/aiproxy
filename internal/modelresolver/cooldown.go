@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/provider"
 )
 
@@ -12,6 +13,7 @@ type CooldownFingerprint struct {
 	Alias         string
 	Provider      string
 	Model         string
+	Workspace     identity.WorkspaceScope
 	BaseURL       string
 	Credential    string
 	UpstreamModel string
@@ -30,6 +32,7 @@ func CooldownFingerprintFor(alias string, prov config.Provider, model config.Mod
 		Alias:         alias,
 		Provider:      prov.Name,
 		Model:         model.Name,
+		Workspace:     prov.Workspace,
 		BaseURL:       provider.EffectiveBaseURL(prov.Type, prov.BaseURL),
 		Credential:    credential,
 		UpstreamModel: model.UpstreamName,
@@ -159,6 +162,9 @@ func (s *CooldownStore) cloneForCatalog(catalog config.Catalog) *CooldownStore {
 func validCooldownFingerprints(catalog config.Catalog) map[CooldownFingerprint]bool {
 	valid := make(map[CooldownFingerprint]bool)
 	for _, a := range catalog.Aliases() {
+		if _, scoped := a.Workspace.ID(); scoped && !catalog.ModelVisibleInWorkspace("alias/"+a.Name, a.Workspace) {
+			continue
+		}
 		for _, target := range a.Targets {
 			prov, model, ok := catalog.Model(target.Provider, target.Model)
 			if !ok {

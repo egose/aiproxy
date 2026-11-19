@@ -27,6 +27,9 @@ var tlsClientHelloSQL string
 //go:embed encrypted_reasoning.sql
 var encryptedReasoningSQL string
 
+//go:embed serving_revisions.sql
+var servingRevisionsSQL string
+
 const schemaVersion = "schema.sql"
 
 var migrations = []struct {
@@ -38,6 +41,7 @@ var migrations = []struct {
 	{"allow_insecure_base_url.sql", allowInsecureBaseURLSQL},
 	{"tls_client_hello.sql", tlsClientHelloSQL},
 	{"encrypted_reasoning.sql", encryptedReasoningSQL},
+	{"serving_revisions.sql", servingRevisionsSQL},
 }
 
 type Store struct {

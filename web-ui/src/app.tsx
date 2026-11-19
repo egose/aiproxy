@@ -2,7 +2,9 @@ import { Link, Navigate, Route, Routes } from 'react-router';
 import { useSnapshot as useStateSnapshot } from 'valtio';
 import { authLifecycle } from './auth-lifecycle';
 import { DialogManagerProvider } from '@egose/shadcn-theme/components/widgets/dialog-manager';
+import { Button } from '@egose/shadcn-theme/components/ui/button';
 import { Spinner } from '@egose/shadcn-theme/components/ui/spinner';
+import { TooltipProvider } from '@egose/shadcn-theme/components/ui/tooltip';
 import { Shell } from './components/shell';
 import { useAdminMe, useAdminSession, useAdminStatus, useCurrentWorkspace, useDataAuth } from './hooks';
 import { AdminOidcPage } from './pages/admin-oidc-page';
@@ -10,6 +12,7 @@ import { AdminWorkspacesPage } from './pages/admin-workspaces-page';
 import { AliasesPage } from './pages/aliases-page';
 import { BlocksPage } from './pages/blocks-page';
 import { LoginPage } from './pages/login-page';
+import { InvitePage } from './pages/invite-page';
 import { LogoutPage } from './pages/logout-page';
 import { ManageKeysPage } from './pages/manage-keys-page';
 import { ManageMembersPage } from './pages/manage-members-page';
@@ -34,7 +37,6 @@ function RequireAdmin({ children }: { children: React.JSX.Element }) {
 
 function RequireDashboardOperator({ children }: { children: React.JSX.Element }) {
   const access = useDataAuth();
-  const session = useAdminSession();
   if (access.pending) {
     return (
       <div className="p-6">
@@ -42,14 +44,12 @@ function RequireDashboardOperator({ children }: { children: React.JSX.Element })
       </div>
     );
   }
-  if (session.accessToken && !access.enabled) {
+  if (access.mode === 'session' && !access.credential) {
     return (
       <div className="grid gap-4 p-6" role="alert">
         <h1 className="text-lg font-semibold">Operator access required</h1>
 
-        <p>
-          Global dashboard data and decisions are available only to system administrators or dashboard-token holders.
-        </p>
+        <p>Global dashboard data and decisions are available only to system administrators.</p>
         {access.error && <p>Unable to verify your account. Sign in again to check access.</p>}
 
         <Link to="/manage/keys" className="underline">
@@ -84,16 +84,34 @@ function RequireSystemAdmin({ children }: { children: React.JSX.Element }) {
 export function App() {
   const { generation } = useStateSnapshot(authLifecycle);
   return (
-    <DialogManagerProvider key={generation}>
-      <AppContent />
-    </DialogManagerProvider>
+    <TooltipProvider>
+      <DialogManagerProvider key={generation}>
+        <AppContent />
+      </DialogManagerProvider>
+    </TooltipProvider>
   );
 }
 
 function AppContent() {
   const status = useAdminStatus();
   const session = useAdminSession();
-  const multi = status.data?.multi_tenancy_enabled === true;
+  if (!status.data) {
+    return (
+      <div className="p-6">
+        {status.isError ? (
+          <div className="grid justify-items-start gap-3" role="alert">
+            <p>Unable to load server settings.</p>
+            <Button appearance="outline" onClick={() => void status.refetch()} disabled={status.isFetching}>
+              Retry
+            </Button>
+          </div>
+        ) : (
+          <Spinner size="small">Loading server settings...</Spinner>
+        )}
+      </div>
+    );
+  }
+  const multi = status.data.multi_tenancy_enabled;
   const signedIn = !!session.accessToken;
   if (multi && !signedIn) {
     return (
@@ -103,6 +121,7 @@ function AppContent() {
             <Route path="/login" element={<LoginPage />} />
 
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/invite" element={<InvitePage />} />
 
             <Route path="/admin/oidc/callback" element={<OidcCallbackPage />} />
 
@@ -159,6 +178,7 @@ function AppContent() {
           {multi && <Route path="/token" element={<Navigate to="/" replace />} />}
           {multi && <Route path="/login" element={<LoginPage />} />}
           {multi && <Route path="/register" element={<RegisterPage />} />}
+          {multi && <Route path="/invite" element={<InvitePage />} />}
           {multi && <Route path="/logout" element={<LogoutPage />} />}
           {multi && <Route path="/admin/oidc/callback" element={<OidcCallbackPage />} />}
 

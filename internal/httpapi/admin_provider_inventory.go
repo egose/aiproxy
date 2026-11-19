@@ -7,6 +7,7 @@ import (
 
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/dbmerge"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/store"
 )
 
@@ -17,33 +18,61 @@ type adminProviderInventory struct {
 	static       map[string]config.Provider
 	materialized map[string]config.Provider
 	models       map[string][]store.DBProviderModel
+	details      map[string]store.DBProvider
 }
 
 func loadAdminProviderInventory(ctx context.Context, deps Dependencies) (*adminProviderInventory, error) {
-	rows, err := deps.AdminStore.ListProviders(ctx)
+	references, err := deps.AdminStore.ListProviderReferences(ctx)
 	if err != nil {
 		return nil, catalogStorageError{err}
+	}
+	rows := make([]store.DBProvider, 0, len(references))
+	for _, reference := range references {
+		rows = append(rows, store.DBProvider{
+			ID: reference.ID, Name: reference.Name, Type: reference.Type,
+			Extends: reference.Extends, Enabled: reference.Enabled, WorkspaceID: reference.WorkspaceID,
+		})
 	}
 	inventory := &adminProviderInventory{
 		store: deps.AdminStore, rows: rows, rowsByName: make(map[string]store.DBProvider, len(rows)),
 		static: make(map[string]config.Provider), materialized: make(map[string]config.Provider),
-		models: make(map[string][]store.DBProviderModel),
+		models:  make(map[string][]store.DBProviderModel),
+		details: make(map[string]store.DBProvider),
 	}
 	for _, provider := range deps.Catalog.DisabledProviders() {
 		if !provider.DatabaseManaged {
+			provider.Workspace = identity.InWorkspace(store.SystemWorkspaceID)
+			provider.Enabled = false
 			inventory.static[provider.Name] = provider
 		}
 	}
 	for _, provider := range deps.Catalog.Providers() {
 		if !provider.DatabaseManaged {
+			provider.Workspace = identity.InWorkspace(store.SystemWorkspaceID)
+			provider.Enabled = true
 			inventory.static[provider.Name] = provider
 		}
 	}
 	for _, row := range rows {
 		inventory.rowsByName[row.Name] = row
-		delete(inventory.static, row.Name)
 	}
 	return inventory, nil
+}
+
+func (inventory *adminProviderInventory) savedRow(ctx context.Context, name string) (store.DBProvider, error) {
+	if row, ok := inventory.details[name]; ok {
+		return row, nil
+	}
+	row, err := inventory.store.GetProvider(ctx, name)
+	if err != nil {
+		return store.DBProvider{}, catalogStorageError{err}
+	}
+	reference := inventory.rowsByName[name]
+	if row.ID != reference.ID || row.WorkspaceID != reference.WorkspaceID {
+		return store.DBProvider{}, store.ErrCatalogConflict
+	}
+	inventory.details[name] = row
+	return row, nil
 }
 
 func (inventory *adminProviderInventory) providerModels(ctx context.Context, row store.DBProvider) ([]store.DBProviderModel, error) {
@@ -67,12 +96,17 @@ func (inventory *adminProviderInventory) bases(ctx context.Context, row store.DB
 		return nil, fmt.Errorf("provider %q: extends %q references itself", row.Name, row.Extends)
 	}
 	if base, ok := inventory.rowsByName[row.Extends]; ok {
+		if base.WorkspaceID != row.WorkspaceID {
+			return nil, unavailableAdminProviderBase(row)
+		}
 		if base.Extends != "" {
 			return nil, fmt.Errorf("provider %q: extends %q must reference a concrete provider; inheritance chains are not supported", row.Name, row.Extends)
 		}
 		if !base.Enabled {
 			return nil, fmt.Errorf("provider %q: extends %q references a disabled provider", row.Name, row.Extends)
 		}
+	} else if _, ok := inventory.static[row.Extends]; !ok || row.WorkspaceID != store.SystemWorkspaceID {
+		return nil, unavailableAdminProviderBase(row)
 	}
 	base, err := inventory.provider(ctx, row.Extends)
 	if err != nil {
@@ -80,6 +114,10 @@ func (inventory *adminProviderInventory) bases(ctx context.Context, row store.DB
 	}
 	bases[row.Extends] = base
 	return bases, nil
+}
+
+func unavailableAdminProviderBase(row store.DBProvider) error {
+	return fmt.Errorf("provider %q: inheritance base is not defined in the destination workspace", row.Name)
 }
 
 func (inventory *adminProviderInventory) provider(ctx context.Context, name string) (config.Provider, error) {
@@ -92,6 +130,13 @@ func (inventory *adminProviderInventory) provider(ctx context.Context, name stri
 			return provider, nil
 		}
 		return config.Provider{}, fmt.Errorf("provider %q is not defined", name)
+	}
+	if _, exists := inventory.static[name]; exists {
+		return config.Provider{}, fmt.Errorf("provider name conflicts with static config")
+	}
+	row, err := inventory.savedRow(ctx, name)
+	if err != nil {
+		return config.Provider{}, err
 	}
 	bases, err := inventory.bases(ctx, row)
 	if err != nil {
@@ -139,7 +184,7 @@ func (h *Handler) prepareDBProvider(ctx context.Context, deps Dependencies, curr
 			return config.Provider{}, nil, err
 		}
 	}
-	provider, err := dbmerge.BuildProvider(row, models, bases)
+	provider, err := dbmerge.BuildProvider(row, models, bases, deps.MultiTenancy.AllowedUpstreamOrigins...)
 	if err != nil {
 		return config.Provider{}, nil, err
 	}
@@ -147,6 +192,19 @@ func (h *Handler) prepareDBProvider(ctx context.Context, deps Dependencies, curr
 		return config.Provider{}, nil, err
 	}
 	return provider, models, nil
+}
+
+func (h *Handler) validateDBProviderPolicy(ctx context.Context, deps Dependencies, row store.DBProvider) error {
+	inventory, err := loadAdminProviderInventory(ctx, deps)
+	if err != nil {
+		return err
+	}
+	bases, err := inventory.bases(ctx, row)
+	if err != nil {
+		return err
+	}
+	_, err = dbmerge.PrepareProvider(row, nil, bases, deps.MultiTenancy.AllowedUpstreamOrigins...)
+	return err
 }
 
 func (h *Handler) buildDBProviderModels(row store.DBProvider, reqModels *[]adminModelUpsert, bases map[string]config.Provider) ([]store.DBProviderModel, error) {

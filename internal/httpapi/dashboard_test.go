@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/providerhealth"
+	"github.com/egose/aiproxy/internal/store"
 )
 
 const dashboardTestToken = "sekret"
@@ -273,5 +275,58 @@ func TestDashboardRejectsAdminJWTWithoutStore(t *testing.T) {
 	h.ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 for admin JWT without multi-tenancy store", w.Code)
+	}
+}
+
+func TestDashboardRejectsTenantSessionsOnEveryOperatorRoute(t *testing.T) {
+	st := openAdminReasoningStore(t)
+	ctx := context.Background()
+	workspace := store.Workspace{Name: "dashboard-tenant"}
+	if err := st.CreateWorkspace(ctx, &workspace); err != nil {
+		t.Fatal(err)
+	}
+	rt := newRT()
+	rt.MultiTenancy.Enabled = true
+	usage := accounting.NewAggregator()
+	health := providerhealth.New(nil, config.ProviderHealth{})
+	health.SetProviders(rt.Catalog)
+	deps := newDashboardDeps(rt, time.Now(), usage, health, observability.NewLogBuffer(10))
+	deps.AdminStore = st
+	deps.MultiTenancy = rt.MultiTenancy
+	deps.AdminAuthConfig = rt.Auth
+	h := NewHandler(deps)
+
+	for _, role := range []string{roleMember, roleAdmin} {
+		t.Run(role, func(t *testing.T) {
+			user := store.User{Email: role + "@example.test"}
+			if err := st.CreateUser(ctx, &user); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.AddMembership(ctx, &store.WorkspaceMember{UserID: user.ID, WorkspaceID: workspace.ID, Role: role}); err != nil {
+				t.Fatal(err)
+			}
+			access, _, err := adminauth.IssueAccess(user.ID.String(), user.Email, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, route := range []struct{ method, path string }{
+				{http.MethodGet, dashrpc.SnapshotPath},
+				{http.MethodGet, dashrpc.LogsPath},
+				{http.MethodGet, dashrpc.PayloadsPath},
+				{http.MethodGet, dashrpc.PayloadPathPrefix + "fixture"},
+				{http.MethodGet, dashrpc.BlocksPath},
+				{http.MethodGet, dashrpc.BlockPathPrefix + "fixture"},
+				{http.MethodPost, dashrpc.BlockPathPrefix + "fixture" + dashrpc.BlockDecisionSuffix},
+			} {
+				r := httptest.NewRequest(route.method, route.path, nil)
+				r.Header.Set("Authorization", "Bearer "+access)
+				r.Header.Set("X-Workspace-ID", workspace.ID.String())
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, r)
+				if w.Code != http.StatusForbidden || w.Body.String() != "dashboard operator access required\n" {
+					t.Errorf("%s %s with tenant %s session = %d, want only the operator authorization error", route.method, route.path, role, w.Code)
+				}
+			}
+		})
 	}
 }

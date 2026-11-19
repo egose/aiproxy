@@ -5,10 +5,11 @@ import (
 	"time"
 
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/identity"
 )
 
 type Limiter interface {
-	Allow(key string) (bool, time.Duration)
+	Allow(key identity.CredentialID) (bool, time.Duration)
 }
 
 type noopLimiter struct{}
@@ -20,7 +21,7 @@ func New(cfg config.Auth) Limiter {
 	return &tokenBucketLimiter{
 		ratePerSecond: float64(cfg.RateLimit.RequestsPerMinute) / 60,
 		burst:         float64(cfg.RateLimit.Burst),
-		entries:       make(map[string]bucketState),
+		entries:       make(map[identity.CredentialID]bucketState),
 		now:           time.Now,
 	}
 }
@@ -32,7 +33,7 @@ func ConfigEqual(a, b config.Auth) bool {
 	return *a.RateLimit == *b.RateLimit
 }
 
-func (noopLimiter) Allow(string) (bool, time.Duration) {
+func (noopLimiter) Allow(identity.CredentialID) (bool, time.Duration) {
 	return true, 0
 }
 
@@ -40,7 +41,7 @@ type tokenBucketLimiter struct {
 	mu            sync.Mutex
 	ratePerSecond float64
 	burst         float64
-	entries       map[string]bucketState
+	entries       map[identity.CredentialID]bucketState
 	now           func() time.Time
 }
 
@@ -49,10 +50,7 @@ type bucketState struct {
 	last   time.Time
 }
 
-func (l *tokenBucketLimiter) Allow(key string) (bool, time.Duration) {
-	if key == "" {
-		key = "anonymous"
-	}
+func (l *tokenBucketLimiter) Allow(key identity.CredentialID) (bool, time.Duration) {
 	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()

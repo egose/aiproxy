@@ -4,12 +4,11 @@ import { Empty, EmptyTitle } from '@egose/shadcn-theme/components/ui/empty';
 import { Spinner } from '@egose/shadcn-theme/components/ui/spinner';
 import { useDialog } from '@egose/shadcn-theme/components/widgets/dialog-manager';
 import { useQueryClient } from '@tanstack/react-query';
-import { useAdminMe, useCurrentWorkspace } from '../hooks';
+import { useCurrentWorkspace } from '../hooks';
 import { CreateTeamDialog, TeamSection } from './workspaces-page';
 
 export function ManageTeamsPage() {
-  const { workspace, workspaces } = useCurrentWorkspace();
-  const me = useAdminMe(true);
+  const { workspace, workspaces, canManage } = useCurrentWorkspace();
   const { openDialog } = useDialog();
   const queryClient = useQueryClient();
 
@@ -29,7 +28,6 @@ export function ManageTeamsPage() {
       </div>
     );
   }
-  const canManage = me.data?.is_admin === true || workspace.role === 'admin';
   const isPersonal = workspace.kind === 'personal';
   const openCreate = async () => {
     try {

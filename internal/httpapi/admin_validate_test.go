@@ -45,7 +45,7 @@ func validationTestHandler(t *testing.T, st *store.Store) (*Handler, string) {
 	rt := newRT()
 	deps := newWebUIDeps(false)
 	deps.Catalog = rt.Catalog
-	deps.MultiTenancy = config.MultiTenancy{Enabled: true}
+	deps.MultiTenancy = config.MultiTenancy{Enabled: true, AllowedUpstreamOrigins: []string{"https://api.openai.com"}}
 	deps.AdminStore = st
 	h := NewHandler(deps)
 	u := &store.User{Email: uniqName(t, "validation-admin") + "@example.com", IsAdmin: true}

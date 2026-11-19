@@ -3,12 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@egose/shadcn-theme/co
 import { Empty, EmptyTitle } from '@egose/shadcn-theme/components/ui/empty';
 import { Spinner } from '@egose/shadcn-theme/components/ui/spinner';
 import { useDialog } from '@egose/shadcn-theme/components/widgets/dialog-manager';
-import { useAdminMe, useCurrentWorkspace } from '../hooks';
+import { useCurrentWorkspace } from '../hooks';
 import { InviteDialog, MemberSection } from './workspaces-page';
 
 export function ManageMembersPage() {
-  const { workspace, workspaces } = useCurrentWorkspace();
-  const me = useAdminMe(true);
+  const { workspace, workspaces, canManage } = useCurrentWorkspace();
   const { openDialog } = useDialog();
 
   if (workspaces.isLoading) {
@@ -27,7 +26,6 @@ export function ManageMembersPage() {
       </div>
     );
   }
-  const canManage = me.data?.is_admin === true || workspace.role === 'admin';
   const isPersonal = workspace.kind === 'personal';
   const openInvite = async () => {
     try {

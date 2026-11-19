@@ -225,7 +225,7 @@ multi_tenancy { enabled = true }
 	if !reflect.DeepEqual(readKey().AllowedModels, []string{"local/new"}) {
 		t.Fatal("valid commit lost on activation failure")
 	}
-	checkLive(200, 200)
+	checkLive(403, 200)
 	rewriteConfigFile(t, path, cfg)
 	if err := a.Reload(); err != nil {
 		t.Fatal(err)

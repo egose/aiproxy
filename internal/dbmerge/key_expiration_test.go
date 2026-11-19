@@ -62,6 +62,9 @@ func TestMergedKeyExpirationAndLifecycle(t *testing.T) {
 			if err != nil || p == nil {
 				t.Fatalf("%s: principal = %+v, error = %v", token, p, err)
 			}
+			if _, workspaceID, ok := p.DatabaseKey(); !ok || workspaceID != store.SystemWorkspaceID {
+				t.Fatalf("%s: persisted System scope = (%v, %v)", token, workspaceID, ok)
+			}
 		} else if p != nil || err != auth.ErrInvalidToken {
 			t.Errorf("%s: principal = %+v, error = %v; want nil, ErrInvalidToken", token, p, err)
 		}

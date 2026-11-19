@@ -8,10 +8,14 @@ import (
 
 	"github.com/egose/aiproxy/internal/guardrails"
 	"github.com/egose/aiproxy/internal/tlsprofile"
+	"github.com/egose/aiproxy/internal/upstreampolicy"
 	"github.com/redis/go-redis/v9"
 )
 
 func Validate(rt *Runtime) error {
+	if _, err := upstreampolicy.New(rt.MultiTenancy.AllowedUpstreamOrigins); err != nil {
+		return fmt.Errorf("multi_tenancy: %w", err)
+	}
 	if err := validateListener(rt.Listener); err != nil {
 		return err
 	}
@@ -307,25 +311,8 @@ func validateProviders(providers []Provider, requireCredential bool) error {
 			if m.UpstreamName == "" {
 				return fmt.Errorf("provider %q: model %q has empty upstream_name", p.Name, m.Name)
 			}
-			if err := validateModelProtocol(p.Type, p.Name, m); err != nil {
+			if err := ValidateModelCapabilities(p.Type, p.Name, m); err != nil {
 				return err
-			}
-			served := OpenCodeProtocolCapabilities(m.Protocol)
-			seenCaps := make(map[Capability]bool)
-			for _, c := range m.Capabilities {
-				if !isValidCapability(c) {
-					return fmt.Errorf("provider %q: model %q has invalid capability %q", p.Name, m.Name, c)
-				}
-				if !providerSupportsCapability(p.Type, c) {
-					return fmt.Errorf("provider %q: model %q capability %q is not supported by provider type %q", p.Name, m.Name, c, p.Type)
-				}
-				if IsOpenCodeProviderType(p.Type) && !HasCapability(served, c) {
-					return fmt.Errorf("provider %q: model %q capability %q is not served by protocol %q", p.Name, m.Name, c, m.Protocol)
-				}
-				if seenCaps[c] {
-					return fmt.Errorf("provider %q: model %q has duplicate capability %q", p.Name, m.Name, c)
-				}
-				seenCaps[c] = true
 			}
 		}
 	}
@@ -611,6 +598,9 @@ func validateAliases(aliases []Alias, catalog Catalog) error {
 		}
 		seen := make(map[string]bool)
 		for _, t := range a.Targets {
+			if _, scoped := a.Workspace.ID(); scoped && !catalog.ModelVisibleInWorkspace(t.Provider+"/"+t.Model, a.Workspace) {
+				return fmt.Errorf("alias %q: target is not defined in the destination workspace", a.Name)
+			}
 			_, _, ok := catalog.Model(t.Provider, t.Model)
 			if !ok {
 				if _, providerOK := catalog.Provider(t.Provider); !providerOK {

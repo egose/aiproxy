@@ -69,6 +69,12 @@ type CopilotFlowStart struct {
 	ClientID    string
 }
 
+type CopilotFlowBinding struct {
+	WorkspaceID  uuid.UUID
+	ProviderID   *uuid.UUID
+	ProviderName string
+}
+
 type CopilotFlowLease struct {
 	flowID     uuid.UUID
 	actorID    uuid.UUID
@@ -424,6 +430,26 @@ func (s *Store) GetCopilotFlow(ctx context.Context, actorID, id uuid.UUID) (Copi
 	return s.withCopilotFlow(ctx, actorID, id, nil)
 }
 
+func (s *Store) ReadCopilotFlowBinding(ctx context.Context, actorID, id uuid.UUID) (CopilotFlowBinding, error) {
+	var binding CopilotFlowBinding
+	err := s.DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var f copilotDeviceFlow
+		if err := tx.NewSelect().Model(&f).Column("workspace_id", "provider_id", "provider_name").
+			Where("id = ? AND actor_id = ?", id, actorID).Scan(ctx); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrCopilotFlowNotFound
+			}
+			return err
+		}
+		if err := flowAuthority(ctx, tx, actorID, f.WorkspaceID); err != nil {
+			return err
+		}
+		binding = CopilotFlowBinding{WorkspaceID: f.WorkspaceID, ProviderID: f.ProviderID, ProviderName: f.ProviderName}
+		return nil
+	})
+	return binding, err
+}
+
 func (s *Store) CancelCopilotFlow(ctx context.Context, actorID, id uuid.UUID) (CopilotFlowStatus, error) {
 	return s.withCopilotFlow(ctx, actorID, id, func(ctx context.Context, tx bun.Tx, f *copilotDeviceFlow, now time.Time) error {
 		if !flowLive(f) {
@@ -518,7 +544,7 @@ func (snap CopilotFlowSnapshot) AttachCredential(p *DBProvider) error {
 	return nil
 }
 
-func (s *Store) ConsumeCopilotFlow(ctx context.Context, snap CopilotFlowSnapshot, p *DBProvider, models *[]DBProviderModel) error {
+func (s *Store) ConsumeCopilotFlow(ctx context.Context, snap CopilotFlowSnapshot, p *DBProvider, models *[]DBProviderModel, options ...CatalogEditOptions) error {
 	var next DBProvider
 	_, err := s.withCopilotFlow(ctx, snap.flow.ActorID, snap.flow.ID, func(ctx context.Context, tx bun.Tx, f *copilotDeviceFlow, now time.Time) error {
 		if f.State != "ready" || f.Revision != snap.flow.Revision || !bytes.Equal(f.CredentialEncrypted, p.CopilotCredentialEncrypted) {
@@ -543,13 +569,13 @@ func (s *Store) ConsumeCopilotFlow(ctx context.Context, snap CopilotFlowSnapshot
 			if current.Type != "github-copilot" || current.Name != p.Name || !current.UpdatedAt.Equal(p.UpdatedAt) {
 				return ErrCatalogConflict
 			}
-			next, err = updateProviderAggregateTx(ctx, tx, p, models)
+			next, err = updateProviderAggregateTx(ctx, tx, p, models, options...)
 		} else {
 			var ms []DBProviderModel
 			if models != nil {
 				ms = *models
 			}
-			next, err = createProviderAggregateTx(ctx, tx, p, ms)
+			next, err = createProviderAggregateTx(ctx, tx, p, ms, options...)
 		}
 		if err != nil {
 			return err

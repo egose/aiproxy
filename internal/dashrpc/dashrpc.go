@@ -351,12 +351,12 @@ func BuildContext(ctx context.Context, version, address, authMode string, startT
 		snap.Health = health.SnapshotContext(ctx)
 	}
 	if usage != nil {
-		snap.Billing = usage.BillingSnapshot()
+		snap.Billing = usage.OperatorBillingSnapshot()
 		snap.Usage = snap.Billing.Usage
 		snap.Rates = usage.RateSnapshot()
 		snap.Recent = usage.Recent(recentN)
 		snap.ProviderStats = usage.ProviderSummaries()
-		snap.Upstream = usage.UpstreamSummaries()
+		snap.Upstream = usage.OperatorUpstreamSummaries()
 	}
 	if logs != nil {
 		entries, lastSeq := logs.SinceSeq(0)

@@ -11,6 +11,8 @@ import (
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/dashrpc"
+	"github.com/egose/aiproxy/internal/identity"
+	"github.com/google/uuid"
 )
 
 func measurementModel(t *testing.T, usage *accounting.Aggregator, catalog config.Catalog) (*model, dashrpc.Snapshot) {
@@ -113,7 +115,13 @@ func TestRetainedCostsThroughRPCAndTUIIsolateAliasesAndIdentities(t *testing.T) 
 		rows           int
 		cost           string
 	}{{"", "same", 3, "$0.01"}, {"t", "same", 6, "$1.10"}} {
-		rows := accounting.FilterSummaries(wire.Billing.Usage, scope.tenant, scope.client)
+		var rows []accounting.Summary
+		for _, row := range wire.Billing.Usage {
+			if scope.tenant != "" && row.Tenant == scope.tenant ||
+				scope.tenant == "" && row.Tenant == "" && row.Client == scope.client {
+				rows = append(rows, row)
+			}
+		}
 		if len(rows) != scope.rows {
 			t.Fatalf("scope %+v: %+v", scope, rows)
 		}
@@ -192,6 +200,45 @@ func TestProductionCostPriceGapsAndProviderSubtotals(t *testing.T) {
 				t.Fatalf("provider price gap: %s", got)
 			}
 		})
+	}
+}
+
+func TestOperatorRPCAndTUIPreserveOverlappingLabelAggregates(t *testing.T) {
+	a := accounting.NewAggregator()
+	var identifiers []string
+	for i, workspace := range []uuid.UUID{uuid.Nil, uuid.New(), uuid.New()} {
+		key := uuid.New()
+		identifiers = append(identifiers, key.String())
+		a.Record(accounting.Event{CredentialID: identity.DatabaseKeyID(key), WorkspaceScope: identity.InWorkspace(workspace),
+			Tenant: "shared", Client: "shared", Model: "alias/shared", Provider: []string{"cheap", "expensive", "cheap"}[i],
+			UpstreamModel: "m", Operation: "chat_completions", StatusCode: 200, PromptTokens: 1000000, TotalTokens: 1000000})
+	}
+	catalog := config.NewCatalog([]config.Provider{
+		{Name: "cheap", Models: []config.Model{{Name: "m", Pricing: &config.ModelPricing{InputPerMillion: 1}}}},
+		{Name: "expensive", Models: []config.Model{{Name: "m", Pricing: &config.ModelPricing{InputPerMillion: 10}}}},
+	}, nil, nil)
+	m, wire := measurementModel(t, a, catalog)
+	if len(a.Summaries()) != 3 || len(upstreamAsSummaries(a.BillingSnapshot().Upstream)) != 3 ||
+		len(wire.Billing.Usage) != 1 || wire.Billing.Usage[0].Count != 3 || len(wire.Billing.Upstream) != 2 {
+		t.Fatal("operator transport merged stored identities or lost intentional label aggregates")
+	}
+	if got := renderUsage(m, 240, 20); !strings.Contains(got, "$12.00") {
+		t.Fatalf("serialized operator alias attribution was ambiguous: %s", got)
+	}
+	prices := pricingIndex(m.snapshot.Providers)
+	for provider, want := range map[string]string{"cheap": "$2.00", "expensive": "$10.00"} {
+		if got := providerCostTextWithAliases(provider, wire.Billing.Usage, prices, nil, wire.Billing.Upstream); got != want {
+			t.Fatalf("operator provider aggregate %s = %s, want %s", provider, got, want)
+		}
+	}
+	data, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range append(identifiers, "CredentialID", "WorkspaceScope") {
+		if strings.Contains(string(data), forbidden) {
+			t.Fatal("operator JSON disclosed credential identity")
+		}
 	}
 }
 

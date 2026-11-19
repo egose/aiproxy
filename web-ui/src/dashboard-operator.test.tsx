@@ -7,6 +7,7 @@ import { fetchAdminMe, fetchAdminWorkspaces, fetchAdminStatus } from './services
 import { fetchBlock, fetchBlocks, fetchPayload, fetchPayloads, fetchSnapshot } from './services/dashboard';
 import { adminWorkspaceStore, clearAdminSession, setAdminSession, setDashboardToken } from './store';
 import { adminWorkspaceSchema, adminStatusSchema, snapshotSchema } from './types';
+import { systemWorkspaceId } from './workspace-selection';
 
 vi.mock('./services/admin', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./services/admin')>()),
@@ -36,6 +37,7 @@ beforeEach(() => {
   );
   vi.mocked(fetchAdminMe).mockResolvedValue({ user_id: 'member', email: 'member@example.com', is_admin: false });
   vi.mocked(fetchAdminWorkspaces).mockResolvedValue([
+    adminWorkspaceSchema.parse({ id: systemWorkspaceId, name: 'system', is_system: true, role: 'member' }),
     adminWorkspaceSchema.parse({ id: 'ws-a', name: 'ws-a', kind: 'organization', is_system: false, role: 'member' }),
   ]);
   vi.mocked(fetchSnapshot).mockResolvedValue(
@@ -82,15 +84,16 @@ async function findDetailButton(name: RegExp) {
 }
 
 async function waitForWorkspace() {
-  await waitFor(() => expect(adminWorkspaceStore.workspaceId).toBe('ws-a'));
+  await waitFor(() => expect([systemWorkspaceId, 'ws-a']).toContain(adminWorkspaceStore.workspaceId));
 }
 
 describe('operator-only dashboard', () => {
   for (const role of ['member', 'admin'] as const) {
     it.each(['/', '/requests', '/payloads', '/blocks'])(
-      `blocks ${role} direct link %s without global reads`,
+      `blocks ${role} direct link %s even with a saved dashboard token`,
       async (path) => {
         setAdminSession('ordinary-session', '');
+        setDashboardToken('previous-dashboard-secret');
         vi.mocked(fetchAdminWorkspaces).mockResolvedValue([
           adminWorkspaceSchema.parse({ id: 'ws-a', name: 'ws-a', kind: 'organization', is_system: false, role }),
         ]);
@@ -111,32 +114,52 @@ describe('operator-only dashboard', () => {
     );
   }
 
-  for (const credential of ['system-admin', 'dashboard-secret']) {
-    it.each(['/', '/requests', '/payloads', '/blocks'])(`permits ${credential} on %s`, async (path) => {
-      setAdminSession('session', '');
-      if (credential === 'system-admin') {
-        vi.mocked(fetchAdminMe).mockResolvedValue({
-          user_id: 'operator',
-          email: 'operator@example.com',
-          is_admin: true,
-        });
-      } else {
-        setDashboardToken('operator-secret');
-      }
-      renderPage(path);
-      await waitFor(() => expect(fetchSnapshot).toHaveBeenCalled());
-      await waitFor(() => expect(screen.getByRole('link', { name: 'Recent requests' })).toBeInTheDocument());
-      expect(screen.queryByRole('heading', { name: 'Operator access required' })).not.toBeInTheDocument();
-      if (path === '/payloads') await waitFor(() => expect(fetchPayloads).toHaveBeenCalled());
-      if (path === '/blocks') await waitFor(() => expect(fetchBlocks).toHaveBeenCalled());
-    });
+  for (const credential of ['session', 'token'] as const) {
+    it.each(['/', '/requests', '/payloads', '/blocks'])(
+      `uses ${credential} for %s in the configured mode`,
+      async (path) => {
+        setAdminSession('saved-session', '');
+        setDashboardToken('saved-dashboard-token');
+        if (credential === 'session') {
+          vi.mocked(fetchAdminMe).mockResolvedValue({
+            user_id: 'operator',
+            email: 'operator@example.com',
+            is_admin: true,
+          });
+        } else {
+          vi.mocked(fetchAdminStatus).mockResolvedValue(
+            adminStatusSchema.parse({ multi_tenancy_enabled: false, web_ui_enabled: true, db_ok: false }),
+          );
+        }
+        renderPage(path);
+        await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledWith(credential));
+        await waitFor(() => expect(screen.getByRole('link', { name: 'Recent requests' })).toBeInTheDocument());
+        expect(screen.queryByRole('heading', { name: 'Operator access required' })).not.toBeInTheDocument();
+        if (credential === 'token') expect(fetchAdminMe).not.toHaveBeenCalled();
+        if (path === '/payloads')
+          await waitFor(() => expect(fetchPayloads).toHaveBeenCalledWith(credential, 100, false));
+        if (path === '/blocks') await waitFor(() => expect(fetchBlocks).toHaveBeenCalledWith(credential));
+      },
+    );
   }
 
   it('waits for stored authority before loading dashboard data', async () => {
     setAdminSession('session', '');
+    setDashboardToken('previous-dashboard-secret');
     vi.mocked(fetchAdminMe).mockReturnValue(new Promise(() => {}));
     renderPage('/blocks');
     expect(await screen.findByText('Checking operator access...')).toBeInTheDocument();
+    expectNoDashboardReads();
+  });
+
+  it('waits for server mode before sending dashboard credentials', async () => {
+    setAdminSession('session', '');
+    setDashboardToken('previous-dashboard-secret');
+    vi.mocked(fetchAdminStatus).mockReturnValue(new Promise(() => {}));
+    renderPage('/token');
+    expect(await screen.findByText('Loading server settings...')).toBeInTheDocument();
+    expect(screen.queryByText('Dashboard token')).not.toBeInTheDocument();
+    expect(fetchAdminMe).not.toHaveBeenCalled();
     expectNoDashboardReads();
   });
 
@@ -161,6 +184,31 @@ describe('operator-only dashboard', () => {
     expect(await screen.findByText(/Operator access required\. Global dashboard data/)).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Fix token' })).not.toBeInTheDocument();
+  });
+
+  it('offers account sign-in, not token settings, after a session 401', async () => {
+    setAdminSession('session', '');
+    vi.mocked(fetchAdminMe).mockResolvedValue({ user_id: 'operator', email: 'operator@example.com', is_admin: true });
+    vi.mocked(fetchSnapshot).mockRejectedValue({ response: { status: 401 } });
+    renderPage('/');
+    expect(await screen.findByText('Authentication failed. Sign in again.')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Fix token' })).not.toBeInTheDocument();
+    const signIn = screen.getByRole('link', { name: 'Sign in again' });
+    expect(signIn).toHaveAttribute('href', '/login');
+    fireEvent.click(signIn);
+    expect(await screen.findByLabelText('Email')).toBeInTheDocument();
+  });
+
+  it('still offers token settings after a token-mode 401', async () => {
+    setDashboardToken('stale-token');
+    vi.mocked(fetchAdminStatus).mockResolvedValue(
+      adminStatusSchema.parse({ multi_tenancy_enabled: false, web_ui_enabled: true, db_ok: false }),
+    );
+    vi.mocked(fetchSnapshot).mockRejectedValue({ response: { status: 401 } });
+    renderPage('/');
+    expect(await screen.findByText('Authentication failed. Check your dashboard token.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('link', { name: 'Fix token' }));
+    expect(await screen.findByLabelText('Bearer token')).toBeInTheDocument();
   });
 
   it.each(['/payloads', '/blocks'])('explains detail access denial on %s and hides decision controls', async (path) => {

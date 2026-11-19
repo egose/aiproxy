@@ -16,15 +16,7 @@ import {
 } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation } from 'react-router';
-import {
-  useAdminMe,
-  useAdminWorkspace,
-  useAdminWorkspaces,
-  useAdminSession,
-  useAdminStatus,
-  useDataAuth,
-  useSnapshot,
-} from '../hooks';
+import { useAdminMe, useAdminSession, useAdminStatus, useCurrentWorkspace, useDataAuth, useSnapshot } from '../hooks';
 import { setAdminWorkspaceId } from '../store';
 import { assertAuthGeneration, authLifecycle } from '../auth-lifecycle';
 import { NewWorkspaceDialog } from './dialogs';
@@ -52,6 +44,7 @@ const sectionMeta: Record<string, { group: string; title: string }> = {
   '/token': { group: 'Dashboard', title: 'Token' },
   '/login': { group: 'Admin', title: 'Sign in' },
   '/register': { group: 'Admin', title: 'Create account' },
+  '/invite': { group: 'Admin', title: 'Accept invitation' },
   '/logout': { group: 'Admin', title: 'Sign out' },
   '/admin/oidc/callback': { group: 'Admin', title: 'Sign in' },
   '/admin/workspaces': { group: 'Admin', title: 'Workspaces' },
@@ -85,26 +78,11 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.title = `${meta.title} · aiproxy`;
   }, [meta.title]);
-  const workspacesQuery = useAdminWorkspaces(signedIn);
-  const adminWorkspace = useAdminWorkspace();
+  const selection = useCurrentWorkspace(signedIn);
   const queryClient = useQueryClient();
   const { openDialog } = useDialog();
-  const workspaceList = multi && signedIn ? (workspacesQuery.data ?? []) : [];
-  const currentWorkspaceId = workspaceList.some((o) => o.id === adminWorkspace.workspaceId)
-    ? adminWorkspace.workspaceId
-    : (workspaceList[0]?.id ?? '');
-  useEffect(() => {
-    if (
-      multi &&
-      signedIn &&
-      workspacesQuery.data &&
-      workspaceList.length > 0 &&
-      currentWorkspaceId !== '' &&
-      currentWorkspaceId !== adminWorkspace.workspaceId
-    ) {
-      setAdminWorkspaceId(currentWorkspaceId);
-    }
-  }, [multi, signedIn, workspacesQuery.data, workspaceList.length, currentWorkspaceId, adminWorkspace.workspaceId]);
+  const workspaceList = multi && signedIn && selection.me.isSuccess ? (selection.workspaces.data ?? []) : [];
+  const currentWorkspaceId = selection.workspace?.id ?? '';
   if (multi && !signedIn) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
@@ -145,7 +123,12 @@ export function Shell({ children }: { children: ReactNode }) {
             canAdd: true,
             addText: 'New Workspace',
             items: workspaceList.map((o) => ({
-              name: o.display_name || o.name,
+              workspaceId: o.id,
+              name: workspaceList.some(
+                (other) => other.id !== o.id && (other.display_name || other.name) === (o.display_name || o.name),
+              )
+                ? `${o.display_name || o.name} (${o.name})`
+                : o.display_name || o.name,
               text: o.display_name !== '' ? `${o.name} · ${o.role}` : o.role,
               active: o.id === currentWorkspaceId,
             })),
@@ -156,7 +139,7 @@ export function Shell({ children }: { children: ReactNode }) {
             items: [{ name: 'Local server', text: snapshotQuery.data?.address ?? 'serve', active: true }],
           },
     menus: [
-      ...(!multi || dashboardAccess.enabled
+      ...(!multi || !!dashboardAccess.credential
         ? [
             {
               title: 'Dashboard',
@@ -271,8 +254,8 @@ export function Shell({ children }: { children: ReactNode }) {
       ...(signedIn ? [{ title: 'Sign out', url: '/logout', icon: IconLock }] : []),
     ],
     events: {
-      contextSelect: (ctx: { name: string }) => {
-        const match = workspaceList.find((o) => (o.display_name || o.name) === ctx.name);
+      contextSelect: (ctx: { name: string; workspaceId?: string }) => {
+        const match = workspaceList.find((o) => o.id === ctx.workspaceId);
         if (match) {
           setAdminWorkspaceId(match.id);
         }
@@ -298,7 +281,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <TooltipProvider>
-      <SidebarLayout aslink={Link} data={data}>
+      <SidebarLayout key={currentWorkspaceId || 'unresolved'} aslink={Link} data={data}>
         <HeaderSlot group={group} title={headerTitle} />
         {children}
       </SidebarLayout>

@@ -295,6 +295,12 @@ func (h *Handler) adminUsers(deps Dependencies, w http.ResponseWriter, r *http.R
 			writeMembershipError(w, err)
 			return
 		}
+		w.Header().Set("X-Aiproxy-User-Deleted", "true")
+		w.Header().Set("X-Aiproxy-User-ID", target.ID.String())
+		w.Header().Set("Cache-Control", "no-store")
+		if !activateCatalogChange(deps, w) {
+			return
+		}
 		writeAdminJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
 		http.Error(w, "unknown action", http.StatusNotFound)

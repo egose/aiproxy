@@ -6,6 +6,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/egose/aiproxy/internal/identity"
+	"github.com/google/uuid"
 )
 
 func TestBillingSnapshotRetentionAndLifetimeCounters(t *testing.T) {
@@ -115,11 +118,17 @@ func TestMemoryBillingSnapshotAttributesPublicModels(t *testing.T) {
 }
 
 func TestBillingClientScopeDoesNotCrossTenants(t *testing.T) {
-	summaries := []Summary{{Client: "same"}, {Tenant: "a", Client: "same"}, {Tenant: "b", Client: "same"}, {Client: "other"}}
-	if got := FilterSummaries(summaries, "", "same"); len(got) != 1 || got[0].Tenant != "" {
+	workspace := identity.InWorkspace(uuid.Nil)
+	summaries := []Summary{
+		{CredentialID: identity.StaticClientID("same"), WorkspaceScope: workspace, Client: "same"},
+		{CredentialID: identity.StaticClientID("tenant-a"), WorkspaceScope: workspace, Tenant: "a", Client: "same"},
+		{CredentialID: identity.StaticClientID("tenant-b"), WorkspaceScope: workspace, Tenant: "b", Client: "same"},
+		{CredentialID: identity.StaticClientID("other"), WorkspaceScope: workspace, Client: "other"},
+	}
+	if got := FilterSummaries(summaries, CredentialUsage(identity.StaticClientID("same"), workspace)); len(got) != 1 || got[0].Tenant != "" {
 		t.Fatalf("tenantless client scope: %+v", got)
 	}
-	if got := FilterSummaries(summaries, "a", "same"); len(got) != 1 || got[0].Tenant != "a" {
+	if got := FilterSummaries(summaries, StaticTenantUsage("a", workspace)); len(got) != 1 || got[0].Tenant != "a" {
 		t.Fatalf("tenant scope: %+v", got)
 	}
 }

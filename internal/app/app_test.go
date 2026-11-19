@@ -20,8 +20,10 @@ import (
 
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/providerhealth"
+	"github.com/egose/aiproxy/internal/store"
 )
 
 func writeConfigFile(t *testing.T, contents string) string {
@@ -466,10 +468,10 @@ provider "openai" "openai" {
 	if err != nil {
 		t.Fatalf("build app: %v", err)
 	}
-	if allowed, _ := a.rateLimiter.Allow("client-a"); !allowed {
+	if allowed, _ := a.rateLimiter.Allow(identity.CredentialID{}); !allowed {
 		t.Fatal("first request should pass")
 	}
-	if allowed, _ := a.rateLimiter.Allow("client-a"); allowed {
+	if allowed, _ := a.rateLimiter.Allow(identity.CredentialID{}); allowed {
 		t.Fatal("second request should exhaust bucket")
 	}
 
@@ -490,7 +492,7 @@ provider "openai" "openai" {
 	if err := a.Reload(); err != nil {
 		t.Fatalf("reload app: %v", err)
 	}
-	if allowed, _ := a.rateLimiter.Allow("client-a"); allowed {
+	if allowed, _ := a.rateLimiter.Allow(identity.CredentialID{}); allowed {
 		t.Fatal("unchanged rate limit config should preserve exhausted bucket")
 	}
 }
@@ -686,7 +688,7 @@ provider "openai" "openai" {
 	if err != nil {
 		t.Fatalf("build app: %v", err)
 	}
-	if allowed, _ := a.rateLimiter.Allow("client-a"); !allowed {
+	if allowed, _ := a.rateLimiter.Allow(identity.CredentialID{}); !allowed {
 		t.Fatal("first request should pass")
 	}
 
@@ -707,7 +709,7 @@ provider "openai" "openai" {
 	if err := a.Reload(); err != nil {
 		t.Fatalf("reload app: %v", err)
 	}
-	if allowed, _ := a.rateLimiter.Allow("client-a"); !allowed {
+	if allowed, _ := a.rateLimiter.Allow(identity.CredentialID{}); !allowed {
 		t.Fatal("changed rate limit config should create a fresh bucket")
 	}
 }
@@ -1003,7 +1005,8 @@ provider "openai" "openai" {
 	if len(summaries) != 1 {
 		t.Fatalf("summaries = %+v", summaries)
 	}
-	if summaries[0] != (accounting.Summary{Tenant: "team-a", Client: "ci", Model: "openai/gpt-4o-mini", Operation: "chat_completions", StatusCode: 200, Count: 1}) {
+	if summaries[0] != (accounting.Summary{CredentialID: identity.StaticClientID("ci"), WorkspaceScope: identity.InWorkspace(store.SystemWorkspaceID),
+		Tenant: "team-a", Client: "ci", Model: "openai/gpt-4o-mini", Operation: "chat_completions", StatusCode: 200, Count: 1}) {
 		t.Fatalf("summary = %+v", summaries[0])
 	}
 

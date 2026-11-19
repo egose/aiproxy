@@ -150,6 +150,8 @@ func TestScopedEncryptedReasoningAccountingQuotaAndAttemptTelemetry(t *testing.T
 				configuration := config.Auth{Mode: config.AuthModeBearerStatic}
 				deps.Auth, deps.Authorizer = auth.NewAuthenticatorWithClients(configuration, []auth.DynamicClient{client}), auth.NewAuthorizerWithClients(configuration, []auth.DynamicClient{client})
 				deps.MultiTenancy.Enabled, deps.Quota, deps.RateLimiter = true, NewQuotaTrackerWithStore(quota), rate
+				rt.Catalog = withTestWorkspace(rt.Catalog, client.Workspace)
+				deps.Catalog, deps.Resolver = rt.Catalog, modelresolver.New(rt)
 				var logs bytes.Buffer
 				deps.AccessLog = true
 				deps.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
@@ -180,7 +182,8 @@ func TestScopedEncryptedReasoningAccountingQuotaAndAttemptTelemetry(t *testing.T
 					t.Error("recovery duplicated or changed persistent usage")
 				}
 				quota.mu.Unlock()
-				if tokens, _ := deps.Quota.windowTokens(client.WorkspaceID, quotaScope{typ: quotaScopeUser, id: client.OwnerUserID}, target); tokens != 10 {
+				workspaceID, _ := client.Workspace.ID()
+				if tokens, _ := deps.Quota.windowTokens(workspaceID, quotaScope{typ: quotaScopeUser, id: client.OwnerUserID}, target); tokens != 10 {
 					t.Fatalf("local usage charged %d tokens, want only the final 10", tokens)
 				}
 				if strings.Count(logs.String(), `"msg":"upstream request started"`) != len(statuses) ||

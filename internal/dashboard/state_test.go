@@ -13,7 +13,9 @@ import (
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/dashrpc"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/observability"
+	"github.com/google/uuid"
 )
 
 func stateSnapshot(names ...string) *RuntimeSnapshot {
@@ -109,12 +111,17 @@ func TestRefreshSelectionWinsConflictingTopAndDisabledProviderMove(t *testing.T)
 }
 
 func TestUsageIdentityIncludesEveryGroupingDimension(t *testing.T) {
-	base := accounting.Summary{Model: "p/m", Tenant: "t", Client: "c", Operation: "chat", StatusCode: 200, Count: 20}
-	for _, dimension := range []string{"tenant", "client", "model", "operation", "status"} {
+	base := accounting.Summary{CredentialID: identity.DatabaseKeyID(uuid.New()), WorkspaceScope: identity.InWorkspace(uuid.Nil),
+		Model: "p/m", Tenant: "t", Client: "c", Operation: "chat", StatusCode: 200, Count: 20}
+	for _, dimension := range []string{"credential", "workspace", "tenant", "client", "model", "operation", "status"} {
 		for _, upstream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/upstream=%t", dimension, upstream), func(t *testing.T) {
 				other := base
 				switch dimension {
+				case "credential":
+					other.CredentialID = identity.DatabaseKeyID(uuid.New())
+				case "workspace":
+					other.WorkspaceScope = identity.InWorkspace(uuid.New())
 				case "tenant":
 					other.Tenant = "other"
 				case "client":
@@ -134,7 +141,9 @@ func TestUsageIdentityIncludesEveryGroupingDimension(t *testing.T) {
 					u.billing = &accounting.BillingSnapshot{}
 					for _, row := range rows {
 						parts := strings.SplitN(row.Model, "/", 2)
-						u.billing.Upstream = append(u.billing.Upstream, accounting.UpstreamSummary{Tenant: row.Tenant, Client: row.Client, Provider: parts[0], Model: parts[1], Operation: row.Operation, StatusCode: row.StatusCode, Count: row.Count})
+						u.billing.Upstream = append(u.billing.Upstream, accounting.UpstreamSummary{
+							CredentialID: row.CredentialID, WorkspaceScope: row.WorkspaceScope,
+							Tenant: row.Tenant, Client: row.Client, Provider: parts[0], Model: parts[1], Operation: row.Operation, StatusCode: row.StatusCode, Count: row.Count})
 					}
 					return s
 				}

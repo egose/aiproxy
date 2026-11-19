@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +15,21 @@ import (
 	"github.com/google/uuid"
 )
 
+func (h *Handler) validateCopilotFlowPolicy(ctx context.Context, deps Dependencies, binding store.CopilotFlowBinding) error {
+	if binding.WorkspaceID == store.SystemWorkspaceID || binding.ProviderName == "" {
+		return nil
+	}
+	row, err := deps.AdminStore.GetProvider(ctx, binding.ProviderName)
+	if err != nil {
+		return catalogStorageError{err}
+	}
+	if row.WorkspaceID != binding.WorkspaceID || row.Type != "github-copilot" ||
+		(binding.ProviderID != nil && row.ID != *binding.ProviderID) {
+		return store.ErrCopilotFlowUnavailable
+	}
+	return h.validateDBProviderPolicy(ctx, deps, row)
+}
+
 const copilotIssuerTimeout = 25 * time.Second
 
 const catalogSavedHeader = "X-Aiproxy-Catalog-Saved"
@@ -21,9 +37,9 @@ const catalogSavedHeader = "X-Aiproxy-Catalog-Saved"
 var errDeviceFlowNotReady = errors.New("device authorization is not ready; check flow status and retry")
 
 type adminCopilotFlowStart struct {
-	ClientID     string `json:"client_id"`
-	WorkspaceID  string `json:"workspace_id"`
-	ProviderName string `json:"provider_name"`
+	ClientID     string          `json:"client_id"`
+	WorkspaceID  json.RawMessage `json:"workspace_id"`
+	ProviderName string          `json:"provider_name"`
 }
 
 func (h *Handler) copilotDeviceClient(deps Dependencies) *copilotlogin.Client {
@@ -43,7 +59,10 @@ func writeCopilotFlowStatus(w http.ResponseWriter, code int, status store.Copilo
 }
 
 func writeCopilotFlowError(deps Dependencies, w http.ResponseWriter, err error) {
+	var denial catalogWriteDenial
 	switch {
+	case errors.As(err, &denial):
+		http.Error(w, denial.message, denial.status)
 	case errors.Is(err, store.ErrCopilotFlowNotFound):
 		http.Error(w, "device flow not found", http.StatusNotFound)
 	case errors.Is(err, store.ErrCopilotFlowUnauthorized):
@@ -119,8 +138,16 @@ func (h *Handler) adminCopilotFlows(deps Dependencies, w http.ResponseWriter, r 
 }
 
 func (h *Handler) startCopilotFlow(deps Dependencies, w http.ResponseWriter, r *http.Request, claims *adminauth.Claims) {
+	decoder := json.NewDecoder(ioLimitReader(r))
+	var raw json.RawMessage
 	var req adminCopilotFlowStart
-	if err := json.NewDecoder(ioLimitReader(r)).Decode(&req); err != nil {
+	if decoder.Decode(&raw) != nil || json.Unmarshal(raw, &req) != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(req.ProviderName)
+	var workspaceStr string
+	if name == "" && req.WorkspaceID != nil && json.Unmarshal(req.WorkspaceID, &workspaceStr) != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
@@ -131,42 +158,54 @@ func (h *Handler) startCopilotFlow(deps Dependencies, w http.ResponseWriter, r *
 	}
 	ctx := r.Context()
 	actorID := mustParseUUID(claims.Subject)
-	var workspace store.Workspace
+	var workspaceID uuid.UUID
 	var providerID *uuid.UUID
-	if name := strings.TrimSpace(req.ProviderName); name != "" {
-		p, err := deps.AdminStore.GetProvider(ctx, name)
-		if err != nil {
-			if h.isStaticProvider(deps, name) {
-				http.Error(w, "config-managed: edit the HCL file", http.StatusBadRequest)
+	if name != "" {
+		if decoder.Decode(new(json.RawMessage)) != io.EOF {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if err := adminJSONKeyErrorWithCompatibility(raw, "", nil, true); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var bodyWorkspaceID catalogBodyWorkspaceID
+		if req.WorkspaceID != nil {
+			if err := json.Unmarshal(req.WorkspaceID, &bodyWorkspaceID); err != nil {
+				writeCatalogWriteBodyError(w, err)
 				return
 			}
-			http.Error(w, "provider not found", http.StatusNotFound)
+		}
+		target, err := h.resolveCatalogWriteTarget(deps, r, claims, catalogProviderResource, name, bodyWorkspaceID.value)
+		if err != nil {
+			writeCopilotFlowError(deps, w, err)
+			return
+		}
+		p, err := deps.AdminStore.GetProviderByIDInWorkspace(ctx, target.id, target.workspaceID)
+		if err != nil {
+			writeCopilotFlowError(deps, w, catalogProviderResource.targetReadError(err))
 			return
 		}
 		if p.Type != "github-copilot" {
 			http.Error(w, "device authorization is only supported by github-copilot", http.StatusBadRequest)
 			return
 		}
-		if workspaceStr := strings.TrimSpace(req.WorkspaceID); workspaceStr != "" && workspaceStr != p.WorkspaceID.String() {
-			http.Error(w, "workspace does not match provider workspace", http.StatusBadRequest)
-			return
+		if target.workspaceID != store.SystemWorkspaceID {
+			if err := h.validateDBProviderPolicy(ctx, deps, p); err != nil {
+				writeCopilotFlowError(deps, w, err)
+				return
+			}
 		}
-		if !h.requireResourceWorkspace(deps, w, r, claims, p.WorkspaceID) {
-			return
-		}
-		workspaceID := p.WorkspaceID
-		workspace = store.Workspace{ID: workspaceID}
-		id := p.ID
-		providerID = &id
+		workspaceID, providerID = target.workspaceID, &target.id
 	} else {
-		resolved, ok := h.resolveWriteWorkspace(deps, w, r, claims, req.WorkspaceID)
+		resolved, ok := h.resolveWriteWorkspace(deps, w, r, claims, workspaceStr)
 		if !ok {
 			return
 		}
-		workspace = resolved
+		workspaceID = resolved.ID
 	}
 	_, lease, err := deps.AdminStore.StartCopilotFlow(ctx, store.CopilotFlowStart{
-		ActorID: actorID, WorkspaceID: workspace.ID, ProviderID: providerID, ClientID: clientID,
+		ActorID: actorID, WorkspaceID: workspaceID, ProviderID: providerID, ClientID: clientID,
 	})
 	if err != nil {
 		writeCopilotFlowError(deps, w, err)
@@ -221,6 +260,18 @@ func (h *Handler) cancelCopilotFlow(deps Dependencies, w http.ResponseWriter, r 
 func (h *Handler) pollCopilotFlow(deps Dependencies, w http.ResponseWriter, r *http.Request, claims *adminauth.Claims, id uuid.UUID) {
 	ctx := r.Context()
 	actorID := mustParseUUID(claims.Subject)
+	binding, err := deps.AdminStore.ReadCopilotFlowBinding(ctx, actorID, id)
+	if err != nil {
+		if !errors.Is(err, store.ErrCopilotFlowNotFound) && !errors.Is(err, store.ErrCopilotFlowUnauthorized) && !errors.Is(err, store.ErrCopilotFlowForbidden) {
+			err = catalogStorageError{err}
+		}
+		writeCopilotFlowError(deps, w, err)
+		return
+	}
+	if err := h.validateCopilotFlowPolicy(ctx, deps, binding); err != nil {
+		writeCopilotFlowError(deps, w, err)
+		return
+	}
 	status, lease, err := deps.AdminStore.ClaimCopilotFlowPoll(ctx, actorID, id)
 	if err != nil {
 		writeCopilotFlowError(deps, w, err)

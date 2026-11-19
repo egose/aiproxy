@@ -15,11 +15,16 @@ import (
 	"github.com/egose/aiproxy/internal/alias"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/deferred"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/provider"
 )
 
 func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op provider.Operation, r modelresolver.ResolveResult, inbound *http.Request, body []byte, logger *slog.Logger) (*provider.Result, error) {
+	publicModel := r.Provider.Name + "/" + r.Model.Name
+	if deps.MultiTenancy.Enabled && (r.Workspace != r.Provider.Workspace || !deps.Resolver.ModelVisibleInWorkspace(publicModel, r.Workspace)) {
+		return nil, modelresolver.ErrUnknownModel{Model: publicModel}
+	}
 	er := encryptedReasoningForTarget(deps, r.Provider, r.Model, nil)
 	if encryptedReasoningApplies(op) && !er.Passthrough {
 		stripped, changed, err := stripDispatchOpaqueBlocks(ctx, op, body)
@@ -135,12 +140,19 @@ type aliasPoolTarget struct {
 	ok          bool
 }
 
-func resolveAliasPool(deps Dependencies, aliasName string, targets []config.AliasTarget) []aliasPoolTarget {
+func resolveAliasPool(deps Dependencies, aliasName string, targets []config.AliasTarget, workspace identity.WorkspaceScope) []aliasPoolTarget {
 	pool := make([]aliasPoolTarget, 0, len(targets))
 	for _, target := range targets {
 		entry := aliasPoolTarget{target: alias.Target{Provider: target.Provider, Model: target.Model}}
 		if deps.Resolver != nil {
-			prov, model, ok := deps.Resolver.Model(target.Provider, target.Model)
+			var prov config.Provider
+			var model config.Model
+			var ok bool
+			if deps.MultiTenancy.Enabled {
+				prov, model, ok = deps.Resolver.ModelInWorkspace(target.Provider, target.Model, workspace)
+			} else {
+				prov, model, ok = deps.Resolver.Model(target.Provider, target.Model)
+			}
 			if ok {
 				entry.provider = prov
 				entry.model = model
@@ -235,6 +247,10 @@ func observeCooldownError(cooldowns *modelresolver.CooldownStore, ctx context.Co
 }
 
 func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provider.Operation, r modelresolver.ResolveResult, inbound *http.Request, body []byte, logger *slog.Logger) (*provider.Result, error) {
+	publicModel := "alias/" + r.Alias.Name
+	if deps.MultiTenancy.Enabled && (r.Workspace != r.Alias.Workspace || !deps.Resolver.ModelVisibleInWorkspace(publicModel, r.Workspace)) {
+		return nil, modelresolver.ErrUnknownModel{Model: publicModel}
+	}
 	var lastErr error
 	var lastErrorResult *provider.Result
 	tried := make(map[alias.Target]bool, len(r.Alias.Targets))
@@ -242,7 +258,7 @@ func (h *Handler) dispatchAlias(deps Dependencies, ctx context.Context, op provi
 	for _, code := range r.Alias.RetryStatusCodes {
 		retryCodes[code] = true
 	}
-	pool := resolveAliasPool(deps, r.Alias.Name, r.Alias.Targets)
+	pool := resolveAliasPool(deps, r.Alias.Name, r.Alias.Targets, r.Workspace)
 	stripApplies := encryptedReasoningApplies(op)
 	explicitPolicy := r.Alias.EncryptedReasoning != nil
 	aliasPrestripped := false
@@ -312,19 +328,7 @@ targetLoop:
 		}
 		tried[t] = true
 		entry := poolTargetFor(pool, t)
-		var prov config.Provider
-		var model config.Model
-		var fp modelresolver.CooldownFingerprint
-		var ok bool
-		if entry != nil && entry.ok {
-			prov, model, fp, ok = entry.provider, entry.model, entry.fingerprint, true
-		} else if deps.Resolver != nil {
-			prov, model, ok = deps.Resolver.Model(t.Provider, t.Model)
-			if ok {
-				fp = modelresolver.CooldownFingerprintFor(r.Alias.Name, prov, model)
-			}
-		}
-		if !ok {
+		if entry == nil || !entry.ok {
 			if deps.Resolver == nil {
 				lastErr = fmt.Errorf("alias target provider %q not found", t.Provider)
 			} else if _, providerOK := deps.Resolver.Provider(t.Provider); !providerOK {
@@ -335,6 +339,7 @@ targetLoop:
 			releaseLease()
 			continue
 		}
+		prov, model, fp := entry.provider, entry.model, entry.fingerprint
 		if _, cooling := cooldowns.Remaining(fp); cooling {
 			releaseLease()
 			continue

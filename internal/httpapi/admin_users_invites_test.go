@@ -54,7 +54,7 @@ func openUsersTestStore(t *testing.T) (*store.Store, *Handler, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt := &config.Runtime{MultiTenancy: config.MultiTenancy{Enabled: true, AllowPublicRegistration: true}}
+	rt := &config.Runtime{MultiTenancy: config.MultiTenancy{Enabled: true, AllowPublicRegistration: true, AllowedUpstreamOrigins: []string{"https://api.openai.com"}}}
 	usage := accounting.NewAggregator()
 	health := providerhealth.New(nil, config.ProviderHealth{})
 	health.SetProviders(rt.Catalog)

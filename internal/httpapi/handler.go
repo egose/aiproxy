@@ -21,6 +21,7 @@ import (
 	"github.com/egose/aiproxy/internal/dashrpc"
 	"github.com/egose/aiproxy/internal/deferred"
 	"github.com/egose/aiproxy/internal/guardrails"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/payloadlog"
@@ -32,39 +33,43 @@ import (
 )
 
 type Dependencies struct {
-	Resolver              *modelresolver.Resolver
-	Adapter               provider.Adapter
-	Auth                  auth.Authenticator
-	Authorizer            auth.Authorizer
-	Client                *http.Client
-	ClientForProvider     func(config.Provider) *http.Client
-	Catalog               config.Catalog
-	Metrics               *observability.Metrics
-	MetricsToken          string
-	Health                *providerhealth.Tracker
-	RateLimiter           ratelimit.Limiter
-	Quota                 *QuotaTracker
-	Accounting            accounting.Recorder
-	Usage                 accounting.Reader
-	AccessLog             bool
-	HasAccessLog          bool
-	RedactGuardrailBodies bool
-	PayloadLog            payloadlog.Recorder
-	Logger                *slog.Logger
-	Dashboard             dashrpc.Source
-	WebUI                 config.WebUI
-	MultiTenancy          config.MultiTenancy
-	AdminStore            *store.Store
-	AdminAuthConfig       config.Auth
-	CopilotDeviceClient   func() *copilotlogin.Client
-	RequestReload         func() error
-	Version               string
-	Guardrails            *guardrails.Scanner
-	Quarantine            *guardrails.Quarantine
-	Exceptions            *guardrails.Exceptions
-	DeferredStore         *deferred.Store
-	RuntimeResources      *RuntimeResources
-	revision              uint64
+	Resolver                *modelresolver.Resolver
+	Adapter                 provider.Adapter
+	Auth                    auth.Authenticator
+	Authorizer              auth.Authorizer
+	Client                  *http.Client
+	ClientForProvider       func(config.Provider) *http.Client
+	Catalog                 config.Catalog
+	Metrics                 *observability.Metrics
+	MetricsToken            string
+	Health                  *providerhealth.Tracker
+	RateLimiter             ratelimit.Limiter
+	Quota                   *QuotaTracker
+	Accounting              accounting.Recorder
+	Usage                   accounting.Reader
+	AccessLog               bool
+	HasAccessLog            bool
+	RedactGuardrailBodies   bool
+	PayloadLog              payloadlog.Recorder
+	Logger                  *slog.Logger
+	Dashboard               dashrpc.Source
+	WebUI                   config.WebUI
+	MultiTenancy            config.MultiTenancy
+	AdminStore              *store.Store
+	AdminAuthConfig         config.Auth
+	CopilotDeviceClient     func() *copilotlogin.Client
+	RequestReload           func() error
+	AppliedServingRevisions func() store.ServingRevisions
+	Version                 string
+	Guardrails              *guardrails.Scanner
+	Quarantine              *guardrails.Quarantine
+	Exceptions              *guardrails.Exceptions
+	DeferredStore           *deferred.Store
+	RuntimeResources        *RuntimeResources
+	ServingRevisions        store.ServingRevisions
+	KeysConfirmedAt         time.Time
+	CatalogConfirmedAt      time.Time
+	revision                uint64
 }
 
 const maxRequestBodyBytes int64 = 8 << 20
@@ -198,6 +203,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				usage = result.Usage
 			}
 			deps.Accounting.Record(accounting.Event{
+				CredentialID:        principal.CredentialID(),
+				WorkspaceScope:      principal.WorkspaceScope(),
 				RequestID:           requestID,
 				PublicModel:         publicModel,
 				Timestamp:           time.Now(),
@@ -314,7 +321,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	principal, err = h.authenticateInference(deps, r)
 	if err != nil {
 		logger.Warn("auth failed", "error", err)
-		h.writeRequestError(deps.Metrics, rw, r, http.StatusUnauthorized, "auth_failed", err.Error())
+		h.writeInferenceAuthError(deps, rw, r, err)
 		return
 	}
 	body, admitted := h.readInferenceInput(deps, rw, r, principal, nil, maxRequestBodyBytes)
@@ -540,6 +547,13 @@ func (h *Handler) handleHealth(deps Dependencies, w http.ResponseWriter, r *http
 		if !allowHealthMethod(w, r) {
 			return true
 		}
+		if (deps.ServingRevisions.Keys > 0 && !servingFresh(deps.KeysConfirmedAt)) || (deps.ServingRevisions.Catalog > 0 && !servingFresh(deps.CatalogConfirmedAt)) {
+			if deps.Metrics != nil {
+				deps.Metrics.SetReadyWithReason(false, "database_serving_stale")
+			}
+			http.Error(w, "database serving state freshness is unconfirmed", http.StatusServiceUnavailable)
+			return true
+		}
 		if deps.Catalog.ProviderCount() == 0 {
 			if deps.Metrics != nil {
 				deps.Metrics.SetReadyWithReason(false, "no_active_providers")
@@ -621,16 +635,21 @@ func (h *Handler) handleModels(deps Dependencies, w http.ResponseWriter, r *http
 	if r.URL.Path != "/v1/models" || r.Method != http.MethodGet {
 		return false
 	}
-	principal, err := deps.Auth.Authenticate(r)
+	principal, err := h.authenticateInference(deps, r)
 	if err != nil {
 		logger.Warn("auth failed", "error", err)
-		h.writeRequestError(deps.Metrics, w, r, http.StatusUnauthorized, "auth_failed", err.Error())
+		h.writeInferenceAuthError(deps, w, r, err)
 		return true
 	}
 	if !h.allowRequest(deps, w, r, principal) {
 		return true
 	}
-	h.writeModels(w, filterModelCatalog(BuildModelCatalog(deps.Catalog), deps.Authorizer, principal))
+	if h.denyStaleDatabaseRead(deps, w, r, principal) {
+		return true
+	}
+	h.writeModels(w, buildModelCatalog(deps.Catalog, func(model string) bool {
+		return checkInferenceModel(deps, principal, model) == nil
+	}))
 	return true
 }
 
@@ -638,10 +657,10 @@ func (h *Handler) handleBilling(deps Dependencies, w http.ResponseWriter, r *htt
 	if r.URL.Path != "/v1/billing/usage" || r.Method != http.MethodGet {
 		return false
 	}
-	principal, err := deps.Auth.Authenticate(r)
+	principal, err := h.authenticateInference(deps, r)
 	if err != nil {
 		logger.Warn("auth failed", "error", err)
-		h.writeRequestError(deps.Metrics, w, r, http.StatusUnauthorized, "auth_failed", err.Error())
+		h.writeInferenceAuthError(deps, w, r, err)
 		return true
 	}
 	if !h.allowRequest(deps, w, r, principal) {
@@ -651,15 +670,37 @@ func (h *Handler) handleBilling(deps Dependencies, w http.ResponseWriter, r *htt
 		h.writeRequestError(deps.Metrics, w, r, http.StatusNotFound, "not_found", "billing usage not configured")
 		return true
 	}
+	if h.denyStaleDatabaseRead(deps, w, r, principal) {
+		return true
+	}
 	summaries, upstream := deps.Usage.BillingSummaries()
-	summaries = accounting.FilterSummaries(summaries, principalTenant(principal), principalName(principal))
-	h.writeBillingUsage(w, summaries, billingPrices(deps.Catalog), upstream)
+	filter := accounting.CredentialUsage(principal.CredentialID(), principal.WorkspaceScope())
+	if principal == nil {
+		filter = accounting.AllUsage()
+	} else if _, static := principal.CredentialID().StaticClientName(); static {
+		if principal.Tenant != "" {
+			filter = accounting.StaticTenantUsage(principal.Tenant, principal.WorkspaceScope())
+		} else {
+			filter = accounting.StaticClientUsage(principal.CredentialID(), principal.WorkspaceScope())
+		}
+	}
+	summaries = accounting.FilterSummaries(summaries, filter)
+	upstream = accounting.FilterUpstreamSummaries(upstream, filter)
+	workspace := principal.WorkspaceScope()
+	if !deps.MultiTenancy.Enabled {
+		workspace = identity.WorkspaceScope{}
+	}
+	h.writeBillingUsage(w, summaries, billingPrices(deps.Catalog, workspace), upstream)
 	return true
 }
 
-func billingPrices(catalog config.Catalog) map[string]*config.ModelPricing {
+func billingPrices(catalog config.Catalog, workspace identity.WorkspaceScope) map[string]*config.ModelPricing {
 	out := map[string]*config.ModelPricing{}
+	_, restricted := workspace.ID()
 	for _, p := range catalog.Providers() {
+		if restricted && p.Workspace != workspace {
+			continue
+		}
 		for _, m := range p.Models {
 			if m.Pricing != nil && m.Pricing.HasRates() {
 				out[p.Name+"/"+m.Name] = m.Pricing
@@ -673,7 +714,7 @@ func (h *Handler) allowRequest(deps Dependencies, w http.ResponseWriter, r *http
 	if deps.RateLimiter == nil {
 		return true
 	}
-	allowed, retryAfter := deps.RateLimiter.Allow(principalRateLimitKey(principal))
+	allowed, retryAfter := deps.RateLimiter.Allow(principal.CredentialID())
 	if allowed {
 		return true
 	}
@@ -689,13 +730,6 @@ func (h *Handler) allowRequest(deps Dependencies, w http.ResponseWriter, r *http
 	}
 	h.writeRequestError(deps.Metrics, w, r, http.StatusTooManyRequests, "rate_limited", "rate limit exceeded")
 	return false
-}
-
-func principalRateLimitKey(principal *auth.Principal) string {
-	if principal == nil || principal.Name == "" {
-		return "anonymous"
-	}
-	return principal.Name
 }
 
 func principalName(principal *auth.Principal) string {
@@ -811,19 +845,4 @@ func extractMessagesEffort(body []byte) string {
 		}
 	}
 	return ""
-}
-
-func filterModelCatalog(catalog []ModelCard, authorizer auth.Authorizer, principal *auth.Principal) []ModelCard {
-	if authorizer == nil {
-		out := make([]ModelCard, len(catalog))
-		copy(out, catalog)
-		return out
-	}
-	out := make([]ModelCard, 0, len(catalog))
-	for _, card := range catalog {
-		if authorizer.Allow(principal, card.ID) {
-			out = append(out, card)
-		}
-	}
-	return out
 }
