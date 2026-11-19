@@ -23,9 +23,11 @@ import (
 func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op provider.Operation, r modelresolver.ResolveResult, inbound *http.Request, body []byte, logger *slog.Logger) (*provider.Result, error) {
 	passthrough := r.Kind == modelresolver.KindModelPassthrough
 	target, upstreamModel := r.Model.Name, r.Model.UpstreamName
+	protocol := r.Model.Protocol
 	publicModel := r.Provider.Name + "/" + target
 	if passthrough {
 		target, upstreamModel = modelPassthroughTargetIdentity(r), r.PassthroughSuffix
+		protocol = r.PassthroughRule.Protocol()
 		publicModel = r.Provider.Name + "/" + upstreamModel
 	}
 	if deps.MultiTenancy.Enabled {
@@ -60,7 +62,8 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		APIKey:               r.Provider.APIKey,
 		CopilotToken:         r.Provider.CopilotToken,
 		UpstreamModel:        upstreamModel,
-		ModelProtocol:        r.Model.Protocol,
+		ModelProtocol:        protocol,
+		ModelPassthrough:     passthrough,
 		UserAgent:            r.Provider.UserAgent,
 		ForwardUserAgent:     r.Provider.ForwardUserAgent,
 		ForwardHeaders:       r.Provider.ForwardHeaders,

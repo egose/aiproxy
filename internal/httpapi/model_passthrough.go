@@ -76,7 +76,7 @@ func validModelPassthroughInput(op provider.Operation, contentType string, body 
 	for dec.More() {
 		token, err := dec.Token()
 		key, ok := token.(string)
-		if err != nil || !ok || alternateModelSelector(key) {
+		if err != nil || !ok || alternateModelSelector(key) || (op == provider.OpMessages && strings.EqualFold(key, "fallbacks")) {
 			return false
 		}
 		if strings.EqualFold(key, "model") {

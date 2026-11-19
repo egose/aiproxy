@@ -231,6 +231,7 @@ type rawModel struct {
 type rawModelPassthrough struct {
 	Name         string         `hcl:"name,label"`
 	Match        *hcl.Attribute `hcl:"match"`
+	Protocol     *hcl.Attribute `hcl:"protocol,optional"`
 	Capabilities *hcl.Attribute `hcl:"capabilities"`
 }
 

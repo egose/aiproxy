@@ -420,3 +420,5 @@ All four tasks met their acceptance criteria and recorded verification.
 Regressions cover exact priority, authorization, workspace isolation,
 non-enumeration, bounded aggregation, and reload. Scope exclusions are
 documented.
+
+Follow-up: [extend model-ID passthrough to the remaining provider types](20261119-105050-expand-model-passthrough-provider-support.md).

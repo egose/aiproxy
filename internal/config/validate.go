@@ -375,20 +375,20 @@ func resolveProviderTLSProfile(p Provider, allowCustom bool) (tlsprofile.Profile
 	return profile, nil
 }
 
-func validateModelProtocol(providerType ProviderType, providerName string, m Model) error {
+func validateModelProtocol(providerType ProviderType, owner string, protocol ModelProtocol) error {
 	if !IsOpenCodeProviderType(providerType) {
-		if m.Protocol != "" {
-			return fmt.Errorf("provider %q: model %q protocol is only supported by opencode-zen and opencode-go", providerName, m.Name)
+		if protocol != "" {
+			return fmt.Errorf("%s protocol is only supported by opencode-zen and opencode-go", owner)
 		}
 		return nil
 	}
-	switch m.Protocol {
+	switch protocol {
 	case ModelProtocolChat, ModelProtocolResponses, ModelProtocolMessages, ModelProtocolGemini:
 	default:
-		return fmt.Errorf("provider %q: model %q has invalid protocol %q (must be chat, responses, messages, or gemini)", providerName, m.Name, m.Protocol)
+		return fmt.Errorf("%s has invalid protocol %q (must be chat, responses, messages, or gemini)", owner, protocol)
 	}
-	if providerType == ProviderTypeOpenCodeGo && m.Protocol == ModelProtocolGemini {
-		return fmt.Errorf("provider %q: model %q protocol %q is not supported by provider type %q", providerName, m.Name, m.Protocol, providerType)
+	if providerType == ProviderTypeOpenCodeGo && protocol == ModelProtocolGemini {
+		return fmt.Errorf("%s protocol %q is not supported by provider type %q", owner, protocol, providerType)
 	}
 	return nil
 }

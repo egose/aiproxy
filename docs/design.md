@@ -1088,35 +1088,53 @@ request directly to the configured provider and literal model, if present.
 Ordinary direct admission can try a named provider's `model_passthrough` rules
 only on an exact catalog miss. The literal resolver stays separate for aliases,
 listing, model overlays and peer deferred admission. A hidden, denied,
-unsupported or failed exact hit cannot fall back. Matching is local to an
-enabled, concrete static `openai`, `openai-compatible`, `openrouter` or `zenmux`
-provider in the caller's scope. Static bearer grants are separate from exact
-allowlists and remain System-only during a database merge; no database key can
-receive a rule grant. File-only `none` is an explicit anonymous opt-in when a
-rule is present.
+unsupported or failed exact hit cannot fall back. Matching is local to an enabled
+concrete static provider in the caller's scope, from the explicit allowlist:
+`openai`, `openai-compatible`, `openrouter`, `zenmux`, `anthropic`, `gemini`,
+`opencode-zen`, `opencode-go`, and `github-copilot`. Static bearer grants are
+separate from exact allowlists and remain System-only during a database merge;
+no database key can receive a rule grant. File-only `none` is an explicit
+anonymous opt-in when a rule is present.
 
 Candidate loading compiles at most 32 immutable Go regexes of at most 512
 bytes per pattern per provider. Match the whole unmodified suffix (at most 256
-bytes, with the literal model-name segment grammar). All rules participate in
-uniqueness before grant or capability checks; ambiguity preserves the ordinary
-literal miss (`403` for an allowlist exclusion, else `404`) without exposing
-rule details. Rule/grant snapshots publish together on successful reload.
+bytes, using the existing lowercase slash-separated model-name grammar). All
+rules participate in uniqueness before protocol-specific ID shape, capability
+or grant checks. Ambiguous or unusable matches preserve the ordinary literal
+miss (`403` for an allowlist exclusion, else `404`) without exposing rule
+details. Rule protocols, regexes, capabilities and grants publish in one
+snapshot on successful reload; a rejected candidate cannot change new
+admissions, and admitted streams still use their original runtime.
 
-Carry the bounded rule identity separately from the wire ID. The OpenAI adapter
-uses the provider's ordinary URL, credential and header policy, replacing the
-canonical JSON/multipart `model` value with the unchanged suffix. Admission
-rejects duplicate or noncanonical model fields and known auxiliary selectors
-(`models`, `preset`) on this path, including on guardrail rewrites. This is a
-boundary on what the proxy sends, not a guarantee about upstream behavior or
-virtual IDs. Provider/root reasoning policy and same-target recovery still
-apply; no peer dispatch, cross-target failover or discovery results from a match.
+Every rule declares a nonempty subset of its adapter's supported capabilities.
+Zen/Go rules require their own validated protocol; other rules cannot declare
+one. Dispatch carries the admitted rule identity and protocol separately from
+the wire ID, and uses the existing adapter and its URL, credential and header
+policy. Body-based adapters write the unchanged suffix to the upstream
+JSON/multipart `model`. Gemini and Zen `gemini` rules require a single bare ID
+and place it in a fixed adapter path; the ID cannot select the destination,
+action or query. A base override may include a path prefix, but not `?` or `#`
+when that provider declares a path rule. Only the adapter adds `alt=sse`.
+Gemini rule embeddings batches set each generated `requests[].model` to
+`models/<admitted-id>`, agreeing with the path; literal and alias batches
+retain their existing body shape.
+
+Admission rejects duplicate or noncanonical model fields and known auxiliary
+selectors (`models`, `preset`, and top-level `fallbacks` on native Messages rule
+calls only), including on guardrail rewrites. This is a boundary on what the
+proxy sends, not a guarantee about upstream behavior or virtual IDs.
+Provider/root reasoning policy and same-target recovery still apply to chat
+and Responses where supported, never native Messages. Copilot uses its loaded
+sidecar credential; no OAuth, exchange or refresh is added. No peer dispatch,
+cross-target failover, discovery or new public operation results from a match.
 
 No rule or match is inserted into the literal inventory. Billing and metric
 model dimensions use `<provider>/@passthrough/<rule>` and the provider-local
 target `@passthrough/<rule>`; `@` falls outside the callable model grammar.
 Caller-controlled wire IDs may appear in bounded request diagnostics, not as
 aggregate dimensions. Rule usage has no configured price; attribution and
-credential/workspace isolation remain unchanged.
+credential/workspace isolation remain unchanged. The accounting identity is
+not substituted for the adapter's normal response model value.
 
 ### Alias Resolution
 

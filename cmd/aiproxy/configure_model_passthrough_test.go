@@ -155,3 +155,89 @@ func TestConfigureModelPassthroughInteractiveRuleOnlyProvider(t *testing.T) {
 		t.Fatal("interactive edit did not preserve rule-only provider")
 	}
 }
+
+func TestConfigureModelPassthroughOpenCodeProtocolPreserved(t *testing.T) {
+	t.Setenv("CLI_RULE_PROTOCOL", "messages")
+	t.Setenv("CLI_PASSTHROUGH_GRANT", "go/family")
+	const expression = `model_passthrough "family" {
+    match = "^org/chat-.*$"
+    protocol = env("CLI_RULE_PROTOCOL")
+    capabilities = ["chat"]
+  }`
+	const literal = `model_passthrough "responses-family" {
+    match = "^org/resp-.*$"
+    protocol = "responses"
+    capabilities = ["responses"]
+  }`
+	const source = `listener "http" "public" { address = ":8080" }
+auth "main" {
+  mode = "bearer_static"
+  client "app" {
+    token = "app-token"
+    allowed_model_passthroughs = ` + cliModelPassthroughGrant + `
+  }
+}
+provider "opencode-go" "go" {
+  api_key = "go-key"
+  ` + expression + `
+  ` + literal + `
+}
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.hcl")
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	providerArgs := []string{"configure", "provider", "--config", path, "--non-interactive", "--name", "go"}
+	for _, args := range [][]string{
+		append(slices.Clone(providerArgs), "--display-name", "Edited Go"),
+		{"configure", "auth", "--config", path, "--non-interactive", "--rate-limit-rpm", "80"},
+	} {
+		if out, stderr, err := executeRootCommand("", args...); err != nil {
+			t.Fatalf("configure: %v\n%s\n%s", err, out, stderr)
+		}
+		for _, want := range []string{expression, literal, cliModelPassthroughGrant} {
+			if !strings.Contains(mustReadFile(t, path), want) {
+				t.Fatalf("edit discarded %q", want)
+			}
+		}
+	}
+	original := mustReadFile(t, path)
+	secretsPath := filepath.Join(dir, "keys.json")
+	if _, _, err := executeRootCommand("", append(slices.Clone(providerArgs), "--type", "openai",
+		"--secrets-path", secretsPath, "--secrets-key", "go", "--api-key", "staged-key")...); err == nil ||
+		!strings.Contains(err.Error(), "protocol is only supported by opencode-zen and opencode-go") {
+		t.Fatalf("incompatible provider edit: %v", err)
+	}
+	if _, err := os.Stat(secretsPath); !os.IsNotExist(err) || mustReadFile(t, path) != original {
+		t.Fatal("rejected edit changed the config or staged secrets")
+	}
+	t.Setenv("CLI_RULE_PROTOCOL", "chat")
+	assertRules := func(file string) {
+		t.Helper()
+		rt, err := config.LoadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, found := rt.Catalog.Provider("go")
+		chat, chatMatch := p.MatchModelPassthrough("org/chat-next")
+		responses, responsesMatch := p.MatchModelPassthrough("org/resp-next")
+		if !found || p.Type != config.ProviderTypeOpenCodeGo || p.DisplayName != "Edited Go" || len(p.Models) != 0 ||
+			chatMatch != config.ModelPassthroughMatched || chat.Protocol() != config.ModelProtocolChat ||
+			responsesMatch != config.ModelPassthroughMatched || responses.Protocol() != config.ModelProtocolResponses ||
+			!slices.Equal(rt.Auth.Clients["app"].AllowedModelPassthroughs, []string{"go/family"}) {
+			t.Fatal("edit lost rule protocol intent, inventory, or grants")
+		}
+	}
+	assertRules(path)
+	jsonPath := filepath.Join(dir, "config.json")
+	if out, err := runConvertCommand(t, nil, jsonPath, "--config", path); err != nil {
+		t.Fatalf("convert edited config: %v\n%s", err, out)
+	}
+	assertRules(jsonPath)
+	jsonBefore := mustReadFile(t, jsonPath)
+	if _, _, err := executeRootCommand("", "configure", "provider", "--config", jsonPath, "--non-interactive", "--name", "go", "--display-name", "Rejected"); err == nil ||
+		!strings.Contains(err.Error(), "convert JSON to HCL") || mustReadFile(t, jsonPath) != jsonBefore {
+		t.Fatalf("JSON edit didn't fail safely: %v", err)
+	}
+}

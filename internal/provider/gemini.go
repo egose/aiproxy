@@ -19,6 +19,7 @@ type geminiRequest struct {
 }
 
 type geminiEmbedRequest struct {
+	Model                string        `json:"model,omitempty"`
 	Content              geminiContent `json:"content"`
 	OutputDimensionality int           `json:"outputDimensionality,omitempty"`
 }
@@ -184,7 +185,11 @@ func (a *adapter) doGeminiEmbeddings(ctx context.Context, r Request) (*Result, e
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
-	translated, batch, err := translateOpenAIEmbeddingsToGemini(body)
+	var batchModel string
+	if r.ModelPassthrough {
+		batchModel = "models/" + r.UpstreamModel
+	}
+	translated, batch, err := translateOpenAIEmbeddingsToGemini(body, batchModel)
 	if err != nil {
 		return nil, ErrInvalidRequest{Message: fmt.Sprintf("translate request: %v", err)}
 	}
@@ -314,7 +319,7 @@ func translateOpenAIToGemini(body []byte, states ...*executionState) ([]byte, bo
 	return translated, req.Stream, nil
 }
 
-func translateOpenAIEmbeddingsToGemini(body []byte) ([]byte, bool, error) {
+func translateOpenAIEmbeddingsToGemini(body []byte, batchModel string) ([]byte, bool, error) {
 	if err := rejectUnsupportedTopLevelFields(body, openAIEmbeddingRequestFields); err != nil {
 		return nil, false, err
 	}
@@ -339,6 +344,7 @@ func translateOpenAIEmbeddingsToGemini(body []byte) ([]byte, bool, error) {
 	payload := geminiBatchEmbedRequest{Requests: make([]geminiEmbedRequest, 0, len(inputs))}
 	for _, input := range inputs {
 		reqItem := geminiEmbedRequest{
+			Model:   batchModel,
 			Content: geminiContent{Parts: []geminiPart{{Text: input}}},
 		}
 		if req.Dimensions > 0 {
