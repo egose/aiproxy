@@ -1081,7 +1081,42 @@ Deferred auth features:
 ### Direct Provider Model Resolution
 
 If `model` is in the form `<provider-name>/<model-name>`, the proxy resolves the
-request directly to the configured provider and model.
+request directly to the configured provider and literal model, if present.
+
+#### Static Model-ID Passthrough
+
+Ordinary direct admission can try a named provider's `model_passthrough` rules
+only on an exact catalog miss. The literal resolver stays separate for aliases,
+listing, model overlays and peer deferred admission. A hidden, denied,
+unsupported or failed exact hit cannot fall back. Matching is local to an
+enabled, concrete static `openai`, `openai-compatible`, `openrouter` or `zenmux`
+provider in the caller's scope. Static bearer grants are separate from exact
+allowlists and remain System-only during a database merge; no database key can
+receive a rule grant. File-only `none` is an explicit anonymous opt-in when a
+rule is present.
+
+Candidate loading compiles at most 32 immutable Go regexes of at most 512
+bytes per pattern per provider. Match the whole unmodified suffix (at most 256
+bytes, with the literal model-name segment grammar). All rules participate in
+uniqueness before grant or capability checks; ambiguity preserves the ordinary
+literal miss (`403` for an allowlist exclusion, else `404`) without exposing
+rule details. Rule/grant snapshots publish together on successful reload.
+
+Carry the bounded rule identity separately from the wire ID. The OpenAI adapter
+uses the provider's ordinary URL, credential and header policy, replacing the
+canonical JSON/multipart `model` value with the unchanged suffix. Admission
+rejects duplicate or noncanonical model fields and known auxiliary selectors
+(`models`, `preset`) on this path, including on guardrail rewrites. This is a
+boundary on what the proxy sends, not a guarantee about upstream behavior or
+virtual IDs. Provider/root reasoning policy and same-target recovery still
+apply; no peer dispatch, cross-target failover or discovery results from a match.
+
+No rule or match is inserted into the literal inventory. Billing and metric
+model dimensions use `<provider>/@passthrough/<rule>` and the provider-local
+target `@passthrough/<rule>`; `@` falls outside the callable model grammar.
+Caller-controlled wire IDs may appear in bounded request diagnostics, not as
+aggregate dimensions. Rule usage has no configured price; attribution and
+credential/workspace isolation remain unchanged.
 
 ### Alias Resolution
 
@@ -1535,7 +1570,7 @@ stack equivalence, live-provider compatibility and WAF/bot acceptance remain unv
 
 ## Model Model
 
-Each provider contains one or more nested `model` blocks:
+Literal models are configured with nested `model` blocks:
 
 ```hcl
 model "<name>" {}
@@ -2767,7 +2802,8 @@ The config loader should validate:
   `enabled = false` is declared explicitly
 - `api_key_ref` blocks missing `key`
 - `api_key_ref` JSON files that do not exist or do not contain the requested key
-- providers without any models
+- providers without any literal models or eligible static `model_passthrough` rules
+- invalid model-ID passthrough rules, grants or provider placements
 - duplicate model names within a provider
 - aliases without any targets
 - alias targets pointing to unknown providers
@@ -3245,6 +3281,7 @@ Reload currently rebuilds and swaps:
 
 - inbound auth configuration
 - provider/model catalog
+- static model-ID passthrough rules and grants in the same admission snapshot
 - alias routing state
 - root and provider upstream header timeouts
 - provider TLS ClientHello profiles and custom recipe contents

@@ -783,8 +783,15 @@ func runConfigureAuth(prompts *promptSession, configPath string, deleteBlock boo
 		}
 	}
 
-	input, err := promptAuthInput(prompts, doc.blocks, existingAuthInput(doc.blocks), options)
+	existing := existingAuthInput(doc.blocks)
+	if existing == nil && hasBlockType(doc.blocks, "auth") {
+		return fmt.Errorf("cannot preserve the existing auth block; edit the static config file")
+	}
+	input, err := promptAuthInput(prompts, doc.blocks, existing, options)
 	if err != nil {
+		return err
+	}
+	if err := preserveAuthModelPassthroughGrants(existing, &input); err != nil {
 		return err
 	}
 
@@ -909,9 +916,21 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 	if err := config.ValidateDeferredConfig([]byte(doc.source), configPath); err != nil {
 		return err
 	}
-	input, secretsUpdate, err := promptProviderInput(prompts, existingProviderInput(doc.blocks, nameForAction), options)
+	var existing *providerInput
+	if action == "update" {
+		existing = existingProviderInput(doc.blocks, nameForAction)
+		if existing == nil {
+			return fmt.Errorf("cannot preserve the existing provider %q; edit the static config file", nameForAction)
+		}
+	}
+	input, secretsUpdate, err := promptProviderInput(prompts, existing, options)
 	if err != nil {
 		return err
+	}
+	if existing != nil {
+		input.ModelPassthroughBlocks = existing.ModelPassthroughBlocks
+	} else if containsName(providerNames, input.Name) {
+		return fmt.Errorf("provider %q already exists; use update to preserve its declarations", input.Name)
 	}
 	if err := validateProviderExtendsInput(doc.blocks, input); err != nil {
 		return err
@@ -2172,7 +2191,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if isGitHubCopilotProviderType(defaults.ProviderType) && defaults.Healthcheck != nil {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("healthcheck is not supported by github-copilot providers (remove it or use --no-healthcheck)")
 		}
-		if len(defaults.Models) == 0 {
+		if len(defaults.Models) == 0 && len(defaults.ModelPassthroughBlocks) == 0 {
 			return providerInput{}, secretsUpdate{}, fmt.Errorf("provider requires at least one model in non-interactive mode")
 		}
 		return defaults, providerSecretsUpdate(defaults, options), nil
@@ -2309,7 +2328,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			}
 			models := preservedProviderDeferredModelOverlays(existing, extends)
 			if strings.TrimSpace(extends) == "" {
-				models, err = promptProviderModels(prompts, providerType, defaults.Models)
+				models, err = promptProviderLiteralModels(prompts, providerType, defaults)
 				if err != nil {
 					return providerInput{}, secretsUpdate{}, err
 				}
@@ -2421,7 +2440,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		}
 		models := preservedProviderDeferredModelOverlays(existing, extends)
 		if strings.TrimSpace(extends) == "" {
-			models, err = promptProviderModels(prompts, providerType, defaults.Models)
+			models, err = promptProviderLiteralModels(prompts, providerType, defaults)
 			if err != nil {
 				return providerInput{}, secretsUpdate{}, err
 			}
@@ -2554,7 +2573,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		}
 		models := preservedProviderDeferredModelOverlays(existing, extends)
 		if strings.TrimSpace(extends) == "" {
-			models, err = promptProviderModels(prompts, providerType, defaults.Models)
+			models, err = promptProviderLiteralModels(prompts, providerType, defaults)
 			if err != nil {
 				return providerInput{}, secretsUpdate{}, err
 			}
@@ -2648,7 +2667,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 	}
 	models := preservedProviderDeferredModelOverlays(existing, extends)
 	if strings.TrimSpace(extends) == "" {
-		models, err = promptProviderModels(prompts, providerType, defaults.Models)
+		models, err = promptProviderLiteralModels(prompts, providerType, defaults)
 		if err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
@@ -2799,6 +2818,16 @@ func promptProviderTLSInput(prompts *promptSession, input providerInput, options
 		return providerInput{}, err
 	}
 	return input, nil
+}
+
+func promptProviderLiteralModels(prompts *promptSession, providerType string, defaults providerInput) ([]providerModelInput, error) {
+	if len(defaults.Models) == 0 && len(defaults.ModelPassthroughBlocks) != 0 {
+		add, err := prompts.askYesNo("Add literal models", false)
+		if err != nil || !add {
+			return nil, err
+		}
+	}
+	return promptProviderModels(prompts, providerType, defaults.Models)
 }
 
 func promptProviderModels(prompts *promptSession, providerType string, existing []providerModelInput) ([]providerModelInput, error) {
@@ -4477,9 +4506,38 @@ func existingAuthInput(blocks []topLevelBlock) *authInput {
 		client.Token = parseLiteralOrExpression(attributeExpr(src, clientBlock.Body, "token"))
 		client.Tenant = parseLiteralOrExpression(attributeExpr(src, clientBlock.Body, "tenant"))
 		client.AllowedModels = parseQuotedListExpr(attributeExpr(src, clientBlock.Body, "allowed_models"))
+		client.AllowedModelPassthroughsExpr = attributeExpr(src, clientBlock.Body, "allowed_model_passthroughs")
+		if clientBlock.Body.Attributes["allowed_model_passthroughs"] != nil && client.AllowedModelPassthroughsExpr == "" {
+			return nil
+		}
 		input.Clients = append(input.Clients, client)
 	}
 	return input
+}
+
+func preserveAuthModelPassthroughGrants(existing *authInput, input *authInput) error {
+	if existing == nil {
+		return nil
+	}
+	for _, old := range existing.Clients {
+		if old.AllowedModelPassthroughsExpr == "" {
+			continue
+		}
+		preserved := false
+		if input.Mode == "bearer_static" {
+			for i := range input.Clients {
+				if input.Clients[i].Name == old.Name {
+					input.Clients[i].AllowedModelPassthroughsExpr = old.AllowedModelPassthroughsExpr
+					preserved = true
+					break
+				}
+			}
+		}
+		if !preserved {
+			return fmt.Errorf("cannot preserve allowed_model_passthroughs for client %q; edit the static config file", old.Name)
+		}
+	}
+	return nil
 }
 
 func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
@@ -4519,6 +4577,13 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 	input.AllowInsecureBaseURL = parseBoolExpr(attributeExpr(src, parsed.Body, "allow_insecure_base_url"), false)
 	input.DeferredTransportBlock = nestedBlockSource(src, parsed.Body, "deferred_transport")
 	input.DeferredReceiverBlock = nestedBlockSource(src, parsed.Body, "deferred_receiver")
+	for _, rule := range findNestedBlocks(parsed.Body, "model_passthrough") {
+		source := syntaxBlockSource(src, rule)
+		if source == "" {
+			return nil
+		}
+		input.ModelPassthroughBlocks = append(input.ModelPassthroughBlocks, source)
+	}
 	input.EncryptedReasoning, err = configedit.ReadEncryptedReasoning(block.Text, configedit.EncryptedReasoningScope{Provider: name})
 	if err != nil {
 		return nil
@@ -4626,7 +4691,8 @@ func eligibleBaseProviders(blocks []topLevelBlock) ([]string, map[string]string)
 			continue
 		}
 		input := existingProviderInput(blocks, block.Labels[1])
-		if input == nil || input.Extends != "" || input.ProviderType == "" || (input.Enabled != nil && !*input.Enabled) {
+		if input == nil || input.Extends != "" || input.ProviderType == "" || (input.Enabled != nil && !*input.Enabled) ||
+			(len(input.ModelPassthroughBlocks) != 0 && len(input.Models) == 0) {
 			continue
 		}
 		names = append(names, input.Name)
@@ -4683,6 +4749,9 @@ func validateProviderExtendsInput(blocks []topLevelBlock, input providerInput) e
 	}
 	if input.ProviderType != base.ProviderType {
 		return fmt.Errorf("provider %q: type %q must match extends provider %q type %q", input.Name, input.ProviderType, input.Extends, base.ProviderType)
+	}
+	if len(base.ModelPassthroughBlocks) != 0 && len(base.Models) == 0 {
+		return fmt.Errorf("provider %q: extends %q requires a base with at least one literal model", input.Name, baseName)
 	}
 	return nil
 }
@@ -4825,6 +4894,10 @@ func nestedBlockSource(src []byte, body *hclsyntax.Body, blockType string) strin
 	if block == nil {
 		return ""
 	}
+	return syntaxBlockSource(src, block)
+}
+
+func syntaxBlockSource(src []byte, block *hclsyntax.Block) string {
 	rng := block.Range()
 	if rng.Start.Byte < 0 || rng.End.Byte > len(src) || rng.End.Byte < rng.Start.Byte {
 		return ""

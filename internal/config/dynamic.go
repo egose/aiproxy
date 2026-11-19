@@ -110,6 +110,9 @@ func NormalizeAlias(a Alias) Alias {
 }
 
 func ValidateDynamicProvider(p Provider) error {
+	if len(p.ModelPassthroughs) != 0 {
+		return fmt.Errorf("provider %q: model_passthrough is static-config-only", p.Name)
+	}
 	if err := validateProviderEncryptedReasoning(p); err != nil {
 		return err
 	}

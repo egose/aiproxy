@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"log/slog"
@@ -157,10 +158,12 @@ func (h *Handler) admitInferenceBody(deps Dependencies, w http.ResponseWriter, r
 			return admission, false
 		}
 	}
+	contentType := r.Header.Get("Content-Type")
+	var unmodified bool
 	if limits != nil {
 		admission.PublicModel, _ = deferred.ChatInputModel(body)
 	} else {
-		admission.PublicModel = extractModelForRequest(r.Header.Get("Content-Type"), body)
+		admission.PublicModel, unmodified = extractModelForRequest(contentType, body)
 	}
 	if admission.PublicModel == "" {
 		admission.AccountingModel = accountingModelInvalidBody
@@ -184,6 +187,12 @@ func (h *Handler) admitInferenceBody(deps Dependencies, w http.ResponseWriter, r
 		logger.Info("request received", "method", r.Method, "path", r.URL.Path, "request_bytes", len(body))
 	}
 	resolved, denial := resolveInferenceModel(deps, principal, publicModel)
+	if limits == nil && unmodified && denial != nil && (denial.status == http.StatusForbidden || denial.status == http.StatusNotFound) {
+		if fallback, ok := resolveInferenceModelPassthrough(deps, principal, op, publicModel, logger); ok &&
+			validModelPassthroughInput(op, contentType, body, publicModel) {
+			resolved, denial = fallback, nil
+		}
+	}
 	if denial != nil {
 		admission.AccountingModel = accountingModelNotFound
 		if denial.status == http.StatusForbidden {
@@ -196,12 +205,18 @@ func (h *Handler) admitInferenceBody(deps Dependencies, w http.ResponseWriter, r
 	}
 	admission.Resolved = resolved
 	admission.AccountingModel = publicModel
+	passthrough := resolved.Kind == modelresolver.KindModelPassthrough
+	if passthrough {
+		admission.AccountingModel = resolved.Provider.Name + "/" + modelPassthroughTargetIdentity(resolved)
+	}
 	if !h.allowQuota(deps, w, r, principal, publicModel) {
 		return admission, false
 	}
-	if err := ensureOperationSupported(op, resolved, deps.Catalog); err != nil {
-		h.writeRequestError(deps.Metrics, w, r, http.StatusBadRequest, "unsupported_operation", err.Error())
-		return admission, false
+	if !passthrough {
+		if err := ensureOperationSupported(op, resolved, deps.Catalog); err != nil {
+			h.writeRequestError(deps.Metrics, w, r, http.StatusBadRequest, "unsupported_operation", err.Error())
+			return admission, false
+		}
 	}
 	if limits != nil {
 		receiver, err := deferredReceiverLimits(deps, resolved)
@@ -222,6 +237,10 @@ func (h *Handler) admitInferenceBody(deps Dependencies, w http.ResponseWriter, r
 		blocked, out, logState := h.checkGuardrails(deps, w, r, op, body, deps.Guardrails, publicModel, logger, deps.RedactGuardrailBodies, limits)
 		admission.GuardrailLog, admission.Body = logState, out
 		if blocked {
+			return admission, false
+		}
+		if passthrough && !bytes.Equal(body, out) && !validModelPassthroughInput(op, contentType, out, publicModel) {
+			h.writeRequestError(deps.Metrics, w, r, http.StatusBadRequest, guardrailGapType, guardrailGapMessage)
 			return admission, false
 		}
 		if limits != nil {

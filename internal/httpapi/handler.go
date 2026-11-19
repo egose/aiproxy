@@ -408,7 +408,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	resolved := admission.Resolved
 
-	if resolved.Kind == modelresolver.KindDirect {
+	if resolved.Kind == modelresolver.KindDirect || resolved.Kind == modelresolver.KindModelPassthrough {
 		result, err = h.dispatchDirect(deps, r.Context(), op, resolved, r, body, logger)
 	} else {
 		result, err = h.dispatchAlias(deps, r.Context(), op, resolved, r, body, logger)
@@ -746,20 +746,20 @@ func principalTenant(principal *auth.Principal) string {
 	return principal.Tenant
 }
 
-func extractModelForRequest(contentType string, body []byte) string {
+func extractModelForRequest(contentType string, body []byte) (model string, unmodified bool) {
 	if strings.HasPrefix(contentType, "multipart/form-data;") {
 		boundary := multipartContentBoundary(contentType)
 		if boundary == "" {
-			return ""
+			return "", false
 		}
 		reader := multipart.NewReader(bytes.NewReader(body), boundary)
 		for {
 			part, err := reader.NextPart()
 			if err == io.EOF {
-				return ""
+				return "", false
 			}
 			if err != nil {
-				return ""
+				return "", false
 			}
 			if part.FormName() != "model" {
 				part.Close()
@@ -768,12 +768,14 @@ func extractModelForRequest(contentType string, body []byte) string {
 			data, err := io.ReadAll(part)
 			part.Close()
 			if err != nil {
-				return ""
+				return "", false
 			}
-			return strings.TrimSpace(string(data))
+			raw := string(data)
+			model := strings.TrimSpace(raw)
+			return model, model == raw
 		}
 	}
-	return extractModel(body)
+	return extractModel(body), true
 }
 
 func multipartContentBoundary(contentType string) string {

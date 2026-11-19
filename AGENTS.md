@@ -78,12 +78,13 @@ JSON config form, where `env("VAR")` is written bare as the value. Run
 `set -a; . ./.env; set +a` before invoking the binary locally so env vars resolve.
 
 The server supports `SIGHUP`-triggered live config reload for auth, providers,
-models, aliases, root and provider upstream header timeouts, provider TLS
-ClientHello profiles and custom recipes, root and provider
-user-agent settings, root/provider/model/alias encrypted-reasoning policies, access-log
-enablement, payload-log configuration, metrics config, provider-health config, ingress-guardrail policy, web UI enablement, and metrics-backed inventory
-state. When multi-tenancy is enabled, database-backed providers, aliases, and
-inbound keys merge into the serving catalog on the same reload path (and
+models, static model-ID passthrough rules and grants, aliases, root and provider
+upstream header timeouts, provider TLS ClientHello profiles and custom recipes,
+root and provider user-agent settings, root/provider/model/alias encrypted-reasoning
+policies, access-log enablement, payload-log configuration, metrics config,
+provider-health config, ingress-guardrail policy, web UI enablement, and
+metrics-backed inventory state. When multi-tenancy is enabled, database-backed
+providers, aliases, and inbound keys merge into the serving catalog on the same reload path (and
 automatically after admin API mutations and durable-revision polling every 2s);
 invalid catalogs retain the old catalog but keys refresh independently. DB-backed
 new admission fails closed after 30s without confirmed freshness; admitted work
@@ -302,8 +303,23 @@ The optional standalone Bun capture tool is documented in
   limit. In `bearer_static` mode it is keyed per authenticated client; in
   `none` mode it uses a shared anonymous bucket.
 - Static `auth.client` blocks may also define optional `tenant` and
-  `allowed_models` fields. `allowed_models` is enforced against proxy-visible
-  model names.
+  `allowed_models` fields. `allowed_models` is enforced against literal public
+  model and alias names.
+- Static concrete `openai`, `openai-compatible`, `openrouter`, and `zenmux`
+  providers may declare `model_passthrough "<rule>"` alongside or instead of
+  literal models. Exact hits always win. On a miss, require a unique full Go
+  regexp match (32 rules/provider, 512 bytes/pattern, 256 bytes/valid lowercase
+  slash-separated suffix), declared capability, and a separate static client
+  `allowed_model_passthroughs = ["<provider>/<rule>"]` grant. File-only `none`
+  explicitly allows anonymous use of configured rules; DB keys, including System,
+  cannot use them. Zero/overlapping/unusable rule matches keep the literal
+  `403`/`404`. Forward the unchanged suffix in the canonical JSON/multipart
+  `model`; reject `models` and `preset` on rule calls. No discovery, model
+  cards, alias targets, inheritance, peer transport or managed creation. Use
+  trusted upstream credentials and narrow regexes: rule usage is grouped under
+  `<provider>/@passthrough/<rule>` and unpriced. CLI edits preserve declarations;
+  invalid `SIGHUP` candidates retain both rules and grants. See the exact-tested
+  [HCL/JSON configurations](website/docs/configuration.md#model-id-passthrough).
 - `GET /v1/billing/usage` is a rolling, process-local usage/cost estimate, not an
   invoice. DB bearers see only their immutable credential/workspace pair, including
   earlier label snapshots; rotation preserves history and deletion/recreation does

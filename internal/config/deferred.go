@@ -643,6 +643,9 @@ func validateDeferredConfigBody(body hcl.Body) error {
 	if err != nil {
 		return err
 	}
+	if err := validateModelPassthroughBlockShapes(body); err != nil {
+		return err
+	}
 	var raw struct {
 		Deferred  []*rawDeferred `hcl:"deferred,block"`
 		Auth      []rawAuth      `hcl:"auth,block"`
@@ -670,6 +673,9 @@ func validateDeferredConfigBody(body hcl.Body) error {
 			return fmt.Errorf("duplicate provider %q", p.Name)
 		}
 		byName[p.Name] = p
+	}
+	if err := validateEditableModelPassthrough(raw.Auth, raw.Providers, byName); err != nil {
+		return err
 	}
 	for i, local := range raw.Providers {
 		effective := local

@@ -45,6 +45,7 @@ var jsonBlockLabels = map[string]int{
 	"credential_ref":      0,
 	"healthcheck":         0,
 	"model":               1,
+	"model_passthrough":   1,
 	"pricing":             0,
 	"payload_log":         0,
 	"mongodb":             0,
@@ -344,6 +345,17 @@ func writeHCLBlocks(body *hclwrite.Body, typeName string, labels []string, val i
 		}
 		if depth == 0 {
 			body.AppendNewline()
+		}
+		return nil
+	}
+	if entries, ok := val.([]interface{}); ok && typeName == "model_passthrough" {
+		for _, entry := range entries {
+			if _, ok := entry.(map[string]interface{}); !ok {
+				return fmt.Errorf("%s block expects objects with %d labels", typeName, arity)
+			}
+			if err := writeHCLBlocks(body, typeName, labels, entry, arity, depth); err != nil {
+				return err
+			}
 		}
 		return nil
 	}

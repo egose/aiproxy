@@ -21,9 +21,18 @@ import (
 )
 
 func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op provider.Operation, r modelresolver.ResolveResult, inbound *http.Request, body []byte, logger *slog.Logger) (*provider.Result, error) {
-	publicModel := r.Provider.Name + "/" + r.Model.Name
-	if deps.MultiTenancy.Enabled && (r.Workspace != r.Provider.Workspace || !deps.Resolver.ModelVisibleInWorkspace(publicModel, r.Workspace)) {
-		return nil, modelresolver.ErrUnknownModel{Model: publicModel}
+	passthrough := r.Kind == modelresolver.KindModelPassthrough
+	target, upstreamModel := r.Model.Name, r.Model.UpstreamName
+	publicModel := r.Provider.Name + "/" + target
+	if passthrough {
+		target, upstreamModel = modelPassthroughTargetIdentity(r), r.PassthroughSuffix
+		publicModel = r.Provider.Name + "/" + upstreamModel
+	}
+	if deps.MultiTenancy.Enabled {
+		if _, scoped := r.Workspace.ID(); !scoped || r.Workspace != r.Provider.Workspace ||
+			(!passthrough && !deps.Resolver.ModelVisibleInWorkspace(publicModel, r.Workspace)) {
+			return nil, modelresolver.ErrUnknownModel{Model: publicModel}
+		}
 	}
 	er := encryptedReasoningForTarget(deps, r.Provider, r.Model, nil)
 	if encryptedReasoningApplies(op) && !er.Passthrough {
@@ -36,17 +45,21 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		}
 	}
 	if deps.Metrics != nil {
-		deps.Metrics.RecordProviderSelection(op, r.Provider.Name+"/"+r.Model.Name, r.Provider.Name, r.Model.Name)
+		deps.Metrics.RecordProviderSelection(op, r.Provider.Name+"/"+target, r.Provider.Name, target)
 	}
 	execution := deferredExecutionFromContext(ctx)
+	var transport *config.DeferredTransport
+	if !passthrough {
+		transport = config.EffectiveDeferredTransport(r.Provider, r.Model)
+	}
 	request := provider.Request{
 		Operation:            op,
 		ProviderType:         r.Provider.Type,
-		PublicModel:          r.Provider.Name + "/" + r.Model.Name,
+		PublicModel:          publicModel,
 		BaseURL:              r.Provider.BaseURL,
 		APIKey:               r.Provider.APIKey,
 		CopilotToken:         r.Provider.CopilotToken,
-		UpstreamModel:        r.Model.UpstreamName,
+		UpstreamModel:        upstreamModel,
 		ModelProtocol:        r.Model.Protocol,
 		UserAgent:            r.Provider.UserAgent,
 		ForwardUserAgent:     r.Provider.ForwardUserAgent,
@@ -54,7 +67,7 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		ForwardAuthorization: r.Provider.ForwardAuthorization,
 		Version:              deps.Version,
 		Client:               clientForProvider(deps, r.Provider),
-		DeferredTransport:    config.EffectiveDeferredTransport(r.Provider, r.Model),
+		DeferredTransport:    transport,
 		ExecutionLimits:      execution.executionLimits(),
 		ObserveBody:          execution.bodyObserver(),
 	}
@@ -71,14 +84,14 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 			logger.Info("upstream request started",
 				"provider", r.Provider.Name,
 				"provider_type", r.Provider.Type,
-				"upstream_model", r.Model.UpstreamName,
+				"upstream_model", upstreamModel,
 			)
 		}
 		start := time.Now()
 		result, err := deps.Adapter.Do(ctx, request)
 		if result != nil {
 			result.Provider = r.Provider.Name
-			result.UpstreamModel = r.Model.Name
+			result.UpstreamModel = target
 		}
 		if deps.Metrics != nil && !provider.IsPeerControlOutcome(result, err) && (result == nil || !result.Streaming) {
 			status := 0
@@ -91,7 +104,7 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 			attrs := []any{
 				"provider", r.Provider.Name,
 				"provider_type", r.Provider.Type,
-				"upstream_model", r.Model.UpstreamName,
+				"upstream_model", upstreamModel,
 				"duration_ms", time.Since(start).Milliseconds(),
 			}
 			if result != nil {
@@ -106,7 +119,7 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 			h.attachStreamFinalizers(deps, ctx, op, r.Provider.Name, result, start, logger, []any{
 				"provider", r.Provider.Name,
 				"provider_type", r.Provider.Type,
-				"upstream_model", r.Model.UpstreamName,
+				"upstream_model", upstreamModel,
 			})
 			h.instrumentUpstreamResponseSize(deps, op, r.Provider.Name, result, err)
 			return result, nil

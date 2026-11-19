@@ -48,10 +48,11 @@ type AuthRateLimitInput struct {
 }
 
 type AuthClientInput struct {
-	Name          string
-	Token         string
-	Tenant        string
-	AllowedModels []string
+	Name                         string
+	Token                        string
+	Tenant                       string
+	AllowedModels                []string
+	AllowedModelPassthroughsExpr string
 }
 
 type ProviderInput struct {
@@ -77,6 +78,7 @@ type ProviderInput struct {
 	Enabled                   *bool
 	Healthcheck               *ProviderHealthcheckInput
 	Models                    []ProviderModelInput
+	ModelPassthroughBlocks    []string
 }
 
 func (i ProviderInput) IsExplicitlyDisabled() bool {
@@ -297,6 +299,11 @@ func RenderAuthBlock(input AuthInput) string {
 			b.WriteString(RenderQuotedList(client.AllowedModels))
 			b.WriteString("\n")
 		}
+		if client.AllowedModelPassthroughsExpr != "" {
+			b.WriteString("    allowed_model_passthroughs = ")
+			b.WriteString(client.AllowedModelPassthroughsExpr)
+			b.WriteString("\n")
+		}
 		b.WriteString("  }\n")
 	}
 	b.WriteString("}\n")
@@ -339,6 +346,7 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 		renderProviderDeferredBlocks(&b, input)
 		renderEncryptedReasoningBlock(&b, input.EncryptedReasoning, "  ")
 		renderProviderModelBlocks(&b, input)
+		renderModelPassthroughBlocks(&b, input.ModelPassthroughBlocks)
 		b.WriteString("}\n")
 		return b.String()
 	}
@@ -383,8 +391,17 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 		b.WriteString(renderProviderHealthcheckBlock(input.Healthcheck))
 	}
 	renderProviderModelBlocks(&b, input)
+	renderModelPassthroughBlocks(&b, input.ModelPassthroughBlocks)
 	b.WriteString("}\n")
 	return b.String()
+}
+
+func renderModelPassthroughBlocks(b *strings.Builder, blocks []string) {
+	for _, block := range blocks {
+		b.WriteString("\n  ")
+		b.WriteString(block)
+		b.WriteString("\n")
+	}
 }
 
 func renderProviderModelBlocks(b *strings.Builder, input ProviderInput) {

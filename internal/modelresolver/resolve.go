@@ -18,12 +18,14 @@ import (
 //
 // Unknown models return an error so the caller maps them to a 4xx response.
 type ResolveResult struct {
-	Kind      Kind
-	Provider  config.Provider
-	Model     config.Model
-	Alias     config.Alias
-	Selector  alias.Selector
-	Workspace identity.WorkspaceScope
+	Kind              Kind
+	Provider          config.Provider
+	Model             config.Model
+	Alias             config.Alias
+	Selector          alias.Selector
+	Workspace         identity.WorkspaceScope
+	PassthroughRule   config.ModelPassthroughRule
+	PassthroughSuffix string
 }
 
 type Kind int
@@ -31,6 +33,7 @@ type Kind int
 const (
 	KindDirect Kind = iota
 	KindAlias
+	KindModelPassthrough
 )
 
 type Resolver struct {
@@ -162,19 +165,34 @@ func (r *Resolver) Resolve(publicModel string) (ResolveResult, error) {
 		}
 		return ResolveResult{Kind: KindAlias, Alias: a, Selector: r.selectors[name]}, nil
 	}
-	parts := strings.SplitN(publicModel, "/", 2)
-	if len(parts) != 2 {
-		return ResolveResult{}, ErrUnknownModel{Model: publicModel}
-	}
-	provName, modelName := parts[0], parts[1]
-	if _, ok := r.catalog.Provider(provName); !ok {
-		return ResolveResult{}, ErrUnknownProvider{Provider: provName}
-	}
-	prov, model, ok := r.catalog.Model(provName, modelName)
+	provName, modelName, ok := strings.Cut(publicModel, "/")
 	if !ok {
 		return ResolveResult{}, ErrUnknownModel{Model: publicModel}
 	}
+	prov, model, ok := r.catalog.Model(provName, modelName)
+	if !ok {
+		if !r.catalog.HasProvider(provName) {
+			return ResolveResult{}, ErrUnknownProvider{Provider: provName}
+		}
+		return ResolveResult{}, ErrUnknownModel{Model: publicModel}
+	}
 	return ResolveResult{Kind: KindDirect, Provider: prov, Model: model}, nil
+}
+
+func (r *Resolver) ResolveModelPassthrough(publicModel string, workspace *identity.WorkspaceScope) (ResolveResult, config.ModelPassthroughMatch) {
+	providerName, suffix, ok := strings.Cut(publicModel, "/")
+	if !ok || providerName == "alias" {
+		return ResolveResult{}, config.ModelPassthroughNoMatch
+	}
+	p, rule, match := r.catalog.MatchModelPassthrough(providerName, suffix, workspace)
+	if match != config.ModelPassthroughMatched {
+		return ResolveResult{}, match
+	}
+	resolved := ResolveResult{Kind: KindModelPassthrough, Provider: p, PassthroughRule: rule, PassthroughSuffix: suffix}
+	if workspace != nil {
+		resolved.Workspace = *workspace
+	}
+	return resolved, match
 }
 
 type ErrUnknownModel struct{ Model string }
