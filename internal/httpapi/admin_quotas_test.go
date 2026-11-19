@@ -14,6 +14,7 @@ import (
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/provider"
@@ -165,7 +166,7 @@ func TestBudgetEnforcement(t *testing.T) {
 	if err := st.InsertSpendEntry(ctx, &store.SpendEntry{WorkspaceID: workspaceUUID, KeyID: mustParseUUID(keyID), UserID: &memberUUID, Model: "alias/fast", Tokens: 10, CostMicros: 150}); err != nil {
 		t.Fatal(err)
 	}
-	principal := &auth.Principal{Name: "k", KeyID: uuid.New(), WorkspaceID: workspaceUUID, OwnerUserID: memberUUID}
+	principal := quotaTestPrincipal(t, workspaceUUID, memberUUID)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	w := httptest.NewRecorder()
 	if h.allowQuota(deps, w, req, principal, "alias/fast") {
@@ -213,6 +214,7 @@ func TestQuotaProxyEndToEnd(t *testing.T) {
 		MultiTenancy: config.MultiTenancy{Enabled: true},
 		Catalog: config.NewCatalog([]config.Provider{{
 			Type: config.ProviderTypeOpenAI, Name: "openai", BaseURL: upstream.URL, APIKey: "sk-test",
+			Workspace: identity.InWorkspace(mustParseUUID(workspaceID)),
 			Models: []config.Model{{Name: "gpt-4o-mini", UpstreamName: "gpt-4o-mini",
 				Pricing: &config.ModelPricing{InputPerMillion: 1000, OutputPerMillion: 2000}}},
 		}}, nil, nil),
@@ -221,7 +223,7 @@ func TestQuotaProxyEndToEnd(t *testing.T) {
 	dyn := []auth.DynamicClient{{
 		TokenHash: store.TokenHash(token), Name: created["name"].(string),
 		AllowedModels: []string{"openai/gpt-4o-mini"},
-		KeyID:         mustParseUUID(keyID), WorkspaceID: mustParseUUID(workspaceID), OwnerUserID: mustParseUUID(memberID),
+		KeyID:         mustParseUUID(keyID), Workspace: identity.InWorkspace(mustParseUUID(workspaceID)), OwnerUserID: mustParseUUID(memberID),
 	}}
 	agg := accounting.NewAggregator()
 	proxy := NewHandler(Dependencies{
@@ -290,7 +292,7 @@ func TestTPMEnforcement(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps.Quota.recordTokens(workspaceUUID, quotaScope{typ: "user", id: memberUUID}, "alias/fast", 100)
-	principal := &auth.Principal{Name: "k", KeyID: uuid.New(), WorkspaceID: workspaceUUID, OwnerUserID: memberUUID}
+	principal := quotaTestPrincipal(t, workspaceUUID, memberUUID)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	w := httptest.NewRecorder()
 	if h.allowQuota(deps, w, req, principal, "alias/fast") {
@@ -305,4 +307,13 @@ func TestTPMEnforcement(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "tpm_exceeded") {
 		t.Fatalf("tpm body wrong: %s", w.Body.String())
 	}
+}
+
+func quotaTestPrincipal(t *testing.T, workspace, user uuid.UUID) *auth.Principal {
+	t.Helper()
+	const token = "quota-fixture"
+	a := auth.NewAuthenticatorWithClients(config.Auth{Mode: config.AuthModeBearerStatic}, []auth.DynamicClient{{
+		Name: "k", TokenHash: store.TokenHash(token), KeyID: uuid.New(), Workspace: identity.InWorkspace(workspace), OwnerUserID: user,
+	}})
+	return authenticatedTestPrincipal(t, a, token)
 }

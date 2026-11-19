@@ -3,6 +3,7 @@ package dbmerge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -10,11 +11,14 @@ import (
 
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/store"
 	"github.com/google/uuid"
 )
 
 type Merged struct {
+	Revisions         store.ServingRevisions
+	ConfirmedAt       time.Time
 	Providers         []config.Provider
 	DisabledProviders []config.Provider
 	Aliases           []config.Alias
@@ -43,11 +47,63 @@ func jsonPresent(raw []byte) bool {
 }
 
 func MergeCatalog(ctx context.Context, st *store.Store, rt *config.Runtime) (Merged, error) {
+	if st == nil {
+		return Merged{}, nil
+	}
+	started := time.Now()
+	before, err := st.ServingRevisions(ctx)
+	if err != nil {
+		return Merged{}, err
+	}
+	out, err := mergeCatalog(ctx, st, rt)
+	if err != nil {
+		return Merged{}, err
+	}
+	after, err := st.ServingRevisions(ctx)
+	if err != nil {
+		return Merged{}, err
+	}
+	if before != after {
+		return Merged{}, ErrSnapshotChanged
+	}
+	out.Revisions, out.ConfirmedAt = before, started
+	return out, nil
+}
+
+var ErrSnapshotChanged = errors.New("database serving snapshot changed during read")
+
+func MergeKeys(ctx context.Context, st *store.Store) ([]auth.DynamicClient, store.ServingRevisions, time.Time, error) {
+	started := time.Now()
+	before, err := st.ServingRevisions(ctx)
+	if err != nil {
+		return nil, before, started, err
+	}
+	keys, err := mergeKeys(ctx, st)
+	if err != nil {
+		return nil, before, started, err
+	}
+	after, err := st.ServingRevisions(ctx)
+	if err == nil && before.Keys != after.Keys {
+		err = ErrSnapshotChanged
+	}
+	if before.Catalog != after.Catalog {
+		before.Catalog = 0
+	}
+	return keys, before, started, err
+}
+
+func mergeCatalog(ctx context.Context, st *store.Store, rt *config.Runtime) (Merged, error) {
 	var out Merged
 	if st == nil {
 		return out, nil
 	}
 	static := rt.Catalog
+	staticNames := make(map[string]bool)
+	for _, p := range append(static.Providers(), static.DisabledProviders()...) {
+		if !p.DatabaseManaged {
+			staticNames[p.Name] = true
+		}
+	}
 	rows, err := st.ListProviders(ctx)
 	if err != nil {
 		return out, fmt.Errorf("database providers: %w", err)
@@ -55,6 +111,9 @@ func MergeCatalog(ctx context.Context, st *store.Store, rt *config.Runtime) (Mer
 	modelsByProvider := make(map[string][]store.DBProviderModel, len(rows))
 	managedByName := make(map[string]store.DBProvider, len(rows))
 	for _, row := range rows {
+		if staticNames[row.Name] {
+			return out, fmt.Errorf("provider %q: name is already defined in static config", row.Name)
+		}
 		managedByName[row.Name] = row
 		models, err := st.ListProviderModels(ctx, row.ID)
 		if err != nil {
@@ -64,10 +123,19 @@ func MergeCatalog(ctx context.Context, st *store.Store, rt *config.Runtime) (Mer
 	}
 	enabled := map[string]config.Provider{}
 	disabled := map[string]config.Provider{}
+	system := identity.InWorkspace(store.SystemWorkspaceID)
 	for _, p := range static.Providers() {
+		if p.DatabaseManaged {
+			continue
+		}
+		p.Workspace = system
 		enabled[p.Name] = p
 	}
 	for _, p := range static.DisabledProviders() {
+		if p.DatabaseManaged {
+			continue
+		}
+		p.Workspace = system
 		disabled[p.Name] = p
 	}
 	ordered := append([]store.DBProvider(nil), rows...)
@@ -78,6 +146,9 @@ func MergeCatalog(ctx context.Context, st *store.Store, rt *config.Runtime) (Mer
 				continue
 			}
 			if base, ok := managedByName[row.Extends]; row.Extends != "" && ok {
+				if base.WorkspaceID != row.WorkspaceID {
+					return out, unavailableProviderBase(row)
+				}
 				if base.Extends != "" {
 					return out, fmt.Errorf("provider %q: extends %q must reference a concrete provider; inheritance chains are not supported", row.Name, row.Extends)
 				}
@@ -85,20 +156,14 @@ func MergeCatalog(ctx context.Context, st *store.Store, rt *config.Runtime) (Mer
 					return out, fmt.Errorf("provider %q: extends %q references a disabled provider", row.Name, row.Extends)
 				}
 			}
-			built, err := BuildProvider(row, modelsByProvider[row.Name], enabled)
+			built, err := PrepareProvider(row, modelsByProvider[row.Name], enabled, rt.MultiTenancy.AllowedUpstreamOrigins...)
 			if err != nil {
 				return out, err
 			}
 			if row.Extends == "" {
 				built = rt.ApplyProviderDefaults(built)
 			}
-			if err := config.ValidateDynamicProvider(built); err != nil {
-				return out, err
-			}
 			if built.Enabled {
-				if err := resolveCredentials(&built); err != nil {
-					return out, err
-				}
 				delete(disabled, built.Name)
 				enabled[built.Name] = built
 			} else {
@@ -110,6 +175,26 @@ func MergeCatalog(ctx context.Context, st *store.Store, rt *config.Runtime) (Mer
 	aliases, err := mergeAliases(ctx, st, static, enabled, disabled)
 	if err != nil {
 		return out, err
+	}
+	for _, row := range ordered {
+		built, ok := enabled[row.Name]
+		if !ok {
+			built = disabled[row.Name]
+		}
+		if err := attachCredential(&built, row); err != nil {
+			return out, err
+		}
+		if err := config.ValidateDynamicProvider(built); err != nil {
+			return out, err
+		}
+		if built.Enabled {
+			if err := resolveCredentials(&built); err != nil {
+				return out, err
+			}
+			enabled[built.Name] = built
+		} else {
+			disabled[built.Name] = built
+		}
 	}
 	keys, err := mergeKeys(ctx, st)
 	if err != nil {
@@ -190,8 +275,8 @@ func cloneModel(model config.Model) config.Model {
 	return model
 }
 
-func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases map[string]config.Provider) (config.Provider, error) {
-	p, err := MaterializeProvider(row, models, bases)
+func BuildProvider(row store.DBProvider, models []store.DBProviderModel, bases map[string]config.Provider, allowedOrigins ...string) (config.Provider, error) {
+	p, err := PrepareProvider(row, models, bases, allowedOrigins...)
 	if err != nil {
 		return config.Provider{}, err
 	}
@@ -225,7 +310,13 @@ func MaterializeProvider(row store.DBProvider, models []store.DBProviderModel, b
 		}
 		base, ok := bases[row.Extends]
 		if !ok {
-			return config.Provider{}, fmt.Errorf("provider %q: extends %q is not defined", name, row.Extends)
+			return config.Provider{}, unavailableProviderBase(row)
+		}
+		if _, scoped := base.Workspace.ID(); !scoped && !base.DatabaseManaged {
+			base.Workspace = identity.InWorkspace(store.SystemWorkspaceID)
+		}
+		if base.Workspace != identity.InWorkspace(row.WorkspaceID) {
+			return config.Provider{}, unavailableProviderBase(row)
 		}
 		if base.Extends != "" {
 			return config.Provider{}, fmt.Errorf("provider %q: extends %q must reference a concrete provider; inheritance chains are not supported", name, row.Extends)
@@ -251,6 +342,7 @@ func MaterializeProvider(row store.DBProvider, models []store.DBProviderModel, b
 		p := cloneProvider(base)
 		p.Name = name
 		p.DatabaseManaged = true
+		p.Workspace = identity.InWorkspace(row.WorkspaceID)
 		p.Extends = row.Extends
 		p.TLSClientHelloInherited = true
 		p.ForwardAuthorization = row.ForwardAuthorization
@@ -278,6 +370,7 @@ func MaterializeProvider(row store.DBProvider, models []store.DBProviderModel, b
 	}
 	p := config.Provider{
 		Type: config.ProviderType(row.Type), Name: name, DatabaseManaged: true,
+		Workspace:   identity.InWorkspace(row.WorkspaceID),
 		DisplayName: row.DisplayName, BaseURL: row.BaseURL,
 		TLSClientHello: row.TLSClientHello, HasTLSClientHello: row.TLSClientHello != "", TLSProfile: localTLS.TLSProfile,
 		UserAgent: row.UserAgent, ForwardUserAgent: row.ForwardUserAgent,
@@ -353,6 +446,10 @@ func MaterializeProvider(row store.DBProvider, models []store.DBProviderModel, b
 	return p, nil
 }
 
+func unavailableProviderBase(row store.DBProvider) error {
+	return fmt.Errorf("provider %q: inheritance base is not defined in the destination workspace", row.Name)
+}
+
 func attachCredential(p *config.Provider, row store.DBProvider) error {
 	hasAPI := len(row.APIKeyEncrypted) > 0 || row.APIKeyRefKey != "" || row.APIKeyRefPath != ""
 	hasCopilotRef := row.CopilotCredentialName != "" || row.CopilotCredentialPath != ""
@@ -414,16 +511,26 @@ func mergeAliases(ctx context.Context, st *store.Store, static config.Catalog, e
 	}
 	byName := map[string]config.Alias{}
 	for _, a := range static.Aliases() {
+		if a.DatabaseManaged {
+			continue
+		}
+		a.Workspace = identity.InWorkspace(store.SystemWorkspaceID)
 		byName[a.Name] = a
 	}
 	ordered := append([]store.DBAlias(nil), rows...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Name < ordered[j].Name })
 	for _, row := range ordered {
+		if _, exists := byName[row.Name]; exists {
+			return nil, fmt.Errorf("alias %q: name is already defined in static config", row.Name)
+		}
 		targets, err := st.ListAliasTargets(ctx, row.ID)
 		if err != nil {
 			return nil, fmt.Errorf("database alias %q targets: %w", row.Name, err)
 		}
-		alias := config.Alias{Name: row.Name, DatabaseManaged: true, Algorithm: config.Algorithm(row.Algorithm), RetryStatusCodes: append([]int(nil), row.RetryStatusCodes...)}
+		alias := config.Alias{
+			Name: row.Name, Workspace: identity.InWorkspace(row.WorkspaceID), DatabaseManaged: true,
+			Algorithm: config.Algorithm(row.Algorithm), RetryStatusCodes: append([]int(nil), row.RetryStatusCodes...),
+		}
 		if jsonPresent(row.SessionAffinity) {
 			var affinity dbSessionAffinity
 			if err := json.Unmarshal(row.SessionAffinity, &affinity); err != nil {
@@ -500,7 +607,7 @@ func mergeKeys(ctx context.Context, st *store.Store) ([]auth.DynamicClient, erro
 			TokenHash: k.TokenHash, Name: k.Name, Tenant: k.Tenant,
 			ExpiresAt:     expiresAt,
 			AllowedModels: append([]string(nil), k.AllowedModels...),
-			KeyID:         k.ID, WorkspaceID: k.WorkspaceID,
+			KeyID:         k.ID, Workspace: identity.InWorkspace(k.WorkspaceID),
 			OwnerUserID: uuidOrNil(k.OwnerUserID), OwnerTeamID: uuidOrNil(k.OwnerTeamID),
 		})
 	}

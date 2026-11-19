@@ -25,6 +25,7 @@ import (
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/deferred"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/payloadlog"
@@ -43,7 +44,7 @@ type deferredRateLimiter struct {
 	allowed atomic.Bool
 }
 
-func (l *deferredRateLimiter) Allow(string) (bool, time.Duration) {
+func (l *deferredRateLimiter) Allow(identity.CredentialID) (bool, time.Duration) {
 	l.calls.Add(1)
 	return l.allowed.Load(), time.Second
 }

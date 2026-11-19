@@ -23,7 +23,8 @@ func payloadIdentity(p PayloadSummary) string   { return p.RequestID }
 func blockIdentity(b BlockSummary) string       { return b.BlockID }
 
 func usageIdentity(s accounting.Summary) accounting.Summary {
-	return accounting.Summary{Tenant: s.Tenant, Client: s.Client, Model: s.Model, Operation: s.Operation, StatusCode: s.StatusCode}
+	return accounting.Summary{CredentialID: s.CredentialID, WorkspaceScope: s.WorkspaceScope,
+		Tenant: s.Tenant, Client: s.Client, Model: s.Model, Operation: s.Operation, StatusCode: s.StatusCode}
 }
 
 func (m *model) providerList() []config.Provider {

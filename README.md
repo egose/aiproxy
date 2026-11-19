@@ -62,15 +62,17 @@ required `protocol`: `chat` defaults to `chat`, `responses` defaults to
 - optional `tenant` and `allowed_models` on `auth.client` let you attach client
   identity metadata and enforce a static allow-list of proxy-visible model
   names
-- request accounting is tracked in-process by tenant, client, model, operation,
-  and status over a rolling 24-hour window; `/metrics` exposes aggregated usage
-  event counters
+- request accounting groups immutable credential/workspace identity before tenant,
+  client, model, operation and status labels over a rolling 24-hour in-process
+  window; `/metrics` retains operator usage counters without credential-ID labels
 - optional `logging` config controls structured log level and request lifecycle
   access logging
-- `GET /v1/billing/usage` returns aggregated in-process usage summaries. In
-  `bearer_static` mode it is scoped to the caller's tenant when present,
-  otherwise to the caller's client identity. Summaries use the same rolling
-  24-hour in-process window as local accounting.
+- `GET /v1/billing/usage` returns a rolling, process-local estimate, not an invoice.
+  DB bearers see only their immutable key/workspace usage, including earlier label
+  snapshots. Rotation preserves that identity; replacement keys do not inherit it.
+  HCL clients retain tenant reporting among static clients in System, or their own
+  tenantless static usage. File-only anonymous reporting remains unfiltered.
+  Workspace-wide views require separate explicit management/operator authority.
 - optional `provider_health` config can use Redis to share transient provider
   health state across instances; without it, health remains in-process only
 

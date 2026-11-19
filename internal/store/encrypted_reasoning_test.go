@@ -43,7 +43,7 @@ func TestEncryptedReasoningMigrationFreshAndRepeat(t *testing.T) {
 	ctx := context.Background()
 	assertReasoningColumns(t, st)
 	status, err := st.Status(ctx)
-	if err != nil || len(status.Pending) != 0 || len(status.Applied) == 0 || status.Applied[len(status.Applied)-1] != "encrypted_reasoning.sql" {
+	if err != nil || len(status.Pending) != 0 || len(status.Applied) == 0 || status.Applied[len(status.Applied)-1] != "serving_revisions.sql" {
 		t.Fatalf("fresh migration registration: %+v %v", status, err)
 	}
 	if applied, err := st.MigrateUp(ctx); err != nil || len(applied) != 0 {
@@ -134,6 +134,10 @@ func TestEncryptedReasoningMigrationPreservesLegacyRows(t *testing.T) {
 func TestEncryptedReasoningStoreDeclarationRoundTrip(t *testing.T) {
 	st := openLedgerTestStore(t)
 	ctx := context.Background()
+	base := DBProvider{Name: "base", Type: "openai", Enabled: true, WorkspaceID: SystemWorkspaceID}
+	if err := st.CreateProviderAggregate(ctx, &base, []DBProviderModel{{Name: "m"}, {Name: "n"}, {Name: "free"}}); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct{ name, raw, want string }{
 		{"absent", "", ""},
 		{"json-null", " null ", ""},
@@ -216,7 +220,11 @@ func TestEncryptedReasoningStoreDeclarationRoundTrip(t *testing.T) {
 		})
 	}
 	a := DBAlias{Name: "null-alias", Algorithm: "round_robin", EncryptedReasoning: json.RawMessage(`null`)}
-	if err := st.CreateAlias(ctx, &a, nil); err != nil {
+	p := DBProvider{Name: "alias-base", Type: "openai", WorkspaceID: SystemWorkspaceID, Enabled: true}
+	if err := st.CreateProviderAggregate(ctx, &p, []DBProviderModel{{Name: "m"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateAlias(ctx, &a, []DBAliasTarget{{Provider: p.Name, Model: "m"}}); err != nil {
 		t.Fatal(err)
 	}
 	alias, err := st.GetAlias(ctx, a.Name)

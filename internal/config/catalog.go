@@ -1,5 +1,11 @@
 package config
 
+import (
+	"strings"
+
+	"github.com/egose/aiproxy/internal/identity"
+)
+
 type Catalog struct {
 	providers         []Provider
 	disabledProviders []Provider
@@ -75,6 +81,45 @@ func (c Catalog) Model(providerName, modelName string) (Provider, Model, bool) {
 		return Provider{}, Model{}, false
 	}
 	return provider, cloneModel(model), true
+}
+
+func (c Catalog) ModelVisibleInWorkspace(publicModel string, workspace identity.WorkspaceScope) bool {
+	if _, scoped := workspace.ID(); !scoped {
+		return false
+	}
+	provider, model, ok := strings.Cut(publicModel, "/")
+	if !ok {
+		return false
+	}
+	if provider != "alias" {
+		return c.modelInWorkspace(provider, model, workspace)
+	}
+	i, ok := c.aliasIndex[model]
+	if !ok || c.aliases[i].Workspace != workspace || len(c.aliases[i].Targets) == 0 {
+		return false
+	}
+	for _, target := range c.aliases[i].Targets {
+		if !c.modelInWorkspace(target.Provider, target.Model, workspace) {
+			return false
+		}
+	}
+	return true
+}
+
+func (c Catalog) modelInWorkspace(provider, model string, workspace identity.WorkspaceScope) bool {
+	i, ok := c.providerIndex[provider]
+	if !ok || c.providers[i].Workspace != workspace {
+		return false
+	}
+	p := c.providers[i]
+	if p.Extends != "" {
+		base, ok := c.providerIndex[p.Extends]
+		if !ok || c.providers[base].Workspace != workspace || c.providers[base].Extends != "" {
+			return false
+		}
+	}
+	_, ok = p.ModelByName[model]
+	return ok
 }
 
 func (c Catalog) ProviderNames() []string {

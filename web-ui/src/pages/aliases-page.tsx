@@ -22,16 +22,27 @@ import { useMemo, useState } from 'react';
 import { Controller, FormProvider, useForm, useFormContext } from 'react-hook-form';
 import { Link } from 'react-router';
 import { z } from 'zod';
+import { useSnapshot as useStateSnapshot } from 'valtio';
 import { DataTable, type ManagementColumnDef } from '../components/data-table';
 import { useConfirm } from '../components/dialogs';
 import { EncryptedReasoningControl, ReasoningPolicyReadOnly } from '../components/encrypted-reasoning-control';
 import { SourceBadge } from '../components/source-badge';
 import { WorkspaceBadge } from '../components/workspace-select';
-import { useAdminAliases, useAdminSession, useAdminStatus, useSnapshot } from '../hooks';
+import { WorkspaceAccessNotice } from '../components/workspace-access';
+import {
+  useAdminAliases,
+  useAdminProviders,
+  useAdminSession,
+  useAdminStatus,
+  useCurrentWorkspace,
+  useSnapshot,
+} from '../hooks';
 import { reasoningDeclaration, reasoningDraft, reasoningDraftSchema } from '../lib/encrypted-reasoning-form';
 import { createAdminAlias, deleteAdminAlias, updateAdminAlias } from '../services/admin';
 import { errorMessage } from '../services/dashboard';
-import type { AdminAlias } from '../types';
+import type { AdminAlias, AdminProvider } from '../types';
+import { authLifecycle } from '../auth-lifecycle';
+import { assertWorkspaceContext, resourceInWorkspace, type WorkspaceContext } from '../workspace-selection';
 
 function SnapshotAliases() {
   const snapshot = useSnapshot();
@@ -191,8 +202,22 @@ function buildAliasBody(v: AliasFormValues, initial?: AliasFormValues): Record<s
   return body;
 }
 
-function AliasFields({ lockName, alias, disabled }: { lockName: boolean; alias?: AdminAlias; disabled: boolean }) {
+function AliasFields({
+  lockName,
+  alias,
+  disabled,
+  inventory,
+}: {
+  lockName: boolean;
+  alias?: AdminAlias;
+  disabled: boolean;
+  inventory: AdminProvider[];
+}) {
   const form = useFormContext<AliasFormValues>();
+  const [target, setTarget] = useState('');
+  const models = inventory
+    .filter((provider) => provider.enabled)
+    .flatMap((provider) => provider.models.map((model) => `${provider.name}/${model.name}`));
   return (
     <>
       <HookFormTextInput<AliasFormValues>
@@ -219,6 +244,36 @@ function AliasFields({ lockName, alias, disabled }: { lockName: boolean; alias?:
       />
 
       <Separator />
+
+      <label className="grid gap-1 text-sm">
+        <span>Available targets in this workspace</span>
+        <select
+          aria-label="Available targets in this workspace"
+          value={target}
+          onChange={(event) => setTarget(event.target.value)}
+          disabled={disabled}
+        >
+          <option value="">Select a target...</option>
+          {models.map((model) => (
+            <option key={model} value={model}>
+              {model}
+            </option>
+          ))}
+        </select>
+      </label>
+      <Button
+        type="button"
+        appearance="outline"
+        disabled={disabled || !target}
+        onClick={() => {
+          form.setValue('targets', [form.getValues('targets')?.trim(), target].filter(Boolean).join('\n'), {
+            shouldValidate: true,
+          });
+          setTarget('');
+        }}
+      >
+        Add target
+      </Button>
 
       <HookFormTextarea<AliasFormValues>
         name="targets"
@@ -294,6 +349,8 @@ function AliasForm({
   onCancel,
   lockName,
   alias,
+  inventory,
+  workspaceContext,
 }: {
   initial: AliasFormValues;
   submitLabel: string;
@@ -301,25 +358,64 @@ function AliasForm({
   onCancel?: () => void;
   lockName: boolean;
   alias?: AdminAlias;
+  inventory: AdminProvider[];
+  workspaceContext: WorkspaceContext;
 }) {
   const form = useForm<AliasFormValues>({ resolver: zodResolver(aliasFormSchema), defaultValues: initial });
+  const lifecycle = useStateSnapshot(authLifecycle);
+  const contextChanged =
+    workspaceContext.generation !== lifecycle.generation || workspaceContext.session !== lifecycle.session;
+  const scopedInventory = inventory.filter((p) => resourceInWorkspace(p, workspaceContext.workspaceId));
   const submitMutation = useMutation({
-    mutationFn: async (values: AliasFormValues) => onSubmit(buildAliasBody(values, lockName ? initial : undefined)),
+    mutationFn: async (values: AliasFormValues) => {
+      assertWorkspaceContext(workspaceContext);
+      const body = buildAliasBody(values, lockName ? initial : undefined);
+      const targets =
+        'targets' in body
+          ? (body.targets as Array<{ provider: string; model: string }>)
+          : (body.providers as string[]).map((provider) => ({ provider, model: body.model as string }));
+      if (
+        targets.some(
+          (target) =>
+            !scopedInventory.some(
+              (provider) =>
+                provider.enabled &&
+                provider.name === target.provider &&
+                provider.models.some((model) => model.name === target.model),
+            ),
+        )
+      ) {
+        throw new Error('Choose targets from the selected workspace inventory.');
+      }
+      return onSubmit(body);
+    },
   });
 
   return (
     <FormProvider {...form}>
       <form className="grid gap-4" onSubmit={form.handleSubmit((values) => submitMutation.mutate(values))}>
+        {contextChanged && (
+          <Alert variant="danger">
+            <AlertDescription>
+              Workspace or account changed. Reopen this form in the selected workspace.
+            </AlertDescription>
+          </Alert>
+        )}
         {submitMutation.error && (
           <Alert variant="danger">
             <AlertDescription>{errorMessage(submitMutation.error)}</AlertDescription>
           </Alert>
         )}
 
-        <AliasFields lockName={lockName} alias={alias} disabled={submitMutation.isPending} />
+        <AliasFields
+          lockName={lockName}
+          alias={alias}
+          disabled={submitMutation.isPending || contextChanged}
+          inventory={scopedInventory}
+        />
 
         <div className="flex gap-2">
-          <Button variant="primary" type="submit" disabled={submitMutation.isPending}>
+          <Button variant="primary" type="submit" disabled={submitMutation.isPending || contextChanged}>
             {submitMutation.isPending ? 'Saving...' : submitLabel}
           </Button>
 
@@ -334,7 +430,10 @@ function AliasForm({
   );
 }
 
-const CreateAliasDialog = createTypedDialog<object, boolean>(({ open, onClose }) => (
+const CreateAliasDialog = createTypedDialog<
+  { inventory: AdminProvider[]; workspaceContext: WorkspaceContext },
+  boolean
+>(({ open, args, onClose }) => (
   <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
     <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-auto sm:max-w-2xl">
       <DialogHeader>
@@ -351,8 +450,10 @@ const CreateAliasDialog = createTypedDialog<object, boolean>(({ open, onClose })
         initial={emptyAliasForm()}
         submitLabel="Create alias"
         lockName={false}
+        inventory={args.inventory}
+        workspaceContext={args.workspaceContext}
         onSubmit={async (body) => {
-          await createAdminAlias(body);
+          await createAdminAlias(body, args.workspaceContext);
           onClose(true);
         }}
         onCancel={() => onClose(false)}
@@ -361,7 +462,10 @@ const CreateAliasDialog = createTypedDialog<object, boolean>(({ open, onClose })
   </Dialog>
 ));
 
-const EditAliasDialog = createTypedDialog<{ alias: AdminAlias }, boolean>(({ open, args, onClose }) => (
+const EditAliasDialog = createTypedDialog<
+  { alias: AdminAlias; inventory: AdminProvider[]; workspaceContext: WorkspaceContext },
+  boolean
+>(({ open, args, onClose }) => (
   <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
     <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-auto sm:max-w-2xl">
       <DialogHeader>
@@ -375,8 +479,10 @@ const EditAliasDialog = createTypedDialog<{ alias: AdminAlias }, boolean>(({ ope
         alias={args.alias}
         submitLabel="Save changes"
         lockName
+        inventory={args.inventory}
+        workspaceContext={args.workspaceContext}
         onSubmit={async (body) => {
-          await updateAdminAlias(args.alias.name, body);
+          await updateAdminAlias(args.alias.name, body, args.workspaceContext);
           onClose(true);
         }}
         onCancel={() => onClose(false)}
@@ -386,24 +492,34 @@ const EditAliasDialog = createTypedDialog<{ alias: AdminAlias }, boolean>(({ ope
 ));
 
 function ManagedAliases() {
+  const selection = useCurrentWorkspace();
   const aliases = useAdminAliases(true);
+  const providers = useAdminProviders(true);
   const queryClient = useQueryClient();
   const { openDialog } = useDialog();
   const confirm = useConfirm();
   const [error, setError] = useState<string | null>(null);
 
-  const rows = aliases.data ?? [];
+  const rows = (aliases.data ?? []).filter(
+    (a) => selection.context && resourceInWorkspace(a, selection.context.workspaceId),
+  );
+  const inventory = (providers.data ?? []).filter(
+    (p) => selection.context && resourceInWorkspace(p, selection.context.workspaceId),
+  );
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin', 'aliases'] });
 
   const deleteMutation = useMutation({
-    mutationFn: deleteAdminAlias,
+    mutationFn: ({ name, context }: { name: string; context: WorkspaceContext }) => deleteAdminAlias(name, context),
     onSuccess: refresh,
     onError: (err) => setError(errorMessage(err)),
   });
 
   const onCreate = async () => {
     try {
-      const created = await openDialog(CreateAliasDialog, {});
+      const context = selection.context;
+      assertWorkspaceContext(context);
+      if (!selection.canManage) return;
+      const created = await openDialog(CreateAliasDialog, { inventory, workspaceContext: context });
       if (created) {
         setError(null);
         await refresh();
@@ -415,7 +531,10 @@ function ManagedAliases() {
 
   const openEdit = async (alias: AdminAlias) => {
     try {
-      const saved = await openDialog(EditAliasDialog, { alias });
+      const context = selection.context;
+      assertWorkspaceContext(context);
+      if (!selection.canManage || !resourceInWorkspace(alias, context.workspaceId)) return;
+      const saved = await openDialog(EditAliasDialog, { alias, inventory, workspaceContext: context });
       if (saved) {
         setError(null);
         await refresh();
@@ -426,6 +545,8 @@ function ManagedAliases() {
   };
 
   const askDelete = async (alias: string) => {
+    const context = selection.context;
+    if (!context || !selection.canManage) return;
     const ok = await confirm({
       title: 'Delete alias',
       description: `Delete alias "${alias}"?`,
@@ -433,7 +554,7 @@ function ManagedAliases() {
     });
     if (ok) {
       setError(null);
-      deleteMutation.mutate(alias);
+      deleteMutation.mutate({ name: alias, context });
     }
   };
 
@@ -492,7 +613,7 @@ function ManagedAliases() {
         enableGlobalFilter: false,
         cell: ({ row }) => {
           const a = row.original;
-          return a.source === 'database' ? (
+          return a.source === 'database' && selection.canManage ? (
             <ActionMenu
               trigger={
                 <Button variant="secondary" appearance="outline-filled" size="sm" aria-label={`Actions for ${a.name}`}>
@@ -500,7 +621,7 @@ function ManagedAliases() {
                 </Button>
               }
               items={[
-                { label: 'Edit', onSelect: () => openEdit(a), disabled: busy },
+                { label: 'Edit', onSelect: () => openEdit(a), disabled: busy || !providers.isSuccess },
                 { label: 'Delete', onSelect: () => askDelete(a.name), disabled: busy, variant: 'destructive' },
               ]}
             />
@@ -513,11 +634,25 @@ function ManagedAliases() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [busy],
+    [
+      busy,
+      selection.canManage,
+      selection.context?.workspaceId,
+      selection.context?.generation,
+      providers.data,
+      providers.isSuccess,
+    ],
   );
+
+  if (!selection.context) return <WorkspaceAccessNotice pending={selection.pending} error={selection.error} />;
 
   return (
     <>
+      {aliases.error && (
+        <Alert variant="danger">
+          <AlertDescription>Unable to load aliases for this workspace.</AlertDescription>
+        </Alert>
+      )}
       {error && (
         <Alert variant="danger">
           <AlertDescription>{error}</AlertDescription>
@@ -528,7 +663,17 @@ function ManagedAliases() {
         <CardHeader className="flex flex-row items-center justify-between gap-2">
           <CardTitle>Aliases ({rows.length})</CardTitle>
 
-          <Button variant="primary" type="button" onClick={onCreate}>
+          <Button
+            variant="primary"
+            type="button"
+            onClick={onCreate}
+            disabled={
+              !selection.canManage ||
+              !aliases.isSuccess ||
+              !providers.isSuccess ||
+              !inventory.some((p) => p.enabled && p.models.length > 0)
+            }
+          >
             Create alias
           </Button>
         </CardHeader>
@@ -539,8 +684,16 @@ function ManagedAliases() {
             data={rows}
             filterPlaceholder="Filter aliases..."
             getRowId={(row) => row.name}
-            emptyText="No aliases."
+            emptyText={aliases.error ? 'Alias inventory unavailable.' : 'No aliases in this workspace.'}
           />
+          {selection.canManage && providers.isSuccess && !inventory.some((p) => p.enabled && p.models.length > 0) && (
+            <p className="text-sm text-slate-500">
+              Add your first provider and models before creating an alias.{' '}
+              <Link to="/providers" className="underline">
+                Create a provider
+              </Link>
+            </p>
+          )}
 
           {aliases.isLoading && (
             <div className="text-sm text-slate-500">

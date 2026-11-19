@@ -200,19 +200,38 @@ Supported inbound auth modes:
 - `none`
 - `bearer_static`
 
-`none` is only appropriate for trusted environments.
+`none` allows anonymous inference only when multi-tenancy is disabled. With
+`multi_tenancy` enabled it is a management-only choice: model discovery,
+inference, billing usage, and deferred controls require workspace-scoped bearer
+authentication and return `401` in `none` mode. Browser sign-in uses separate
+session credentials.
 
-`bearer_static` validates client bearer tokens against statically configured `client` blocks. Each client may also define:
+Use `bearer_static` to serve inference with multi-tenancy enabled. It validates
+bearer tokens from statically configured `client` blocks and, with multi-tenancy,
+database-issued keys. File-managed providers, models, and aliases belong to
+**System**; an HCL client can use only System's catalog. A database key can use
+only its owning workspace, even if a system administrator issued it.
+
+Each static client may also define:
 
 - `tenant`
 - `allowed_models`
 
 The optional `rate_limit` block is local and in-memory:
 
-- In `bearer_static` mode, it is keyed per authenticated client
-- In `none` mode, it applies to a shared anonymous bucket
+- In `bearer_static` mode, each configured client and each database key gets its
+  own bucket, even if they have the same name. A database key's bucket follows
+  its UUID across token rotation when rate settings remain unchanged. A deleted
+  key's replacement gets a new bucket.
+- In `none` mode, all requests share the anonymous bucket.
 
-Use `allowed_models` when you want a static allow-list at the proxy boundary rather than relying only on application-level policy.
+`allowed_models` narrows access to public names (`<provider>/<model>` or
+`alias/<name>`). Omit it or use `[]` for all models and aliases available in
+the credential's own workspace. An alias can be allowed without granting its
+target names separately, but every target must still be available in the same
+workspace, as must a derived provider's base. An invalid cross-workspace pool
+is unavailable as a whole, not a partially usable fallback route. Without
+multi-tenancy, the allowlist applies to the file-only catalog as before.
 
 ## Providers
 
@@ -264,6 +283,114 @@ but they normally do not require a usable credential. A declared
 `deferred_transport` on a provider or any of its models still requires a
 configured `api_key` or `api_key_ref`, including on a disabled provider.
 
+### Tenant-Managed Upstreams
+
+For invite-only onboarding, explicitly set `allow_public_registration = false`
+inside `multi_tenancy`. A bare HCL `multi_tenancy {}` enables tenancy and defaults public
+password registration to **true**; the configure wizard defaults it to **false**
+for new setups and preserves existing choices. Neither setting enables OIDC
+just-in-time provisioning: SSO signs in existing accounts only, including users
+who redeem an invitation first. With registration closed, recipients can still
+paste a separately delivered one-time code on the clean `/invite` page.
+See [invitation and SSO admission](api-reference.md#invitation-onboarding).
+
+Enabling tenancy does not configure a funded workspace budget or assign a payer.
+Database serving changes reconcile across replicas with a fixed 30-second
+freshness admission deadline; there is no configurable stale-serving bypass.
+See [bounded replica convergence](operations.md#bounded-replica-convergence)
+for independent key revocation, readiness and file-rollout limitations.
+Database user/team quotas are owner-scoped completion-based admission thresholds,
+not hard spending limits; ownerless keys and static/HCL traffic have no such
+quota scope. See the [spending contract](operations.md#spending-contract-owner-quotas-not-funded-workspace-caps)
+before offering usage limits.
+
+With multi-tenancy enabled, **non-System database providers are denied outbound
+access by default**. The operator approves exact public HTTPS origins in the
+HCL or JSON config, never through a provider API or tenant portal field:
+
+```hcl title="tenant-upstream-policy.hcl"
+listener "http" "public" { address = "127.0.0.1:8080" }
+auth "main" {
+  mode = "bearer_static"
+  client "operator" { token = env("AIPROXY_OPERATOR_TOKEN") }
+}
+database { url = env("AIPROXY_DATABASE_URL") }
+multi_tenancy {
+  allow_public_registration = false
+  allowed_upstream_origins = [
+    "https://api.openai.com",
+    "https://api.githubcopilot.com",
+    "https://probe.example.com:8443",
+  ]
+}
+```
+
+The equivalent JSON config uses the same attribute and the usual bare `env()`
+values:
+
+```json title="tenant-upstream-policy.json"
+{
+  "listener": { "http": { "public": { "address": "127.0.0.1:8080" } } },
+  "auth": {
+    "main": {
+      "mode": "bearer_static",
+      "client": { "operator": { "token": env("AIPROXY_OPERATOR_TOKEN") } }
+    }
+  },
+  "database": { "url": env("AIPROXY_DATABASE_URL") },
+  "multi_tenancy": {
+    "allow_public_registration": false,
+    "allowed_upstream_origins": [
+      "https://api.openai.com",
+      "https://api.githubcopilot.com",
+      "https://probe.example.com:8443"
+    ]
+  }
+}
+```
+
+Omission or `[]` approves nothing. At most **128** unique origins are accepted.
+An entry contains only `https://hostname[:port]`: no wildcard, path (even `/`),
+userinfo, query or fragment. Hostnames are ASCII fully qualified names without a
+trailing dot; local/internal names and non-public IP literals are rejected.
+Matching uses the exact scheme, case-insensitive hostname and numeric port;
+omitted HTTPS port and `:443` are equivalent. A parent domain does not approve
+subdomains, and another port requires its own entry.
+
+The effective upstream URL, including provider-type defaults and inherited
+settings, must match an approval. Relative health paths use that upstream
+origin; an absolute health URL needs its own exact approval. This policy applies
+to the **destination workspace**, including edits authored by global
+administrators, disabled rows, credential-only updates and startup/reload of
+existing rows. It does not grant System or foreign provider/model/alias access,
+inheritance, or credential rights.
+
+Tenant providers may use their own write-only, encrypted database API keys,
+their own encrypted Copilot device-flow database credentials, or supported
+keyless Zen access. Nonempty host `api_key_ref` and sidecar `credential_ref`
+references, `forward_authorization = true` and
+`allow_insecure_base_url = true` are reserved for System. Approval does not
+override those restrictions. The portal hides these controls in tenant
+workspaces; the server enforces them independently.
+
+Every new restricted connection resolves DNS, rejects the **entire** answer set
+if any address is non-public, then dials only the validated numeric IPs while
+retaining the original TLS hostname/SNI and certificate verification. Loopback,
+private, link-local, metadata, multicast, documentation/reserved and transition
+addresses are rejected, including mapped IPv4 and IPv6 answers. DNS lookup and
+TCP attempts share a 30-second budget and at most 64 answers are accepted.
+Environment HTTP/HTTPS/SOCKS proxies are not used for tenant upstreams. Native
+and built-in TLS profiles use this same restriction. Existing same-origin
+redirects remain supported; even a separately approved origin cannot be reached
+by a cross-origin redirect.
+
+`LoadFile`, operator inline config and HCL/JSON conversion use the same approval
+validation. Conversion preserves the attribute and resolves `env()` as usual;
+none of these operations proves DNS reachability or sends a probe. Runtime IP
+enforcement is not a validation-time DNS check. System-managed providers, HCL
+providers and file-only operation retain their trusted transport/credential
+behavior. See [upgrade and preflight](operations.md#tenant-provider-policy-upgrade).
+
 ### Forwarding Client Authorization
 
 ```hcl
@@ -297,7 +424,7 @@ credential. Authorization-mode changes apply on successful `SIGHUP` reload.
 
 The CLI supports `aiproxy configure provider --non-interactive ...
 --forward-authorization` and `--forward-authorization=false`. Administrative
-provider POST/PUT also accepts `forward_authorization`; existing credentials
+provider POST/PUT in the **System workspace** also accepts `forward_authorization`; existing credentials
 must be explicitly cleared when switching modes. Existing databases require
 `aiproxy migrate up` to apply the additive forwarding-column migration.
 
@@ -321,7 +448,8 @@ the same Kubernetes namespace. There is no root-level default, environment
 variable, or CLI bypass; the opt-in is per provider and explicit.
 
 **Credentials and payloads travel unencrypted.** Only enable this for networks
-where cleartext HTTP is acceptable. `https` base URLs are always allowed and
+where cleartext HTTP is acceptable. For trusted System/HCL providers, `https`
+base URLs are always allowed and
 the flag has no effect on them; non-http(s) schemes, userinfo, and
 non-absolute URLs remain rejected. Derived providers cannot declare the
 attribute — it is inherited from the base provider together with the base URL.
@@ -332,7 +460,7 @@ stored derived rows with a true local override are rejected during catalog load.
 The CLI supports `aiproxy configure provider --non-interactive ...
 --allow-insecure-base-url` (and `--allow-insecure-base-url=false`), with a
 plain-HTTP confirmation prompt in interactive flows. Administrative provider
-POST/PUT also accepts `allow_insecure_base_url`, and existing databases require
+POST/PUT in the **System workspace** also accepts `allow_insecure_base_url`, and existing databases require
 `aiproxy migrate up` to apply the additive column migration.
 
 GitHub Copilot is **hermetically verified; live GitHub compatibility unverified**.
@@ -466,6 +594,17 @@ A derived provider may be declared before or after its base. It normally declare
 `github-copilot` derivatives instead require a local `credential_ref`; they cannot redefine `base_url` or model definitions, but may use the reasoning-only overlays below. `credential_ref` is rejected on all other types, and `api_key`/`api_key_ref` are rejected on Copilot blocks.
 
 The type label remains required and must match the base. The base must exist, be enabled, and must not itself use `extends`; inheritance chains are rejected. Local `base_url`, `upstream_header_timeout`, `tls_client_hello`, `tls_client_hello_spec_file`, and `enabled` declarations are rejected instead of ignored, including explicit TLS defaults. Local `model` declarations are rejected except for existing-name policy overlays described below.
+
+With multi-tenancy enabled, these HCL providers and their models belong only to
+System. Database-managed inheritance requires a base in the derived provider's
+own workspace, even when a global administrator authors the row or the
+derivative is disabled. Tenant providers cannot inherit System provider/model
+inventory or another tenant's inventory. Alias targets, including shorthand, have the same
+workspace restriction. Provider and alias names remain globally unique:
+startup/reload rejects a static/managed name collision, including disabled
+providers, instead of replacing or reassigning a resource. File-only operation
+is unchanged. Existing deployments should run
+[`validate --check-db` before upgrading](operations.md#workspace-isolation-upgrade-and-recovery).
 
 Derived providers are flattened during config loading and reload. After a successful load, direct model strings, health, metrics, billing, and dashboard inventory use the derived provider's own name. Aliases still list each provider target explicitly.
 

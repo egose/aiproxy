@@ -162,25 +162,8 @@ func ValidateDynamicProvider(p Provider) error {
 		if m.UpstreamName == "" {
 			return fmt.Errorf("provider %q: model %q has empty upstream_name", p.Name, m.Name)
 		}
-		if err := validateModelProtocol(p.Type, p.Name, m); err != nil {
+		if err := ValidateModelCapabilities(p.Type, p.Name, m); err != nil {
 			return err
-		}
-		served := OpenCodeProtocolCapabilities(m.Protocol)
-		seenCaps := make(map[Capability]bool)
-		for _, c := range m.Capabilities {
-			if !isValidCapability(c) {
-				return fmt.Errorf("provider %q: model %q has invalid capability %q", p.Name, m.Name, c)
-			}
-			if !providerSupportsCapability(p.Type, c) {
-				return fmt.Errorf("provider %q: model %q capability %q is not supported by provider type %q", p.Name, m.Name, c, p.Type)
-			}
-			if IsOpenCodeProviderType(p.Type) && !HasCapability(served, c) {
-				return fmt.Errorf("provider %q: model %q capability %q is not served by protocol %q", p.Name, m.Name, c, m.Protocol)
-			}
-			if seenCaps[c] {
-				return fmt.Errorf("provider %q: model %q has duplicate capability %q", p.Name, m.Name, c)
-			}
-			seenCaps[c] = true
 		}
 		if m.Pricing != nil {
 			if err := validatePricingRates(p.Name, m.Name, m.Pricing); err != nil {

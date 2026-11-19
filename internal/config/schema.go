@@ -82,8 +82,9 @@ type rawDatabase struct {
 }
 
 type rawMultiTenancy struct {
-	Enabled                 *bool `hcl:"enabled,optional"`
-	AllowPublicRegistration *bool `hcl:"allow_public_registration,optional"`
+	Enabled                 *bool    `hcl:"enabled,optional"`
+	AllowPublicRegistration *bool    `hcl:"allow_public_registration,optional"`
+	AllowedUpstreamOrigins  []string `hcl:"allowed_upstream_origins,optional"`
 }
 
 type rawGuardrails struct {

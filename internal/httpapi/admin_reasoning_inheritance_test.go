@@ -214,7 +214,7 @@ func TestAdminEncryptedReasoningLegacyInertRowsAndCredentialFreeViews(t *testing
 		APIKeyRefPath: "missing-private-credential-file", APIKeyRefKey: "unused",
 	}
 	legacy := []store.DBProviderModel{{Name: "obsolete-legacy", UpstreamName: "legacy-definition", Capabilities: []string{"chat"}}}
-	if err := fixture.store.CreateProviderAggregate(context.Background(), &row, legacy); err != nil {
+	if err := fixture.store.CreateProviderAggregate(context.Background(), &row, legacy, store.CatalogEditOptions{Static: fixture.runtime.Catalog}); err != nil {
 		t.Fatal(err)
 	}
 	before, models := adminReasoningSavedProvider(t, fixture.store, "legacy")

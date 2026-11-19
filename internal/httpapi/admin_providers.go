@@ -190,13 +190,13 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 	if len(rest) == 0 || rest[0] == "" {
 		switch r.Method {
 		case http.MethodGet:
-			filterWorkspace, ok := h.resolveWorkspaceFilter(deps, w, r, claims, r.URL.Query().Get("workspace_id"))
+			visibility, ok := h.resolveWorkspaceFilter(deps, w, r, claims)
 			if !ok {
 				return
 			}
-			views, err := h.mergedProviderViews(ctx, deps, r, claims, filterWorkspace)
+			views, err := h.mergedProviderViews(ctx, deps, visibility)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				http.Error(w, "could not list providers", http.StatusInternalServerError)
 				return
 			}
 			writeAdminJSON(w, http.StatusOK, map[string]interface{}{"providers": views})
@@ -211,7 +211,7 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 				writeCatalogError(deps, w, err)
 				return
 			}
-			workspace, ok := h.resolveWriteWorkspace(deps, w, r, claims, req.WorkspaceID)
+			workspace, ok := h.resolveWriteWorkspace(deps, w, r, claims, trimmedOrEmpty(req.WorkspaceID.value))
 			if !ok {
 				return
 			}
@@ -224,7 +224,7 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 			if !activateCatalogChange(deps, w) {
 				return
 			}
-			view, err = h.providerViewByName(ctx, deps, r, claims, view.Name)
+			view, err = h.providerViewByName(ctx, deps, claims, view.Name)
 			if err != nil {
 				writeCatalogPresentationError(deps, w, err)
 				return
@@ -246,7 +246,7 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 			http.Error(w, "invalid body", http.StatusBadRequest)
 			return
 		}
-		if err := h.setProviderCredential(ctx, deps, claims, name, req); err != nil {
+		if err := h.setProviderCredential(ctx, deps, r, claims, name, req); err != nil {
 			writeCatalogError(deps, w, err)
 			return
 		}
@@ -259,13 +259,13 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 	}
 	switch r.Method {
 	case http.MethodGet:
-		filterWorkspace, ok := h.resolveWorkspaceFilter(deps, w, r, claims, r.URL.Query().Get("workspace_id"))
+		visibility, ok := h.resolveWorkspaceFilter(deps, w, r, claims)
 		if !ok {
 			return
 		}
-		views, err := h.mergedProviderViews(ctx, deps, r, claims, filterWorkspace)
+		views, err := h.mergedProviderViews(ctx, deps, visibility)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, "could not load provider", http.StatusInternalServerError)
 			return
 		}
 		for _, v := range views {
@@ -278,7 +278,7 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 	case http.MethodPut:
 		var req adminProviderUpsert
 		if err := decodeAdminCatalogBody(r, &req); err != nil {
-			http.Error(w, "invalid body", http.StatusBadRequest)
+			writeCatalogWriteBodyError(w, err)
 			return
 		}
 		req.Name = name
@@ -291,30 +291,24 @@ func (h *Handler) adminProviders(deps Dependencies, w http.ResponseWriter, r *ht
 		if !activateCatalogChange(deps, w) {
 			return
 		}
-		view, err = h.providerViewByName(ctx, deps, r, claims, view.Name)
+		view, err = h.providerViewByName(ctx, deps, claims, view.Name)
 		if err != nil {
 			writeCatalogPresentationError(deps, w, err)
 			return
 		}
 		writeAdminJSON(w, http.StatusOK, view)
 	case http.MethodDelete:
-		p, err := deps.AdminStore.GetProvider(ctx, name)
+		target, err := h.resolveCatalogWriteTarget(deps, r, claims, catalogProviderResource, name, nil)
 		if err != nil {
-			if h.isStaticProvider(deps, name) {
-				http.Error(w, "config-managed: edit the HCL file", http.StatusForbidden)
-				return
-			}
-			http.Error(w, "provider not found", http.StatusNotFound)
+			writeCatalogError(deps, w, err)
 			return
 		}
-		if !h.requireResourceWorkspace(deps, w, r, claims, p.WorkspaceID) {
+		if err := deps.AdminStore.DeleteProvider(ctx, target.id, dbmerge.CatalogEdits(deps.Catalog, deps.MultiTenancy.AllowedUpstreamOrigins...)); err != nil {
+			writeCatalogError(deps, w, catalogProviderResource.targetReadError(err))
 			return
 		}
-		if err := deps.AdminStore.DeleteProvider(ctx, p.ID); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if !h.activateChange(deps, w) {
+		w.Header().Set(catalogSavedHeader, "true")
+		if !activateCatalogChange(deps, w) {
 			return
 		}
 		writeAdminJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -380,7 +374,7 @@ type adminCredentialRefUpsert struct {
 
 type adminProviderUpsert struct {
 	Name                           string                    `json:"name"`
-	WorkspaceID                    string                    `json:"workspace_id"`
+	WorkspaceID                    catalogBodyWorkspaceID    `json:"workspace_id"`
 	Type                           *string                   `json:"type"`
 	DisplayName                    *string                   `json:"display_name"`
 	BaseURL                        *string                   `json:"base_url"`
@@ -597,15 +591,17 @@ func (h *Handler) isStaticProvider(deps Dependencies, name string) bool {
 	return false
 }
 
-func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, filterWorkspace string) ([]adminProviderView, error) {
-	visible, _ := h.visibleWorkspaceIDs(deps, r, claims)
-	names := h.workspaceNameMap(deps, r, claims)
+func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, visibility workspaceVisibility) ([]adminProviderView, error) {
+	if visibility.empty() {
+		return []adminProviderView{}, nil
+	}
+	names := workspaceNameMap(ctx, deps, visibility)
 	inventory, err := loadAdminProviderInventory(ctx, deps)
 	if err != nil {
 		return nil, err
 	}
 	views := map[string]*adminProviderView{}
-	if h.canSeeSystemWorkspace(deps, r, claims, filterWorkspace) {
+	if visibility.allows(store.SystemWorkspaceID) {
 		for _, p := range deps.Catalog.Providers() {
 			if _, managed := inventory.rowsByName[p.Name]; managed || p.DatabaseManaged {
 				continue
@@ -635,13 +631,14 @@ func (h *Handler) mergedProviderViews(ctx context.Context, deps Dependencies, r 
 		}
 	}
 	for _, p := range inventory.rows {
-		if filterWorkspace != "" && p.WorkspaceID.String() != filterWorkspace {
-			continue
-		}
-		if visible != nil && !visible[p.WorkspaceID.String()] {
+		if !visibility.allows(p.WorkspaceID) {
 			continue
 		}
 		provider, err := inventory.provider(ctx, p.Name)
+		if err != nil {
+			return nil, err
+		}
+		p, err = inventory.savedRow(ctx, p.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -851,7 +848,7 @@ func (h *Handler) buildConfigProvider(deps Dependencies, row store.DBProvider, m
 	for _, p := range deps.Catalog.Providers() {
 		bases[p.Name] = p
 	}
-	return dbmerge.BuildProvider(row, models, bases)
+	return dbmerge.BuildProvider(row, models, bases, deps.MultiTenancy.AllowedUpstreamOrigins...)
 }
 
 func (h *Handler) createDBProvider(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, workspace store.Workspace, req adminProviderUpsert) (adminProviderView, error) {
@@ -892,7 +889,7 @@ func (h *Handler) createDBProvider(ctx context.Context, deps Dependencies, r *ht
 	if err != nil {
 		return adminProviderView{}, err
 	}
-	if err := deps.AdminStore.CreateProviderAggregate(ctx, &row, models); err != nil {
+	if err := deps.AdminStore.CreateProviderAggregate(ctx, &row, models, dbmerge.CatalogEdits(deps.Catalog, deps.MultiTenancy.AllowedUpstreamOrigins...)); err != nil {
 		return adminProviderView{}, catalogStorageError{err}
 	}
 	return adminProviderView{Name: name}, nil
@@ -918,12 +915,22 @@ func flowCredentialConflict(req adminProviderUpsert) bool {
 	return false
 }
 
-func (h *Handler) readyFlowSnapshot(ctx context.Context, deps Dependencies, claims *adminauth.Claims, flowID string) (store.CopilotFlowSnapshot, error) {
+func (h *Handler) readyFlowSnapshot(ctx context.Context, deps Dependencies, claims *adminauth.Claims, flowID string, row store.DBProvider) (store.CopilotFlowSnapshot, error) {
 	id, err := uuid.Parse(strings.TrimSpace(flowID))
 	if err != nil {
 		return store.CopilotFlowSnapshot{}, errBad("invalid copilot_device_flow_id")
 	}
-	snapshot, err := deps.AdminStore.ReadyCopilotFlow(ctx, mustParseUUID(claims.Subject), id)
+	actorID := mustParseUUID(claims.Subject)
+	binding, err := deps.AdminStore.ReadCopilotFlowBinding(ctx, actorID, id)
+	if err == nil && (binding.WorkspaceID != row.WorkspaceID ||
+		(binding.ProviderID == nil && row.ID != uuid.Nil) ||
+		(binding.ProviderID != nil && (*binding.ProviderID != row.ID || binding.ProviderName != row.Name))) {
+		return store.CopilotFlowSnapshot{}, errBad("device flow does not authorize this provider")
+	}
+	var snapshot store.CopilotFlowSnapshot
+	if err == nil {
+		snapshot, err = deps.AdminStore.ReadyCopilotFlow(ctx, actorID, id)
+	}
 	if err != nil {
 		if errors.Is(err, store.ErrCopilotFlowUnavailable) {
 			return store.CopilotFlowSnapshot{}, errDeviceFlowNotReady
@@ -950,7 +957,10 @@ func (h *Handler) createDBProviderWithFlow(ctx context.Context, deps Dependencie
 	if flowCredentialConflict(req) {
 		return adminProviderView{}, errBad("copilot_device_flow_id cannot be combined with a credential")
 	}
-	snapshot, err := h.readyFlowSnapshot(ctx, deps, claims, flowID)
+	if err := h.validateDBProviderPolicy(ctx, deps, *row); err != nil {
+		return adminProviderView{}, err
+	}
+	snapshot, err := h.readyFlowSnapshot(ctx, deps, claims, flowID, *row)
 	if err != nil {
 		return adminProviderView{}, err
 	}
@@ -961,7 +971,7 @@ func (h *Handler) createDBProviderWithFlow(ctx context.Context, deps Dependencie
 	if err != nil {
 		return adminProviderView{}, err
 	}
-	if err := deps.AdminStore.ConsumeCopilotFlow(ctx, snapshot, row, &models); err != nil {
+	if err := deps.AdminStore.ConsumeCopilotFlow(ctx, snapshot, row, &models, dbmerge.CatalogEdits(deps.Catalog, deps.MultiTenancy.AllowedUpstreamOrigins...)); err != nil {
 		if errors.Is(err, store.ErrCatalogConflict) {
 			return adminProviderView{}, err
 		}
@@ -999,7 +1009,10 @@ func (h *Handler) updateDBProviderWithFlow(ctx context.Context, deps Dependencie
 	if candidate.Type != "github-copilot" {
 		return adminProviderView{}, errBad("copilot_device_flow_id is only supported by github-copilot")
 	}
-	snapshot, err := h.readyFlowSnapshot(ctx, deps, claims, flowID)
+	if err := h.validateDBProviderPolicy(ctx, deps, candidate); err != nil {
+		return adminProviderView{}, err
+	}
+	snapshot, err := h.readyFlowSnapshot(ctx, deps, claims, flowID, candidate)
 	if err != nil {
 		return adminProviderView{}, err
 	}
@@ -1014,7 +1027,7 @@ func (h *Handler) updateDBProviderWithFlow(ctx context.Context, deps Dependencie
 	if req.Models != nil {
 		replacement = &models
 	}
-	if err := deps.AdminStore.ConsumeCopilotFlow(ctx, snapshot, &candidate, replacement); err != nil {
+	if err := deps.AdminStore.ConsumeCopilotFlow(ctx, snapshot, &candidate, replacement, dbmerge.CatalogEdits(deps.Catalog, deps.MultiTenancy.AllowedUpstreamOrigins...)); err != nil {
 		if errors.Is(err, store.ErrCatalogConflict) {
 			return adminProviderView{}, err
 		}
@@ -1184,18 +1197,13 @@ func (h *Handler) updateDBProvider(ctx context.Context, deps Dependencies, r *ht
 	if err := validateAdminProviderInput(req); err != nil {
 		return adminProviderView{}, err
 	}
-	p, err := deps.AdminStore.GetProvider(ctx, name)
+	target, err := h.resolveCatalogWriteTarget(deps, r, claims, catalogProviderResource, name, req.WorkspaceID.value)
 	if err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			return adminProviderView{}, catalogStorageError{err}
-		}
-		if h.isStaticProvider(deps, name) {
-			return adminProviderView{}, errBad("config-managed: edit the HCL file")
-		}
-		return adminProviderView{}, errBad("provider not found")
+		return adminProviderView{}, err
 	}
-	if !h.canWriteWorkspace(deps, ctx, claims, p.WorkspaceID) {
-		return adminProviderView{}, errBad("workspace admin required")
+	p, err := deps.AdminStore.GetProviderByIDInWorkspace(ctx, target.id, target.workspaceID)
+	if err != nil {
+		return adminProviderView{}, catalogProviderResource.targetReadError(err)
 	}
 	current := p
 	if req.Type != nil {
@@ -1218,14 +1226,18 @@ func (h *Handler) updateDBProvider(ctx context.Context, deps Dependencies, r *ht
 	if req.Models != nil {
 		replacement = &models
 	}
-	if err := deps.AdminStore.UpdateProviderAggregate(ctx, &p, replacement); err != nil {
+	if err := deps.AdminStore.UpdateProviderAggregate(ctx, &p, replacement, dbmerge.CatalogEdits(deps.Catalog, deps.MultiTenancy.AllowedUpstreamOrigins...)); err != nil {
 		return adminProviderView{}, catalogStorageError{err}
 	}
 	return adminProviderView{Name: name}, nil
 }
 
-func (h *Handler) providerViewByName(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, name string) (adminProviderView, error) {
-	views, err := h.mergedProviderViews(ctx, deps, r, claims, "")
+func (h *Handler) providerViewByName(ctx context.Context, deps Dependencies, claims *adminauth.Claims, name string) (adminProviderView, error) {
+	visibility, err := resolveWorkspaceVisibility(ctx, deps, claims)
+	if err != nil {
+		return adminProviderView{}, err
+	}
+	views, err := h.mergedProviderViews(ctx, deps, visibility)
 	if err != nil {
 		return adminProviderView{}, err
 	}
@@ -1237,7 +1249,7 @@ func (h *Handler) providerViewByName(ctx context.Context, deps Dependencies, r *
 	return adminProviderView{}, errBad("provider not found after write")
 }
 
-func (h *Handler) setProviderCredential(ctx context.Context, deps Dependencies, claims *adminauth.Claims, name string, req adminCredentialUpsert) error {
+func (h *Handler) setProviderCredential(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, name string, req adminCredentialUpsert) error {
 	if err := validateManagedDeferredDeclarations(name, req.unsupportedDeferredDeclaration); err != nil {
 		return err
 	}
@@ -1247,21 +1259,16 @@ func (h *Handler) setProviderCredential(ctx context.Context, deps Dependencies, 
 	if req.inputJSONError != nil && !req.unsupportedTLSDeclaration {
 		return req.inputJSONError
 	}
-	p, err := deps.AdminStore.GetProvider(ctx, name)
+	target, err := h.resolveCatalogWriteTarget(deps, r, claims, catalogProviderResource, name, nil)
 	if err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			return catalogStorageError{err}
-		}
-		if h.isStaticProvider(deps, name) {
-			return errBad("config-managed: edit the HCL file")
-		}
-		return errBad("provider not found")
-	}
-	if !h.canWriteWorkspace(deps, ctx, claims, p.WorkspaceID) {
-		return errBad("workspace admin required")
+		return err
 	}
 	if req.unsupportedTLSDeclaration {
 		return fmt.Errorf("provider %q: TLS settings cannot be declared on a credential update; custom files and inline specifications are static-config-only", name)
+	}
+	p, err := deps.AdminStore.GetProviderByIDInWorkspace(ctx, target.id, target.workspaceID)
+	if err != nil {
+		return catalogProviderResource.targetReadError(err)
 	}
 	if req.APIKey != nil { // pragma: allowlist secret
 		if *req.APIKey == "" {
@@ -1290,7 +1297,7 @@ func (h *Handler) setProviderCredential(ctx context.Context, deps Dependencies, 
 	if _, _, err := h.prepareDBProvider(ctx, deps, &p, p, adminProviderUpsert{}); err != nil {
 		return err
 	}
-	if err := deps.AdminStore.UpdateProvider(ctx, &p); err != nil {
+	if err := deps.AdminStore.UpdateProvider(ctx, &p, dbmerge.CatalogEdits(deps.Catalog, deps.MultiTenancy.AllowedUpstreamOrigins...)); err != nil {
 		return catalogStorageError{err}
 	}
 	return nil

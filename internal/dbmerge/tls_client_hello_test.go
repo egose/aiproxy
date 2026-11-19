@@ -136,7 +136,7 @@ func TestMergeCatalogTLSClientHelloActivationAndCorruption(t *testing.T) {
 		if rows[i].Extends != "" {
 			models = nil
 		}
-		if err := st.CreateProviderAggregate(ctx, &rows[i], models); err != nil {
+		if err := st.CreateProviderAggregate(ctx, &rows[i], models, store.CatalogEditOptions{Static: rt.Catalog}); err != nil {
 			t.Fatal(err)
 		}
 		id := rows[i].ID
@@ -168,7 +168,7 @@ func TestMergeCatalogTLSClientHelloActivationAndCorruption(t *testing.T) {
 	}
 	for _, selector := range []string{"native", "custom", "firefox"} {
 		rows[2].TLSClientHello = selector
-		if err := st.UpdateProvider(ctx, &rows[2]); err != nil {
+		if _, err := st.DB.NewUpdate().Model(&rows[2]).Column("tls_client_hello").WherePK().Exec(ctx); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := MergeCatalog(ctx, st, rt); err == nil {
@@ -180,7 +180,7 @@ func TestMergeCatalogTLSClientHelloActivationAndCorruption(t *testing.T) {
 		}
 	}
 	rows[2].TLSClientHello = ""
-	if err := st.UpdateProvider(ctx, &rows[2]); err != nil {
+	if err := st.UpdateProvider(ctx, &rows[2], store.CatalogEditOptions{Static: rt.Catalog}); err != nil {
 		t.Fatal(err)
 	}
 	base.TLSClientHello, base.HasTLSClientHello = "custom", true

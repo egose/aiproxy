@@ -83,6 +83,20 @@ export async function showSecret(
   }
 }
 
+export function showInvitationCode(
+  openDialog: ReturnType<typeof useDialog>['openDialog'],
+  code: string,
+  title: string,
+) {
+  return showSecret(openDialog, {
+    title,
+    description:
+      'Direct the recipient to /invite on this site. Send the code separately over a trusted channel, never in a URL.',
+    secret: code,
+    hint: 'Shown once. Copy it now; it expires after 7 days.',
+  });
+}
+
 const newWorkspaceSchema = z.object({
   name: z.string().trim().min(1, 'Enter a workspace name.'),
   display_name: z.string().optional(),

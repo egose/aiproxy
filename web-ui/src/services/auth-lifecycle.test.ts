@@ -8,6 +8,7 @@ import * as dashboard from './dashboard';
 import { dashboardClient } from './client';
 import { authLifecycle } from '../auth-lifecycle';
 import { useAdminMe } from '../hooks';
+import type { WorkspaceContext } from '../workspace-selection';
 import {
   adminWorkspaceStore,
   adminStore,
@@ -41,6 +42,14 @@ const originals = {
   dashboard: dashboardClient.defaults.adapter,
   axios: axios.defaults.adapter,
 };
+function context(): WorkspaceContext {
+  return {
+    workspaceId: adminWorkspaceStore.workspaceId,
+    generation: authLifecycle.generation,
+    session: authLifecycle.session,
+  };
+}
+
 beforeEach(() => {
   setDashboardToken('');
   setAdminSession('access-A', 'refresh-A');
@@ -58,23 +67,23 @@ afterEach(() => {
 
 const adminCalls = [
   ['fetchAdminMe', () => admin.fetchAdminMe()],
-  ['fetchAdminProviders', () => admin.fetchAdminProviders()],
+  ['fetchAdminProviders', () => admin.fetchAdminProviders(context())],
   ['fetchProviderTypes', () => admin.fetchProviderTypes()],
-  ['createAdminProvider', () => admin.createAdminProvider({})],
-  ['updateAdminProvider', () => admin.updateAdminProvider('id', {})],
-  ['deleteAdminProvider', () => admin.deleteAdminProvider('id')],
-  ['setProviderCredential', () => admin.setProviderCredential('id', {})],
-  ['fetchAdminAliases', () => admin.fetchAdminAliases()],
-  ['createAdminAlias', () => admin.createAdminAlias({})],
-  ['updateAdminAlias', () => admin.updateAdminAlias('id', {})],
-  ['deleteAdminAlias', () => admin.deleteAdminAlias('id')],
-  ['fetchAdminKeys', () => admin.fetchAdminKeys()],
-  ['createAdminKey', () => admin.createAdminKey({})],
-  ['rotateAdminKey', () => admin.rotateAdminKey('id')],
-  ['revokeAdminKey', () => admin.revokeAdminKey('id')],
-  ['deleteAdminKey', () => admin.deleteAdminKey('id')],
-  ['fetchAdminKey', () => admin.fetchAdminKey('id')],
-  ['updateAdminKey', () => admin.updateAdminKey('id', {})],
+  ['createAdminProvider', () => admin.createAdminProvider({}, context())],
+  ['updateAdminProvider', () => admin.updateAdminProvider('id', {}, context())],
+  ['deleteAdminProvider', () => admin.deleteAdminProvider('id', context())],
+  ['setProviderCredential', () => admin.setProviderCredential('id', {}, context())],
+  ['fetchAdminAliases', () => admin.fetchAdminAliases(context())],
+  ['createAdminAlias', () => admin.createAdminAlias({}, context())],
+  ['updateAdminAlias', () => admin.updateAdminAlias('id', {}, context())],
+  ['deleteAdminAlias', () => admin.deleteAdminAlias('id', context())],
+  ['fetchAdminKeys', () => admin.fetchAdminKeys(context())],
+  ['createAdminKey', () => admin.createAdminKey({}, context())],
+  ['rotateAdminKey', () => admin.rotateAdminKey('id', context())],
+  ['revokeAdminKey', () => admin.revokeAdminKey('id', context())],
+  ['deleteAdminKey', () => admin.deleteAdminKey('id', context())],
+  ['fetchAdminKey', () => admin.fetchAdminKey('id', context())],
+  ['updateAdminKey', () => admin.updateAdminKey('id', {}, context())],
   ['fetchAdminUsers', () => admin.fetchAdminUsers()],
   ['createAdminUser', () => admin.createAdminUser({})],
   ['setUserRole', () => admin.setUserRole('id', 'user')],
@@ -105,10 +114,10 @@ const adminCalls = [
   ['setTeamMemberRole', () => admin.setTeamMemberRole('ws-A', 'id', 'user', 'member')],
   ['fetchScopeQuota', () => admin.fetchScopeQuota('ws-A', 'users', 'id')],
   ['updateScopeQuota', () => admin.updateScopeQuota('ws-A', 'users', 'id', {})],
-  ['startCopilotDeviceFlow', () => admin.startCopilotDeviceFlow({ client_id: 'test' })],
-  ['fetchCopilotDeviceFlow', () => admin.fetchCopilotDeviceFlow('id')],
-  ['pollCopilotDeviceFlow', () => admin.pollCopilotDeviceFlow('id')],
-  ['cancelCopilotDeviceFlow', () => admin.cancelCopilotDeviceFlow('id')],
+  ['startCopilotDeviceFlow', () => admin.startCopilotDeviceFlow({ client_id: 'test' }, context())],
+  ['fetchCopilotDeviceFlow', () => admin.fetchCopilotDeviceFlow('id', context())],
+  ['pollCopilotDeviceFlow', () => admin.pollCopilotDeviceFlow('id', context())],
+  ['cancelCopilotDeviceFlow', () => admin.cancelCopilotDeviceFlow('id', context())],
 ] as const;
 
 const dashboardCalls = [
@@ -133,6 +142,7 @@ describe('all authenticated service entry points', () => {
         'adminLogout',
         'fetchAdminStatus',
         'publicRegister',
+        'acceptAdminInvite',
       ].sort(),
     );
   });
@@ -147,7 +157,8 @@ describe('all authenticated service entry points', () => {
     const pending = call();
     const rejected = expect(pending).rejects.toSatisfy(axios.isCancel);
     expect(config.headers.Authorization).toBe('Bearer access-A');
-    expect(config.headers[admin.adminWorkspaceHeader]).toBe('ws-A');
+    const scoped = /Provider$|Alias$|Key$|Credential$|Providers$|Aliases$|Keys$|DeviceFlow$/.test(_name);
+    expect(config.headers[admin.adminWorkspaceHeader]).toBe(scoped ? 'ws-A' : undefined);
     setAdminSession('access-B', 'refresh-B');
     expect(config.signal?.aborted).toBe(true);
     held.resolve(response(config, { secret: 'A', token: 'one-time-A' }));
@@ -183,13 +194,66 @@ describe('all authenticated service entry points', () => {
       config = request;
       return held.promise;
     };
-    const pending = admin.fetchAdminKeys();
+    const pending = admin.fetchAdminKeys(context());
     const rejected = expect(pending).rejects.toSatisfy(axios.isCancel);
     setAdminWorkspaceId('ws-B');
     held.resolve(response(config, { keys: [] }));
     await rejected;
     expect(config.signal?.aborted).toBe(true);
   });
+});
+
+const workspaceCalls: Array<[string, (context: WorkspaceContext) => Promise<unknown>]> = [
+  ['provider list', (context) => admin.fetchAdminProviders(context)],
+  ['provider create', (context) => admin.createAdminProvider({}, context)],
+  ['provider update', (context) => admin.updateAdminProvider('a-provider', {}, context)],
+  ['provider delete', (context) => admin.deleteAdminProvider('a-provider', context)],
+  [
+    'provider credential',
+    (context) => admin.setProviderCredential('a-provider', { api_key: 'never-cross-context' }, context), // pragma: allowlist secret
+  ],
+  ['alias list', (context) => admin.fetchAdminAliases(context)],
+  ['alias create', (context) => admin.createAdminAlias({}, context)],
+  ['alias update', (context) => admin.updateAdminAlias('a-alias', {}, context)],
+  ['alias delete', (context) => admin.deleteAdminAlias('a-alias', context)],
+  ['key list', (context) => admin.fetchAdminKeys(context)],
+  ['key detail', (context) => admin.fetchAdminKey('a-key', context)],
+  ['key create', (context) => admin.createAdminKey({}, context)],
+  ['key update', (context) => admin.updateAdminKey('a-key', {}, context)],
+  ['key rotate', (context) => admin.rotateAdminKey('a-key', context)],
+  ['key revoke', (context) => admin.revokeAdminKey('a-key', context)],
+  ['key delete', (context) => admin.deleteAdminKey('a-key', context)],
+  ['device start', (context) => admin.startCopilotDeviceFlow({ client_id: 'fixture' }, context)],
+  ['device status', (context) => admin.fetchCopilotDeviceFlow('a-flow', context)],
+  ['device poll', (context) => admin.pollCopilotDeviceFlow('a-flow', context)],
+  ['device cancel', (context) => admin.cancelCopilotDeviceFlow('a-flow', context)],
+];
+
+describe('workspace-pinned services', () => {
+  it.each(workspaceCalls)(
+    '%s rejects stale or unresolved selection before sending credentials or a mutation',
+    async (_name, call) => {
+      const saved = context();
+      const adapter = vi.fn<AxiosAdapter>();
+      admin.adminClient.defaults.adapter = adapter;
+      setAdminWorkspaceId('ws-B');
+      await expect(call(saved)).rejects.toSatisfy(axios.isCancel);
+      setAdminWorkspaceId('ws-A');
+      await expect(call(saved)).rejects.toSatisfy(axios.isCancel);
+      await expect(call(undefined as never)).rejects.toSatisfy(axios.isCancel);
+      expect(adapter).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([admin.createAdminProvider, admin.createAdminAlias, admin.createAdminKey])(
+    'does not let an explicit destination replace the authorized selected workspace',
+    async (create) => {
+      const adapter = vi.fn<AxiosAdapter>();
+      admin.adminClient.defaults.adapter = adapter;
+      await expect(create({ workspace_id: 'ws-B' }, context())).rejects.toThrow('selected workspace');
+      expect(adapter).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('refresh ownership and authentication entry points', () => {

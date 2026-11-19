@@ -182,7 +182,11 @@ func TestCatalogPrecommitReadFailures(t *testing.T) {
 				if method == "PUT" {
 					path += "/missing"
 				}
-				code, _, raw := doAdmin(t, h, access, method, path, validProviderBody("missing"))
+				body := validProviderBody("missing")
+				if resource == "aliases" {
+					body = map[string]interface{}{"name": "missing", "targets": []map[string]string{{"provider": "openai", "model": "gpt-4o-mini"}}}
+				}
+				code, _, raw := doAdmin(t, h, access, method, path, body)
 				if code != 500 || raw != "could not save catalog edit\n" || count != 0 {
 					t.Fatalf("read failure = %d %s activations=%d", code, raw, count)
 				}
@@ -200,7 +204,7 @@ func (h catalogPauseHook) BeforeQuery(ctx context.Context, _ *bun.QueryEvent) co
 	return ctx
 }
 func (h catalogPauseHook) AfterQuery(ctx context.Context, event *bun.QueryEvent) {
-	if ctx.Value(catalogPauseKey{}) == true && strings.HasPrefix(event.Query, "SELECT") && strings.Contains(event.Query, `FROM "db_providers"`) {
+	if ctx.Value(catalogPauseKey{}) == true && event.Operation() == "SELECT" && strings.Contains(event.Query, `"p"."api_key_encrypted"`) && strings.Contains(event.Query, `FROM "db_providers"`) {
 		select {
 		case h.read <- struct{}{}:
 			<-h.resume
@@ -239,7 +243,11 @@ func TestCatalogCredentialAggregateHTTPConflict(t *testing.T) {
 			done := make(chan int, 1)
 			ctx := context.WithValue(context.Background(), catalogPauseKey{}, true)
 			go func() { done <- membershipRequest(ctx, h, access, "PUT", slowPath, slowBody).Code }()
-			<-pause.read
+			select {
+			case <-pause.read:
+			case code := <-done:
+				t.Fatalf("delayed update completed before reading the provider row: %d", code)
+			}
 			w := membershipRequest(context.Background(), h, access, "PUT", fastPath, fastBody)
 			close(pause.resume)
 			if code := <-done; code != http.StatusConflict {

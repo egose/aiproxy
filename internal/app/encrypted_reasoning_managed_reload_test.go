@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/store"
 )
 
 func managedReasoningRuntimeFixture(t *testing.T) (*App, string, string, *appReasoningRequests, func(string, string, string) *httptest.ResponseRecorder) {
@@ -199,16 +200,29 @@ func TestEncryptedReasoningManagedCorruptRowsAndDanglingOverlayRollback(t *testi
 		})
 	}
 	oldRuntime, oldResolver, oldClients := a.Config, a.resolver, a.clients
+	beforeModels, err := a.adminStore.ListProviderModels(ctx, base.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeBase, err := a.adminStore.GetProvider(ctx, base.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloads := 0
+	deps := a.handler.SnapshotDependencies()
+	deps.RequestReload = func() error { reloads++; return a.Reload() }
+	a.handler.UpdateDependencies(deps)
 	w := request("PUT", "/_internal/admin/providers/managed-base", `{"models":[{"name":"n","upstream_name":"saved-n"}]}`)
-	if w.Code != 500 || w.Header().Get("X-Aiproxy-Catalog-Saved") != "true" || w.Body.String() != "saved but activation failed\n" {
-		t.Fatalf("dangling overlay save/activation result = %d %s", w.Code, w.Body.String())
+	if w.Code != 400 || w.Header().Get("X-Aiproxy-Catalog-Saved") != "" || w.Body.String() != store.ErrCatalogDependency.Error()+"\n" || reloads != 0 {
+		t.Fatalf("dangling overlay precommit rejection = %d %s", w.Code, w.Body.String())
 	}
 	if a.Config != oldRuntime || a.resolver != oldResolver || a.clients != oldClients {
 		t.Fatal("dangling overlay reload replaced the old runtime")
 	}
 	baseModels, err := a.adminStore.ListProviderModels(ctx, base.ID)
-	if err != nil || len(baseModels) != 1 || baseModels[0].Name != "n" || baseModels[0].UpstreamName != "saved-n" {
-		t.Fatalf("failed activation rolled back a durable base save: %+v %v", baseModels, err)
+	afterBase, getErr := a.adminStore.GetProvider(ctx, base.Name)
+	if err != nil || getErr != nil || !reflect.DeepEqual(beforeModels, baseModels) || !reflect.DeepEqual(beforeBase, afterBase) {
+		t.Fatalf("rejected base save changed durable rows: %+v %v", baseModels, err)
 	}
 	child, _ := a.adminStore.GetProvider(ctx, "managed-child")
 	overlays, err := a.adminStore.ListProviderModels(ctx, child.ID)
@@ -216,6 +230,12 @@ func TestEncryptedReasoningManagedCorruptRowsAndDanglingOverlayRollback(t *testi
 		t.Fatal("dangling overlay was silently dropped")
 	}
 	assertManagedReasoningInference(t, observations, request, "managed-child/m", "served-m", "child-private-credential", false)
+	if _, err := a.adminStore.DB.ExecContext(ctx, `DELETE FROM db_provider_models WHERE provider_id = ? AND name = 'm'`, base.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.adminStore.DB.ExecContext(ctx, `UPDATE db_provider_models SET upstream_name = 'saved-n' WHERE provider_id = ? AND name = 'n'`, base.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := a.Reload(); err == nil || a.Config != oldRuntime || a.resolver != oldResolver {
 		t.Fatal("repeated dangling overlay reload did not preserve the old runtime")
 	}
@@ -251,9 +271,24 @@ func TestEncryptedReasoningManagedBaseDeletionRejectsStaticFallback(t *testing.T
 	requireManagedReasoningAdmin(t, request, "POST", "/_internal/admin/providers",
 		`{"name":"draining-child","type":"openai-compatible","extends":"removed-base","api_key":"child-private-credential","models":[{"name":"m","encrypted_reasoning":{}}]}`, 201)
 	oldRuntime, oldResolver := a.Config, a.resolver
+	beforeBase, err := a.adminStore.GetProvider(ctx, "removed-base")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloads := 0
+	deps := a.handler.SnapshotDependencies()
+	deps.RequestReload = func() error { reloads++; return a.Reload() }
+	a.handler.UpdateDependencies(deps)
 	w := request("DELETE", "/_internal/admin/providers/removed-base", "")
-	if w.Code != 500 || !strings.HasPrefix(w.Body.String(), "saved but activation failed: ") {
-		t.Fatalf("base removal activation result = %d %s", w.Code, w.Body.String())
+	if w.Code != 400 || w.Body.String() != store.ErrCatalogDependency.Error()+"\n" || w.Header().Get("X-Aiproxy-Catalog-Saved") != "" || reloads != 0 {
+		t.Fatalf("base removal precommit rejection = %d %s", w.Code, w.Body.String())
+	}
+	afterBase, err := a.adminStore.GetProvider(ctx, "removed-base")
+	if err != nil || !reflect.DeepEqual(beforeBase, afterBase) {
+		t.Fatal("rejected base removal changed durable state")
+	}
+	if _, err := a.adminStore.DB.NewDelete().Model(&beforeBase).WherePK().Exec(ctx); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := a.adminStore.GetProvider(ctx, "removed-base"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal("base removal was not durable")

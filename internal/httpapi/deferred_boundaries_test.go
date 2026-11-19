@@ -17,6 +17,7 @@ import (
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/deferred"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/payloadlog"
 	"github.com/egose/aiproxy/internal/provider"
@@ -164,7 +165,8 @@ func TestDeferredRemoteFinalizationSharesTerminalDeadlineAndPublishesLocalUsageO
 				t.Fatalf("remote completion reused execution/submit context or renewed its timeout: observed=%+v terminal=%v", observed, fixedDeadline)
 			}
 			events := f.accounting.Events()
-			tokens, _ := deps.Quota.windowTokens(client.WorkspaceID, quotaScope{typ: quotaScopeUser, id: client.OwnerUserID}, "p/m")
+			workspaceID, _ := client.Workspace.ID()
+			tokens, _ := deps.Quota.windowTokens(workspaceID, quotaScope{typ: quotaScopeUser, id: client.OwnerUserID}, "p/m")
 			if len(events) != 1 || events[0].TotalTokens != 5 || tokens != 5 || f.store.Stats().WorkBytes == 0 || f.store.Stats().FinalizationCredits != 1 {
 				t.Fatal("remote wait delayed/duplicated local accounting or freed completion ownership")
 			}
@@ -254,7 +256,8 @@ func TestDeferredExecutorTwoWorkersRetainLocalSinkOwnershipAndExpireQueuedRemote
 	f.h.UpdateDependencies(deps)
 	resources.Retire()
 	stats := f.store.Stats()
-	tokens, _ := deps.Quota.windowTokens(client.WorkspaceID, quotaScope{typ: quotaScopeUser, id: client.OwnerUserID}, "p/m")
+	workspaceID, _ := client.Workspace.ID()
+	tokens, _ := deps.Quota.windowTokens(workspaceID, quotaScope{typ: quotaScopeUser, id: client.OwnerUserID}, "p/m")
 	if stats.Finalizing != 2 || stats.FinalizationCredits != 3 || stats.WorkBytes != 3*o.MaxWorkBytes ||
 		stats.InputBytes == 0 || closes.Load() != 0 || quota.inserts.Load() != 2 || payload.calls.Load() != 2 || tokens != 21 {
 		t.Fatalf("blocked local sinks lost bounded workers, memory, or runtime leases: %+v", stats)
@@ -461,7 +464,8 @@ func TestDeferredConcurrentPollReplayDeleteDetachesSubmitAndKeepsSourceCleanupOw
 	releaseCleanup()
 	awaitDeferredHTTP(t, "source cleanup and runtime release", func() bool { return f.store.Stats().Jobs == 0 && closes.Load() == 1 })
 	events := f.accounting.Events()
-	tokens, _ := deps.Quota.windowTokens(client.WorkspaceID, quotaScope{typ: quotaScopeUser, id: client.OwnerUserID}, "p/m")
+	workspaceID, _ := client.Workspace.ID()
+	tokens, _ := deps.Quota.windowTokens(workspaceID, quotaScope{typ: quotaScopeUser, id: client.OwnerUserID}, "p/m")
 	if len(events) != 1 || events[0].StatusCode != 502 || events[0].TotalTokens != 5 || tokens != 5 ||
 		quota.inserts.Load() != 1 || quota.reads.Load() != 2 || len(payload.snapshot()) != 1 || body.closes.Load() != 1 || f.store.Stats().WorkBytes != 0 {
 		t.Fatal("poll/replay/delete/source finalization duplicated or lost known usage")
@@ -599,7 +603,7 @@ type deferredAdmissionGate struct {
 	calls   atomic.Int32
 }
 
-func (g *deferredAdmissionGate) Allow(string) (bool, time.Duration) {
+func (g *deferredAdmissionGate) Allow(identity.CredentialID) (bool, time.Duration) {
 	g.calls.Add(1)
 	g.once.Do(func() { close(g.started) })
 	<-g.gate

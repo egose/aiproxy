@@ -32,18 +32,30 @@ func (h *Handler) adminInvites(deps Dependencies, w http.ResponseWriter, r *http
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			invites, err := deps.AdminStore.ListInvites(ctx)
+			visibility, err := resolveWorkspaceVisibility(ctx, deps, claims)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				http.Error(w, workspaceVisibilityError, http.StatusInternalServerError)
 				return
 			}
-			visible, _ := h.visibleWorkspaceIDs(deps, r, claims)
 			views := make([]adminInviteView, 0)
+			if visibility.empty() {
+				writeAdminJSON(w, http.StatusOK, map[string]interface{}{"invites": views})
+				return
+			}
+			invites, err := deps.AdminStore.ListInvites(ctx)
+			if err != nil {
+				http.Error(w, "could not list invites", http.StatusInternalServerError)
+				return
+			}
 			for _, inv := range invites {
 				if inv.AcceptedAt != nil || !inv.ExpiresAt.After(time.Now()) {
 					continue
 				}
-				if visible != nil && inv.WorkspaceID != nil && !visible[inv.WorkspaceID.String()] {
+				if inv.WorkspaceID == nil {
+					if !visibility.global {
+						continue
+					}
+				} else if !visibility.allows(*inv.WorkspaceID) {
 					continue
 				}
 				views = append(views, h.inviteView(deps, r, inv))
@@ -108,6 +120,9 @@ func (h *Handler) adminInvites(deps Dependencies, w http.ResponseWriter, r *http
 			if _, err := deps.AdminStore.GetUserByEmail(ctx, email); err == nil {
 				http.Error(w, "email is already registered", http.StatusBadRequest)
 				return
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "could not create invite", http.StatusInternalServerError)
+				return
 			}
 			token, err := newInviteToken()
 			if err != nil {
@@ -119,6 +134,7 @@ func (h *Handler) adminInvites(deps Dependencies, w http.ResponseWriter, r *http
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
+			w.Header().Set("Cache-Control", "no-store")
 			writeAdminJSON(w, http.StatusCreated, map[string]interface{}{
 				"invite": h.inviteView(deps, r, *inv),
 				"token":  token,
@@ -173,6 +189,7 @@ func (h *Handler) adminInvites(deps Dependencies, w http.ResponseWriter, r *http
 }
 
 func (h *Handler) acceptInvite(deps Dependencies, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	ctx := r.Context()
 	var req struct {
 		Token    string `json:"token"`

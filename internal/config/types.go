@@ -3,7 +3,9 @@ package config
 import (
 	"time"
 
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/tlsprofile"
+	"github.com/egose/aiproxy/internal/upstreampolicy"
 )
 
 const DefaultUpstreamHeaderTimeout = 90 * time.Second
@@ -84,6 +86,7 @@ type Database struct {
 type MultiTenancy struct {
 	Enabled                 bool
 	AllowPublicRegistration bool
+	AllowedUpstreamOrigins  []string
 }
 
 func (r Runtime) MultiTenancyEnabled() bool {
@@ -274,7 +277,9 @@ const (
 type Provider struct {
 	Type                        ProviderType
 	Name                        string
-	DatabaseManaged             bool `json:"-"`
+	DatabaseManaged             bool                    `json:"-"`
+	Workspace                   identity.WorkspaceScope `json:"-"`
+	OutboundPolicy              *upstreampolicy.Policy  `json:"-"`
 	Extends                     string
 	DisplayName                 string
 	BaseURL                     string
@@ -407,7 +412,8 @@ func (p *ModelPricing) Cost(promptTokens, completionTokens, cachedTokens, cacheW
 
 type Alias struct {
 	Name               string
-	DatabaseManaged    bool `json:"-"`
+	DatabaseManaged    bool                    `json:"-"`
+	Workspace          identity.WorkspaceScope `json:"-"`
 	Algorithm          Algorithm
 	RetryStatusCodes   []int
 	SessionAffinity    *SessionAffinity

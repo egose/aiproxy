@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/egose/aiproxy/internal/identity"
 )
 
 const (
@@ -13,11 +15,13 @@ const (
 )
 
 type Event struct {
-	Truncated      RecentTruncation `json:",omitzero"`
-	RecentSequence uint64           `json:",string,omitempty"`
-	ProviderID     uint64           `json:",string,omitempty"`
-	RequestID      string           `json:",omitempty"`
-	PublicModel    string           `json:",omitempty"`
+	CredentialID   identity.CredentialID   `json:"-"`
+	WorkspaceScope identity.WorkspaceScope `json:"-"`
+	Truncated      RecentTruncation        `json:",omitzero"`
+	RecentSequence uint64                  `json:",string,omitempty"`
+	ProviderID     uint64                  `json:",string,omitempty"`
+	RequestID      string                  `json:",omitempty"`
+	PublicModel    string                  `json:",omitempty"`
 	Timestamp      time.Time
 	Tenant         string
 	Client         string
@@ -81,12 +85,14 @@ type Snapshotter interface {
 }
 
 type Summary struct {
-	Tenant     string
-	Client     string
-	Model      string
-	Operation  string
-	StatusCode int
-	Count      int64
+	CredentialID   identity.CredentialID   `json:"-"`
+	WorkspaceScope identity.WorkspaceScope `json:"-"`
+	Tenant         string
+	Client         string
+	Model          string
+	Operation      string
+	StatusCode     int
+	Count          int64
 
 	PromptTokens        int64
 	CompletionTokens    int64
@@ -111,14 +117,16 @@ type ProviderSummary struct {
 }
 
 type UpstreamSummary struct {
-	PublicModel string `json:",omitempty"`
-	Tenant      string
-	Client      string
-	Provider    string
-	Model       string
-	Operation   string
-	StatusCode  int
-	Count       int64
+	CredentialID   identity.CredentialID   `json:"-"`
+	WorkspaceScope identity.WorkspaceScope `json:"-"`
+	PublicModel    string                  `json:",omitempty"`
+	Tenant         string
+	Client         string
+	Provider       string
+	Model          string
+	Operation      string
+	StatusCode     int
+	Count          int64
 
 	PromptTokens        int64
 	CompletionTokens    int64
@@ -208,10 +216,11 @@ func (r *MemoryRecorder) Summaries() []Summary {
 	byKey := map[summaryKey]*Summary{}
 	var order []summaryKey
 	for _, e := range r.events {
-		key := summaryKey{tenant: e.Tenant, client: e.Client, model: e.Model, operation: e.Operation, statusCode: e.StatusCode}
+		key := eventBillingKey(e).summaryKey
 		s, ok := byKey[key]
 		if !ok {
-			s = &Summary{Tenant: key.tenant, Client: key.client, Model: key.model, Operation: key.operation, StatusCode: key.statusCode}
+			s = &Summary{CredentialID: key.credential, WorkspaceScope: key.workspace,
+				Tenant: key.tenant, Client: key.client, Model: key.model, Operation: key.operation, StatusCode: key.statusCode}
 			byKey[key] = s
 			order = append(order, key)
 		}
@@ -259,6 +268,8 @@ type providerEntry struct {
 }
 
 type upstreamKey struct {
+	credential identity.CredentialID
+	workspace  identity.WorkspaceScope
 	tenant     string
 	client     string
 	provider   string
@@ -291,6 +302,8 @@ type aggregateEntry struct {
 }
 
 type summaryKey struct {
+	credential identity.CredentialID
+	workspace  identity.WorkspaceScope
 	tenant     string
 	client     string
 	model      string
@@ -306,8 +319,9 @@ type billingKey struct {
 
 func eventBillingKey(e Event) billingKey {
 	return billingKey{
-		summaryKey: summaryKey{tenant: e.Tenant, client: e.Client, model: e.Model, operation: e.Operation, statusCode: e.StatusCode},
-		provider:   e.Provider, upstreamModel: e.UpstreamModel,
+		summaryKey: summaryKey{credential: e.CredentialID, workspace: e.WorkspaceScope,
+			tenant: e.Tenant, client: e.Client, model: e.Model, operation: e.Operation, statusCode: e.StatusCode},
+		provider: e.Provider, upstreamModel: e.UpstreamModel,
 	}
 }
 
@@ -392,6 +406,8 @@ func (a *Aggregator) Record(event Event) {
 			a.upstream = make(map[upstreamKey]*providerEntry)
 		}
 		ukey := upstreamKey{
+			credential: event.CredentialID,
+			workspace:  event.WorkspaceScope,
 			tenant:     event.Tenant,
 			client:     event.Client,
 			provider:   event.Provider,
@@ -443,6 +459,7 @@ func summarizeBilling(retained map[billingKey]aggregateEntry) ([]Summary, []Upst
 			continue
 		}
 		upstream = append(upstream, UpstreamSummary{
+			CredentialID: key.credential, WorkspaceScope: key.workspace,
 			PublicModel: key.model, Tenant: key.tenant, Client: key.client,
 			Provider: key.provider, Model: key.upstreamModel, Operation: key.operation, StatusCode: key.statusCode,
 			Count: entry.count, PromptTokens: entry.promptTokens, CompletionTokens: entry.completionTokens,
@@ -453,6 +470,8 @@ func summarizeBilling(retained map[billingKey]aggregateEntry) ([]Summary, []Upst
 	out := make([]Summary, 0, len(counts))
 	for key, entry := range counts {
 		out = append(out, Summary{
+			CredentialID:        key.credential,
+			WorkspaceScope:      key.workspace,
 			Tenant:              key.tenant,
 			Client:              key.client,
 			Model:               key.model,
@@ -480,7 +499,10 @@ func summarizeBilling(retained map[billingKey]aggregateEntry) ([]Summary, []Upst
 		if out[i].Operation != out[j].Operation {
 			return out[i].Operation < out[j].Operation
 		}
-		return out[i].StatusCode < out[j].StatusCode
+		if out[i].StatusCode != out[j].StatusCode {
+			return out[i].StatusCode < out[j].StatusCode
+		}
+		return identityLess(out[i].CredentialID, out[i].WorkspaceScope, out[j].CredentialID, out[j].WorkspaceScope)
 	})
 	sort.Slice(upstream, func(i, j int) bool {
 		a, b := upstream[i], upstream[j]
@@ -502,7 +524,10 @@ func summarizeBilling(retained map[billingKey]aggregateEntry) ([]Summary, []Upst
 		if a.Provider != b.Provider {
 			return a.Provider < b.Provider
 		}
-		return a.Model < b.Model
+		if a.Model != b.Model {
+			return a.Model < b.Model
+		}
+		return identityLess(a.CredentialID, a.WorkspaceScope, b.CredentialID, b.WorkspaceScope)
 	})
 	return out, upstream
 }
@@ -643,6 +668,8 @@ func (a *Aggregator) UpstreamSummaries() []UpstreamSummary {
 	out := make([]UpstreamSummary, 0, len(a.upstream))
 	for key, entry := range a.upstream {
 		out = append(out, UpstreamSummary{
+			CredentialID:        key.credential,
+			WorkspaceScope:      key.workspace,
 			Tenant:              key.tenant,
 			Client:              key.client,
 			Provider:            key.provider,
@@ -665,29 +692,23 @@ func (a *Aggregator) UpstreamSummaries() []UpstreamSummary {
 		if out[i].Provider != out[j].Provider {
 			return out[i].Provider < out[j].Provider
 		}
-		return out[i].Model < out[j].Model
+		if out[i].Model != out[j].Model {
+			return out[i].Model < out[j].Model
+		}
+		if out[i].Tenant != out[j].Tenant {
+			return out[i].Tenant < out[j].Tenant
+		}
+		if out[i].Client != out[j].Client {
+			return out[i].Client < out[j].Client
+		}
+		if out[i].Operation != out[j].Operation {
+			return out[i].Operation < out[j].Operation
+		}
+		if out[i].StatusCode != out[j].StatusCode {
+			return out[i].StatusCode < out[j].StatusCode
+		}
+		return identityLess(out[i].CredentialID, out[i].WorkspaceScope, out[j].CredentialID, out[j].WorkspaceScope)
 	})
-	return out
-}
-
-func FilterSummaries(summaries []Summary, tenant, client string) []Summary {
-	if tenant == "" && client == "" {
-		out := make([]Summary, len(summaries))
-		copy(out, summaries)
-		return out
-	}
-	out := make([]Summary, 0, len(summaries))
-	for _, summary := range summaries {
-		if tenant != "" {
-			if summary.Tenant == tenant {
-				out = append(out, summary)
-			}
-			continue
-		}
-		if summary.Tenant == "" && summary.Client == client {
-			out = append(out, summary)
-		}
-	}
 	return out
 }
 

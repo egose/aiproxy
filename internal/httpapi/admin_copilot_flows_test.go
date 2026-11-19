@@ -123,6 +123,11 @@ func openCopilotFlowHarness(t *testing.T) *copilotFlowHarness {
 	if _, err := st.MigrateUp(ctx); err != nil {
 		t.Fatal(err)
 	}
+	return newCopilotFlowHarness(t, st)
+}
+
+func newCopilotFlowHarness(t *testing.T, st *store.Store) *copilotFlowHarness {
+	t.Helper()
 	f := &copilotFlowHarness{st: st, issuer: &mockTokenBehavior{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/login/device/code", f.issuer.codeHandler())
@@ -131,6 +136,7 @@ func openCopilotFlowHarness(t *testing.T) *copilotFlowHarness {
 	t.Cleanup(f.srv.Close)
 	deps := newWebUIDeps(false)
 	deps.MultiTenancy.Enabled = true
+	deps.MultiTenancy.AllowedUpstreamOrigins = []string{"https://api.githubcopilot.com"}
 	deps.AdminStore = st
 	srvURL := f.srv.URL
 	deps.CopilotDeviceClient = func() *copilotlogin.Client {
@@ -692,25 +698,27 @@ func TestAdminCopilotProviderSaveContracts(t *testing.T) {
 		t.Fatalf("saved source = %d %s", after.code, after.raw)
 	}
 
+	ownBefore, err := f.st.GetProvider(context.Background(), "contract-copilot")
+	if err != nil {
+		t.Fatal(err)
+	}
 	legacy := f.call(t, access, http.MethodPut, "/_internal/admin/providers/contract-copilot/credential", map[string]interface{}{
 		"copilot_credential_name": "sidecar-main",
 	})
-	if legacy.code != http.StatusOK {
-		t.Fatalf("legacy sidecar switch = %d %s", legacy.code, legacy.raw)
+	if legacy.code != http.StatusBadRequest || legacy.header.Get(catalogSavedHeader) != "" {
+		t.Fatalf("tenant sidecar switch must be rejected before persistence: %d %s", legacy.code, legacy.raw)
 	}
 	switched, err := f.st.GetProvider(context.Background(), "contract-copilot")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(switched.CopilotCredentialEncrypted) != 0 {
-		t.Fatalf("sidecar switch must clear DB ciphertext")
-	}
-	if switched.CopilotCredentialName != "sidecar-main" {
-		t.Fatalf("sidecar switch must persist ref")
+	if !bytes.Equal(switched.CopilotCredentialEncrypted, ownBefore.CopilotCredentialEncrypted) ||
+		switched.CopilotCredentialName != "" || !switched.UpdatedAt.Equal(ownBefore.UpdatedAt) {
+		t.Fatal("rejected tenant sidecar switch changed the own DB credential")
 	}
 	sidecarView := f.call(t, access, http.MethodGet, "/_internal/admin/providers/contract-copilot", nil)
-	if sidecarView.parsed["copilot_credential_source"] != "sidecar" {
-		t.Fatalf("sidecar source = %s", sidecarView.raw)
+	if sidecarView.parsed["copilot_credential_source"] != "database" {
+		t.Fatalf("own DB source changed after rejected sidecar switch: %s", sidecarView.raw)
 	}
 	mixed := f.call(t, access, http.MethodPut, "/_internal/admin/providers/contract-copilot/credential", map[string]interface{}{
 		"api_key": "nope",

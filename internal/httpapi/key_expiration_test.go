@@ -14,10 +14,12 @@ import (
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/provider"
 	"github.com/egose/aiproxy/internal/store"
+	"github.com/google/uuid"
 )
 
 func TestPublicEndpointsKeyExpirationWithoutReload(t *testing.T) {
@@ -49,9 +51,10 @@ func TestPublicEndpointsKeyExpirationWithoutReload(t *testing.T) {
 	p.BaseURL = upstream.URL
 	replaceProviders(rt, []config.Provider{p})
 	cfg := config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{"static": {Token: "static"}}}
+	workspace := identity.InWorkspace(store.SystemWorkspaceID)
 	dyn := []auth.DynamicClient{
-		{Name: "expiring", TokenHash: store.TokenHash("expiring"), ExpiresAt: deadline},
-		{Name: "permanent", TokenHash: store.TokenHash("permanent")},
+		{Name: "expiring", TokenHash: store.TokenHash("expiring"), ExpiresAt: deadline, KeyID: uuid.New(), Workspace: workspace},
+		{Name: "permanent", TokenHash: store.TokenHash("permanent"), KeyID: uuid.New(), Workspace: workspace},
 	}
 	agg := accounting.NewAggregator()
 	h := NewHandler(Dependencies{

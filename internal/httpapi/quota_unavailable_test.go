@@ -21,6 +21,7 @@ import (
 
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/store"
 	"github.com/google/uuid"
@@ -118,7 +119,7 @@ func newQuotaFailureFixture(t *testing.T, owner string) *quotaFailureFixture {
 	}
 	f.token = body["token"].(string)
 	key := body["key"].(map[string]interface{})
-	dyn := auth.DynamicClient{Name: key["name"].(string), KeyID: mustParseUUID(key["id"].(string)), WorkspaceID: f.workspace, TokenHash: store.TokenHash(f.token)}
+	dyn := auth.DynamicClient{Name: key["name"].(string), KeyID: mustParseUUID(key["id"].(string)), Workspace: identity.InWorkspace(f.workspace), TokenHash: store.TokenHash(f.token)}
 	entry := store.SpendEntry{WorkspaceID: f.workspace, KeyID: dyn.KeyID, Model: "openai/m", CostMicros: 150}
 	if owner == "user" {
 		dyn.OwnerUserID, entry.UserID = f.scope.id, &f.scope.id
@@ -141,14 +142,15 @@ func newQuotaFailureFixture(t *testing.T, owner string) *quotaFailureFixture {
 		}
 	}))
 	t.Cleanup(upstream.Close)
+	workspace := identity.InWorkspace(f.workspace)
 	rt := &config.Runtime{
 		Auth: config.Auth{Mode: config.AuthModeBearerStatic},
-		Catalog: config.NewCatalog([]config.Provider{{Name: "openai", Type: config.ProviderTypeOpenAI, BaseURL: upstream.URL, APIKey: "upstream-private",
+		Catalog: config.NewCatalog([]config.Provider{{Name: "openai", Workspace: workspace, Type: config.ProviderTypeOpenAI, BaseURL: upstream.URL, APIKey: "upstream-private",
 			Models: []config.Model{{Name: "m", UpstreamName: "m", Capabilities: []config.Capability{
 				config.CapabilityChat, config.CapabilityResponses, config.CapabilityEmbeddings,
 				config.CapabilityImages, config.CapabilityAudioTranscriptions, config.CapabilityAudioSpeech,
 			}}},
-		}}, nil, []config.Alias{{Name: "fast", Algorithm: config.AlgorithmRoundRobin, Targets: []config.AliasTarget{{Provider: "openai", Model: "m"}}}}),
+		}}, nil, []config.Alias{{Name: "fast", Workspace: workspace, Algorithm: config.AlgorithmRoundRobin, Targets: []config.AliasTarget{{Provider: "openai", Model: "m"}}}}),
 	}
 	f.proxy = NewHandler(Dependencies{
 		Resolver: modelresolver.New(rt), Catalog: rt.Catalog, MultiTenancy: config.MultiTenancy{Enabled: true}, AdminStore: st,
@@ -412,6 +414,15 @@ func TestQuotaUnlimitedAndStaticControls(t *testing.T) {
 			f.setPolicy(t, 100, 10)
 			deps := f.proxy.current()
 			deps.Auth = auth.NewAuthenticator(config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{"static": {Name: "static", Token: "static-private"}}})
+			providers, aliases := deps.Catalog.Providers(), deps.Catalog.Aliases()
+			for i := range providers {
+				providers[i].Workspace = identity.InWorkspace(store.SystemWorkspaceID)
+			}
+			for i := range aliases {
+				aliases[i].Workspace = identity.InWorkspace(store.SystemWorkspaceID)
+			}
+			deps.Catalog = config.NewCatalog(providers, nil, aliases)
+			deps.Resolver = modelresolver.New(&config.Runtime{Catalog: deps.Catalog})
 			f.proxy.UpdateDependencies(deps)
 			f.token = "static-private"
 			for _, stage := range []string{"budget", "model", "spend"} {

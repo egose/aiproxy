@@ -4,6 +4,7 @@ import { authLifecycle } from './auth-lifecycle';
 import { DialogManagerProvider } from '@egose/shadcn-theme/components/widgets/dialog-manager';
 import { Button } from '@egose/shadcn-theme/components/ui/button';
 import { Spinner } from '@egose/shadcn-theme/components/ui/spinner';
+import { TooltipProvider } from '@egose/shadcn-theme/components/ui/tooltip';
 import { Shell } from './components/shell';
 import { useAdminMe, useAdminSession, useAdminStatus, useCurrentWorkspace, useDataAuth } from './hooks';
 import { AdminOidcPage } from './pages/admin-oidc-page';
@@ -11,6 +12,7 @@ import { AdminWorkspacesPage } from './pages/admin-workspaces-page';
 import { AliasesPage } from './pages/aliases-page';
 import { BlocksPage } from './pages/blocks-page';
 import { LoginPage } from './pages/login-page';
+import { InvitePage } from './pages/invite-page';
 import { LogoutPage } from './pages/logout-page';
 import { ManageKeysPage } from './pages/manage-keys-page';
 import { ManageMembersPage } from './pages/manage-members-page';
@@ -82,9 +84,11 @@ function RequireSystemAdmin({ children }: { children: React.JSX.Element }) {
 export function App() {
   const { generation } = useStateSnapshot(authLifecycle);
   return (
-    <DialogManagerProvider key={generation}>
-      <AppContent />
-    </DialogManagerProvider>
+    <TooltipProvider>
+      <DialogManagerProvider key={generation}>
+        <AppContent />
+      </DialogManagerProvider>
+    </TooltipProvider>
   );
 }
 
@@ -117,6 +121,7 @@ function AppContent() {
             <Route path="/login" element={<LoginPage />} />
 
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/invite" element={<InvitePage />} />
 
             <Route path="/admin/oidc/callback" element={<OidcCallbackPage />} />
 
@@ -173,6 +178,7 @@ function AppContent() {
           {multi && <Route path="/token" element={<Navigate to="/" replace />} />}
           {multi && <Route path="/login" element={<LoginPage />} />}
           {multi && <Route path="/register" element={<RegisterPage />} />}
+          {multi && <Route path="/invite" element={<InvitePage />} />}
           {multi && <Route path="/logout" element={<LogoutPage />} />}
           {multi && <Route path="/admin/oidc/callback" element={<OidcCallbackPage />} />}
 

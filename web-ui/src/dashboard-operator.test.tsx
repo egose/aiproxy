@@ -7,6 +7,7 @@ import { fetchAdminMe, fetchAdminWorkspaces, fetchAdminStatus } from './services
 import { fetchBlock, fetchBlocks, fetchPayload, fetchPayloads, fetchSnapshot } from './services/dashboard';
 import { adminWorkspaceStore, clearAdminSession, setAdminSession, setDashboardToken } from './store';
 import { adminWorkspaceSchema, adminStatusSchema, snapshotSchema } from './types';
+import { systemWorkspaceId } from './workspace-selection';
 
 vi.mock('./services/admin', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./services/admin')>()),
@@ -36,6 +37,7 @@ beforeEach(() => {
   );
   vi.mocked(fetchAdminMe).mockResolvedValue({ user_id: 'member', email: 'member@example.com', is_admin: false });
   vi.mocked(fetchAdminWorkspaces).mockResolvedValue([
+    adminWorkspaceSchema.parse({ id: systemWorkspaceId, name: 'system', is_system: true, role: 'member' }),
     adminWorkspaceSchema.parse({ id: 'ws-a', name: 'ws-a', kind: 'organization', is_system: false, role: 'member' }),
   ]);
   vi.mocked(fetchSnapshot).mockResolvedValue(
@@ -82,7 +84,7 @@ async function findDetailButton(name: RegExp) {
 }
 
 async function waitForWorkspace() {
-  await waitFor(() => expect(adminWorkspaceStore.workspaceId).toBe('ws-a'));
+  await waitFor(() => expect([systemWorkspaceId, 'ws-a']).toContain(adminWorkspaceStore.workspaceId));
 }
 
 describe('operator-only dashboard', () => {

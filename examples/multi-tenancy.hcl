@@ -1,6 +1,8 @@
 # Multi-tenancy with database-backed dynamic resources. Static providers and
-# aliases below remain read-only in the admin UI/CLI (badge: config); resources
-# created via the admin UI/CLI are stored in Postgres (badge: database).
+# aliases below belong to System and remain read-only in the admin UI/CLI;
+# resources created via the admin UI/CLI are stored in their owning workspace.
+# Hosted inference requires bearer_static. The HCL client below can use System
+# inventory only; issue database keys for workspaces that serve tenant traffic.
 #
 # Provision locally with:
 #   make sandbox-up
@@ -25,6 +27,7 @@ database {
 
 multi_tenancy {
   enabled = true
+  allowed_upstream_origins = []
 }
 
 web_ui {

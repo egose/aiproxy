@@ -9,6 +9,7 @@ import { Link, useNavigate } from 'react-router';
 import { z } from 'zod';
 import { publicRegister } from '../services/admin';
 import { errorMessage } from '../services/dashboard';
+import { useAdminStatus } from '../hooks';
 
 const registerSchema = z.object({
   email: z.string().trim().min(1, 'Enter your email.').email('Enter a valid email.'),
@@ -19,6 +20,7 @@ const registerSchema = z.object({
 type RegisterForm = z.infer<typeof registerSchema>;
 
 export function RegisterPage() {
+  const status = useAdminStatus();
   const navigate = useNavigate();
   const form = useForm<RegisterForm>({
     resolver: zodResolver(registerSchema),
@@ -34,6 +36,20 @@ export function RegisterPage() {
       }),
     onSuccess: () => navigate('/login', { replace: true }),
   });
+
+  if (!status.data?.registration_enabled) {
+    return (
+      <div className="grid gap-4 p-6">
+        <h1>Public registration is closed</h1>
+        <Link to="/invite" className="underline">
+          Accept invitation
+        </Link>
+        <Link to="/login" className="underline">
+          Back to sign in
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto grid w-full max-w-2xl gap-6 p-6">

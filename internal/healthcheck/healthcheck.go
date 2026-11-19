@@ -132,24 +132,30 @@ func (m *Manager) Prepare(catalog config.Catalog, factory func(upstreamhttp.Opti
 	return prepared, nil
 }
 
-func prepareProbe(provider config.Provider, factory func(upstreamhttp.Options) (upstreamhttp.Transport, error)) (preparedProbe, error) {
-	profile, err := upstreamhttp.ProfileForProvider(provider)
+func prepareProbe(p config.Provider, factory func(upstreamhttp.Options) (upstreamhttp.Transport, error)) (preparedProbe, error) {
+	if p.Healthcheck == nil {
+		return preparedProbe{}, errors.New("healthcheck is not configured")
+	}
+	options, err := upstreamhttp.OptionsForProvider(p, 0)
 	if err != nil {
 		return preparedProbe{}, err
 	}
-	provider.TLSProfile = profile
-	transport, err := factory(upstreamhttp.Options{Profile: profile, ResponseHeaderTimeout: 0})
+	if err := options.OutboundPolicy.Check(config.ResolveHealthcheckURL(provider.EffectiveBaseURL(p.Type, p.BaseURL), p.Healthcheck.Path)); err != nil {
+		return preparedProbe{}, fmt.Errorf("provider %q: healthcheck.path: %w", p.Name, err)
+	}
+	p.TLSProfile = options.Profile
+	transport, err := factory(options)
 	if err != nil {
 		if transport != nil {
 			transport.CloseIdleConnections()
 		}
-		return preparedProbe{}, fmt.Errorf("provider %q: healthcheck transport: %w", provider.Name, err)
+		return preparedProbe{}, fmt.Errorf("provider %q: healthcheck transport: %w", p.Name, err)
 	}
 	if transport == nil {
-		return preparedProbe{}, fmt.Errorf("provider %q: healthcheck transport factory returned no transport", provider.Name)
+		return preparedProbe{}, fmt.Errorf("provider %q: healthcheck transport factory returned no transport", p.Name)
 	}
 	retiring := upstreamhttp.NewRetiringTransport(transport)
-	return preparedProbe{provider: provider, fingerprint: fingerprint(provider), client: &http.Client{Transport: retiring, CheckRedirect: upstreamhttp.CheckRedirect}, transport: retiring}, nil
+	return preparedProbe{provider: p, fingerprint: fingerprint(p), client: &http.Client{Transport: retiring, CheckRedirect: upstreamhttp.CheckRedirect}, transport: retiring}, nil
 }
 
 func (p *Prepared) Close() {
@@ -261,6 +267,7 @@ func fingerprint(p config.Provider) string {
 	return strings.Join([]string{
 		string(p.Type),
 		p.TLSProfile.Identity(),
+		p.OutboundPolicy.Identity(),
 		provider.EffectiveBaseURL(p.Type, p.BaseURL),
 		hc.Path,
 		strings.ToUpper(hc.Method),

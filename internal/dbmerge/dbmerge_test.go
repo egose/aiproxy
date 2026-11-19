@@ -147,11 +147,11 @@ func TestMergeCatalogEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if p, err := st.GetProvider(context.Background(), provName); err == nil {
-			_ = st.DeleteProvider(context.Background(), p.ID)
-		}
 		if a, err := st.GetAlias(context.Background(), aliasName); err == nil {
 			_ = st.DeleteAlias(context.Background(), a.ID)
+		}
+		if p, err := st.GetProvider(context.Background(), provName); err == nil {
+			_ = st.DeleteProvider(context.Background(), p.ID)
 		}
 	})
 	if err := st.ReplaceProviderModels(ctx, providerRow.ID, []store.DBProviderModel{

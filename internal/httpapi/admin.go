@@ -46,6 +46,12 @@ func (h *Handler) handleAdmin(deps Dependencies, w http.ResponseWriter, r *http.
 		segments = strings.Split(path, "/")
 	}
 	switch {
+	case len(segments) == 1 && segments[0] == "serving-status" && r.Method == http.MethodGet:
+		if _, ok := h.requireAdmin(deps, w, r); ok {
+			w.Header().Set("Cache-Control", "no-store")
+			writeAdminJSON(w, http.StatusOK, h.ServingStatus())
+		}
+		return true
 	case len(segments) == 1 && segments[0] == "status" && r.Method == http.MethodGet:
 		dbOK := deps.AdminStore.Ping(r.Context()) == nil
 		oidcDisplay, oidcEnabledFlag := "", false

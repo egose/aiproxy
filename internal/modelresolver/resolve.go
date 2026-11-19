@@ -6,6 +6,7 @@ import (
 
 	"github.com/egose/aiproxy/internal/alias"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/identity"
 )
 
 // Resolve identifies a concrete provider/model pair from the public model
@@ -17,11 +18,12 @@ import (
 //
 // Unknown models return an error so the caller maps them to a 4xx response.
 type ResolveResult struct {
-	Kind     Kind
-	Provider config.Provider
-	Model    config.Model
-	Alias    config.Alias
-	Selector alias.Selector
+	Kind      Kind
+	Provider  config.Provider
+	Model     config.Model
+	Alias     config.Alias
+	Selector  alias.Selector
+	Workspace identity.WorkspaceScope
 }
 
 type Kind int
@@ -82,7 +84,7 @@ func selectorForAlias(name string, a config.Alias, previous *Resolver) alias.Sel
 }
 
 func aliasesShareSelectorState(a, b config.Alias) bool {
-	if a.Name != b.Name || a.Algorithm != b.Algorithm || len(a.Targets) != len(b.Targets) {
+	if a.Name != b.Name || a.Workspace != b.Workspace || a.Algorithm != b.Algorithm || len(a.Targets) != len(b.Targets) {
 		return false
 	}
 	for i := range a.Targets {
@@ -119,6 +121,29 @@ func (r *Resolver) Alias(name string) (config.Alias, bool) {
 
 func (r *Resolver) Model(providerName, modelName string) (config.Provider, config.Model, bool) {
 	return r.catalog.Model(providerName, modelName)
+}
+
+func (r *Resolver) ModelVisibleInWorkspace(publicModel string, workspace identity.WorkspaceScope) bool {
+	return r != nil && r.catalog.ModelVisibleInWorkspace(publicModel, workspace)
+}
+
+func (r *Resolver) ModelInWorkspace(providerName, modelName string, workspace identity.WorkspaceScope) (config.Provider, config.Model, bool) {
+	if !r.ModelVisibleInWorkspace(providerName+"/"+modelName, workspace) {
+		return config.Provider{}, config.Model{}, false
+	}
+	return r.Model(providerName, modelName)
+}
+
+func (r *Resolver) ResolveInWorkspace(publicModel string, workspace identity.WorkspaceScope) (ResolveResult, error) {
+	if !r.ModelVisibleInWorkspace(publicModel, workspace) {
+		return ResolveResult{}, ErrUnknownModel{Model: publicModel}
+	}
+	resolved, err := r.Resolve(publicModel)
+	if err != nil {
+		return ResolveResult{}, err
+	}
+	resolved.Workspace = workspace
+	return resolved, nil
 }
 
 func (r *Resolver) EncryptedReasoning(provider config.Provider, model config.Model, alias *config.Alias) config.EncryptedReasoningResolution {

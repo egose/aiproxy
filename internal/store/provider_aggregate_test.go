@@ -161,6 +161,11 @@ func TestProviderAggregateConcurrentCredentials(t *testing.T) {
 func TestAliasAggregateConflict(t *testing.T) {
 	st := openInviteTestStore(t)
 	ctx := context.Background()
+	p := DBProvider{Name: "p", Type: "openai", WorkspaceID: SystemWorkspaceID, Enabled: true}
+	if err := st.CreateProviderAggregate(ctx, &p, []DBProviderModel{{Name: "old"}, {Name: "stale"}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.DeleteProvider(ctx, p.ID) })
 	a := DBAlias{Name: uuid.NewString(), Algorithm: "round_robin", WorkspaceID: SystemWorkspaceID}
 	targets := []DBAliasTarget{{Provider: "p", Model: "old"}}
 	if err := st.CreateAlias(ctx, &a, targets); err != nil {
@@ -188,6 +193,11 @@ func TestAliasAggregateConflict(t *testing.T) {
 func TestAliasAggregateRollbackOutputs(t *testing.T) {
 	st := openInviteTestStore(t)
 	ctx := context.Background()
+	p := DBProvider{Name: "p", Type: "openai", WorkspaceID: SystemWorkspaceID, Enabled: true}
+	if err := st.CreateProviderAggregate(ctx, &p, []DBProviderModel{{Name: "old"}, {Name: "fault"}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.DeleteProvider(ctx, p.ID) })
 	a := DBAlias{Name: uuid.NewString(), Algorithm: "round_robin", WorkspaceID: SystemWorkspaceID}
 	targets := []DBAliasTarget{{Provider: "p", Model: "old"}, {Provider: "p", Model: "fault"}}
 	input, inputTargets := a, append([]DBAliasTarget(nil), targets...)

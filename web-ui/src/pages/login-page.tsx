@@ -75,6 +75,9 @@ export function LoginPage() {
                   </Link>
                 )}
               </div>
+              <Link className="text-sm underline" to="/invite">
+                Accept invitation
+              </Link>
             </form>
           </FormProvider>
 

@@ -21,6 +21,7 @@ import (
 	"github.com/egose/aiproxy/internal/config"
 	"github.com/egose/aiproxy/internal/deferred"
 	"github.com/egose/aiproxy/internal/guardrails"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/provider"
 	"github.com/egose/aiproxy/internal/store"
@@ -78,7 +79,7 @@ func (s *deferredQuotaStore) InsertSpendEntry(ctx context.Context, entry *store.
 func dynamicDeferredClient() auth.DynamicClient {
 	return auth.DynamicClient{
 		TokenHash: store.TokenHash("peer-token"), Name: "dynamic-name", Tenant: "dynamic-usage-tenant",
-		KeyID: uuid.New(), WorkspaceID: uuid.New(), OwnerUserID: uuid.New(),
+		KeyID: uuid.New(), Workspace: identity.InWorkspace(uuid.New()), OwnerUserID: uuid.New(),
 	}
 }
 
@@ -89,7 +90,24 @@ func configureDynamicDeferred(f *deferredHTTPFixture, clients []auth.DynamicClie
 	deps.Authorizer = auth.NewAuthorizerWithClients(f.rt.Auth, clients)
 	deps.MultiTenancy = config.MultiTenancy{Enabled: true}
 	deps.Quota = NewQuotaTrackerWithStore(quota)
+	f.rt.Catalog = withTestWorkspace(f.rt.Catalog, clients[0].Workspace)
+	deps.Catalog, deps.Resolver = f.rt.Catalog, modelresolver.NewWithPrevious(f.rt, deps.Resolver)
 	f.h.UpdateDependencies(deps)
+}
+
+func withTestWorkspace(catalog config.Catalog, workspace identity.WorkspaceScope) config.Catalog {
+	providers, aliases := catalog.Providers(), catalog.Aliases()
+	for i := range providers {
+		if _, scoped := providers[i].Workspace.ID(); !scoped {
+			providers[i].Workspace = workspace
+		}
+	}
+	for i := range aliases {
+		if _, scoped := aliases[i].Workspace.ID(); !scoped {
+			aliases[i].Workspace = workspace
+		}
+	}
+	return config.NewCatalog(providers, catalog.DisabledProviders(), aliases)
 }
 
 func TestDeferredSharedAdmissionPolicyParityAndRejectedDedup(t *testing.T) {
@@ -124,7 +142,8 @@ func TestDeferredSharedAdmissionPolicyParityAndRejectedDedup(t *testing.T) {
 				expected = "budget_exceeded"
 			case "tpm":
 				quota.model.TPMEffective = 10
-				f.h.current().Quota.recordTokens(client.WorkspaceID, quotaScope{typ: quotaScopeUser, id: client.OwnerUserID}, "p/m", 10)
+				workspaceID, _ := client.Workspace.ID()
+				f.h.current().Quota.recordTokens(workspaceID, quotaScope{typ: quotaScopeUser, id: client.OwnerUserID}, "p/m", 10)
 				expected = "tpm_exceeded"
 			case "quota_unavailable":
 				quota.failure = errors.New("private database detail")
@@ -193,7 +212,7 @@ func TestDeferredDynamicCanonicalOwnershipExpiryReplacementAndAnonymousControls(
 		t.Fatal("same display name replacement key inherited canonical ownership")
 	}
 	workspaceReplacement := client
-	workspaceReplacement.WorkspaceID = uuid.New()
+	workspaceReplacement.Workspace = identity.InWorkspace(uuid.New())
 	configureDynamicDeferred(f, []auth.DynamicClient{workspaceReplacement}, quota, time.Now)
 	w = f.call("GET", deferred.Prefix+"/jobs/"+receipt.ID, "peer-token", nil)
 	if w.Code != 404 {
@@ -224,10 +243,86 @@ func TestDeferredDynamicCanonicalOwnershipExpiryReplacementAndAnonymousControls(
 	}
 	release()
 	f.finish(t, receipt)
+	workspaceID, _ := client.Workspace.ID()
 	if quota.inserts.Load() != 1 || len(f.accounting.Events()) != 1 || f.accounting.Events()[0].Client != client.Name ||
-		f.accounting.Events()[0].Tenant != client.Tenant || quota.entries[0].KeyID != client.KeyID || quota.entries[0].WorkspaceID != client.WorkspaceID ||
+		f.accounting.Events()[0].Tenant != client.Tenant ||
+		f.accounting.Events()[0].CredentialID != identity.DatabaseKeyID(client.KeyID) || f.accounting.Events()[0].WorkspaceScope != client.Workspace ||
+		quota.entries[0].KeyID != client.KeyID || quota.entries[0].WorkspaceID != workspaceID ||
 		quota.deadlines[0].IsZero() || quota.entries[0].Tokens != 7 {
 		t.Fatal("accepted work lost its admitted execution identity or duplicated persistence")
+	}
+}
+
+func TestDeferredSystemKeyAndStaticPeerHaveDistinctOwners(t *testing.T) {
+	var calls atomic.Int32
+	f := newDeferredHTTPFixture(t, deferredAdapterFunc(func(context.Context, provider.Request) (*provider.Result, error) {
+		calls.Add(1)
+		return &provider.Result{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: []byte(`{}`)}, nil
+	}))
+	cfg := config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{
+		"peer": {Token: "file-peer", Tenant: "shared-label"},
+	}}
+	client := auth.DynamicClient{
+		TokenHash: store.TokenHash("peer-token"), Name: "peer", Tenant: "shared-label",
+		KeyID: uuid.New(), Workspace: identity.InWorkspace(store.SystemWorkspaceID),
+	}
+	f.rt.Catalog = withTestWorkspace(f.rt.Catalog, client.Workspace)
+	publish := func(client auth.DynamicClient) auth.Authenticator {
+		deps := f.h.current()
+		deps.MultiTenancy.Enabled = true
+		deps.Auth = auth.NewAuthenticatorWithClients(cfg, []auth.DynamicClient{client})
+		deps.Authorizer = auth.NewAuthorizerWithClients(cfg, []auth.DynamicClient{client})
+		deps.Catalog, deps.Resolver = f.rt.Catalog, modelresolver.New(f.rt)
+		f.h.UpdateDependencies(deps)
+		return deps.Auth
+	}
+	a := publish(client)
+	for _, tc := range []struct {
+		token string
+		owner deferred.Owner
+	}{
+		{"peer-token", deferred.Owner{Kind: "key", ID: client.KeyID.String(), Workspace: store.SystemWorkspaceID.String()}},
+		{"file-peer", deferred.Owner{Kind: "static", ID: "peer", Tenant: "shared-label"}},
+	} {
+		owner, err := deferredOwner(authenticatedTestPrincipal(t, a, tc.token))
+		if err != nil || owner != tc.owner {
+			t.Errorf("peer owner = %+v, %v; want %+v", owner, err, tc.owner)
+		}
+	}
+	for _, p := range []*auth.Principal{nil, {Name: "peer", Tenant: "shared-label"}} {
+		if _, err := deferredOwner(p); err != auth.ErrInvalidToken {
+			t.Errorf("absent or label-only principal: owner error = %v", err)
+		}
+	}
+	capabilities := deferred.Prefix + "/capabilities?model=p/m"
+	if w := f.call(http.MethodGet, capabilities, "file-peer", nil); w.Code != http.StatusOK {
+		t.Fatalf("static peer capability = %d %s", w.Code, w.Body.String())
+	}
+	request := deferredSubmitRequest(t, f.capability(t, "p/m"), []byte(`{"model":"p/m"}`))
+	receipt := f.submit(t, request)
+	f.finish(t, receipt)
+	job := deferred.Prefix + "/jobs/" + receipt.ID
+	if w := f.call(http.MethodGet, job, "file-peer", nil); w.Code != http.StatusNotFound || controlErrorType(t, w) != "job_unavailable" {
+		t.Fatalf("same-named static peer did not remain a separate owner: %d %s", w.Code, w.Body.String())
+	}
+	client.TokenHash, client.Name, client.Tenant = store.TokenHash("rotated-peer"), "renamed-peer", "other-label"
+	publish(client)
+	if w := f.call(http.MethodGet, job, "peer-token", nil); w.Code != http.StatusUnauthorized {
+		t.Fatalf("old bearer still accepted: %d %s", w.Code, w.Body.String())
+	}
+	if w := f.call(http.MethodGet, job, "rotated-peer", nil); w.Code != http.StatusOK {
+		t.Fatalf("rotated System peer lost ownership: %d %s", w.Code, w.Body.String())
+	}
+	w := f.call(http.MethodPost, deferred.Prefix+"/submit", "rotated-peer", submitWire(t, request))
+	var replay deferred.Receipt
+	if w.Code != http.StatusAccepted || deferred.DecodeControl(w.Body.Bytes(), &replay) != nil ||
+		replay.ID != receipt.ID || !replay.Replayed || calls.Load() != 1 || f.rate.calls.Load() != 1 {
+		t.Fatalf("rotation did not retain accepted System replay: %d %s", w.Code, w.Body.String())
+	}
+	client.Workspace = identity.WorkspaceScope{}
+	publish(client)
+	if w := f.call(http.MethodGet, capabilities, "rotated-peer", nil); w.Code != http.StatusUnauthorized || controlErrorType(t, w) != "auth_failed" {
+		t.Fatalf("unscoped database credential obtained peer capability: %d %s", w.Code, w.Body.String())
 	}
 }
 

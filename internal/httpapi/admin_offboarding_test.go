@@ -124,10 +124,10 @@ func TestOffboardingDirectAuthorityMatrix(t *testing.T) {
 					code               int
 				}{
 					{http.MethodGet, keyPath, "", http.StatusNotFound},
-					{http.MethodPut, keyPath, `{"description":"hijacked","tenant":"hijacked","allowed_models":["hijacked/model"],"user_ids":[],"team_ids":[]}`, http.StatusForbidden},
-					{http.MethodPost, keyPath + "/rotate", "", http.StatusForbidden},
-					{http.MethodPost, keyPath + "/revoke", "", http.StatusForbidden},
-					{http.MethodDelete, keyPath, "", http.StatusForbidden},
+					{http.MethodPut, keyPath, `{"description":"hijacked","tenant":"hijacked","allowed_models":["hijacked/model"],"user_ids":[],"team_ids":[]}`, http.StatusNotFound},
+					{http.MethodPost, keyPath + "/rotate", "", http.StatusNotFound},
+					{http.MethodPost, keyPath + "/revoke", "", http.StatusNotFound},
+					{http.MethodDelete, keyPath, "", http.StatusNotFound},
 					{http.MethodGet, quotaPath, "", http.StatusNotFound},
 					{http.MethodPut, quotaPath, `{"tpm":[{"model":"private/model","effective":3}]}`, http.StatusNotFound},
 				} {

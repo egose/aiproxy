@@ -1,6 +1,95 @@
 ## Unreleased
 
+### Clarifications
+
+- Workspace ownership/reporting does not provide a funded pool, hard spending
+  bound or payer assignment. Existing user/team quotas remain completion-based
+  admission thresholds; ownerless DB and static/anonymous traffic are outside
+  those owner quotas. Documented cache/stream overshoot, missing-data gaps and
+  late ledger-write failures after owner deletion without changing attribution.
+  See [spending contract](website/docs/operations.md#spending-contract-owner-quotas-not-funded-workspace-caps).
+
+### Compatibility Changes
+
+- Direct provider and alias updates/deletes and provider credential updates now
+  return the same `404` for hidden resources, missing names and valid workspace
+  selector mismatches. All supplied selectors must agree, including for global
+  administrators. Denied writes save nothing and do not request activation.
+  See [direct catalog writes](website/docs/api-reference.md#direct-catalog-writes).
+
+- Starting a Copilot device flow by provider name and updating, deleting,
+  rotating, or revoking an existing key now enforce current visibility and every
+  supplied workspace selector, including for global administrators. Hidden or
+  missing targets and valid selector mismatches return the same `404` without
+  changes or issuer calls. Offboarded callers now get `404` instead of `403` for
+  writes to keys they can no longer see; visible read-only shares still return
+  `403`. Offboarding does not revoke distributed bearers.
+
+- Database serving revisions now reconcile across replicas without notifications.
+  New DB-backed admission fails closed with `503 serving_stale` after 30 seconds
+  without confirmed freshness; `/readyz` fails while `/healthz` and trusted HCL
+  inference remain available. Key revocation refreshes independently of invalid
+  catalogs, and admitted work may finish. Local activation/revision headers and
+  admin serving status never claim cluster acknowledgement. File policy changes
+  still require rollout to every replica. See
+  [bounded replica convergence](website/docs/operations.md#bounded-replica-convergence).
+
+- OIDC now signs in existing accounts only, including previously redeemed
+  invitees; unknown identities are never provisioned, even with public password
+  registration enabled. Lookup errors fail closed and SSO preserves memberships
+  without automatic personal-workspace creation or System enrollment.
+
+- Account deletion now activates its personal-key cascade on the receiving
+  instance before returning success: new requests using those bearers receive
+  `401`. Team/other-user keys and spend history remain; workspace offboarding
+  and already-admitted work are unchanged. Confirmed deletions report
+  `X-Aiproxy-User-Deleted` and `X-Aiproxy-User-ID`, including activation failures
+  that require operational reload/restart rather than another DELETE.
+  See [local revocation recovery](website/docs/operations.md#account-deletion-and-local-revocation).
+- Database key issuance now commits the key, intended owner and user/team grants
+  in one authorized transaction; validation or persistence rejection requests no
+  reload and leaves no partial key. Creation/rotation report confirmed saves with
+  `X-Aiproxy-Key-Saved`, `X-Aiproxy-Key-ID` and `Location`, including post-commit
+  failures. Lost one-time bearers require reading and rotating the existing key,
+  never plaintext replay; duplicate creation names return `409` without changes.
+  See [key recovery](website/docs/operations.md#database-key-issuance-recovery).
+- Managed provider deletion, disabling, model removal and incompatible
+  inheritance/type/capability/protocol edits now reject before commit when they
+  would strand aliases or derivatives, including disabled derivatives and model
+  policy overlays. Retarget/delete referencers first; there is no cascade or
+  force-delete. Graph-affecting aggregate writes serialize in PostgreSQL, and
+  dependency rejection leaves rows/revisions/ready Copilot flows unchanged with
+  no reload. Valid saved edits can still fail runtime activation for unrelated
+  operational reasons. Provider DELETE now reports the durable saved header.
+  See [cleanup and preflight](website/docs/operations.md#managed-catalog-dependencies-and-cleanup).
+- DB bearer `GET /v1/billing/usage` now returns only the caller's immutable
+  key/workspace usage, not every key sharing an editable tenant/client label.
+  Label edits and rotation preserve own-key history; deletion/recreation does not
+  inherit it. HCL tenant reporting remains static/System-only, file-only anonymous
+  reporting stays unfiltered, and authorized global dashboard aggregates remain
+  available. Credential IDs are not emitted as billing JSON or new metrics labels.
+  The rolling, process-local usage/cost view is an estimate, not an invoice.
+- Tenant-managed providers and probes now default-deny outbound access and
+  require exact operator-approved public HTTPS origins in
+  `multi_tenancy.allowed_upstream_origins` (HCL/JSON). The destination workspace
+  policy also applies to global-administrator-authored tenant rows, inherited
+  settings, credential-only edits and old rows at activation. Host secret/
+  Copilot sidecar references, caller Authorization forwarding and cleartext
+  exceptions are System-only. Tenant-owned encrypted DB API keys and Copilot
+  DB credentials remain supported. New connections validate all DNS answers
+  and dial only public IPs, without environment proxies or weakened TLS;
+  same-origin redirects remain supported. Trusted System/HCL and file-only
+  behavior is unchanged. Run the candidate binary's
+  [`validate --check-db` preflight](website/docs/operations.md#tenant-provider-policy-upgrade)
+  and repair old tenant rows before upgrading; disabling them is not a repair.
+
 ### Features
+
+- Add signed-out `/invite` onboarding with public registration closed. Send a
+  one-time code separately for the recipient to paste on the clean `/invite`
+  page. Codes in URLs are ignored. Revoke and reissue pending invitations
+  previously shared as code-bearing links. See
+  [invitation onboarding](website/docs/api-reference.md#invitation-onboarding).
 
 - Add scoped `encrypted_reasoning` policies at root/provider/model/alias scope,
   with whole-block inheritance, explicit safe resets, derived model-policy

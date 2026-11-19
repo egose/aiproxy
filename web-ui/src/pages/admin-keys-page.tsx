@@ -19,18 +19,20 @@ import { Tabs, TabsList, TabsTrigger } from '@egose/shadcn-theme/components/ui/t
 import { ActionMenu } from '@egose/shadcn-theme/components/widgets/action-menu';
 import { useDialog, createTypedDialog } from '@egose/shadcn-theme/components/widgets/dialog-manager';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { DataTable, type ManagementColumnDef } from '../components/data-table';
 import { showSecret, useConfirm } from '../components/dialogs';
 import { KeyQuotaLine } from '../components/quota';
 import { SourceBadge } from '../components/source-badge';
-import { WorkspaceBadge, WorkspaceSelect } from '../components/workspace-select';
-import { useAdminKeys, useAdminWorkspace, useAdminWorkspaces, useWorkspaceMembers, useWorkspaceTeams } from '../hooks';
+import { WorkspaceBadge } from '../components/workspace-select';
+import { WorkspaceAccessNotice } from '../components/workspace-access';
+import { useAdminKeys, useCurrentWorkspace, useWorkspaceMembers, useWorkspaceTeams } from '../hooks';
 import { createAdminKey, deleteAdminKey, revokeAdminKey, rotateAdminKey, updateAdminKey } from '../services/admin';
 import { errorMessage } from '../services/dashboard';
 import type { AdminKey } from '../types';
+import { assertWorkspaceContext, resourceInWorkspace, type WorkspaceContext } from '../workspace-selection';
 
 const issueKeySchema = z.object({
   workspace_id: z.string().optional(),
@@ -56,139 +58,143 @@ const editKeySchema = z.object({
 type EditKeyForm = z.input<typeof editKeySchema>;
 type EditKeyValues = z.output<typeof editKeySchema>;
 
-const EditKeyDialog = createTypedDialog<{ key: AdminKey }, boolean>(({ open, args, onClose }) => {
-  const key = args.key;
-  const members = useWorkspaceMembers(key.workspace_id || null, true);
-  const teams = useWorkspaceTeams(key.workspace_id || null, true);
-  const [userIds, setUserIds] = useState<string[]>(key.user_ids ?? []);
-  const [teamIds, setTeamIds] = useState<string[]>(key.team_ids ?? []);
-  const [error, setError] = useState<string | null>(null);
+const EditKeyDialog = createTypedDialog<{ key: AdminKey; workspaceContext: WorkspaceContext }, boolean>(
+  ({ open, args, onClose }) => {
+    const key = args.key;
+    const members = useWorkspaceMembers(key.workspace_id || null, true, args.workspaceContext);
+    const teams = useWorkspaceTeams(key.workspace_id || null, true, args.workspaceContext);
+    const [userIds, setUserIds] = useState<string[]>(key.user_ids ?? []);
+    const [teamIds, setTeamIds] = useState<string[]>(key.team_ids ?? []);
+    const [error, setError] = useState<string | null>(null);
 
-  const form = useForm<EditKeyForm, unknown, EditKeyValues>({
-    resolver: zodResolver(editKeySchema),
-    defaultValues: {
-      description: key.description ?? '',
-      expires_at: key.expires_at ?? '',
-      tenant: key.tenant ?? '',
-      allowed_models: key.allowed_models ?? [],
-    },
-  });
+    const form = useForm<EditKeyForm, unknown, EditKeyValues>({
+      resolver: zodResolver(editKeySchema),
+      defaultValues: {
+        description: key.description ?? '',
+        expires_at: key.expires_at ?? '',
+        tenant: key.tenant ?? '',
+        allowed_models: key.allowed_models ?? [],
+      },
+    });
 
-  const toggle = (list: string[], id: string, set: (v: string[]) => void) => {
-    set(list.includes(id) ? list.filter((v) => v !== id) : [...list, id]);
-  };
+    const toggle = (list: string[], id: string, set: (v: string[]) => void) => {
+      set(list.includes(id) ? list.filter((v) => v !== id) : [...list, id]);
+    };
 
-  const saveMutation = useMutation({
-    mutationFn: async (values: EditKeyValues) =>
-      updateAdminKey(key.id, {
-        description: (values.description ?? '').trim(),
-        expires_at: (values.expires_at ?? '').trim(),
-        tenant: (values.tenant ?? '').trim(),
-        allowed_models: values.allowed_models ?? [],
-        user_ids: userIds,
-        team_ids: teamIds,
-      }),
-    onSuccess: () => onClose(true),
-    onError: (err) => setError(errorMessage(err)),
-  });
+    const saveMutation = useMutation({
+      mutationFn: async (values: EditKeyValues) =>
+        updateAdminKey(
+          key.id,
+          {
+            description: (values.description ?? '').trim(),
+            expires_at: (values.expires_at ?? '').trim(),
+            tenant: (values.tenant ?? '').trim(),
+            allowed_models: values.allowed_models ?? [],
+            user_ids: userIds,
+            team_ids: teamIds,
+          },
+          args.workspaceContext,
+        ),
+      onSuccess: () => onClose(true),
+      onError: (err) => setError(errorMessage(err)),
+    });
 
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Edit key {key.name}</DialogTitle>
-        </DialogHeader>
+    return (
+      <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit key {key.name}</DialogTitle>
+          </DialogHeader>
 
-        <FormProvider {...form}>
-          <form className="grid gap-4" onSubmit={form.handleSubmit((values) => saveMutation.mutate(values))}>
-            <HookFormTextInput<EditKeyForm> name="description" label="Description (optional)" />
+          <FormProvider {...form}>
+            <form className="grid gap-4" onSubmit={form.handleSubmit((values) => saveMutation.mutate(values))}>
+              <HookFormTextInput<EditKeyForm> name="description" label="Description (optional)" />
 
-            <HookFormTextInput<EditKeyForm>
-              name="expires_at"
-              label="Expiry (optional, RFC3339, empty = never)"
-              placeholder="2026-12-31T00:00:00Z"
-            />
+              <HookFormTextInput<EditKeyForm>
+                name="expires_at"
+                label="Expiry (optional, RFC3339, empty = never)"
+                placeholder="2026-12-31T00:00:00Z"
+              />
 
-            <HookFormTextInput<EditKeyForm> name="tenant" label="Tenant (optional)" />
+              <HookFormTextInput<EditKeyForm> name="tenant" label="Tenant (optional)" />
 
-            <HookFormTagPicker<EditKeyForm>
-              name="allowed_models"
-              label="Allowed models (empty = all)"
-              placeholder="Type a model and press Enter"
-            />
+              <HookFormTagPicker<EditKeyForm>
+                name="allowed_models"
+                label="Allowed models (empty = all)"
+                placeholder="Type a model and press Enter"
+              />
 
-            <div className="grid gap-2">
-              <Label>Visible to users (optional, empty = workspace admins only)</Label>
+              <div className="grid gap-2">
+                <Label>Visible to users (optional, empty = workspace admins only)</Label>
 
-              {(members.data ?? []).map((m) => (
-                <label key={m.user_id} className="flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={userIds.includes(m.user_id)}
-                    onCheckedChange={() => toggle(userIds, m.user_id, setUserIds)}
-                  />
-                  <span className="font-mono">{m.email || m.user_id}</span>
-                </label>
-              ))}
+                {(members.data ?? []).map((m) => (
+                  <label key={m.user_id} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={userIds.includes(m.user_id)}
+                      onCheckedChange={() => toggle(userIds, m.user_id, setUserIds)}
+                    />
+                    <span className="font-mono">{m.email || m.user_id}</span>
+                  </label>
+                ))}
 
-              {members.isLoading && (
-                <div className="text-sm text-slate-500">
-                  <Spinner size="small">Loading members...</Spinner>
-                </div>
+                {members.isLoading && (
+                  <div className="text-sm text-slate-500">
+                    <Spinner size="small">Loading members...</Spinner>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-2">
+                <Label>Visible to teams (optional)</Label>
+
+                {(teams.data ?? []).map((t) => (
+                  <label key={t.id} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={teamIds.includes(t.id)}
+                      onCheckedChange={() => toggle(teamIds, t.id, setTeamIds)}
+                    />
+                    <span className="font-mono">{t.name}</span>
+                  </label>
+                ))}
+
+                {teams.isLoading && (
+                  <div className="text-sm text-slate-500">
+                    <Spinner size="small">Loading teams...</Spinner>
+                  </div>
+                )}
+              </div>
+
+              {error && (
+                <Alert variant="danger">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
               )}
-            </div>
 
-            <div className="grid gap-2">
-              <Label>Visible to teams (optional)</Label>
+              <DialogFooter>
+                <Button appearance="outline" type="button" onClick={() => onClose(false)}>
+                  Cancel
+                </Button>
 
-              {(teams.data ?? []).map((t) => (
-                <label key={t.id} className="flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={teamIds.includes(t.id)}
-                    onCheckedChange={() => toggle(teamIds, t.id, setTeamIds)}
-                  />
-                  <span className="font-mono">{t.name}</span>
-                </label>
-              ))}
+                <Button variant="primary" type="submit" disabled={saveMutation.isPending}>
+                  {saveMutation.isPending ? 'Saving...' : 'Save changes'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </FormProvider>
+        </DialogContent>
+      </Dialog>
+    );
+  },
+);
 
-              {teams.isLoading && (
-                <div className="text-sm text-slate-500">
-                  <Spinner size="small">Loading teams...</Spinner>
-                </div>
-              )}
-            </div>
-
-            {error && (
-              <Alert variant="danger">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-
-            <DialogFooter>
-              <Button appearance="outline" type="button" onClick={() => onClose(false)}>
-                Cancel
-              </Button>
-
-              <Button variant="primary" type="submit" disabled={saveMutation.isPending}>
-                {saveMutation.isPending ? 'Saving...' : 'Save changes'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </FormProvider>
-      </DialogContent>
-    </Dialog>
-  );
-});
-
-const IssueKeyDialog = createTypedDialog<{ fixedWorkspaceId?: string; canAdminWorkspace?: boolean }, boolean>(
+const IssueKeyDialog = createTypedDialog<{ workspaceContext: WorkspaceContext; canAdminWorkspace?: boolean }, boolean>(
   ({ open, args, onClose }) => {
     const { openDialog } = useDialog();
-    const workspaces = useAdminWorkspaces(true);
-    const adminWorkspace = useAdminWorkspace();
     const [error, setError] = useState<string | null>(null);
     const form = useForm<IssueKeyForm, unknown, IssueKeyValues>({
       resolver: zodResolver(issueKeySchema),
       defaultValues: {
-        workspace_id: '',
+        workspace_id: args.workspaceContext.workspaceId,
         owner_type: 'personal',
         team_id: '',
         name: '',
@@ -198,11 +204,8 @@ const IssueKeyDialog = createTypedDialog<{ fixedWorkspaceId?: string; canAdminWo
         expires_at: '',
       },
     });
-    const effectiveWorkspaceId = args.fixedWorkspaceId ?? adminWorkspace.workspaceId;
-    useEffect(() => {
-      form.setValue('workspace_id', effectiveWorkspaceId);
-    }, [effectiveWorkspaceId, form]);
-    const manageableTeams = (useWorkspaceTeams(effectiveWorkspaceId || null, true).data ?? []).filter(
+    const effectiveWorkspaceId = args.workspaceContext.workspaceId;
+    const manageableTeams = (useWorkspaceTeams(effectiveWorkspaceId, true, args.workspaceContext).data ?? []).filter(
       (t) => args.canAdminWorkspace === true || t.my_role === 'admin',
     );
 
@@ -215,17 +218,17 @@ const IssueKeyDialog = createTypedDialog<{ fixedWorkspaceId?: string; canAdminWo
           description: (values.description ?? '').trim(),
           expires_at: (values.expires_at ?? '').trim(),
         };
-        const workspaceId = args.fixedWorkspaceId ?? values.workspace_id ?? '';
-        if (workspaceId !== '') body.workspace_id = workspaceId;
+        body.workspace_id = args.workspaceContext.workspaceId;
         if ((values.owner_type ?? 'personal') === 'team') {
           body.owner_type = 'team';
           body.owner_id = values.team_id ?? '';
         } else {
           body.owner_type = 'user';
         }
-        return createAdminKey(body);
+        return createAdminKey(body, args.workspaceContext);
       },
       onSuccess: async ({ token }) => {
+        assertWorkspaceContext(args.workspaceContext);
         setError(null);
         onClose(true);
         await showSecret(openDialog, {
@@ -236,8 +239,6 @@ const IssueKeyDialog = createTypedDialog<{ fixedWorkspaceId?: string; canAdminWo
       },
       onError: (err) => setError(errorMessage(err)),
     });
-
-    const workspaceId = form.watch('workspace_id');
 
     return (
       <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
@@ -252,15 +253,6 @@ const IssueKeyDialog = createTypedDialog<{ fixedWorkspaceId?: string; canAdminWo
                 <Alert variant="danger">
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
-              )}
-
-              {args.fixedWorkspaceId === undefined && (workspaces.data ?? []).length >= 2 && (
-                <WorkspaceSelect
-                  workspaces={workspaces.data}
-                  value={workspaceId ?? ''}
-                  onChange={(v) => form.setValue('workspace_id', v)}
-                  id="ak-workspace"
-                />
               )}
 
               <HookFormNativeSelect<IssueKeyForm>
@@ -325,6 +317,7 @@ export function AdminKeysPage({
   fixedWorkspaceId?: string;
   canAdminWorkspace?: boolean;
 }) {
+  const selection = useCurrentWorkspace();
   const keys = useAdminKeys();
   const queryClient = useQueryClient();
   const { openDialog } = useDialog();
@@ -335,19 +328,21 @@ export function AdminKeysPage({
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin', 'keys'] });
 
   const rowMutation = useMutation({
-    mutationFn: async (op: { kind: 'rotate' | 'revoke' | 'delete'; id: string }) => {
-      if (op.kind === 'rotate') return { kind: op.kind, token: await rotateAdminKey(op.id) } as const;
+    mutationFn: async (op: { kind: 'rotate' | 'revoke' | 'delete'; id: string; context: WorkspaceContext }) => {
+      if (op.kind === 'rotate')
+        return { kind: op.kind, token: await rotateAdminKey(op.id, op.context), context: op.context } as const;
       if (op.kind === 'revoke') {
-        await revokeAdminKey(op.id);
+        await revokeAdminKey(op.id, op.context);
         return { kind: op.kind } as const;
       }
-      await deleteAdminKey(op.id);
+      await deleteAdminKey(op.id, op.context);
       return { kind: op.kind } as const;
     },
     onSuccess: async (res) => {
       setError(null);
       await invalidate();
       if (res.kind === 'rotate') {
+        assertWorkspaceContext(res.context);
         await showSecret(openDialog, {
           title: 'Rotated token',
           description: 'Copy it now. It is shown only once.',
@@ -359,17 +354,22 @@ export function AdminKeysPage({
   });
 
   const askDelete = async (name: string, id: string) => {
+    const context = selection.context;
+    if (!context) return;
     const ok = await confirm({
       title: 'Delete key',
       description: `Delete inbound key "${name}"? This cannot be undone.`,
       confirmText: 'Delete',
     });
-    if (ok) rowMutation.mutate({ kind: 'delete', id });
+    if (ok) rowMutation.mutate({ kind: 'delete', id, context });
   };
 
   const openEdit = async (key: AdminKey) => {
     try {
-      const saved = await openDialog(EditKeyDialog, { key });
+      const context = selection.context;
+      assertWorkspaceContext(context);
+      if (!resourceInWorkspace(key, context.workspaceId)) return;
+      const saved = await openDialog(EditKeyDialog, { key, workspaceContext: context });
       if (saved) {
         setError(null);
         await invalidate();
@@ -379,12 +379,17 @@ export function AdminKeysPage({
     }
   };
 
-  const rows = keys.data ?? [];
+  const rows = (keys.data ?? []).filter(
+    (key) => selection.context && resourceInWorkspace(key, selection.context.workspaceId),
+  );
   const busy = rowMutation.isPending;
 
   const openCreate = async () => {
     try {
-      const created = await openDialog(IssueKeyDialog, { fixedWorkspaceId, canAdminWorkspace });
+      const context = selection.context;
+      assertWorkspaceContext(context);
+      if (fixedWorkspaceId && fixedWorkspaceId !== context.workspaceId) return;
+      const created = await openDialog(IssueKeyDialog, { workspaceContext: context, canAdminWorkspace });
       if (created) {
         setError(null);
         await invalidate();
@@ -475,15 +480,20 @@ export function AdminKeysPage({
         enableGlobalFilter: false,
         cell: ({ row }) => {
           const k = row.original;
-          if (k.source === 'database' && k.id && k.can_manage) {
+          if (k.source === 'database' && k.id && k.can_manage && selection.context) {
+            const context = selection.context;
             return (
               <ActionMenu
                 items={[
                   { label: 'Edit', onSelect: () => openEdit(k), disabled: busy },
-                  { label: 'Rotate', onSelect: () => rowMutation.mutate({ kind: 'rotate', id: k.id }), disabled: busy },
+                  {
+                    label: 'Rotate',
+                    onSelect: () => rowMutation.mutate({ kind: 'rotate', id: k.id, context }),
+                    disabled: busy,
+                  },
                   {
                     label: 'Revoke',
-                    onSelect: () => rowMutation.mutate({ kind: 'revoke', id: k.id }),
+                    onSelect: () => rowMutation.mutate({ kind: 'revoke', id: k.id, context }),
                     disabled: busy,
                     variant: 'destructive',
                   },
@@ -504,8 +514,10 @@ export function AdminKeysPage({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [busy],
+    [busy, selection.context?.workspaceId, selection.context?.generation],
   );
+
+  if (!selection.context) return <WorkspaceAccessNotice pending={selection.pending} error={selection.error} />;
 
   return (
     <div className="grid w-full gap-6 p-6">

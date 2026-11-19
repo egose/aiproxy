@@ -247,6 +247,12 @@ through `dedup_until_ms = submit_until_ms + execution_timeout_ms + retention_ms 
 finalization_timeout_ms`. Existing accepted entries can replay after ticket
 expiry; absent expired scopes or old generations dispatch nothing.
 
+With multi-tenancy, discovery and new admissions use the bearer credential's
+workspace. Accepted replays and job controls require the same admitted
+credential identity and workspace, and still check the current allowlist for
+the admitted public model. They do not use a replacement catalog to re-resolve
+accepted work. No workspace fields or headers are added to the peer protocol.
+
 Once submit begins, the caller freezes generation/ticket/key/prepared input.
 Lost acknowledgments retry only that qualified submit, never a fresh capability
 or key. `acceptance` is `not_accepted`, `accepted` or `indeterminate`; later
@@ -265,6 +271,7 @@ success or provider outcome.
 | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `400`                                                       | Invalid envelope, body, headers, model/receiver eligibility or query; `invalid_cursor` for invalid reads |
 | `401 auth_failed` / `403 forbidden`                         | Current inference authentication / admitted-model authorization failed; no result disclosure             |
+| `404 model_not_found`                                       | Model or alias unavailable to the caller, including missing names and out-of-workspace inventory         |
 | `404 job_unavailable`                                       | Unknown or different-owner job, including unknown DELETE                                                 |
 | `404 deferred_disabled`                                     | New deferred admission is disabled                                                                       |
 | `405 method_not_allowed`                                    | Recognized route, unsupported method; carries `Allow`                                                    |
@@ -303,14 +310,55 @@ When `bearer_static` auth is enabled, requests must send:
 Authorization: Bearer <token>
 ```
 
-When `none` auth is enabled, no inbound authentication is performed.
+When `none` auth is enabled and multi-tenancy is disabled, inference does not
+authenticate incoming requests. With multi-tenancy enabled, `none` is
+management-only. Model discovery, inference, billing usage, and the private
+deferred API return `401` without a valid inference bearer with workspace scope.
+Browser login JWTs and workspace-selection headers are not inference credentials.
 
-In `bearer_static` mode, individual clients may also be restricted with `allowed_models`.
+In `bearer_static` mode, configured clients and database keys each have their
+own `allowed_models` policy and request rate-limit bucket (if configured).
+Matching names or `tenant` labels do not share policy or capacity. No bearer
+header or token format changes are required.
+
+### Model Access With Multi-tenancy
+
+`GET /v1/models` lists only the models and aliases the key can use in its own
+workspace. An empty workspace returns `{"object":"list","data":[]}`. HCL
+providers, models and aliases are System-only, and HCL client tokens are scoped
+to System. A database key is scoped to its owning workspace regardless of the
+issuer's roles.
+
+`allowed_models` narrows the workspace by public name; omitting it or setting
+`[]` never grants access to another workspace. A name excluded by the allowlist
+returns `403 forbidden` regardless of whether it exists. Otherwise missing
+and out-of-scope names return the same `404 model_not_found`. An alias with a
+missing or out-of-workspace target is entirely unavailable: it is not listed,
+and no part of its pool is tried. A derived provider whose base is missing or
+belongs to another workspace is likewise unavailable. Allowing an alias does
+not require listing its target names in `allowed_models`, but cannot widen
+workspace scope.
 
 ### Invitation Onboarding
 
-With multi-tenancy enabled, `POST /_internal/admin/invites/accept` accepts a JSON
-body with `token` and `password` (at least eight characters). A successful `201`
+The signed-out browser route `/invite` works with `allow_public_registration =
+false`. Open the clean `/invite` page on your trusted deployment origin and
+paste the one-time code delivered separately by your inviter. Invitation codes
+are not read from URLs, including query strings and fragments. Treat previously
+shared code-bearing links as exposed: [revoke and reissue pending invitations](operations.md#dashboard-web-ui-and-multi-tenancy).
+Opening the form does not erase URLs that were already visited.
+
+The app keeps redemption form values in component memory, not in browser
+storage or React Query mutation/query state. The UI uses a `no-referrer` policy.
+Reloading or leaving the form discards the app's copy of the code. After
+acceptance, sign in with the invited email and new password. The portal selects
+the authorized invitation workspace, not System or a stale workspace saved by a
+different session.
+
+`POST /_internal/admin/invites` returns the one-time code as `token`. Deliver it
+separately over a trusted channel. With multi-tenancy enabled,
+`POST /_internal/admin/invites/accept` accepts the code only as `token` in the
+JSON body, with `password` (at least eight characters). A successful `201`
 creates the account, adds the invitation's workspace membership when present,
 and consumes the invitation in one database transaction. Email, system-admin
 authority, workspace, and workspace role come from the current stored
@@ -327,6 +375,20 @@ after the cause is resolved. Successful onboarding supports the normal login flo
 Acceptance also serializes with workspace deletion. If the stored invitation's
 workspace changes while acceptance is acquiring locks, it returns `400` with
 retry guidance and saves nothing; retry uses the current invitation scope.
+Invitation creation and acceptance responses use `Cache-Control: no-store`.
+
+### SSO Admission
+
+OIDC is **existing accounts only**, including invitees after redemption creates
+their accounts. A pending invitation alone is not admission.
+Verified IdP identities without an existing local account receive an error
+redirect, never a user, workspace or refresh session. This rule also applies
+when public password registration is enabled. A user lookup database error is
+distinct from a missing account and fails closed without database details.
+Disabled accounts cannot sign in. Returning accounts keep their memberships;
+SSO does not create personal workspaces or enroll tenant users into System.
+Existing configured admin-claim mapping still applies to admitted accounts;
+it is not authority to provision an unknown identity.
 
 ### Workspace Model
 
@@ -342,8 +404,75 @@ Kinds are `personal` and `organization`, plus a `system` flag:
   its owner, so teams and additional members are rejected.
 - `organization` (kind): created afterwards via `POST /_internal/admin/workspaces`
   for collaboration with members and teams.
-- `system`: the built-in workspace (`is_system`) that owns global config-backed
-  inventory. It is hidden from membership listings and cannot be deleted.
+- `system`: the built-in workspace (`is_system`) that owns config-backed
+  inventory. Global administrators and explicit System members can read that
+  inventory through the management API. This does not grant System
+  administration, and System cannot be deleted.
+
+The provider, alias, and key management lists and detail reads apply workspace
+access before returning metadata. `workspace_id` takes precedence over
+`X-Workspace-ID`; either can narrow access, not grant it. An inaccessible
+workspace or resource returns `404`. Workspace and invitation lists cover the
+caller's authorized workspaces; only global administrators see invitations
+without a workspace. A caller with no memberships and no global authority gets
+empty unfiltered lists. If a required membership lookup fails, these reads
+return `500` without inventory or database error details.
+
+### Workspace Catalog References
+
+Provider inheritance and every alias target must belong to the **destination
+workspace**, not merely a workspace the author can administer. This applies to
+provider/alias POST and PUT, including alias `providers`/`model` shorthand and
+omitted targets retained on update. A global administrator creating a tenant
+resource cannot use a System or another tenant's base or models. Config-backed
+providers, models and aliases belong only to System; a managed System resource
+may reference a compatible System base, subject to the ordinary inheritance
+restrictions.
+
+Missing and foreign references return the same controlled `400`, without
+foreign provider types, models, credentials or enabled-state metadata. Rejected
+edits persist nothing and request no activation.
+
+Provider and alias names remain globally unique, including disabled providers.
+Startup, reload and `validate --check-db` reject cross-workspace graphs and
+static/managed name collisions rather than overwriting a resource or changing
+its owner. Invalid legacy graph views fail without disclosing referenced
+inventory. See [upgrade and recovery](operations.md#workspace-isolation-upgrade-and-recovery).
+
+The portal honors a saved choice only when it is authorized. Otherwise global
+administrators start in System; tenant users prefer an authorized non-System
+workspace. Account and workspace resolution must complete before inventory
+queries run. No memberships means no tenant write target. Explicit System
+membership permits reads, not System administration; tenant membership roles
+are retained. Forms, reference pickers, key/credential requests and mutations
+use the selected workspace, and stale forms cannot retarget themselves after a
+workspace or account change.
+
+### Direct Catalog Writes
+
+This applies to `PUT` and `DELETE` on `/_internal/admin/providers/{name}` and
+`/_internal/admin/aliases/{name}`, and to
+`PUT /_internal/admin/providers/{name}/credential`. It also applies to
+[starting a Copilot device flow](#github-copilot-device-authorization) with
+`provider_name`.
+
+- Each supplied `workspace_id` query parameter, `X-Workspace-ID` header, and
+  `workspace_id` body field (provider/alias PUT and named Copilot starts) must
+  match the resource's workspace. Even global administrators cannot override a
+  conflicting selector. Omit unused selectors; empty or invalid IDs return
+  `400` (`invalid workspace id`). These operations cannot move a resource.
+- For valid requests, missing names, names outside the caller's visibility
+  (including hidden System HCL resources), and valid selector mismatches all
+  return `404`. The plain-text body is `provider not found` or `alias not found`,
+  followed by a newline. These denials save nothing, request no reload, and
+  include no save or activation headers.
+- A required membership lookup failure returns `500` (`could not resolve
+workspace visibility`) without database details. For visible targets in the
+  selected scope, write-role requirements are unchanged. Visible HCL resources
+  remain read-only (`400` for PUT and named Copilot starts, `403` for DELETE).
+
+Scoped GET selection, graph-reference validation and global name uniqueness on
+creation are unchanged.
 
 ### Workspace And Team Membership Changes
 
@@ -381,15 +510,110 @@ an ordinary member does not restore prior team roles or direct sharing grants.
 
 Current workspace membership is required for non-system key owners/team admins
 to read or manage keys and for team quota access, even with a known resource ID or
-an existing login token. After removal, key detail and team quota GET/PUT return
-`404`; key update/rotate/revoke/delete return `403`. System administrators retain
-access. Personal ownership is preserved and becomes usable again if the owner is
-re-added to the workspace. Already-admitted operations are not retroactively
-canceled.
+an existing login token. After removal, key detail, [direct key writes](#direct-key-writes),
+and team quota GET/PUT return `404`. System administrators retain access. Personal
+ownership is preserved and becomes usable again if the owner is re-added to the
+workspace. Already-admitted operations are not retroactively canceled.
 
 **API bearer credentials are separate:** removing management access does not
 automatically revoke, rotate or disable any key, including a personal key. To stop
 use of previously distributed API tokens, explicitly rotate or revoke the key.
+
+### Account Deletion And Personal Bearers
+
+`DELETE /_internal/admin/users/{user_id}` is a global-administrator action.
+Self-deletion and deleting the last enabled global administrator are rejected;
+workspace/team last-administrator checks remain transactional. Rejected deletion
+requests no activation and preserves the account and its keys.
+
+After confirmed deletion, the response sets `X-Aiproxy-User-Deleted: true`,
+`X-Aiproxy-User-ID: <user_id>` and `Cache-Control: no-store`, then requests local
+activation once. A `200` means new requests using personally owned keys removed
+by the account cascade now receive `401` on that instance. Team-owned and other
+users' keys retain their identity and workspace; historical spend remains, with
+the deleted user's ledger reference set to null. Already-admitted work can finish.
+Workspace membership removal still does not revoke bearers.
+
+A `500 saved but activation failed` with the deletion headers means the account
+and personal keys are deleted in PostgreSQL, but the previous runtime remains
+active and may still accept those bearers. Do not repeat account deletion to
+activate it: resolve the logged failure and reload/restart the receiving instance.
+DB changes also reconcile independently on other replicas, without cluster acknowledgement.
+
+`GET /_internal/admin/serving-status` requires live system-administrator authorization.
+It returns local `applied_revisions` (`catalog`, `keys`), `keys_confirmed_at`,
+`catalog_confirmed_at`, `keys_fresh`, `catalog_fresh`,
+`freshness_deadline_seconds` (30) and `cluster_acknowledged` (false).
+Mutation activation headers distinguish `X-Aiproxy-Local-Active` from
+`X-Aiproxy-Cluster-Acknowledged` (always false), alongside
+`X-Aiproxy-Applied-Catalog-Revision` and `X-Aiproxy-Applied-Key-Revision`.
+They do not replace durable-save headers or acknowledge other replicas.
+Expired DB-serving freshness returns `503 serving_stale` on new DB inference,
+listing/billing and applicable peer controls; `/readyz` becomes unavailable.
+Independent key refresh may revoke keys even when catalog activation fails.
+See [bounded replica convergence](operations.md#bounded-replica-convergence).
+After response loss, reconcile the account's presence through the authorized user
+list; missing headers do not establish rollback. This is not a cluster-wide
+revocation acknowledgement.
+
+### Atomic Key Issuance And Bearer Recovery
+
+`POST /_internal/admin/keys` commits the new key, its intended user/team owner,
+and both sharing lists in one authorized transaction. The owner's share is included
+automatically; repeated binding IDs are deduplicated. Current actor authority,
+owner eligibility and user/team workspace membership are rechecked under the
+membership locks, including concurrent offboarding, demotion and deletion. A
+non-administrator can issue only their own personal key or a key for a team they
+currently administer in that workspace; unowned keys require workspace or global
+administrator authority.
+
+Validation/authorization failures and key/grant persistence failures roll back
+the entire issuance and request no activation. Lost authority returns `403`,
+invalid bindings `400`, and storage failures a controlled `500` without database
+details. An existing key name returns `409`: read that key rather than issuing
+under a new name to recover a missing bearer.
+
+After confirmed commit, creation and rotation responses set
+`X-Aiproxy-Key-Saved: true`, `X-Aiproxy-Key-ID: <key_id>`,
+`Location: /_internal/admin/keys/<key_id>`, and `Cache-Control: no-store`.
+Activation is requested exactly once after commit, before creating the response
+view. Creation returns `201` with `key` and the one-time `token`; rotation returns
+`200` with a new one-time `token`. Only the bearer hash and display prefix are
+stored, never a recoverable plaintext bearer.
+
+Post-commit activation or creation-view failures return `500` with those saved
+headers and an explicit key ID and rotation recovery instruction. The complete
+issuance remains saved; an activation failure retains the previous runtime.
+Read the authorized key detail/list, resolve any activation problem, then use
+`POST /_internal/admin/keys/<key_id>/rotate` to obtain a new bearer. Do not repeat
+creation. Rotation preserves immutable credential identity, workspace, ownership
+and grants, and invalidates the prior bearer after successful local activation.
+If rotation itself commits but activation fails or its response is lost, rotate
+the same key again after resolving the problem; plaintext tokens are not replayed.
+
+A lost connection/response (including an indeterminate database commit result)
+does not prove rollback, and absence of saved headers alone is not proof either.
+Discover the key by its globally unique name through the authorized list before
+retrying. A duplicate-name rejection does not overwrite or rotate it. These are
+single-instance activation outcomes, not cluster-wide acknowledgements.
+
+### Direct Key Writes
+
+`PUT` and `DELETE` on `/_internal/admin/keys/{key_id}` and `POST` on its
+`/rotate` and `/revoke` subpaths require current visibility and key manager
+authority. Each supplied `workspace_id` query parameter and `X-Workspace-ID`
+header must match the key's workspace, even for global administrators. Omitting
+selectors preserves authorized access by ID. An empty or malformed selector
+returns `400` (`invalid workspace id`) before the key is looked up.
+
+Missing keys, keys no longer visible to the caller after offboarding, other
+hidden keys, and valid selector mismatches all return `404` with the plain-text
+body `key not found` followed by a newline. A visible read-only share still
+returns `403` (`key manager required`). Required membership lookups that fail
+return `500` (`could not resolve workspace visibility`); key or sharing lookup
+failures return `500` (`could not load key`). These denials save nothing, request
+no activation, and include no save or activation headers. Scoped GET continues
+to give the query selector precedence over the header.
 
 ### Key Policy And Sharing Updates
 
@@ -399,7 +623,8 @@ optional sharing replacement commit in one database transaction. The update keep
 the key's name, workspace, ownership, bearer credential, and enabled state.
 
 - Omitted or `null` fields preserve their current values. An empty `description`
-  or `tenant` clears it; `allowed_models: []` removes the model restriction.
+  or `tenant` clears it; `allowed_models: []` removes the explicit list
+  restriction, not the key's workspace restriction.
 - `expires_at` accepts RFC3339; an empty string clears expiry. A past timestamp
   is valid and makes the key stop authenticating after successful activation.
 - Supplying either non-null binding list replaces **both** user and team shares.
@@ -409,7 +634,8 @@ the key's name, workspace, ownership, bearer credential, and enabled state.
 Malformed UUIDs, nonmember users, and teams from another workspace return
 `400`; missing keys/teams return `404`. Current manager authority and grant
 eligibility are rechecked inside the transaction, serialized with workspace
-offboarding and membership role changes. Lost manager authority returns `403`.
+offboarding and membership role changes. If manager authority is lost after the
+initial access check, the transactional recheck still returns `403`.
 Rejected validation and binding-storage failures leave all fields and both sharing
 sets unchanged and do not request runtime activation. Storage failures return
 `500` (`could not update key`) without database details. A later reload cannot
@@ -428,18 +654,38 @@ failure that saved nothing.
 `GET /v1/billing/usage` returns aggregated in-process usage summaries over the
 proxy's rolling 24-hour accounting window.
 
-- When the authenticated client has a `tenant`, results are scoped to that tenant
-- Otherwise, results are scoped to the caller's tenantless client identity; a
-  same-named client in another tenant is excluded
-- This endpoint is local accounting only; it is not an external billing,
-  invoicing, or quota system
+Hosted requests require a workspace-scoped inference bearer.
 
-Rows are grouped by tenant, client, requested public model, operation, and HTTP
-status. The optional `estimated_cost_usd` uses current configured model prices.
+- A DB bearer sees only its own immutable key/workspace usage, even if its labels
+  overlap another key or HCL client, or its creator is a global administrator.
+  Neither a `tenant` label nor an allowed-model list grants workspace-wide reporting.
+- Label edits do not hide that key's earlier usage. Token rotation preserves its
+  identity; deleting and recreating a same-named key gives it a new identity and
+  no access to the deleted key's usage.
+- Trusted HCL clients with a `tenant` see same-tenant **static** clients in System
+  only, never DB keys with matching labels. Tenantless HCL clients see their own
+  tenantless static usage. These file-only reporting contracts remain supported.
+- File-only `auth.mode = "none"` retains unfiltered anonymous reporting. Hosted
+  inference never uses this anonymous view.
+- Workspace-wide or global reads require separate explicit management/operator
+  authority. This endpoint does not accept scope-broadening query/header selectors
+  or inherit browser roles from a key's creator.
+
+Rows are grouped first by internal credential identity and explicit workspace,
+then by the recorded tenant/client labels, requested public model, operation and
+HTTP status. Earlier and later labels can therefore appear as separate own-key
+rows. Credential/workspace identifiers are not emitted in these JSON summaries.
+Ordinary and deferred completions use the identity, scope and labels captured at
+admission, including after a reload, edit, rotation or deletion.
+
+The optional `estimated_cost_usd` uses current configured model prices.
 For an alias, it sums the recorded token usage of the targets actually used for
-that alias's row. Traffic through another alias or a direct model sharing those
-targets is excluded. Changing alias membership does not redistribute past traffic;
-changing model prices reprices the retained estimate.
+that alias's identity-scoped row. Other credentials/workspaces, another alias or
+a direct model sharing those targets are excluded. Changing alias membership does
+not redistribute past traffic; changing model prices reprices the retained estimate.
+Hosted estimates use only current prices from the caller's workspace. If a
+retained provider/model name is recreated in another workspace, its foreign
+price is not used; the retained own-key row remains visible without an estimate.
 
 The estimate is **omitted**, rather than returned as a partial sum, when any
 contributing target lacks pricing or when target attribution does not account for
@@ -455,8 +701,17 @@ that the upstream reported every billable token.
 Usage and cost share one rolling snapshot, using one-minute buckets retained while
 their start is at or after `now - 24h`. Consequently, events can expire up to one
 minute before their exact 24-hour age. Data is process-local and resets on restart.
+This is a rolling usage/cost **estimate, not an invoice**, cross-instance total,
+external billing service or quota system.
 The dashboard's lifetime provider/upstream counters and the durable quota spend
 ledger have separate lifetimes and pricing semantics.
+
+Database user/team quotas are completion-based admission thresholds, **not hard
+spending limits or funded workspace caps**. Ownerless DB keys and static/HCL or
+anonymous traffic have no DB owner quota. Workspace reporting does not assign
+a payer or grant workspace budget authority. See the
+[spending contract](operations.md#spending-contract-owner-quotas-not-funded-workspace-caps)
+for quota permissions, cache/stream overshoot, missing data and deletion gaps.
 
 ## Error Behavior
 
@@ -510,23 +765,62 @@ protection and preserves models/policies; it rejects policy/model edits rather
 than silently accepting them. Alias POST/PUT likewise save metadata and targets
 in one transaction, preserving omitted update fields.
 
-Provider PUT supports explicit `true`/`false` for `enabled`,
-`forward_user_agent`, `forward_authorization` and `allow_insecure_base_url`, `[]` to clear local `forward_headers`, and `""` to clear
+Provider PUT supports explicit `true`/`false` for `enabled` and
+`forward_user_agent` (also `forward_authorization` and `allow_insecure_base_url`
+in System), `[]` to clear local `forward_headers`, and `""` to clear
 `display_name`, `base_url`, `upstream_header_timeout`, `user_agent` or `extends`,
 subject to normal validation. Clearing an override restores applicable defaults;
 it does not disable root-level forwarding. Omit untouched `api_key`, `api_key_ref`
 and `credential_ref` fields to retain them. Supplied reference objects replace
 their path and key/name together; an empty path selects the default secrets path.
 
+### Tenant Provider Credential And Destination Policy
+
+For non-System database providers, create, update and credential-only PUT
+validate the **destination workspace's** effective configuration before
+credential decryption/file resolution or persistence. Global administrators
+authoring tenant rows do not bypass this policy. The operator-controlled
+`multi_tenancy.allowed_upstream_origins` config attribute approves exact public
+HTTPS upstream/probe origins; omission or `[]` denies all. It is not a writable
+provider/API field and does not grant access to a System or foreign resource or
+credential. See [configuration](configuration.md#tenant-managed-upstreams).
+
+- Tenant `api_key` values remain write-only and encrypted in the database.
+  Own Copilot database credentials still use the actor/workspace-bound device
+  authorization flow, never a raw-token or foreign-credential input.
+- Nonempty `api_key_ref` and sidecar `credential_ref` references are
+  System-only, including the flat reference fields on credential PUT.
+  `forward_authorization: true` and `allow_insecure_base_url: true` are likewise
+  forbidden in tenant workspaces, even with an approved origin.
+- Both effective upstream and health destinations must be approved; provider
+  defaults and inherited endpoints/healthchecks cannot bypass the check.
+  Disabled rows and old stored rows are checked too.
+- A forbidden edit returns `400`, has no `X-Aiproxy-Catalog-Saved` header,
+  requests no activation and leaves provider/models/credentials/revision
+  unchanged. Correcting legacy intent may explicitly clear both members of a
+  reference object and set reserved flags to `false`. Omission does not repair
+  a forbidden old setting.
+
+At connection time, tenant transports reject any non-public DNS answer and
+pin dialing to the validated IPs, ignore environment proxies and keep TLS
+verification and same-origin redirect limits. A syntactically approved
+hostname can still fail at runtime because DNS or certificate verification
+fails; successful save/preflight is not an upstream compatibility check.
+Trusted System/HCL behavior is unchanged. Run the candidate binary's
+[`validate --check-db` preflight](operations.md#tenant-provider-policy-upgrade)
+before upgrading.
+
 `allow_insecure_base_url` is a provider-only opt-in that accepts a non-loopback
 plain-HTTP `base_url` (see
 [plain-HTTP upstreams](configuration.md#allowing-plain-http-upstreams)).
-Omitting the flag preserves its current value on concrete providers. Enabling
+The opt-in is **System-only** for database providers. Omitting the flag preserves
+its current value on concrete providers. Enabling
 it does not relax any other URL validation. Derived provider POST/PUT rejects
 explicit `true` or `false`; setting a non-empty `extends` without declaring the
 flag clears any previously stored local opt-in so the base's value is inherited.
 
-`forward_authorization` is a provider-only opt-in for supported bearer-header
+`forward_authorization` is a System-only database provider opt-in for supported
+bearer-header
 upstreams, independent of inherited defaults. It cannot coexist with stored
 credentials. To switch an existing keyed provider, explicitly send
 `"api_key": ""` and `"api_key_ref": {"path": "", "key": ""}` along with
@@ -550,25 +844,51 @@ zero `expected_status`, `failure_threshold` and `success_threshold` reset to
 healthcheck block is unsupported**: omission, null, an empty object or an empty
 path does not delete it.
 
-Catalog POST/PUT outcomes:
+Catalog POST/PUT/DELETE outcomes:
 
-| Status                                                                           | Meaning and next step                                                                                                                                        |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `400`                                                                            | Validation rejected the edit; correct the input.                                                                                                             |
-| `409`                                                                            | The edited aggregate changed concurrently; read current state and retry.                                                                                     |
-| `500`, `could not save catalog edit`                                             | Storage failed before a successful commit; activation was not requested.                                                                                     |
-| `500`, `saved but activation failed`                                             | The complete edit is saved; the previous runtime remains active. Consult server logs, correct the activation problem, then reload.                           |
-| `500`, `saved but response view unavailable; read current state before retrying` | The edit is saved and activation was requested successfully, but its response view could not be read. Read current state rather than blindly repeating POST. |
-| `201` (POST), `200` (PUT)                                                        | Saved, activation requested successfully, and the response view is available.                                                                                |
+| Status                                                                                         | Meaning and next step                                                                                                                                        |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `400`                                                                                          | Validation rejected the edit; correct the input.                                                                                                             |
+| `400`, `catalog dependency conflict; retarget or remove dependent aliases and providers first` | The saved dependency graph would become invalid; retarget/delete referencers first. No rows changed and no activation was requested.                         |
+| `409`                                                                                          | The edited aggregate changed concurrently; read current state and retry.                                                                                     |
+| `500`, `could not save catalog edit`                                                           | Storage failed before a successful commit; activation was not requested.                                                                                     |
+| `500`, `saved but activation failed`                                                           | The complete edit is saved; the previous runtime remains active. Consult server logs, correct the activation problem, then reload.                           |
+| `500`, `saved but response view unavailable; read current state before retrying`               | The edit is saved and activation was requested successfully, but its response view could not be read. Read current state rather than blindly repeating POST. |
+| `201` (POST), `200` (PUT/DELETE)                                                               | Saved, activation requested successfully, and any response view is available.                                                                                |
 
 After each valid commit, activation is requested once before response-view reads.
 Operational failure responses omit storage and credential details. Persistence and
 runtime activation are separate: later reloads can activate a complete saved edit
-after an activation failure. The concurrency check protects the edited aggregate,
-not an atomic snapshot of every catalog dependency or another proxy's runtime.
-Successful provider POST/PUT and credential PUT responses carry
+after an activation failure. Aggregate revision checks reject stale edits; the
+workspace database lock also serializes graph-affecting provider/model/alias and
+Copilot aggregate writes. Dependency validation uses current saved definitions and
+effective static System bases, never stale managed runtime inventory.
+Successful provider POST/PUT/DELETE and credential PUT responses carry
 `X-Aiproxy-Catalog-Saved: true` once the database commit is durable, including
 when activation itself fails.
+
+### Managed Catalog Dependency Edits
+
+Provider deletion, disabling, model removal, concrete/derived transitions and
+type/capability/protocol changes cannot invalidate an alias or derivative.
+Every alias target must remain defined and enabled in the alias's destination
+workspace, with at least one capability shared by all targets. Derivatives must
+retain an enabled, concrete, same-type base; disabled derivatives still require
+that base and inherited models named by local policy overlays. Aliases targeting
+inherited models are checked when their base changes.
+
+Retarget or delete referencers before removing the referenced provider/model.
+There is no force-delete/cascade or automatic retargeting. Dependency errors are
+generic and reveal no dependent names or counts. Rejection preserves all aggregate
+rows, revisions and credentials, requests no activation, has no saved header, and
+does not consume a ready Copilot device flow.
+
+Only affected dependencies are validated during a save. Unrelated corrupted rows
+remain repairable; they can still cause full runtime activation to fail **after a
+valid commit**, which retains the saved-but-activation-failed contract above.
+Static file edits and direct SQL are not covered by managed-write serialization.
+This does not acknowledge activation on any other instance. See
+[cleanup and upgrade guidance](operations.md#managed-catalog-dependencies-and-cleanup).
 
 ### Encrypted Reasoning Policy Intent
 
@@ -728,17 +1048,29 @@ a fixed issuer (`https://github.com/login/device/code`,
 fixed device-verification page, then stores the result as an encrypted database
 credential. Saving the provider consumes the ready authorization exactly once and
 activates it through the normal catalog reload path. The CLI sidecar login remains
-available as an alternative.
+available for trusted System/HCL workflows, not tenant-managed providers.
 
 - `POST /_internal/admin/copilot-device-flows` starts a flow with
-  `{client_id, workspace_id?, provider_name?}`. The workspace is resolved with the
-  normal provider write-workspace policy; `provider_name` pins an edit target and must
-  belong to the same workspace. Responses are `201` flow-status bodies.
+  `{client_id, workspace_id?, provider_name?}`. With `provider_name`, the
+  [direct catalog write rules](#direct-catalog-writes) check visibility, every
+  supplied workspace selector, and write authority before loading the full
+  provider or checking its type and policy. Missing, hidden, and selector-mismatched
+  names return the same `404` (`provider not found`). Visible HCL providers cannot
+  be edited here. A visible tenant provider requires workspace admin authority;
+  an explicit non-global System member cannot start a flow for a System DB
+  provider (`404`, `workspace not found`). A provider-bound tenant edit must
+  also pass effective provider policy. These checks run before saving a flow,
+  recording its start for throttling, or contacting the issuer. Standalone
+  authorization (without `provider_name`) keeps the normal provider write-workspace
+  selection and uses the same fixed issuer. Provider destination approval is
+  checked before its credential can be saved. Successful starts return `201`
+  flow-status bodies.
 - `GET /_internal/admin/copilot-device-flows/{id}` returns the sanitized flow
   status without any upstream calls.
 - `POST /_internal/admin/copilot-device-flows/{id}/poll` performs at most one
   upstream token request when the stored schedule and lease permit; early or
   competing calls return the pending status and delay with no extra upstream call.
+  Provider-bound tenant policy is checked before claiming/decrypting the flow.
 - `DELETE /_internal/admin/copilot-device-flows/{id}` cancels a live flow and is
   idempotent for terminal flows.
 
@@ -756,11 +1088,14 @@ Provider `POST`/`PUT` accepts `copilot_device_flow_id` (flow ID only, never a ra
 credential) instead of a credential reference. Edit saves that consume a flow
 require `expected_updated_at`, the opaque revision from the provider view
 (`updated_at`). A stale revision returns `409` and preserves the ready flow for
-an explicit reread and retry. Provider views expose
+an explicit reread and retry. The ready flow's workspace and create/edit provider
+binding are checked before decrypting its credential; an approved tenant
+destination cannot consume a System or foreign-workspace flow, even if a global
+author initiated it. Provider views expose
 `copilot_credential_source` (`database`, `sidecar`, or `none` alongside the
 existing `has_credential`), and `GET /_internal/admin/provider-types` advertises
 `supports_device_authorization` for `github-copilot`. The legacy credential
-endpoint switches sources the same way (a nonempty sidecar reference clears the
+endpoint switches sources in System the same way (a nonempty sidecar reference clears the
 database ciphertext) but never consumes flows. **Hermetically verified; live
 GitHub compatibility unverified.**
 

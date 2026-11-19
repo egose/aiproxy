@@ -40,10 +40,10 @@ func TestAdminCreateAliasValidation(t *testing.T) {
 		}, "must be set together"},
 		{"unknown provider", func(b map[string]interface{}) {
 			b["targets"] = []interface{}{map[string]interface{}{"provider": "ghost", "model": "m"}}
-		}, `target provider "ghost" is not defined`},
+		}, "target is not defined in the destination workspace"},
 		{"unknown model", func(b map[string]interface{}) {
 			b["targets"] = []interface{}{map[string]interface{}{"provider": "openai", "model": "ghost"}}
-		}, "is not defined on provider"},
+		}, "target is not defined in the destination workspace"},
 		{"dup targets", func(b map[string]interface{}) {
 			b["targets"] = []interface{}{
 				map[string]interface{}{"provider": "openai", "model": "gpt-4o-mini"},

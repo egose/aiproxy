@@ -1,7 +1,15 @@
 import { useQuery as usePublicQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { useSensitiveQuery as useQuery } from './sensitive-query';
 import { useSnapshot as useTokenSnapshot } from 'valtio';
-import { adminWorkspaceStore, adminStore, dashboardStore } from './store';
+import { adminWorkspaceStore, adminStore, dashboardStore, setAdminWorkspaceId } from './store';
+import { authLifecycle } from './auth-lifecycle';
+import {
+  assertWorkspaceContext,
+  canManageWorkspaceResources,
+  selectWorkspace,
+  type WorkspaceContext,
+} from './workspace-selection';
 import {
   fetchAdminAliases,
   fetchAdminInvites,
@@ -127,21 +135,41 @@ export function useAdminWorkspace() {
   return useTokenSnapshot(adminWorkspaceStore);
 }
 
-export function useCurrentWorkspace() {
-  const workspaces = useAdminWorkspaces(true);
+export function useCurrentWorkspace(enabled = true) {
+  const session = useAdminSession();
+  const me = useAdminMe(enabled);
+  const workspaces = useAdminWorkspaces(enabled);
   const { workspaceId } = useAdminWorkspace();
-  const list = workspaces.data ?? [];
-  const workspace = list.some((o) => o.id === workspaceId) ? list.find((o) => o.id === workspaceId) : list[0];
-  return { workspace, workspaces };
+  const lifecycle = useTokenSnapshot(authLifecycle);
+  const authorized = enabled && !!session.accessToken && me.isSuccess && workspaces.isSuccess;
+  const choice = authorized ? selectWorkspace(workspaces.data, workspaceId, me.data.is_admin) : undefined;
+  const choiceId = choice?.id ?? '';
+  useEffect(() => {
+    if (authorized && choiceId !== workspaceId) setAdminWorkspaceId(choiceId);
+  }, [authorized, choiceId, workspaceId]);
+  const resolved = authorized && choiceId === workspaceId;
+  const workspace = resolved ? choice : undefined;
+  const context: WorkspaceContext | undefined = workspace
+    ? { workspaceId: workspace.id, generation: lifecycle.generation, session: lifecycle.session }
+    : undefined;
+  return {
+    workspace,
+    workspaces,
+    me,
+    context,
+    pending: enabled && !!session.accessToken && (me.isPending || workspaces.isPending || (authorized && !resolved)),
+    error: me.error ?? workspaces.error,
+    canManage: canManageWorkspaceResources(workspace, me.data?.is_admin === true),
+  };
 }
 
 export function useAdminProviders(enabled = true) {
   const session = useAdminSession();
-  const workspaceId = useAdminWorkspace().workspaceId;
+  const { context } = useCurrentWorkspace(enabled);
   return useQuery({
-    queryKey: ['admin', 'providers', session.accessToken ? 'authed' : 'anon', workspaceId || 'all'],
-    queryFn: fetchAdminProviders,
-    enabled: enabled && !!session.accessToken,
+    queryKey: ['admin', 'providers', session.accessToken ? 'authed' : 'anon', context?.workspaceId ?? 'unresolved'],
+    queryFn: () => fetchAdminProviders(context!),
+    enabled: enabled && !!context,
     retry: false,
   });
 }
@@ -159,22 +187,22 @@ export function useProviderTypes(enabled = true) {
 
 export function useAdminAliases(enabled = true) {
   const session = useAdminSession();
-  const workspaceId = useAdminWorkspace().workspaceId;
+  const { context } = useCurrentWorkspace(enabled);
   return useQuery({
-    queryKey: ['admin', 'aliases', session.accessToken ? 'authed' : 'anon', workspaceId || 'all'],
-    queryFn: fetchAdminAliases,
-    enabled: enabled && !!session.accessToken,
+    queryKey: ['admin', 'aliases', session.accessToken ? 'authed' : 'anon', context?.workspaceId ?? 'unresolved'],
+    queryFn: () => fetchAdminAliases(context!),
+    enabled: enabled && !!context,
     retry: false,
   });
 }
 
 export function useAdminKeys(enabled = true) {
   const session = useAdminSession();
-  const workspaceId = useAdminWorkspace().workspaceId;
+  const { context } = useCurrentWorkspace(enabled);
   return useQuery({
-    queryKey: ['admin', 'keys', session.accessToken ? 'authed' : 'anon', workspaceId || 'all'],
-    queryFn: fetchAdminKeys,
-    enabled: enabled && !!session.accessToken,
+    queryKey: ['admin', 'keys', session.accessToken ? 'authed' : 'anon', context?.workspaceId ?? 'unresolved'],
+    queryFn: () => fetchAdminKeys(context!),
+    enabled: enabled && !!context,
     retry: false,
   });
 }
@@ -219,22 +247,36 @@ export function useAdminWorkspaces(enabled = true) {
   });
 }
 
-export function useWorkspaceTeams(workspaceId: string | null, enabled = true) {
+export function useWorkspaceTeams(workspaceId: string | null, enabled = true, context?: WorkspaceContext) {
   const session = useAdminSession();
+  const lifecycle = useTokenSnapshot(authLifecycle);
+  const saved = useAdminWorkspace();
+  const current =
+    !context || (context.generation === lifecycle.generation && context.workspaceId === saved.workspaceId);
   return useQuery({
     queryKey: ['admin', 'workspaces', workspaceId, 'teams', session.accessToken ? 'authed' : 'anon'],
-    queryFn: () => fetchWorkspaceTeams(workspaceId ?? ''),
-    enabled: enabled && !!session.accessToken && !!workspaceId,
+    queryFn: () => {
+      if (context) assertWorkspaceContext(context);
+      return fetchWorkspaceTeams(workspaceId ?? '');
+    },
+    enabled: enabled && !!session.accessToken && !!workspaceId && current,
     retry: false,
   });
 }
 
-export function useWorkspaceMembers(workspaceId: string | null, enabled = true) {
+export function useWorkspaceMembers(workspaceId: string | null, enabled = true, context?: WorkspaceContext) {
   const session = useAdminSession();
+  const lifecycle = useTokenSnapshot(authLifecycle);
+  const saved = useAdminWorkspace();
+  const current =
+    !context || (context.generation === lifecycle.generation && context.workspaceId === saved.workspaceId);
   return useQuery({
     queryKey: ['admin', 'workspaces', workspaceId, 'members', session.accessToken ? 'authed' : 'anon'],
-    queryFn: () => fetchWorkspaceMembers(workspaceId ?? ''),
-    enabled: enabled && !!session.accessToken && !!workspaceId,
+    queryFn: () => {
+      if (context) assertWorkspaceContext(context);
+      return fetchWorkspaceMembers(workspaceId ?? '');
+    },
+    enabled: enabled && !!session.accessToken && !!workspaceId && current,
     retry: false,
   });
 }

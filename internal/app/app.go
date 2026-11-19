@@ -34,6 +34,7 @@ import (
 	"github.com/egose/aiproxy/internal/store"
 	"github.com/egose/aiproxy/internal/tlsprofile"
 	"github.com/egose/aiproxy/internal/upstreamhttp"
+	"github.com/egose/aiproxy/internal/upstreampolicy"
 )
 
 const (
@@ -87,6 +88,8 @@ type App struct {
 	deferredStore         *deferred.Store
 	runtimeResources      *httpapi.RuntimeResources
 	resourceManager       *runtimeResourceManager
+	reconcileCancel       context.CancelFunc
+	reconcileDone         chan struct{}
 }
 
 type candidateResources struct {
@@ -167,6 +170,7 @@ func Build(ctx context.Context, opts BuildOptions) (_ *App, err error) {
 	}
 	candidate.store = adminStore
 	var dynKeys []auth.DynamicClient
+	var servingSnapshot dbmerge.Merged
 	if adminStore != nil {
 		merged, err := dbmerge.MergeCatalog(ctx, adminStore, rt)
 		if err != nil {
@@ -183,6 +187,7 @@ func Build(ctx context.Context, opts BuildOptions) (_ *App, err error) {
 		}
 		candidate.probes = preparedProbes
 		dynKeys = merged.Keys
+		servingSnapshot = merged
 	}
 	dashboardTokenMinted, _, err := ensureDashboardToken(rt, config.Dashboard{}, false)
 	if err != nil {
@@ -248,6 +253,9 @@ func Build(ctx context.Context, opts BuildOptions) (_ *App, err error) {
 	deps.Quota = app.quotaTracker
 	deps.RequestReload = app.Reload
 	deps.CopilotDeviceClient = app.copilotDeviceClient
+	deps.AppliedServingRevisions = func() store.ServingRevisions { return app.handler.SnapshotDependencies().ServingRevisions }
+	deps.ServingRevisions = servingSnapshot.Revisions
+	deps.KeysConfirmedAt, deps.CatalogConfirmedAt = servingSnapshot.ConfirmedAt, servingSnapshot.ConfirmedAt
 	app.handler = httpapi.NewHandler(deps)
 	server := &http.Server{
 		Handler: app.handler,
@@ -259,7 +267,18 @@ func Build(ctx context.Context, opts BuildOptions) (_ *App, err error) {
 		return nil, err
 	}
 	if adminStore != nil {
+		revisions, err := adminStore.ServingRevisions(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if revisions != servingSnapshot.Revisions {
+			return nil, dbmerge.ErrSnapshotChanged
+		}
+		if time.Since(servingSnapshot.ConfirmedAt) >= httpapi.ServingFreshnessDeadline {
+			return nil, httpapi.ErrServingStale
+		}
 		app.copilotCleanup = startCopilotFlowCleanup(adminStore, logger)
+		app.startServingReconciliation()
 	}
 	return app, nil
 }
@@ -381,6 +400,11 @@ func (a *App) Reload() (err error) {
 	if a.closed {
 		return errors.New("app is closed")
 	}
+	if a.adminStore != nil {
+		if err := a.refreshServingKeys(); err != nil {
+			return fmt.Errorf("database keys: %w", err)
+		}
+	}
 	var candidate candidateResources
 	defer candidate.cleanup(&err)
 
@@ -389,13 +413,17 @@ func (a *App) Reload() (err error) {
 		return fmt.Errorf("config: %w", err)
 	}
 	var dynKeys []auth.DynamicClient
+	var servingSnapshot dbmerge.Merged
 	if a.adminStore != nil {
-		merged, err := dbmerge.MergeCatalog(context.Background(), a.adminStore, rt)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		merged, err := dbmerge.MergeCatalog(ctx, a.adminStore, rt)
+		cancel()
 		if err != nil {
 			return fmt.Errorf("database catalog: %w", err)
 		}
 		rt.Catalog = config.NewCatalog(merged.Providers, merged.DisabledProviders, merged.Aliases)
 		dynKeys = merged.Keys
+		servingSnapshot = merged
 	}
 
 	a.mu.RLock()
@@ -495,8 +523,23 @@ func (a *App) Reload() (err error) {
 	a.mu.RUnlock()
 	oldClients := a.clients
 	oldResources := a.runtimeResources
+	nextQuota := a.handler.SnapshotDependencies().Quota
 	a.mu.Lock()
 	activate := func() error {
+		if a.adminStore != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			revisions, err := a.adminStore.ServingRevisions(ctx)
+			cancel()
+			if err != nil {
+				return err
+			}
+			if revisions != servingSnapshot.Revisions {
+				return dbmerge.ErrSnapshotChanged
+			}
+			if time.Since(servingSnapshot.ConfirmedAt) >= httpapi.ServingFreshnessDeadline {
+				return httpapi.ErrServingStale
+			}
+		}
 		dashboardTokenMinted, dashboardTokenPublished, err := ensureDashboardToken(rt, currentDashboard, true)
 		if err != nil {
 			return fmt.Errorf("dashboard token: %w", err)
@@ -512,6 +555,10 @@ func (a *App) Reload() (err error) {
 		deps.Quota = a.quotaTracker
 		deps.RequestReload = a.Reload
 		deps.CopilotDeviceClient = copilotDeviceClient
+		deps.AppliedServingRevisions = func() store.ServingRevisions { return a.handler.SnapshotDependencies().ServingRevisions }
+		deps.ServingRevisions = servingSnapshot.Revisions
+		deps.KeysConfirmedAt, deps.CatalogConfirmedAt = servingSnapshot.ConfirmedAt, servingSnapshot.ConfirmedAt
+		deps.Quota = nextQuota
 		a.Config = rt
 		a.resolver = nextResolver
 		a.clients = nextClients
@@ -565,6 +612,9 @@ func (a *App) BeginShutdown() {
 	if a == nil {
 		return
 	}
+	if a.reconcileCancel != nil {
+		a.reconcileCancel()
+	}
 	a.reloadMu.Lock()
 	defer a.reloadMu.Unlock()
 	a.closed = true
@@ -591,6 +641,9 @@ func (a *App) CloseContext(ctx context.Context) error {
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if a.reconcileCancel != nil {
+		a.reconcileCancel()
 	}
 	a.closeOnce.Do(func() {
 		a.reloadMu.Lock()
@@ -889,6 +942,7 @@ type upstreamClientPool struct {
 type upstreamClientKey struct {
 	timeout time.Duration
 	profile string
+	policy  string
 }
 
 func openAdminStore(ctx context.Context, rt *config.Runtime) (*store.Store, error) {
@@ -945,30 +999,38 @@ func prepareUpstreamClientPool(catalog config.Catalog, factory func(upstreamhttp
 
 func (p *upstreamClientPool) prepareProviders(catalog config.Catalog) error {
 	for _, provider := range catalog.Providers() {
-		profile, err := upstreamhttp.ProfileForProvider(provider)
+		options, err := upstreamhttp.OptionsForProvider(provider, provider.UpstreamHeaderTimeout)
 		if err != nil {
 			return fmt.Errorf("upstream transports: %w", err)
 		}
-		if err := p.prepare(provider.UpstreamHeaderTimeout, profile); err != nil {
+		if err := p.prepare(provider.UpstreamHeaderTimeout, options.Profile, options.OutboundPolicy); err != nil {
 			return fmt.Errorf("provider %q: %w", provider.Name, err)
 		}
 	}
 	return nil
 }
 
-func upstreamKey(timeout time.Duration, profile tlsprofile.Profile) upstreamClientKey {
+func upstreamKey(timeout time.Duration, profile tlsprofile.Profile, policies ...*upstreampolicy.Policy) upstreamClientKey {
 	if timeout <= 0 {
 		timeout = config.DefaultUpstreamHeaderTimeout
 	}
-	return upstreamClientKey{timeout: timeout, profile: profile.Identity()}
+	var policy *upstreampolicy.Policy
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
+	return upstreamClientKey{timeout: timeout, profile: profile.Identity(), policy: policy.Identity()}
 }
 
-func (p *upstreamClientPool) prepare(timeout time.Duration, profile tlsprofile.Profile) error {
-	key := upstreamKey(timeout, profile)
+func (p *upstreamClientPool) prepare(timeout time.Duration, profile tlsprofile.Profile, policies ...*upstreampolicy.Policy) error {
+	var policy *upstreampolicy.Policy
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
+	key := upstreamKey(timeout, profile, policy)
 	if p.clients[key] != nil {
 		return nil
 	}
-	transport, err := p.factory(upstreamhttp.Options{Profile: profile, ResponseHeaderTimeout: key.timeout})
+	transport, err := p.factory(upstreamhttp.Options{Profile: profile, ResponseHeaderTimeout: key.timeout, OutboundPolicy: policy})
 	if err != nil {
 		if transport != nil {
 			transport.CloseIdleConnections()
@@ -983,7 +1045,11 @@ func (p *upstreamClientPool) prepare(timeout time.Duration, profile tlsprofile.P
 }
 
 func (p *upstreamClientPool) ClientForProvider(provider config.Provider) *http.Client {
-	if client := p.clients[upstreamKey(provider.UpstreamHeaderTimeout, provider.TLSProfile)]; client != nil {
+	options, err := upstreamhttp.OptionsForProvider(provider, provider.UpstreamHeaderTimeout)
+	if err != nil {
+		return p.unavailable
+	}
+	if client := p.clients[upstreamKey(provider.UpstreamHeaderTimeout, options.Profile, options.OutboundPolicy)]; client != nil {
 		return client
 	}
 	return p.unavailable

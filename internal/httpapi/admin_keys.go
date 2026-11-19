@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -80,13 +81,13 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 	if len(rest) == 0 || rest[0] == "" {
 		switch r.Method {
 		case http.MethodGet:
-			filterWorkspace, ok := h.resolveWorkspaceFilter(deps, w, r, claims, r.URL.Query().Get("workspace_id"))
+			visibility, ok := h.resolveWorkspaceFilter(deps, w, r, claims)
 			if !ok {
 				return
 			}
-			views, err := h.mergedKeyViews(ctx, deps, r, claims, filterWorkspace)
+			views, err := h.mergedKeyViews(ctx, deps, claims, visibility)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				http.Error(w, "could not list keys", http.StatusInternalServerError)
 				return
 			}
 			writeAdminJSON(w, http.StatusOK, map[string]interface{}{"keys": views})
@@ -132,21 +133,31 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 			if !ok {
 				return
 			}
-			view, token, err := h.createDBKey(ctx, deps, workspace, req.Name, req.Tenant, req.AllowedModels, req.Description, expires, owner)
+			view, token, err := h.createDBKey(ctx, deps, workspace, req.Name, req.Tenant, req.AllowedModels, req.Description, expires, owner, mustParseUUID(claims.Subject), boundUsers, boundTeams)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				var storage catalogStorageError
+				switch {
+				case errors.Is(err, store.ErrKeyManagerRequired):
+					http.Error(w, store.ErrKeyManagerRequired.Error(), http.StatusForbidden)
+				case errors.Is(err, store.ErrInvalidKeyBinding):
+					http.Error(w, store.ErrInvalidKeyBinding.Error(), http.StatusBadRequest)
+				case errors.Is(err, store.ErrKeyNameExists):
+					http.Error(w, store.ErrKeyNameExists.Error(), http.StatusConflict)
+				case errors.As(err, &storage):
+					http.Error(w, "could not issue key; read current keys before retrying", http.StatusInternalServerError)
+				default:
+					http.Error(w, err.Error(), http.StatusBadRequest)
+				}
 				return
 			}
-			if err := deps.AdminStore.SetKeyBindings(ctx, mustParseUUID(view.ID), boundUsers, boundTeams); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+			keyID := view.ID
+			markKeySaved(w, keyID)
+			if !activateKeyIssuance(deps, w, keyID) {
 				return
 			}
-			view, err = h.fullKeyView(ctx, deps, r, claims, mustParseUUID(view.ID))
+			view, err = h.fullKeyView(ctx, deps, claims, mustParseUUID(keyID))
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if !h.activateChange(deps, w) {
+				http.Error(w, "saved but key response view unavailable; "+keyIssuanceRecovery(keyID), http.StatusInternalServerError)
 				return
 			}
 			writeAdminJSON(w, http.StatusCreated, map[string]interface{}{"key": view, "token": token})
@@ -170,21 +181,16 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		target, err := h.findInboundKey(ctx, deps, id)
+		if _, ok := resolveKeyWriteTarget(deps, w, r, claims, id); !ok {
+			return
+		}
+		token, err := h.rotateDBKey(ctx, deps, id)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, "could not rotate key", http.StatusInternalServerError)
 			return
 		}
-		if !h.canManageKey(deps, ctx, claims, *target) {
-			http.Error(w, "key manager required", http.StatusForbidden)
-			return
-		}
-		token, err := h.rotateDBKey(ctx, deps, target)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if !h.activateChange(deps, w) {
+		markKeySaved(w, id.String())
+		if !activateKeyIssuance(deps, w, id.String()) {
 			return
 		}
 		writeAdminJSON(w, http.StatusOK, map[string]interface{}{"token": token})
@@ -193,17 +199,11 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		target, err := h.findInboundKey(ctx, deps, id)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if _, ok := resolveKeyWriteTarget(deps, w, r, claims, id); !ok {
 			return
 		}
-		if !h.canManageKey(deps, ctx, claims, *target) {
-			http.Error(w, "key manager required", http.StatusForbidden)
-			return
-		}
-		if err := h.setDBKeyEnabled(ctx, deps, target, false); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if err := deps.AdminStore.SetInboundKeyEnabled(ctx, id, false); err != nil {
+			http.Error(w, "could not revoke key", http.StatusInternalServerError)
 			return
 		}
 		if !h.activateChange(deps, w) {
@@ -211,32 +211,14 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 		}
 		writeAdminJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	case "":
-		rows, err := deps.AdminStore.ListInboundKeys(ctx)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		var target *store.InboundKey
-		for i := range rows {
-			if rows[i].ID == id {
-				target = &rows[i]
-			}
-		}
-		if target == nil {
-			http.Error(w, "key not found", http.StatusNotFound)
+		if r.Method == http.MethodGet {
+			h.getAdminKey(deps, w, r, claims, id)
 			return
 		}
 		switch r.Method {
-		case http.MethodGet:
-			view, ok := h.keyDetailView(ctx, deps, r, claims, *target)
-			if !ok {
-				http.Error(w, "key not found", http.StatusNotFound)
-				return
-			}
-			writeAdminJSON(w, http.StatusOK, map[string]interface{}{"key": view})
 		case http.MethodPut:
-			if !h.canManageKey(deps, ctx, claims, *target) {
-				http.Error(w, "key manager required", http.StatusForbidden)
+			target, ok := resolveKeyWriteTarget(deps, w, r, claims, id)
+			if !ok {
 				return
 			}
 			var req struct {
@@ -252,8 +234,12 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 				return
 			}
 			workspace, err := deps.AdminStore.GetWorkspace(ctx, target.WorkspaceID)
-			if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
 				http.Error(w, "workspace not found", http.StatusNotFound)
+				return
+			}
+			if err != nil {
+				http.Error(w, "could not load workspace", http.StatusInternalServerError)
 				return
 			}
 			patch := store.InboundKeyPolicyPatch{Description: req.Description, Tenant: req.Tenant, AllowedModels: req.AllowedModels, SetExpiry: req.ExpiresAt != nil, ReplaceBindings: req.UserIDs != nil || req.TeamIDs != nil}
@@ -293,19 +279,18 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 			if !h.activateChange(deps, w) {
 				return
 			}
-			view, err := h.fullKeyView(ctx, deps, r, claims, target.ID)
+			view, err := h.fullKeyView(ctx, deps, claims, target.ID)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				http.Error(w, "saved but key response view unavailable", http.StatusInternalServerError)
 				return
 			}
 			writeAdminJSON(w, http.StatusOK, map[string]interface{}{"key": view})
 		case http.MethodDelete:
-			if !h.canManageKey(deps, ctx, claims, *target) {
-				http.Error(w, "key manager required", http.StatusForbidden)
+			if _, ok := resolveKeyWriteTarget(deps, w, r, claims, id); !ok {
 				return
 			}
 			if err := deps.AdminStore.DeleteInboundKey(ctx, id); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				http.Error(w, "could not delete key", http.StatusInternalServerError)
 				return
 			}
 			if !h.activateChange(deps, w) {
@@ -320,39 +305,88 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 	}
 }
 
-func (h *Handler) mergedKeyViews(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, filterWorkspace string) ([]interface{}, error) {
-	visible, _ := h.visibleWorkspaceIDs(deps, r, claims)
-	names := h.workspaceNameMap(deps, r, claims)
+func keyManagerInScope(visibility workspaceVisibility, caller uuid.UUID, k store.InboundKey) bool {
+	return visibility.global || visibility.roles[k.WorkspaceID] == roleAdmin || (k.OwnerUserID != nil && *k.OwnerUserID == caller)
+}
+
+func resolveKeyWriteTarget(deps Dependencies, w http.ResponseWriter, r *http.Request, claims *adminauth.Claims, id uuid.UUID) (store.InboundKey, bool) {
+	workspaceIDs, err := parseWriteWorkspaceIDs(r, nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return store.InboundKey{}, false
+	}
+	ctx := r.Context()
+	visibility, err := resolveWorkspaceVisibility(ctx, deps, claims)
+	if err != nil {
+		http.Error(w, workspaceVisibilityError, http.StatusInternalServerError)
+		return store.InboundKey{}, false
+	}
+	if !visibility.allowsWriteSelectors(workspaceIDs) {
+		http.Error(w, "key not found", http.StatusNotFound)
+		return store.InboundKey{}, false
+	}
+	k, ok := loadAdminKey(ctx, deps, w, id)
+	if !ok {
+		return store.InboundKey{}, false
+	}
+	if len(workspaceIDs) > 0 && k.WorkspaceID != workspaceIDs[0] {
+		http.Error(w, "key not found", http.StatusNotFound)
+		return store.InboundKey{}, false
+	}
+	access, err := resolveKeyDetailAccess(ctx, deps, visibility, mustParseUUID(claims.Subject), k)
+	switch {
+	case err != nil:
+		http.Error(w, "could not load key", http.StatusInternalServerError)
+	case access == keyManageable:
+		return k, true
+	case access == keyReadOnly:
+		http.Error(w, "key manager required", http.StatusForbidden)
+	default:
+		http.Error(w, "key not found", http.StatusNotFound)
+	}
+	return store.InboundKey{}, false
+}
+
+func (h *Handler) mergedKeyViews(ctx context.Context, deps Dependencies, claims *adminauth.Claims, visibility workspaceVisibility) ([]interface{}, error) {
 	views := []interface{}{}
-	if h.canSeeSystemWorkspace(deps, r, claims, filterWorkspace) {
+	if visibility.empty() {
+		return views, nil
+	}
+	if visibility.allows(store.SystemWorkspaceID) {
 		for name := range deps.AdminAuthConfig.Clients {
 			views = append(views, adminKeyView{Name: name, Tenant: deps.AdminAuthConfig.Clients[name].Tenant, AllowedModels: deps.AdminAuthConfig.Clients[name].AllowedModels, Enabled: true, Source: "config"})
 		}
 	}
-	adminWorkspaces := map[string]bool{}
-	sharedKeys := map[string]bool{}
-	callerTeams := map[string]bool{}
+	sharedKeys := map[uuid.UUID]bool{}
+	callerTeams := map[uuid.UUID]bool{}
 	caller := mustParseUUID(claims.Subject)
-	if !claims.IsAdmin {
-		memberships, _ := deps.AdminStore.ListMembershipsByUser(ctx, caller)
-		for _, m := range memberships {
-			if m.Role == roleAdmin {
-				adminWorkspaces[m.WorkspaceID.String()] = true
-			}
+	if !visibility.global {
+		shared, err := deps.AdminStore.ListInboundKeysVisibleToMember(ctx, caller)
+		if err != nil {
+			return nil, err
 		}
-		shared, _ := deps.AdminStore.ListInboundKeysVisibleToMember(ctx, caller)
 		for _, k := range shared {
-			sharedKeys[k.ID.String()] = true
+			sharedKeys[k.ID] = true
 		}
-		adminTeams, _ := deps.AdminStore.ListTeamAdminTeamIDs(ctx, caller)
+		adminTeams, err := deps.AdminStore.ListTeamAdminTeamIDs(ctx, caller)
+		if err != nil {
+			return nil, err
+		}
 		for _, tid := range adminTeams {
-			callerTeams[tid.String()] = true
+			callerTeams[tid] = true
 		}
+	}
+	canManage := func(k store.InboundKey) bool {
+		return keyManagerInScope(visibility, caller, k) || (k.OwnerTeamID != nil && callerTeams[*k.OwnerTeamID])
 	}
 	rows, err := deps.AdminStore.ListInboundKeys(ctx)
 	if err != nil {
 		return nil, err
 	}
+	rows = slices.DeleteFunc(rows, func(k store.InboundKey) bool {
+		return !visibility.allows(k.WorkspaceID) || (!canManage(k) && !sharedKeys[k.ID])
+	})
+	names := workspaceNameMap(ctx, deps, visibility)
 	emails, teamNames := h.keyOwnerNames(deps, ctx, rows)
 	usageByKey := map[string]adminKeyUsageView{}
 	usageWorkspaces := map[string]bool{}
@@ -380,16 +414,7 @@ func (h *Handler) mergedKeyViews(ctx context.Context, deps Dependencies, r *http
 		return nil
 	}
 	for _, k := range rows {
-		if filterWorkspace != "" && k.WorkspaceID.String() != filterWorkspace {
-			continue
-		}
-		if visible != nil && !visible[k.WorkspaceID.String()] {
-			continue
-		}
-		manageable := claims.IsAdmin || adminWorkspaces[k.WorkspaceID.String()] ||
-			(k.OwnerUserID != nil && *k.OwnerUserID == caller) ||
-			(k.OwnerTeamID != nil && callerTeams[k.OwnerTeamID.String()])
-		if manageable {
+		if canManage(k) {
 			full, err := h.buildFullKeyView(ctx, deps, names, emails, teamNames, k, true, usageByKey[k.ID.String()], keyQuota(k, true))
 			if err != nil {
 				return nil, err
@@ -397,9 +422,7 @@ func (h *Handler) mergedKeyViews(ctx context.Context, deps Dependencies, r *http
 			views = append(views, full)
 			continue
 		}
-		if sharedKeys[k.ID.String()] {
-			views = append(views, h.buildMemberKeyView(names, emails, teamNames, k, usageByKey[k.ID.String()], keyQuota(k, false)))
-		}
+		views = append(views, h.buildMemberKeyView(names, emails, teamNames, k, usageByKey[k.ID.String()], keyQuota(k, false)))
 	}
 	sort.Slice(views, func(i, j int) bool { return keyViewName(views[i]) < keyViewName(views[j]) })
 	return views, nil
@@ -557,23 +580,12 @@ func (h *Handler) buildMemberKeyView(names, emails, teamNames map[string]string,
 }
 
 func (h *Handler) canManageKey(deps Dependencies, ctx context.Context, claims *adminauth.Claims, k store.InboundKey) bool {
-	if claims.IsAdmin {
-		return true
-	}
-	if !h.canAccessWorkspace(deps, ctx, claims, k.WorkspaceID) {
+	visibility, err := resolveWorkspaceVisibility(ctx, deps, claims)
+	if err != nil {
 		return false
 	}
-	if h.canWriteWorkspace(deps, ctx, claims, k.WorkspaceID) {
-		return true
-	}
-	caller := mustParseUUID(claims.Subject)
-	if k.OwnerUserID != nil && *k.OwnerUserID == caller {
-		return true
-	}
-	if k.OwnerTeamID != nil && h.isTeamAdmin(deps, ctx, claims, *k.OwnerTeamID) {
-		return true
-	}
-	return false
+	access, err := resolveKeyDetailAccess(ctx, deps, visibility, mustParseUUID(claims.Subject), k)
+	return err == nil && access == keyManageable
 }
 
 func (h *Handler) resolveKeyWriteWorkspace(deps Dependencies, w http.ResponseWriter, r *http.Request, claims *adminauth.Claims, workspaceIDStr string) (store.Workspace, bool) {
@@ -606,7 +618,7 @@ func (h *Handler) resolveKeyWriteWorkspace(deps Dependencies, w http.ResponseWri
 	}
 	memberships, err := deps.AdminStore.ListMembershipsByUser(ctx, mustParseUUID(claims.Subject))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, workspaceVisibilityError, http.StatusInternalServerError)
 		return store.Workspace{}, false
 	}
 	if claims.IsAdmin && len(memberships) == 0 {
@@ -710,11 +722,92 @@ func appendUUIDString(out []string, id string) []string {
 	return append(out, id)
 }
 
-func (h *Handler) keyDetailView(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, k store.InboundKey) (interface{}, bool) {
-	if !h.canAccessWorkspace(deps, ctx, claims, k.WorkspaceID) {
-		return nil, false
+func (h *Handler) getAdminKey(deps Dependencies, w http.ResponseWriter, r *http.Request, claims *adminauth.Claims, id uuid.UUID) {
+	visibility, ok := h.resolveWorkspaceFilter(deps, w, r, claims)
+	if !ok {
+		return
 	}
-	names := h.workspaceNameMap(deps, r, claims)
+	ctx := r.Context()
+	if visibility.empty() {
+		http.Error(w, "key not found", http.StatusNotFound)
+		return
+	}
+	k, ok := loadAdminKey(ctx, deps, w, id)
+	if !ok {
+		return
+	}
+	access, err := resolveKeyDetailAccess(ctx, deps, visibility, mustParseUUID(claims.Subject), k)
+	if err != nil {
+		http.Error(w, "could not load key", http.StatusInternalServerError)
+		return
+	}
+	if access == keyHidden {
+		http.Error(w, "key not found", http.StatusNotFound)
+		return
+	}
+	view, err := h.keyDetailView(ctx, deps, visibility, k, access == keyManageable)
+	if err != nil {
+		http.Error(w, "could not load key", http.StatusInternalServerError)
+		return
+	}
+	writeAdminJSON(w, http.StatusOK, map[string]interface{}{"key": view})
+}
+
+func loadAdminKey(ctx context.Context, deps Dependencies, w http.ResponseWriter, id uuid.UUID) (store.InboundKey, bool) {
+	k, err := deps.AdminStore.GetInboundKey(ctx, id)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		http.Error(w, "key not found", http.StatusNotFound)
+	case err != nil:
+		http.Error(w, "could not load key", http.StatusInternalServerError)
+	default:
+		return k, true
+	}
+	return store.InboundKey{}, false
+}
+
+type keyDetailAccess int
+
+const (
+	keyHidden keyDetailAccess = iota
+	keyReadOnly
+	keyManageable
+)
+
+func resolveKeyDetailAccess(ctx context.Context, deps Dependencies, visibility workspaceVisibility, caller uuid.UUID, k store.InboundKey) (keyDetailAccess, error) {
+	if !visibility.allows(k.WorkspaceID) || (!visibility.global && k.WorkspaceID == store.SystemWorkspaceID) {
+		return keyHidden, nil
+	}
+	if keyManagerInScope(visibility, caller, k) {
+		return keyManageable, nil
+	}
+	if k.OwnerTeamID != nil {
+		team, err := deps.AdminStore.GetTeam(ctx, *k.OwnerTeamID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return keyHidden, err
+		}
+		if err == nil && team.WorkspaceID == k.WorkspaceID {
+			member, err := deps.AdminStore.GetTeamMember(ctx, caller, team.ID)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return keyHidden, err
+			}
+			if err == nil && member.Role == roleAdmin {
+				return keyManageable, nil
+			}
+		}
+	}
+	shared, err := deps.AdminStore.InboundKeySharedWithMember(ctx, k.ID, caller)
+	if err != nil {
+		return keyHidden, err
+	}
+	if shared {
+		return keyReadOnly, nil
+	}
+	return keyHidden, nil
+}
+
+func (h *Handler) keyDetailView(ctx context.Context, deps Dependencies, visibility workspaceVisibility, k store.InboundKey, manageable bool) (interface{}, error) {
+	names := workspaceNameMap(ctx, deps, visibility)
 	emails, teamNames := h.keyOwnerNames(deps, ctx, []store.InboundKey{k})
 	usage := adminKeyUsageView{}
 	if used, err := deps.AdminStore.KeyUsageByWorkspace(ctx, k.WorkspaceID); err == nil {
@@ -724,64 +817,42 @@ func (h *Handler) keyDetailView(ctx context.Context, deps Dependencies, r *http.
 			}
 		}
 	}
-	keyQuota := func(manageable bool) *adminQuotaView {
-		scope, ok := keyOwnerScope(k)
-		if !ok {
-			return nil
-		}
-		if !manageable && scope.typ == quotaScopeUser {
-			return nil
-		}
+	var quota *adminQuotaView
+	if scope, ok := keyOwnerScope(k); ok && (manageable || scope.typ != quotaScopeUser) {
 		if view, err := h.quotaView(deps, ctx, k.WorkspaceID, scope); err == nil {
-			return &view
-		}
-		return nil
-	}
-	if h.canManageKey(deps, ctx, claims, k) {
-		full, err := h.buildFullKeyView(ctx, deps, names, emails, teamNames, k, true, usage, keyQuota(true))
-		if err != nil {
-			return nil, false
-		}
-		return full, true
-	}
-	visible, _ := h.visibleWorkspaceIDs(deps, r, claims)
-	if visible != nil && !visible[k.WorkspaceID.String()] {
-		return nil, false
-	}
-	shared, err := deps.AdminStore.ListInboundKeysVisibleToMember(ctx, mustParseUUID(claims.Subject))
-	if err != nil {
-		return nil, false
-	}
-	for _, s := range shared {
-		if s.ID == k.ID {
-			return h.buildMemberKeyView(names, emails, teamNames, k, usage, keyQuota(false)), true
+			quota = &view
 		}
 	}
-	return nil, false
+	if manageable {
+		return h.buildFullKeyView(ctx, deps, names, emails, teamNames, k, true, usage, quota)
+	}
+	return h.buildMemberKeyView(names, emails, teamNames, k, usage, quota), nil
 }
 
-func (h *Handler) fullKeyView(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, id uuid.UUID) (adminKeyView, error) {
-	names := h.workspaceNameMap(deps, r, claims)
-	rows, err := deps.AdminStore.ListInboundKeys(ctx)
+func (h *Handler) fullKeyView(ctx context.Context, deps Dependencies, claims *adminauth.Claims, id uuid.UUID) (adminKeyView, error) {
+	visibility, err := resolveWorkspaceVisibility(ctx, deps, claims)
 	if err != nil {
 		return adminKeyView{}, err
 	}
-	emails, teamNames := h.keyOwnerNames(deps, ctx, rows)
-	for _, k := range rows {
-		if k.ID == id {
-			var quota *adminQuotaView
-			if scope, ok := keyOwnerScope(k); ok {
-				if view, err := h.quotaView(deps, ctx, k.WorkspaceID, scope); err == nil {
-					quota = &view
-				}
-			}
-			return h.buildFullKeyView(ctx, deps, names, emails, teamNames, k, true, adminKeyUsageView{}, quota)
+	names := workspaceNameMap(ctx, deps, visibility)
+	k, err := deps.AdminStore.GetInboundKey(ctx, id)
+	if err != nil {
+		return adminKeyView{}, err
+	}
+	if !visibility.allows(k.WorkspaceID) {
+		return adminKeyView{}, errBad("key not found")
+	}
+	emails, teamNames := h.keyOwnerNames(deps, ctx, []store.InboundKey{k})
+	var quota *adminQuotaView
+	if scope, ok := keyOwnerScope(k); ok {
+		if view, err := h.quotaView(deps, ctx, k.WorkspaceID, scope); err == nil {
+			quota = &view
 		}
 	}
-	return adminKeyView{}, errBad("key not found")
+	return h.buildFullKeyView(ctx, deps, names, emails, teamNames, k, true, adminKeyUsageView{}, quota)
 }
 
-func (h *Handler) createDBKey(ctx context.Context, deps Dependencies, workspace store.Workspace, name, tenant string, allowed []string, description string, expires *time.Time, owner keyOwner) (adminKeyView, string, error) {
+func (h *Handler) createDBKey(ctx context.Context, deps Dependencies, workspace store.Workspace, name, tenant string, allowed []string, description string, expires *time.Time, owner keyOwner, actorID uuid.UUID, userIDs, teamIDs []uuid.UUID) (adminKeyView, string, error) {
 	name = strings.TrimSpace(name)
 	if !validResourceName(name) {
 		return adminKeyView{}, "", errBad("invalid key name")
@@ -794,37 +865,43 @@ func (h *Handler) createDBKey(ctx context.Context, deps Dependencies, workspace 
 	if k.AllowedModels == nil {
 		k.AllowedModels = []string{}
 	}
-	if err := deps.AdminStore.CreateInboundKey(ctx, k); err != nil {
-		return adminKeyView{}, "", err
+	if err := deps.AdminStore.IssueInboundKey(ctx, k, actorID, userIDs, teamIDs); err != nil {
+		return adminKeyView{}, "", catalogStorageError{err}
 	}
 	return adminKeyView{ID: k.ID.String(), Name: k.Name, TokenPrefix: k.TokenPrefix, Tenant: k.Tenant, AllowedModels: k.AllowedModels, Enabled: true, Source: "database", WorkspaceID: workspace.ID.String(), WorkspaceName: workspace.Name, Description: k.Description, ExpiresAt: formatKeyExpiry(k.ExpiresAt), CanManage: true}, token, nil
 }
 
-func (h *Handler) findInboundKey(ctx context.Context, deps Dependencies, id uuid.UUID) (*store.InboundKey, error) {
-	rows, err := deps.AdminStore.ListInboundKeys(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for i := range rows {
-		if rows[i].ID == id {
-			k := rows[i]
-			return &k, nil
-		}
-	}
-	return nil, errBad("key not found")
+func markKeySaved(w http.ResponseWriter, id string) {
+	w.Header().Set("X-Aiproxy-Key-Saved", "true")
+	w.Header().Set("X-Aiproxy-Key-ID", id)
+	w.Header().Set("Location", "/_internal/admin/keys/"+id)
+	w.Header().Set("Cache-Control", "no-store")
 }
 
-func (h *Handler) rotateDBKey(ctx context.Context, deps Dependencies, k *store.InboundKey) (string, error) {
+func keyIssuanceRecovery(id string) string {
+	return "key " + id + "; read this key and rotate it to obtain a new bearer; do not repeat creation"
+}
+
+func activateKeyIssuance(deps Dependencies, w http.ResponseWriter, id string) bool {
+	if deps.RequestReload != nil {
+		if err := deps.RequestReload(); err != nil {
+			if deps.Logger != nil {
+				deps.Logger.Error("key activation failed", "error", err)
+			}
+			http.Error(w, "saved but activation failed; "+keyIssuanceRecovery(id), http.StatusInternalServerError)
+			return false
+		}
+	}
+	return true
+}
+
+func (h *Handler) rotateDBKey(ctx context.Context, deps Dependencies, id uuid.UUID) (string, error) {
 	token, err := newInboundToken()
 	if err != nil {
 		return "", err
 	}
-	if err := deps.AdminStore.RotateInboundKey(ctx, k.ID, store.TokenHash(token), token[:12]); err != nil {
+	if err := deps.AdminStore.RotateInboundKey(ctx, id, store.TokenHash(token), token[:12]); err != nil {
 		return "", err
 	}
 	return token, nil
-}
-
-func (h *Handler) setDBKeyEnabled(ctx context.Context, deps Dependencies, k *store.InboundKey, enabled bool) error {
-	return deps.AdminStore.SetInboundKeyEnabled(ctx, k.ID, enabled)
 }

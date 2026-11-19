@@ -6,8 +6,10 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +25,7 @@ import (
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/providerhealth"
 	"github.com/egose/aiproxy/internal/store"
+	"github.com/uptrace/bun"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -79,6 +82,7 @@ func TestAdminOIDCFullCodeFlow(t *testing.T) {
 	e := b64url([]byte{byte(key.PublicKey.E >> 16), byte(key.PublicKey.E >> 8), byte(key.PublicKey.E)})
 	var issuer string
 	var lastNonce string
+	email := fmt.Sprintf("sso-user-%d@example.com", time.Now().UnixNano())
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -98,7 +102,7 @@ func TestAdminOIDCFullCodeFlow(t *testing.T) {
 			http.Error(w, "bad code", http.StatusBadRequest)
 			return
 		}
-		id := signIDToken(t, key, issuer, "test-client", lastNonce, "sso-user@example.com")
+		id := signIDToken(t, key, issuer, "test-client", lastNonce, email)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"access_token": "opaque", "token_type": "Bearer", "id_token": id,
@@ -127,65 +131,162 @@ func TestAdminOIDCFullCodeFlow(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_ = st.UpsertOIDCConfig(context.Background(), &store.OIDCConfig{Enabled: false})
-		if u, err := st.GetUserByEmail(context.Background(), "sso-user@example.com"); err == nil {
-			_ = st.UpdateUser(context.Background(), &store.User{ID: u.ID, Email: u.Email, PasswordHash: u.PasswordHash, IsAdmin: u.IsAdmin, Disabled: true})
-		}
 	})
 
 	rt := &config.Runtime{MultiTenancy: config.MultiTenancy{Enabled: true}}
 	h := NewHandler(Dependencies{Catalog: rt.Catalog, MultiTenancy: rt.MultiTenancy, AdminStore: st, AdminAuthConfig: rt.Auth})
-
-	startReq := httptest.NewRequest(http.MethodGet, "/_internal/admin/oidc/start", nil)
-	startReq.Host = "example.com"
-	startW := httptest.NewRecorder()
-	h.ServeHTTP(startW, startReq)
-	if startW.Code != http.StatusFound {
-		t.Fatalf("start status = %d", startW.Code)
+	workspace := &store.Workspace{Name: fmt.Sprintf("oidc-invited-%d", time.Now().UnixNano()), Kind: "organization"}
+	if err := st.CreateWorkspace(ctx, workspace); err != nil {
+		t.Fatal(err)
 	}
-	loc, err := url.Parse(startW.Header().Get("Location"))
+	t.Cleanup(func() { _ = st.DeleteWorkspace(ctx, workspace.ID) })
+	inv := &store.Invite{Email: email, TokenHash: store.TokenHash(email), WorkspaceID: &workspace.ID,
+		WorkspaceRole: "member", ExpiresAt: time.Now().Add(time.Hour)}
+	if err := st.CreateInvite(ctx, inv); err != nil {
+		t.Fatal(err)
+	}
+	code, _ := callAdmin(t, h, "", http.MethodPost, "/_internal/admin/invites/accept", map[string]any{"token": email, "password": "invited-password"})
+	if code != http.StatusCreated {
+		t.Fatalf("invite acceptance = %d", code)
+	}
+	u, err := st.GetUserByEmail(ctx, email)
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := loc.Query().Get("state")
-	if state == "" {
-		t.Fatalf("no state in %s", loc.String())
-	}
-	oidcStates.Lock()
-	stored, ok := oidcStates.entries[state]
-	oidcStates.Unlock()
-	if !ok {
-		t.Fatalf("state not stored")
-	}
-	lastNonce = stored.nonce
-
-	cbReq := httptest.NewRequest(http.MethodGet, "/_internal/admin/oidc/callback?state="+state+"&code=valid-code", nil)
-	cbReq.Host = "example.com"
-	cbW := httptest.NewRecorder()
-	h.ServeHTTP(cbW, cbReq)
-	if cbW.Code != http.StatusFound {
-		t.Fatalf("callback status = %d, body = %s", cbW.Code, cbW.Body.String())
-	}
-	fragLoc := cbW.Header().Get("Location")
-	if !strings.HasPrefix(fragLoc, "http://example.com/admin/oidc/callback#") {
-		t.Fatalf("callback redirect = %s", fragLoc)
-	}
-	frag, err := url.ParseQuery(strings.TrimPrefix(fragLoc[strings.Index(fragLoc, "#")+1:], ""))
-	if err != nil {
+	t.Cleanup(func() { _ = st.DeleteUser(ctx, u.ID) })
+	hook := &oidcUserLookupHook{}
+	st.DB.AddQueryHook(hook)
+	unredeemedEmail := "unknown-" + u.Email
+	pendingInvite := &store.Invite{Email: unredeemedEmail, TokenHash: store.TokenHash(unredeemedEmail), WorkspaceID: &workspace.ID, WorkspaceRole: "member", ExpiresAt: time.Now().Add(time.Hour)}
+	if err := st.CreateInvite(ctx, pendingInvite); err != nil {
 		t.Fatal(err)
 	}
-	if frag.Get("access_token") == "" || frag.Get("refresh_token") == "" {
-		t.Fatalf("missing session tokens in %s", fragLoc)
-	}
+	t.Cleanup(func() { _ = st.DeleteInvite(ctx, pendingInvite.ID) })
+	for _, tc := range []struct {
+		name                                                 string
+		unknown, lookupFailure, disabled, publicRegistration bool
+	}{
+		{name: "invited"}, {name: "returning", publicRegistration: true},
+		{name: "unknown", unknown: true}, {name: "unknown-public-registration", unknown: true, publicRegistration: true},
+		{name: "lookup-failure", lookupFailure: true}, {name: "disabled", disabled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			email = u.Email
+			if tc.unknown {
+				email = "unknown-" + u.Email
+			}
+			u.Disabled = tc.disabled
+			if err := st.UpdateUser(ctx, &u); err != nil {
+				t.Fatal(err)
+			}
+			deps := h.SnapshotDependencies()
+			deps.MultiTenancy.AllowPublicRegistration = tc.publicRegistration
+			h.UpdateDependencies(deps)
+			hook.fail = tc.lookupFailure
+			beforeUsers, err := st.DB.NewSelect().Model((*store.User)(nil)).Count(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeWorkspaces, err := st.DB.NewSelect().Model((*store.Workspace)(nil)).Count(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeSessions, err := st.DB.NewSelect().Model((*store.RefreshToken)(nil)).Count(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	u, err := st.GetUserByEmail(ctx, "sso-user@example.com")
-	if err != nil {
-		t.Fatalf("provisioned user missing: %v", err)
+			startReq := httptest.NewRequest(http.MethodGet, "/_internal/admin/oidc/start", nil)
+			startReq.Host = "example.com"
+			startW := httptest.NewRecorder()
+			h.ServeHTTP(startW, startReq)
+			if startW.Code != http.StatusFound {
+				t.Fatalf("start status = %d", startW.Code)
+			}
+			loc, err := url.Parse(startW.Header().Get("Location"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := loc.Query().Get("state")
+			if state == "" {
+				t.Fatalf("no state in %s", loc.String())
+			}
+			oidcStates.Lock()
+			stored, ok := oidcStates.entries[state]
+			oidcStates.Unlock()
+			if !ok {
+				t.Fatalf("state not stored")
+			}
+			lastNonce = stored.nonce
+
+			cbReq := httptest.NewRequest(http.MethodGet, "/_internal/admin/oidc/callback?state="+state+"&code=valid-code", nil)
+			cbReq.Host = "example.com"
+			cbW := httptest.NewRecorder()
+			h.ServeHTTP(cbW, cbReq)
+			if cbW.Code != http.StatusFound {
+				t.Fatalf("callback status = %d, body = %s", cbW.Code, cbW.Body.String())
+			}
+			fragLoc := cbW.Header().Get("Location")
+			if !strings.HasPrefix(fragLoc, "http://example.com/admin/oidc/callback#") {
+				t.Fatalf("callback redirect = %s", fragLoc)
+			}
+			frag, err := url.ParseQuery(strings.TrimPrefix(fragLoc[strings.Index(fragLoc, "#")+1:], ""))
+			if err != nil {
+				t.Fatal(err)
+			}
+			hook.fail = false
+			afterUsers, err := st.DB.NewSelect().Model((*store.User)(nil)).Count(ctx)
+			if err != nil || afterUsers != beforeUsers {
+				t.Fatalf("SSO created accounts: %d -> %d (%v)", beforeUsers, afterUsers, err)
+			}
+			afterWorkspaces, err := st.DB.NewSelect().Model((*store.Workspace)(nil)).Count(ctx)
+			if err != nil || afterWorkspaces != beforeWorkspaces {
+				t.Fatalf("SSO created workspaces: %d -> %d (%v)", beforeWorkspaces, afterWorkspaces, err)
+			}
+			if tc.unknown || tc.lookupFailure || tc.disabled {
+				afterSessions, err := st.DB.NewSelect().Model((*store.RefreshToken)(nil)).Count(ctx)
+				if err != nil || afterSessions != beforeSessions {
+					t.Fatal("denied identity persisted a refresh session")
+				}
+				if frag.Get("access_token") != "" || frag.Get("refresh_token") != "" || frag.Get("error") == "" {
+					t.Fatal("denied identity received session or no error")
+				}
+				if tc.lookupFailure && frag.Get("error") != "cannot look up account" {
+					t.Fatalf("lookup failure = %s", frag.Get("error"))
+				}
+				if tc.unknown {
+					if _, err := st.GetUserByEmail(ctx, email); !errors.Is(err, sql.ErrNoRows) {
+						t.Fatalf("unknown identity persisted: %v", err)
+					}
+				}
+			} else {
+				if frag.Get("access_token") == "" || frag.Get("refresh_token") == "" {
+					t.Fatal("missing session")
+				}
+				claims, err := adminauth.VerifyAccess(frag.Get("access_token"))
+				if err != nil || claims.Subject != u.ID.String() {
+					t.Fatalf("wrong session identity: %v", err)
+				}
+			}
+			memberships, err := st.ListMembershipsByUser(ctx, u.ID)
+			if err != nil || len(memberships) != 1 || memberships[0].WorkspaceID != workspace.ID {
+				t.Fatalf("SSO changed invited workspace: %v %v", memberships, err)
+			}
+		})
 	}
-	if u.Disabled {
-		t.Fatalf("provisioned user disabled")
-	}
-	fmt.Println("provisioned:", u.Email)
 }
+
+type oidcUserLookupHook struct{ fail bool }
+
+func (h *oidcUserLookupHook) BeforeQuery(ctx context.Context, event *bun.QueryEvent) context.Context {
+	if h.fail && strings.Contains(event.Query, `FROM "users"`) && strings.Contains(event.Query, "email =") {
+		ctx, cancel := context.WithCancel(ctx)
+		cancel()
+		return ctx
+	}
+	return ctx
+}
+func (*oidcUserLookupHook) AfterQuery(context.Context, *bun.QueryEvent) {}
 
 func TestDashboardRejectsOrdinaryJWTWithStore(t *testing.T) {
 	dbURL := os.Getenv("AIPROXY_TEST_DATABASE_URL")

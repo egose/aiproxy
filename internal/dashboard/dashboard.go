@@ -1734,7 +1734,8 @@ func upstreamAsSummaries(upstream []accounting.UpstreamSummary) []accounting.Sum
 	out := make([]accounting.Summary, 0, len(upstream))
 	indices := make(map[accounting.Summary]int)
 	for _, u := range upstream {
-		key := accounting.Summary{Tenant: u.Tenant, Client: u.Client, Model: u.Provider + "/" + u.Model, Operation: u.Operation, StatusCode: u.StatusCode}
+		key := accounting.Summary{CredentialID: u.CredentialID, WorkspaceScope: u.WorkspaceScope,
+			Tenant: u.Tenant, Client: u.Client, Model: u.Provider + "/" + u.Model, Operation: u.Operation, StatusCode: u.StatusCode}
 		if i, ok := indices[key]; ok {
 			s := &out[i]
 			s.Count += u.Count
@@ -1748,6 +1749,8 @@ func upstreamAsSummaries(upstream []accounting.UpstreamSummary) []accounting.Sum
 		}
 		indices[key] = len(out)
 		out = append(out, accounting.Summary{
+			CredentialID:        u.CredentialID,
+			WorkspaceScope:      u.WorkspaceScope,
 			Tenant:              u.Tenant,
 			Client:              u.Client,
 			Model:               u.Provider + "/" + u.Model,

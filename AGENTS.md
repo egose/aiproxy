@@ -84,8 +84,15 @@ user-agent settings, root/provider/model/alias encrypted-reasoning policies, acc
 enablement, payload-log configuration, metrics config, provider-health config, ingress-guardrail policy, web UI enablement, and metrics-backed inventory
 state. When multi-tenancy is enabled, database-backed providers, aliases, and
 inbound keys merge into the serving catalog on the same reload path (and
-automatically after admin API mutations); invalid rows fail the reload with
-the old runtime intact. Listener address, listener timeout, logging level, and enabling the
+automatically after admin API mutations and durable-revision polling every 2s);
+invalid catalogs retain the old catalog but keys refresh independently. DB-backed
+new admission fails closed after 30s without confirmed freshness; admitted work
+continues and trusted HCL clients/inference remain available. `/readyz` fails on
+expired DB freshness, `/healthz` does not. System-admin `/_internal/admin/serving-status`
+and activation headers report local applied revisions, never cluster acknowledgement.
+File policies still need per-replica deployment/reload; see
+`website/docs/operations.md#bounded-replica-convergence`.
+Listener address, listener timeout, logging level, and enabling the
 dashboard after startup require restart.
 
 Peer deferred policy also reloads subject to live reservation checks. Removing
@@ -146,6 +153,21 @@ The optional standalone Bun capture tool is documented in
   is exposed to the trusted upstream. Derived providers must opt in locally.
   `api_key_ref.path` defaults to `$XDG_CONFIG_HOME/aiproxy/keys.json`, falling
   back to `~/.config/aiproxy/keys.json`.
+- Non-System database providers/probes default-deny and require exact public HTTPS
+  origins in operator config `multi_tenancy.allowed_upstream_origins` (max 128,
+  omission/`[]` denies all). Destination workspace policy applies even to global
+  admin authors and disabled/old rows, including inherited effective settings and
+  credential-only writes, before decryption/file resolution/commit. Tenant own
+  encrypted DB API keys and own Copilot DB device credentials remain supported;
+  nonempty host API-key/sidecar references, caller Authorization forwarding and
+  cleartext exceptions are System-only. Every restricted new connection rejects
+  any non-public DNS answer, dials pinned public IPs (max 64 answers, 30s DNS/TCP
+  budget), ignores env proxies and retains verified TLS/built-in profiles and
+  same-origin redirects. Trusted System/HCL/file-only behavior is unchanged.
+  Approval never grants foreign/System resource or credential rights. Run candidate
+  `validate --check-db` before upgrade; disabling a row is not a policy repair,
+  and a rejected reload retains old approvals. See
+  `website/docs/operations.md#tenant-provider-policy-upgrade`.
 - Providers may declare `extends = "<base-provider-name>"` to inherit the base
   provider type, endpoint, timeout, enabled state, and models while using their
   own provider name and local credential. Derived providers normally declare
@@ -282,9 +304,15 @@ The optional standalone Bun capture tool is documented in
 - Static `auth.client` blocks may also define optional `tenant` and
   `allowed_models` fields. `allowed_models` is enforced against proxy-visible
   model names.
-- `GET /v1/billing/usage` exposes aggregated in-process usage summaries,
-  filtered to the caller's tenant when present, otherwise to the caller's
-  client identity.
+- `GET /v1/billing/usage` is a rolling, process-local usage/cost estimate, not an
+  invoice. DB bearers see only their immutable credential/workspace pair, including
+  earlier label snapshots; rotation preserves history and deletion/recreation does
+  not inherit it. HCL tenant reporting includes only same-tenant static clients in
+  System; tenantless HCL clients see only their own tenantless static usage.
+  File-only anonymous reporting remains unfiltered. Workspace-wide/operator reads
+  require separate explicit authority; billing query/header labels cannot grant it.
+  Events, grouping and alias-cost joins retain internal credential/workspace identity
+  before filtering; these IDs are not JSON fields or new metrics labels.
 - Provider health state is shared in-process across requests and alias routing.
   Transient transport failures, upstream request errors, and upstream `5xx`
   responses temporarily mark a provider unhealthy. Configured retryable `4xx`
@@ -367,7 +395,8 @@ The optional standalone Bun capture tool is documented in
   per-minute cleanup (100/batch); provider saves set
   `X-Aiproxy-Catalog-Saved: true` once the commit is durable, including
   saved-but-activation-failed outcomes, and activation applies to the receiving
-  instance only (no cluster broadcast). Hermetically verified; live GitHub compatibility unverified.
+  instance immediately (no cluster broadcast), with other replicas reconciling durable
+  DB revisions independently. Hermetically verified; live GitHub compatibility unverified.
   Mock-only checks and their coverage layers are documented in
   `website/docs/operations.md#mock-only-copilot-verification`; live compatibility
   remains deferred in task COPILOT-LIVE-01.

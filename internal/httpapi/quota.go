@@ -173,19 +173,20 @@ func quotaScopes(principal *auth.Principal) []quotaScope {
 }
 
 func (h *Handler) allowQuota(deps Dependencies, w http.ResponseWriter, r *http.Request, principal *auth.Principal, model string) bool {
-	if !deps.Quota.HasStore() || !deps.MultiTenancy.Enabled || principal == nil || principal.KeyID == uuid.Nil {
+	_, workspaceID, isKey := principal.DatabaseKey()
+	if !deps.Quota.HasStore() || !deps.MultiTenancy.Enabled || !isKey {
 		return true
 	}
 	ctx := r.Context()
 	for _, scope := range quotaScopes(principal) {
-		row, ok, err := deps.Quota.quotaRow(ctx, principal.WorkspaceID, scope, quotaBudgetModel)
+		row, ok, err := deps.Quota.quotaRow(ctx, workspaceID, scope, quotaBudgetModel)
 		if err != nil {
-			return h.rejectQuotaUnavailable(deps, w, r, principal, scope, err)
+			return h.rejectQuotaUnavailable(deps, w, r, workspaceID, scope, err)
 		}
 		if ok && row.BudgetMicros > 0 {
-			spent, err := deps.Quota.scopeSpend(ctx, principal.WorkspaceID, scope)
+			spent, err := deps.Quota.scopeSpend(ctx, workspaceID, scope)
 			if err != nil {
-				return h.rejectQuotaUnavailable(deps, w, r, principal, scope, err)
+				return h.rejectQuotaUnavailable(deps, w, r, workspaceID, scope, err)
 			}
 			spent -= row.SpentOffsetMicros
 			if spent < 0 {
@@ -196,9 +197,9 @@ func (h *Handler) allowQuota(deps Dependencies, w http.ResponseWriter, r *http.R
 				return false
 			}
 		}
-		row, ok, err = deps.Quota.quotaRow(ctx, principal.WorkspaceID, scope, model)
+		row, ok, err = deps.Quota.quotaRow(ctx, workspaceID, scope, model)
 		if err != nil {
-			return h.rejectQuotaUnavailable(deps, w, r, principal, scope, err)
+			return h.rejectQuotaUnavailable(deps, w, r, workspaceID, scope, err)
 		}
 		if ok {
 			limit := row.TPMEffective
@@ -206,7 +207,7 @@ func (h *Handler) allowQuota(deps Dependencies, w http.ResponseWriter, r *http.R
 				limit = row.TPMCeiling
 			}
 			if limit > 0 {
-				used, retry := deps.Quota.windowTokens(principal.WorkspaceID, scope, model)
+				used, retry := deps.Quota.windowTokens(workspaceID, scope, model)
 				if used >= limit {
 					seconds := int(retry / time.Second)
 					if retry%time.Second != 0 {
@@ -225,8 +226,8 @@ func (h *Handler) allowQuota(deps Dependencies, w http.ResponseWriter, r *http.R
 	return true
 }
 
-func (h *Handler) rejectQuotaUnavailable(deps Dependencies, w http.ResponseWriter, r *http.Request, principal *auth.Principal, scope quotaScope, err error) bool {
-	deps.Logger.Warn("quota admission unavailable", "error", err, "workspace_id", principal.WorkspaceID, "scope_type", scope.typ, "scope_id", scope.id, "request_id", w.Header().Get("X-Request-Id"))
+func (h *Handler) rejectQuotaUnavailable(deps Dependencies, w http.ResponseWriter, r *http.Request, workspaceID uuid.UUID, scope quotaScope, err error) bool {
+	deps.Logger.Warn("quota admission unavailable", "error", err, "workspace_id", workspaceID, "scope_type", scope.typ, "scope_id", scope.id, "request_id", w.Header().Get("X-Request-Id"))
 	h.writeRequestError(deps.Metrics, w, r, http.StatusServiceUnavailable, "quota_unavailable", "quota data temporarily unavailable")
 	return false
 }
@@ -246,7 +247,8 @@ func (h *Handler) recordQuotaUsage(deps Dependencies, principal *auth.Principal,
 }
 
 func (h *Handler) recordLocalQuotaUsage(deps Dependencies, principal *auth.Principal, publicModel string, usage provider.Usage) {
-	if !deps.Quota.HasStore() || !deps.MultiTenancy.Enabled || principal == nil || principal.KeyID == uuid.Nil {
+	_, workspaceID, isKey := principal.DatabaseKey()
+	if !deps.Quota.HasStore() || !deps.MultiTenancy.Enabled || !isKey {
 		return
 	}
 	tokens := quotaTokens(usage)
@@ -254,12 +256,13 @@ func (h *Handler) recordLocalQuotaUsage(deps Dependencies, principal *auth.Princ
 		return
 	}
 	for _, scope := range quotaScopes(principal) {
-		deps.Quota.recordTokens(principal.WorkspaceID, scope, publicModel, tokens)
+		deps.Quota.recordTokens(workspaceID, scope, publicModel, tokens)
 	}
 }
 
 func (h *Handler) persistQuotaUsageContext(ctx context.Context, deps Dependencies, principal *auth.Principal, publicModel, upstreamModel, providerName string, usage provider.Usage) error {
-	if !deps.Quota.HasStore() || !deps.MultiTenancy.Enabled || principal == nil || principal.KeyID == uuid.Nil {
+	keyID, workspaceID, isKey := principal.DatabaseKey()
+	if !deps.Quota.HasStore() || !deps.MultiTenancy.Enabled || !isKey {
 		return nil
 	}
 	tokens := quotaTokens(usage)
@@ -288,7 +291,7 @@ func (h *Handler) persistQuotaUsageContext(ctx context.Context, deps Dependencie
 		teamID = &tid
 	}
 	entry := &store.SpendEntry{
-		WorkspaceID: principal.WorkspaceID, KeyID: principal.KeyID,
+		WorkspaceID: workspaceID, KeyID: keyID,
 		UserID: userID, TeamID: teamID,
 		Model: publicModel, Tokens: tokens, CostMicros: costMicros,
 	}

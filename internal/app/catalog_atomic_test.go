@@ -20,6 +20,16 @@ import (
 
 func catalogRuntimeFixture(t *testing.T) (*App, string, string, func(string, string, string) *httptest.ResponseRecorder) {
 	t.Helper()
+	return catalogRuntimeFixtureWithAuth(t, `
+auth "main" {
+  mode = "bearer_static"
+  client "static" { token = "static-fixture" }
+}
+`)
+}
+
+func catalogRuntimeFixtureWithAuth(t *testing.T, authConfig string) (*App, string, string, func(string, string, string) *httptest.ResponseRecorder) {
+	t.Helper()
 	dsn := os.Getenv("AIPROXY_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("AIPROXY_TEST_DATABASE_URL not set")
@@ -72,10 +82,7 @@ func catalogRuntimeFixture(t *testing.T) (*App, string, string, func(string, str
 	t.Cleanup(upstream.Close)
 	cfg := fmt.Sprintf(`
 listener "http" "public" { address = "127.0.0.1:0" }
-auth "main" {
-  mode = "bearer_static"
-  client "static" { token = "static-fixture" }
-}
+%s
 provider "openai-compatible" "local" {
   base_url = %q
   api_key = "fixture"
@@ -84,7 +91,7 @@ provider "openai-compatible" "local" {
 }
 database { url = %q }
 multi_tenancy { enabled = true }
-`, upstream.URL, u.String())
+`, authConfig, upstream.URL, u.String())
 	path := writeConfigFile(t, cfg)
 	a, err := Build(ctx, BuildOptions{ConfigPath: path, LogOutput: io.Discard})
 	if err != nil {

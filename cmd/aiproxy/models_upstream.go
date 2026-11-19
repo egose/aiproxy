@@ -143,14 +143,17 @@ func (d *upstreamModelDiscovery) continueWith(cursor string) error {
 }
 
 func upstreamHTTPClient(provider config.Provider, factory func(upstreamhttp.Options) (upstreamhttp.Transport, error)) (*http.Client, *upstreamhttp.RetiringTransport, error) {
-	profile, err := upstreamhttp.ProfileForProvider(provider)
+	options, err := upstreamhttp.OptionsForProvider(provider, 0)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := options.OutboundPolicy.Check(upstreamBaseURL(provider)); err != nil {
 		return nil, nil, err
 	}
 	if factory == nil {
 		factory = upstreamhttp.NewTransport
 	}
-	transport, err := factory(upstreamhttp.Options{Profile: profile, ResponseHeaderTimeout: 0})
+	transport, err := factory(options)
 	if err != nil {
 		if transport != nil {
 			transport.CloseIdleConnections()

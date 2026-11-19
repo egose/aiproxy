@@ -21,7 +21,7 @@ import { FormProvider, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { Separator } from '@egose/shadcn-theme/components/ui/separator';
 import { NativeSelect, NativeSelectOption } from '@egose/shadcn-theme/components/ui/native-select';
-import { showSecret, useConfirm } from '../components/dialogs';
+import { showInvitationCode, useConfirm } from '../components/dialogs';
 import { useAdminInvites, useAdminMe, useAdminUsers } from '../hooks';
 import {
   createAdminInvite,
@@ -112,17 +112,14 @@ export function UsersPage() {
     ]);
 
   const inviteMutation = useMutation({
-    mutationFn: async (values: InviteForm) =>
-      createAdminInvite({ email: values.email.trim(), role: values.role ?? 'user' }),
-    onSuccess: async ({ token }) => {
+    mutationFn: async (values: InviteForm) => {
+      const { token: code } = await createAdminInvite({ email: values.email.trim(), role: values.role ?? 'user' });
       inviteForm.reset({ email: '', role: inviteForm.getValues('role') });
       setError(null);
-      await queryClient.invalidateQueries({ queryKey: ['admin', 'invites'] });
-      await showSecret(openDialog, {
-        title: 'Invite token',
-        description: 'Copy it now. It is shown once and expires after 7 days.',
-        secret: token,
-      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin', 'invites'] }),
+        showInvitationCode(openDialog, code, 'Invitation code'),
+      ]);
     },
     onError: (err) => setError(errorMessage(err)),
   });
@@ -258,9 +255,7 @@ export function UsersPage() {
         <CardHeader>
           <CardTitle>Invite user</CardTitle>
 
-          <CardDescription>
-            Invited users set their own password via the invite token, which is shown once and expires after 7 days.
-          </CardDescription>
+          <CardDescription>Invited users paste a one-time code at /invite and set their own password.</CardDescription>
         </CardHeader>
 
         <CardContent className="grid max-w-2xl gap-4">

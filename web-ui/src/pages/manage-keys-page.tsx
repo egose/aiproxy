@@ -3,6 +3,7 @@ import { Empty, EmptyDescription, EmptyTitle } from '@egose/shadcn-theme/compone
 import { Spinner } from '@egose/shadcn-theme/components/ui/spinner';
 import { KeyQuotaLine } from '../components/quota';
 import { useAdminKeys, useAdminMe, useCurrentWorkspace, useWorkspaceTeams } from '../hooks';
+import { WorkspaceAccessNotice } from '../components/workspace-access';
 import { AdminKeysPage } from './admin-keys-page';
 
 function MemberKeysView() {
@@ -63,27 +64,23 @@ function MemberKeysView() {
 }
 
 export function ManageKeysPage() {
-  const { workspace, workspaces } = useCurrentWorkspace();
+  const selection = useCurrentWorkspace();
+  const { workspace } = selection;
   const me = useAdminMe(true);
-  const teams = useWorkspaceTeams(workspace?.id ?? null, true);
+  const teams = useWorkspaceTeams(
+    workspace?.id ?? null,
+    !!workspace && (!workspace.is_system || me.data?.is_admin === true),
+    selection.context,
+  );
 
-  if (workspaces.isLoading) {
-    return (
-      <div className="p-6 text-sm text-slate-500">
-        <Spinner size="small">Loading API keys...</Spinner>
-      </div>
-    );
-  }
   if (!workspace) {
     return (
       <div className="p-6">
-        <Empty>
-          <EmptyTitle>No workspace selected</EmptyTitle>
-        </Empty>
+        <WorkspaceAccessNotice pending={selection.pending} error={selection.error} />
       </div>
     );
   }
-  const workspaceAdmin = me.data?.is_admin === true || workspace.role === 'admin';
+  const workspaceAdmin = selection.canManage;
   const teamAdmin = (teams.data ?? []).some((t) => t.my_role === 'admin');
   if (!workspaceAdmin && !teamAdmin) {
     return <MemberKeysView />;

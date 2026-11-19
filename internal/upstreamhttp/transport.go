@@ -11,11 +11,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"sync"
 	"time"
 
 	"github.com/egose/aiproxy/internal/tlsprofile"
+	"github.com/egose/aiproxy/internal/upstreampolicy"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -36,12 +38,14 @@ type Transport interface {
 type Options struct {
 	Profile               tlsprofile.Profile
 	ResponseHeaderTimeout time.Duration
+	OutboundPolicy        *upstreampolicy.Policy
 }
 
 type transportDependencies struct {
 	roots       *x509.CertPool
 	proxy       func(*http.Request) (*url.URL, error)
 	dialContext func(context.Context, string, string) (net.Conn, error)
+	lookupNetIP func(context.Context, string, string) ([]netip.Addr, error)
 }
 
 func NewTransport(options Options) (Transport, error) {
@@ -57,6 +61,14 @@ func newTransport(options Options, deps transportDependencies) (Transport, error
 		dialer := &net.Dialer{Timeout: tcpDialTimeout, KeepAlive: tcpKeepAlive}
 		deps.dialContext = dialer.DialContext
 	}
+	if options.OutboundPolicy != nil {
+		if deps.lookupNetIP == nil {
+			deps.lookupNetIP = net.DefaultResolver.LookupNetIP
+		}
+		deps.proxy = func(*http.Request) (*url.URL, error) { return nil, nil }
+		deps.dialContext = publicDialContext(options.OutboundPolicy, deps.lookupNetIP, deps.dialContext)
+		customDial = true
+	}
 	native := http.DefaultTransport.(*http.Transport).Clone()
 	native.Proxy = deps.proxy
 	native.ResponseHeaderTimeout = options.ResponseHeaderTimeout
@@ -69,8 +81,14 @@ func newTransport(options Options, deps transportDependencies) (Transport, error
 		}
 		native.TLSClientConfig.RootCAs = deps.roots
 	}
+	if options.OutboundPolicy != nil {
+		native.Proxy = nil
+		native.DialTLS = nil
+		native.DialTLSContext = nil
+		native.TLSClientConfig = &tls.Config{RootCAs: deps.roots, MinVersion: tls.VersionTLS12}
+	}
 	if options.Profile.IsNative() {
-		return native, nil
+		return withOutboundPolicy(native, options.OutboundPolicy), nil
 	}
 	if _, err := options.Profile.Materialize(); err != nil {
 		return nil, fmt.Errorf("upstream TLS profile: %w", err)
@@ -82,7 +100,7 @@ func newTransport(options Options, deps transportDependencies) (Transport, error
 		routes:  make(map[proxyRoute]*http.Transport),
 	}
 	profiled.routes[proxyRoute{}] = profiled.newRouteTransport(proxyRoute{})
-	return profiled, nil
+	return withOutboundPolicy(profiled, options.OutboundPolicy), nil
 }
 
 type proxyRoute struct {

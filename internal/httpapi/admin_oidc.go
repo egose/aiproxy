@@ -3,8 +3,10 @@ package httpapi
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -15,7 +17,6 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/egose/aiproxy/internal/adminauth"
 	"github.com/egose/aiproxy/internal/store"
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/oauth2"
 )
 
@@ -349,34 +350,22 @@ func (h *Handler) adminOIDCCallback(deps Dependencies, w http.ResponseWriter, r 
 	isAdmin := oidcAdminMatch(claims, cfg)
 	u, err := deps.AdminStore.GetUserByEmail(ctx, email)
 	if err != nil {
-		randomPassword, herr := newRandomHex(32)
-		if herr != nil {
-			fail("cannot provision user")
-			return
+		if errors.Is(err, sql.ErrNoRows) {
+			fail("account not registered; redeem an invitation or contact your administrator")
+		} else {
+			fail("cannot look up account")
 		}
-		hash, herr := bcrypt.GenerateFromPassword([]byte(randomPassword), bcrypt.DefaultCost)
-		if herr != nil {
-			fail("cannot provision user")
-			return
-		}
-		nu := &store.User{Email: email, PasswordHash: string(hash), IsAdmin: isAdmin}
-		if cerr := deps.AdminStore.CreateUser(ctx, nu); cerr != nil {
-			fail("cannot provision user")
-			return
-		}
-		u = *nu
-	}
-	if err := h.ensurePersonalWorkspace(ctx, deps, u.ID, u.Email); err != nil {
-		fail("cannot provision workspace")
 		return
-	} else {
-		if u.Disabled {
-			fail("account is disabled")
+	}
+	if u.Disabled {
+		fail("account is disabled")
+		return
+	}
+	if strings.TrimSpace(cfg.AdminClaim) != "" && u.IsAdmin != isAdmin {
+		u.IsAdmin = isAdmin
+		if err := deps.AdminStore.UpdateUser(ctx, &u); err != nil {
+			fail("cannot update account")
 			return
-		}
-		if strings.TrimSpace(cfg.AdminClaim) != "" && u.IsAdmin != isAdmin {
-			u.IsAdmin = isAdmin
-			_ = deps.AdminStore.UpdateUser(ctx, &u)
 		}
 	}
 	access, exp, err := adminauth.IssueAccess(u.ID.String(), u.Email, u.IsAdmin)

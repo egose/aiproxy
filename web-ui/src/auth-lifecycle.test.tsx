@@ -14,7 +14,8 @@ import {
   setAdminSession,
   setDashboardToken,
 } from './store';
-import { adminStatusSchema } from './types';
+import { adminStatusSchema, adminWorkspaceSchema } from './types';
+import { systemWorkspaceId } from './workspace-selection';
 
 vi.mock('./services/admin', async (original) => {
   const module = await original<typeof admin>();
@@ -74,6 +75,10 @@ beforeEach(() => {
     adminStatusSchema.parse({ multi_tenancy_enabled: true, web_ui_enabled: true, db_ok: true }),
   );
   vi.mocked(admin.fetchAdminMe).mockResolvedValue({ user_id: 'A', email: 'A@example.com', is_admin: true });
+  vi.mocked(admin.fetchAdminWorkspaces).mockResolvedValue([
+    adminWorkspaceSchema.parse({ id: systemWorkspaceId, name: 'system', is_system: true, role: 'admin' }),
+    ...['ws-A', 'ws-B'].map((id) => adminWorkspaceSchema.parse({ id, name: id, role: 'admin' })),
+  ]);
 });
 
 afterEach(() => {

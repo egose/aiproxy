@@ -21,16 +21,29 @@ import (
 	"github.com/egose/aiproxy/internal/accounting"
 	"github.com/egose/aiproxy/internal/auth"
 	"github.com/egose/aiproxy/internal/config"
+	"github.com/egose/aiproxy/internal/identity"
 	"github.com/egose/aiproxy/internal/modelresolver"
 	"github.com/egose/aiproxy/internal/observability"
 	"github.com/egose/aiproxy/internal/provider"
 	"github.com/egose/aiproxy/internal/providerhealth"
+	"github.com/egose/aiproxy/internal/store"
 )
 
 type stubAdapter struct {
 	got    provider.Request
 	result *provider.Result
 	err    error
+}
+
+func authenticatedTestPrincipal(t *testing.T, a auth.Authenticator, token string) *auth.Principal {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Authorization", "Bearer "+token)
+	p, err := a.Authenticate(r)
+	if err != nil || p == nil {
+		t.Fatalf("auth = %+v, %v; want an authenticated principal", p, err)
+	}
+	return p
 }
 
 type clientCaptureAdapter struct {
@@ -385,7 +398,7 @@ func (a *failFirstProviderAdapter) Do(ctx context.Context, r provider.Request) (
 	return &provider.Result{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: []byte(`{"id":"chatcmpl_ok"}`)}, nil
 }
 
-func (l *denySecondLimiter) Allow(string) (bool, time.Duration) {
+func (l *denySecondLimiter) Allow(identity.CredentialID) (bool, time.Duration) {
 	if atomic.AddInt32(&l.count, 1) == 1 {
 		return true, 0
 	}
@@ -2112,7 +2125,8 @@ func TestHandlerAccountingRecordsTenantClientModelAndStatus(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("events = %+v", events)
 	}
-	if events[0].Tenant != "team-a" || events[0].Client != "ci" || events[0].Model != "openai/gpt-4o-mini" || events[0].Operation != "chat_completions" || events[0].StatusCode != http.StatusOK {
+	if events[0].CredentialID != identity.StaticClientID("ci") || events[0].WorkspaceScope != identity.InWorkspace(store.SystemWorkspaceID) ||
+		events[0].Tenant != "team-a" || events[0].Client != "ci" || events[0].Model != "openai/gpt-4o-mini" || events[0].Operation != "chat_completions" || events[0].StatusCode != http.StatusOK {
 		t.Fatalf("event = %+v", events[0])
 	}
 }
@@ -2320,8 +2334,11 @@ func TestHandlerAccountingCollapsesForbiddenModels(t *testing.T) {
 func TestHandlerBillingUsageFiltersToTenant(t *testing.T) {
 	rt := newRT()
 	usage := accounting.NewAggregator()
-	usage.Record(accounting.Event{Tenant: "team-a", Client: "ci", Model: "openai/gpt-4o-mini", Operation: "chat_completions", StatusCode: 200})
-	usage.Record(accounting.Event{Tenant: "team-b", Client: "ops", Model: "openai/gpt-4.1", Operation: "responses", StatusCode: 200})
+	workspace := identity.InWorkspace(store.SystemWorkspaceID)
+	usage.Record(accounting.Event{CredentialID: identity.StaticClientID("ci"), WorkspaceScope: workspace,
+		Tenant: "team-a", Client: "ci", Model: "openai/gpt-4o-mini", Operation: "chat_completions", StatusCode: 200})
+	usage.Record(accounting.Event{CredentialID: identity.StaticClientID("ops"), WorkspaceScope: workspace,
+		Tenant: "team-b", Client: "ops", Model: "openai/gpt-4.1", Operation: "responses", StatusCode: 200})
 	h := NewHandler(Dependencies{
 		Resolver: modelresolver.New(rt),
 		Adapter:  &stubAdapter{},

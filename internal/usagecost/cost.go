@@ -35,10 +35,12 @@ func attributed(s accounting.Summary, upstream []accounting.UpstreamSummary) ([]
 	if !strings.HasPrefix(s.Model, "alias/") {
 		return nil, false
 	}
-	sum := accounting.Summary{Tenant: s.Tenant, Client: s.Client, Model: s.Model, Operation: s.Operation, StatusCode: s.StatusCode}
+	sum := accounting.Summary{CredentialID: s.CredentialID, WorkspaceScope: s.WorkspaceScope,
+		Tenant: s.Tenant, Client: s.Client, Model: s.Model, Operation: s.Operation, StatusCode: s.StatusCode}
 	var entries []accounting.UpstreamSummary
 	for _, u := range upstream {
-		if u.PublicModel != s.Model || u.Tenant != s.Tenant || u.Client != s.Client || u.Operation != s.Operation || u.StatusCode != s.StatusCode {
+		if u.CredentialID != s.CredentialID || u.WorkspaceScope != s.WorkspaceScope ||
+			u.PublicModel != s.Model || u.Tenant != s.Tenant || u.Client != s.Client || u.Operation != s.Operation || u.StatusCode != s.StatusCode {
 			continue
 		}
 		entries = append(entries, u)

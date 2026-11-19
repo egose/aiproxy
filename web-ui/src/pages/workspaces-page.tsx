@@ -16,11 +16,11 @@ import { NativeSelect, NativeSelectOption } from '@egose/shadcn-theme/components
 import { createTypedDialog, useDialog } from '@egose/shadcn-theme/components/widgets/dialog-manager';
 import { Spinner } from '@egose/shadcn-theme/components/ui/spinner';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { DataTable, type ManagementColumnDef } from '../components/data-table';
-import { showSecret, useConfirm } from '../components/dialogs';
+import { showInvitationCode, useConfirm } from '../components/dialogs';
 import { QuotaEditor } from '../components/quota';
 import { KindBadge } from '../components/workspace-select';
 import { useAdminMe, useWorkspaceMembers, useWorkspaceTeams, useTeamMembers } from '../hooks';
@@ -578,6 +578,7 @@ export function MemberSection({ workspace, canManage }: { workspace: AdminWorksp
 export const InviteDialog = createTypedDialog<{ workspaceId: string; workspaceName: string }, boolean>(
   ({ open, args, onClose }) => {
     const { openDialog } = useDialog();
+    const id = useId();
     const [error, setError] = useState<string | null>(null);
     const form = useForm<InviteForm>({
       resolver: zodResolver(inviteSchema),
@@ -585,21 +586,15 @@ export const InviteDialog = createTypedDialog<{ workspaceId: string; workspaceNa
     });
 
     const inviteMutation = useMutation({
-      mutationFn: async (values: InviteForm) =>
-        createAdminInvite({
+      mutationFn: async (values: InviteForm) => {
+        const { token: code } = await createAdminInvite({
           email: values.email.trim(),
           workspace_id: args.workspaceId,
           workspace_role: values.role ?? 'member',
-        }),
-      onSuccess: async ({ token }) => {
+        });
         setError(null);
         onClose(true);
-        await showSecret(openDialog, {
-          title: `Invite to ${args.workspaceName}`,
-          description: 'New users set their own password with this token.',
-          secret: token,
-          hint: 'Shown once. Copy it now.',
-        });
+        await showInvitationCode(openDialog, code, `Invitation code for ${args.workspaceName}`);
       },
       onError: (err) => setError(errorMessage(err)),
     });
@@ -620,12 +615,14 @@ export const InviteDialog = createTypedDialog<{ workspaceId: string; workspaceNa
               )}
 
               <HookFormTextInput<InviteForm>
+                id={`${id}-email`}
                 name="email"
                 label="Email (new users set their own password)"
                 placeholder="teammate@example.com"
               />
 
               <HookFormNativeSelect<InviteForm>
+                id={`${id}-role`}
                 name="role"
                 label="Role"
                 data={[

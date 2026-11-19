@@ -1,14 +1,7 @@
 import axios from 'axios';
 import { z } from 'zod';
 
-import {
-  adminWorkspaceStore,
-  adminStore,
-  clearAdminSession,
-  refreshAdminSession,
-  setAdminSession,
-  setDashboardToken,
-} from '../store';
+import { adminStore, clearAdminSession, refreshAdminSession, setAdminSession, setDashboardToken } from '../store';
 import {
   assertAdminSession,
   assertAuthGeneration,
@@ -16,6 +9,7 @@ import {
   guardAuthClient,
   type AuthRequestConfig,
 } from '../auth-lifecycle';
+import { assertWorkspaceContext, type WorkspaceContext } from '../workspace-selection';
 import {
   adminAliasSchema,
   adminAliasesSchema,
@@ -74,13 +68,6 @@ adminClient.interceptors.request.use(
     if (token) {
       config.headers = config.headers ?? {};
       config.headers.Authorization = `Bearer ${token}`;
-    }
-    const workspaceId = adminWorkspaceStore.workspaceId;
-    if (workspaceId !== '' && typeof config.url === 'string' && config.url.startsWith('/_internal/admin/')) {
-      config.headers = config.headers ?? {};
-      if (config.headers[adminWorkspaceHeader] == null) {
-        config.headers[adminWorkspaceHeader] = workspaceId;
-      }
     }
     return config;
   },
@@ -168,8 +155,20 @@ export async function fetchAdminMe(): Promise<AdminMe> {
   return adminMeSchema.parse(res.data);
 }
 
-export async function fetchAdminProviders(): Promise<AdminProvider[]> {
-  const res = await adminClient.get<unknown>('/_internal/admin/providers');
+function workspaceRequest(context: WorkspaceContext, body?: Record<string, unknown>) {
+  assertWorkspaceContext(context);
+  if (body?.workspace_id && body.workspace_id !== context.workspaceId) {
+    throw new Error('Request does not belong to the selected workspace');
+  }
+  return {
+    headers: { [adminWorkspaceHeader]: context.workspaceId },
+    authGeneration: context.generation,
+    authSession: context.session,
+  };
+}
+
+export async function fetchAdminProviders(context: WorkspaceContext): Promise<AdminProvider[]> {
+  const res = await adminClient.get<unknown>('/_internal/admin/providers', workspaceRequest(context));
   return adminProvidersSchema.parse(res.data).providers;
 }
 
@@ -178,31 +177,48 @@ export async function fetchProviderTypes(): Promise<ProviderTypeInfo[]> {
   return providerTypesSchema.parse(res.data).provider_types;
 }
 
-export async function createAdminProvider(body: Record<string, unknown>): Promise<AdminProvider> {
-  const res = await adminClient.post<unknown>('/_internal/admin/providers', body);
+export async function createAdminProvider(
+  body: Record<string, unknown>,
+  context: WorkspaceContext,
+): Promise<AdminProvider> {
+  const res = await adminClient.post<unknown>('/_internal/admin/providers', body, workspaceRequest(context, body));
   return adminProviderSchema.parse(res.data);
 }
 
-export async function updateAdminProvider(name: string, body: Record<string, unknown>): Promise<AdminProvider> {
-  const res = await adminClient.put<unknown>(`/_internal/admin/providers/${encodeURIComponent(name)}`, body);
+export async function updateAdminProvider(
+  name: string,
+  body: Record<string, unknown>,
+  context: WorkspaceContext,
+): Promise<AdminProvider> {
+  const res = await adminClient.put<unknown>(
+    `/_internal/admin/providers/${encodeURIComponent(name)}`,
+    body,
+    workspaceRequest(context, body),
+  );
   return adminProviderSchema.parse(res.data);
 }
 
-export async function deleteAdminProvider(name: string) {
-  await adminClient.delete(`/_internal/admin/providers/${encodeURIComponent(name)}`);
+export async function deleteAdminProvider(name: string, context: WorkspaceContext) {
+  await adminClient.delete(`/_internal/admin/providers/${encodeURIComponent(name)}`, workspaceRequest(context));
 }
 
-export async function setProviderCredential(name: string, body: Record<string, unknown>) {
-  await adminClient.put(`/_internal/admin/providers/${encodeURIComponent(name)}/credential`, body);
+export async function setProviderCredential(name: string, body: Record<string, unknown>, context: WorkspaceContext) {
+  await adminClient.put(
+    `/_internal/admin/providers/${encodeURIComponent(name)}/credential`,
+    body,
+    workspaceRequest(context, body),
+  );
 }
 
 export const copilotDeviceFlowTimeout = 25_000;
 
 export async function startCopilotDeviceFlow(
   body: Record<string, unknown>,
+  context: WorkspaceContext,
   options?: { signal?: AbortSignal },
 ): Promise<CopilotDeviceFlowStatus> {
   const res = await adminClient.post<unknown>('/_internal/admin/copilot-device-flows', body, {
+    ...workspaceRequest(context, body),
     timeout: copilotDeviceFlowTimeout,
     signal: options?.signal,
   });
@@ -211,9 +227,11 @@ export async function startCopilotDeviceFlow(
 
 export async function fetchCopilotDeviceFlow(
   id: string,
+  context: WorkspaceContext,
   options?: { signal?: AbortSignal },
 ): Promise<CopilotDeviceFlowStatus> {
   const res = await adminClient.get<unknown>(`/_internal/admin/copilot-device-flows/${encodeURIComponent(id)}`, {
+    ...workspaceRequest(context),
     signal: options?.signal,
   });
   return copilotDeviceFlowStatusSchema.parse(res.data);
@@ -221,76 +239,109 @@ export async function fetchCopilotDeviceFlow(
 
 export async function pollCopilotDeviceFlow(
   id: string,
+  context: WorkspaceContext,
   options?: { signal?: AbortSignal },
 ): Promise<CopilotDeviceFlowStatus> {
   const res = await adminClient.post<unknown>(
     `/_internal/admin/copilot-device-flows/${encodeURIComponent(id)}/poll`,
     {},
-    { timeout: copilotDeviceFlowTimeout, signal: options?.signal },
+    { ...workspaceRequest(context), timeout: copilotDeviceFlowTimeout, signal: options?.signal },
   );
   return copilotDeviceFlowStatusSchema.parse(res.data);
 }
 
 export async function cancelCopilotDeviceFlow(
   id: string,
+  context: WorkspaceContext,
   options?: { signal?: AbortSignal },
 ): Promise<CopilotDeviceFlowStatus> {
   const res = await adminClient.delete<unknown>(`/_internal/admin/copilot-device-flows/${encodeURIComponent(id)}`, {
+    ...workspaceRequest(context),
     signal: options?.signal,
   });
   return copilotDeviceFlowStatusSchema.parse(res.data);
 }
 
-export async function fetchAdminAliases(): Promise<AdminAlias[]> {
-  const res = await adminClient.get<unknown>('/_internal/admin/aliases');
+export async function fetchAdminAliases(context: WorkspaceContext): Promise<AdminAlias[]> {
+  const res = await adminClient.get<unknown>('/_internal/admin/aliases', workspaceRequest(context));
   return adminAliasesSchema.parse(res.data).aliases;
 }
 
-export async function createAdminAlias(body: Record<string, unknown>): Promise<AdminAlias> {
-  const res = await adminClient.post<unknown>('/_internal/admin/aliases', body);
+export async function createAdminAlias(body: Record<string, unknown>, context: WorkspaceContext): Promise<AdminAlias> {
+  const res = await adminClient.post<unknown>('/_internal/admin/aliases', body, workspaceRequest(context, body));
   return adminAliasSchema.parse(res.data);
 }
 
-export async function updateAdminAlias(name: string, body: Record<string, unknown>): Promise<AdminAlias> {
-  const res = await adminClient.put<unknown>(`/_internal/admin/aliases/${encodeURIComponent(name)}`, body);
+export async function updateAdminAlias(
+  name: string,
+  body: Record<string, unknown>,
+  context: WorkspaceContext,
+): Promise<AdminAlias> {
+  const res = await adminClient.put<unknown>(
+    `/_internal/admin/aliases/${encodeURIComponent(name)}`,
+    body,
+    workspaceRequest(context, body),
+  );
   return adminAliasSchema.parse(res.data);
 }
 
-export async function deleteAdminAlias(name: string) {
-  await adminClient.delete(`/_internal/admin/aliases/${encodeURIComponent(name)}`);
+export async function deleteAdminAlias(name: string, context: WorkspaceContext) {
+  await adminClient.delete(`/_internal/admin/aliases/${encodeURIComponent(name)}`, workspaceRequest(context));
 }
 
-export async function fetchAdminKeys(): Promise<AdminKey[]> {
-  const res = await adminClient.get<unknown>('/_internal/admin/keys');
+export async function fetchAdminKeys(context: WorkspaceContext): Promise<AdminKey[]> {
+  const res = await adminClient.get<unknown>('/_internal/admin/keys', workspaceRequest(context));
   return adminKeysSchema.parse(res.data).keys;
 }
 
-export async function createAdminKey(body: Record<string, unknown>): Promise<{ key: AdminKey; token: string }> {
-  const res = await adminClient.post<{ key: unknown; token: string }>('/_internal/admin/keys', body);
+export async function createAdminKey(
+  body: Record<string, unknown>,
+  context: WorkspaceContext,
+): Promise<{ key: AdminKey; token: string }> {
+  const res = await adminClient.post<{ key: unknown; token: string }>(
+    '/_internal/admin/keys',
+    body,
+    workspaceRequest(context, body),
+  );
   const key = adminKeySchema.parse(res.data.key);
   return { key, token: res.data.token };
 }
 
-export async function rotateAdminKey(id: string): Promise<string> {
-  const res = await adminClient.post<{ token: string }>(`/_internal/admin/keys/${encodeURIComponent(id)}/rotate`);
+export async function rotateAdminKey(id: string, context: WorkspaceContext): Promise<string> {
+  const res = await adminClient.post<{ token: string }>(
+    `/_internal/admin/keys/${encodeURIComponent(id)}/rotate`,
+    {},
+    workspaceRequest(context),
+  );
   return res.data.token;
 }
 
-export async function revokeAdminKey(id: string) {
-  await adminClient.post(`/_internal/admin/keys/${encodeURIComponent(id)}/revoke`);
+export async function revokeAdminKey(id: string, context: WorkspaceContext) {
+  await adminClient.post(`/_internal/admin/keys/${encodeURIComponent(id)}/revoke`, {}, workspaceRequest(context));
 }
 
-export async function deleteAdminKey(id: string) {
-  await adminClient.delete(`/_internal/admin/keys/${encodeURIComponent(id)}`);
+export async function deleteAdminKey(id: string, context: WorkspaceContext) {
+  await adminClient.delete(`/_internal/admin/keys/${encodeURIComponent(id)}`, workspaceRequest(context));
 }
 
-export async function fetchAdminKey(id: string): Promise<AdminKey> {
-  const res = await adminClient.get<{ key: unknown }>(`/_internal/admin/keys/${encodeURIComponent(id)}`);
+export async function fetchAdminKey(id: string, context: WorkspaceContext): Promise<AdminKey> {
+  const res = await adminClient.get<{ key: unknown }>(
+    `/_internal/admin/keys/${encodeURIComponent(id)}`,
+    workspaceRequest(context),
+  );
   return adminKeySchema.parse(res.data.key);
 }
 
-export async function updateAdminKey(id: string, body: Record<string, unknown>): Promise<AdminKey> {
-  const res = await adminClient.put<{ key: unknown }>(`/_internal/admin/keys/${encodeURIComponent(id)}`, body);
+export async function updateAdminKey(
+  id: string,
+  body: Record<string, unknown>,
+  context: WorkspaceContext,
+): Promise<AdminKey> {
+  const res = await adminClient.put<{ key: unknown }>(
+    `/_internal/admin/keys/${encodeURIComponent(id)}`,
+    body,
+    workspaceRequest(context, body),
+  );
   return adminKeySchema.parse(res.data.key);
 }
 
@@ -478,4 +529,19 @@ export async function updateScopeQuota(
 export async function publicRegister(body: Record<string, unknown>): Promise<unknown> {
   const res = await axios.post<unknown>('/_internal/admin/register', body, { timeout: 10_000 });
   return res.data;
+}
+
+export async function acceptAdminInvite(code: string, password: string): Promise<AdminUser> {
+  const session = authLifecycle.session;
+  try {
+    const res = await axios.post<unknown>(
+      '/_internal/admin/invites/accept',
+      { token: code, password },
+      { timeout: 10_000 },
+    );
+    assertAdminSession(session);
+    return adminUserSchema.parse(res.data);
+  } catch {
+    throw new Error('Unable to accept invitation. Check the code and password, or ask for a new invitation.');
+  }
 }
