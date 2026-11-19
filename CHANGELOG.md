@@ -90,6 +90,11 @@
   entry. Literal routes take priority, static bearers need explicit rule grants,
   and rule traffic is grouped and unpriced without discovery or new model cards.
 
+- Extend static model-ID passthrough to Anthropic, Gemini, OpenCode Zen/Go and
+  GitHub Copilot. OpenCode rules pin a protocol; Gemini-style rules accept one
+  bare model ID. No new operations, discovery or grant types. Copilot rule
+  dispatch is verified with local fixtures, not against live GitHub.
+
 - Add signed-out `/invite` onboarding with public registration closed. Send a
   one-time code separately for the recipient to paste on the clean `/invite`
   page. Codes in URLs are ignored. Revoke and reissue pending invitations

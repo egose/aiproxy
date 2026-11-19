@@ -27,11 +27,14 @@ const (
 
 type ModelPassthroughRule struct {
 	name         string
+	protocol     ModelProtocol
 	capabilities []Capability
 	pattern      *regexp.Regexp
 }
 
 func (r ModelPassthroughRule) Name() string { return r.name }
+
+func (r ModelPassthroughRule) Protocol() ModelProtocol { return r.protocol }
 
 func (r ModelPassthroughRule) Capabilities() []Capability {
 	return slices.Clone(r.capabilities)
@@ -57,15 +60,24 @@ func (p Provider) MatchModelPassthrough(suffix string) (ModelPassthroughRule, Mo
 		}
 		matched = rule
 	}
-	if matched.pattern == nil {
+	if matched.pattern == nil || (ModelPassthroughUsesModelPath(p.Type, matched.protocol) && !IsBareModelPassthroughID(suffix)) {
 		return ModelPassthroughRule{}, ModelPassthroughNoMatch
 	}
 	return matched, ModelPassthroughMatched
 }
 
+func ModelPassthroughUsesModelPath(t ProviderType, protocol ModelProtocol) bool {
+	return t == ProviderTypeGemini || (t == ProviderTypeOpenCodeZen && protocol == ModelProtocolGemini)
+}
+
+func IsBareModelPassthroughID(suffix string) bool {
+	return len(suffix) <= MaxModelPassthroughSuffixBytes && IsLowercaseName(suffix)
+}
+
 func supportsModelPassthrough(t ProviderType) bool {
 	switch t {
-	case ProviderTypeOpenAI, ProviderTypeOpenAICompatible, ProviderTypeOpenRouter, ProviderTypeZenMux:
+	case ProviderTypeOpenAI, ProviderTypeOpenAICompatible, ProviderTypeOpenRouter, ProviderTypeZenMux,
+		ProviderTypeAnthropic, ProviderTypeGitHubCopilot, ProviderTypeOpenCodeZen, ProviderTypeOpenCodeGo, ProviderTypeGemini:
 		return true
 	default:
 		return false
@@ -116,6 +128,10 @@ func buildModelPassthroughs(p rawProvider) ([]ModelPassthroughRule, error) {
 			value.AsString() == "" || len(value.AsString()) > MaxModelPassthroughPatternBytes {
 			return nil, fmt.Errorf("%s: match must be a nonempty string of at most %d bytes", owner, MaxModelPassthroughPatternBytes)
 		}
+		protocol, err := buildModelPassthroughProtocol(providerType, raw.Protocol, owner)
+		if err != nil {
+			return nil, err
+		}
 		caps, err := modelPassthroughStrings(raw.Capabilities.Expr, owner+": capabilities")
 		if err != nil {
 			return nil, err
@@ -126,12 +142,13 @@ func buildModelPassthroughs(p rawProvider) ([]ModelPassthroughRule, error) {
 		capabilities := make([]Capability, 0, len(caps))
 		for _, value := range caps {
 			capability := Capability(value)
-			switch {
-			case !isValidCapability(capability):
+			if !isValidCapability(capability) {
 				return nil, fmt.Errorf("%s: invalid capability %q", owner, capability)
-			case !providerSupportsCapability(providerType, capability):
-				return nil, fmt.Errorf("%s: capability %q is not supported by provider type %q", owner, capability, providerType)
-			case HasCapability(capabilities, capability):
+			}
+			if err := validateProviderCapability(providerType, protocol, capability); err != nil {
+				return nil, fmt.Errorf("%s: %w", owner, err)
+			}
+			if HasCapability(capabilities, capability) {
 				return nil, fmt.Errorf("%s: duplicate capability %q", owner, capability)
 			}
 			capabilities = append(capabilities, capability)
@@ -141,9 +158,35 @@ func buildModelPassthroughs(p rawProvider) ([]ModelPassthroughRule, error) {
 			return nil, fmt.Errorf("%s: invalid match regexp: %w", owner, err)
 		}
 		pattern.Longest()
-		rules = append(rules, ModelPassthroughRule{name: raw.Name, capabilities: capabilities, pattern: pattern})
+		rules = append(rules, ModelPassthroughRule{name: raw.Name, protocol: protocol, capabilities: capabilities, pattern: pattern})
 	}
 	return rules, nil
+}
+
+func buildModelPassthroughProtocol(providerType ProviderType, attr *hcl.Attribute, owner string) (ModelProtocol, error) {
+	if !IsOpenCodeProviderType(providerType) {
+		if attr != nil {
+			return "", fmt.Errorf("%s: protocol is only supported by opencode-zen and opencode-go", owner)
+		}
+		return "", nil
+	}
+	if attr == nil {
+		return "", fmt.Errorf("%s: protocol is required", owner)
+	}
+	value, diags := attr.Expr.Value(nil)
+	if diags.HasErrors() || !value.IsKnown() || value.IsNull() || value.Type() != cty.String || value.AsString() == "" {
+		return "", fmt.Errorf("%s: protocol must be a nonempty string", owner)
+	}
+	protocol := ModelProtocol(value.AsString())
+	if err := validateModelProtocol(providerType, owner+":", protocol); err != nil {
+		return "", err
+	}
+	switch protocol {
+	case ModelProtocolChat, ModelProtocolResponses, ModelProtocolMessages, ModelProtocolGemini:
+		return protocol, nil
+	default:
+		return "", fmt.Errorf("%s: protocol %q is not supported for model_passthrough", owner, protocol)
+	}
 }
 
 func validateProviderModelPassthroughs(p Provider) error {
@@ -153,6 +196,17 @@ func validateProviderModelPassthroughs(p Provider) error {
 	for _, rule := range p.ModelPassthroughs {
 		if rule.pattern == nil {
 			return fmt.Errorf("model_passthrough requires rules compiled during config construction")
+		}
+	}
+	return validateModelPassthroughBaseURL(p.Type, p.BaseURL, p.ModelPassthroughs)
+}
+
+func validateModelPassthroughBaseURL(t ProviderType, baseURL string, rules []ModelPassthroughRule) error {
+	if strings.ContainsAny(baseURL, "?#") {
+		for _, rule := range rules {
+			if ModelPassthroughUsesModelPath(t, rule.protocol) {
+				return fmt.Errorf("base_url must not include a query or fragment for path-based model_passthrough rules")
+			}
 		}
 	}
 	return nil
@@ -217,6 +271,9 @@ func validateEditableModelPassthrough(auth []rawAuth, providers []rawProvider, b
 		if len(p.ModelPassthroughs) != 0 {
 			rules, err := buildModelPassthroughs(p)
 			if err != nil {
+				return fmt.Errorf("provider %q: %w", p.Name, err)
+			}
+			if err := validateModelPassthroughBaseURL(ProviderType(p.Type), p.BaseURL, rules); err != nil {
 				return fmt.Errorf("provider %q: %w", p.Name, err)
 			}
 			declared[p.Name] = rules

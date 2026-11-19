@@ -173,15 +173,17 @@ func TestModelPassthroughOpenAIAdapterOperations(t *testing.T) {
 						}
 					} else {
 						var input struct {
-							Model  string `json:"model"`
-							Vendor struct {
+							Model     string   `json:"model"`
+							Fallbacks []string `json:"fallbacks"`
+							Vendor    struct {
 								Model  string   `json:"model"`
 								Models []string `json:"models"`
 								Preset string   `json:"preset"`
 							} `json:"vendor"`
 						}
 						if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.Model != suffix || input.Vendor.Model != "nested-field" ||
-							!slices.Equal(input.Vendor.Models, []string{"nested-field"}) || input.Vendor.Preset != "nested-field" {
+							!slices.Equal(input.Vendor.Models, []string{"nested-field"}) || input.Vendor.Preset != "nested-field" ||
+							!slices.Equal(input.Fallbacks, []string{"top-level-extension"}) {
 							t.Errorf("upstream model/opaque extension did not survive: %+v, %v", input, err)
 						}
 					}
@@ -198,7 +200,7 @@ func TestModelPassthroughOpenAIAdapterOperations(t *testing.T) {
     capabilities = ["chat", "responses", "embeddings", "images", "audio_transcriptions", "audio_speech"]
   }
 `))
-				contentType, body := "application/json", fmt.Sprintf(`{"model":%q,%s,"vendor":{"model":"nested-field","models":["nested-field"],"preset":"nested-field"}}`, public, tc.fields)
+				contentType, body := "application/json", fmt.Sprintf(`{"model":%q,%s,"FaLlBaCkS":["top-level-extension"],"vendor":{"model":"nested-field","models":["nested-field"],"preset":"nested-field"}}`, public, tc.fields)
 				if tc.path == passthroughAudio {
 					contentType, body = passthroughForm(t, func(form *multipart.Writer) {
 						if err := form.SetBoundary("quoted (boundary)"); err != nil {

@@ -68,21 +68,32 @@ If an upstream stream fails after partial output, the proxy terminates the strea
 
 Use `<provider>/<upstream-id>` in the `model` field when an eligible direct
 request can use a [model-ID passthrough rule](configuration.md#model-id-passthrough).
-Exact literal models take priority. Rule matches use the same direct provider
-settings, ingress guardrails and provider/root encrypted-reasoning policy as
-ordinary inference; they neither contact model discovery nor use peer transport.
+Exact literal models take priority. Rule matches use the existing adapter,
+destination, credential policy and ingress guardrails. Provider/root
+encrypted-reasoning policy still applies to chat and Responses where supported,
+not native Messages. Rules add no public operations, do not contact discovery,
+and do not use peer transport.
 
 A rule call requires exactly one top-level `model` string in a JSON object,
 or one text form field named `model` in multipart audio transcriptions. Use the
 exact lowercase field name and the unmodified ID, with no duplicates. Top-level
 JSON keys or multipart fields named `models` or `preset` (including case
-variants) are rejected on rule calls before upstream I/O. Literal and alias
-payload handling is unchanged.
+variants) are rejected on all rule calls. On native `POST /v1/messages` rule
+calls only, top-level `fallbacks` (including case variants) is also rejected.
+These checks run before upstream I/O, including after guardrail rewrites.
+Literal and alias payload handling and existing translation limits are unchanged.
 
-The proxy forwards the admitted suffix as the `model` value. It does not verify
-that the upstream offers the ID, how the upstream interprets virtual IDs or
-other parameters, or what the upstream actually runs or charges. Use a trusted
-upstream and enforce model and spending restrictions there as well.
+Body-based adapters use the admitted suffix as the upstream `model` value.
+Gemini and the Zen `gemini` protocol use a single bare ID segment in the
+adapter's fixed model path. Only the adapter adds `alt=sse` for streaming.
+For Gemini batched embeddings, send the normal OpenAI-style array of strings
+in `input`; the adapter sets every upstream `requests[].model` to
+`models/<admitted-id>`, matching the `:batchEmbedContents` path. Callers cannot
+provide their own subrequest model. Literal and alias batches are unchanged.
+
+The proxy does not verify that the upstream offers the ID, how it interprets
+virtual IDs or other parameters, or what it actually runs or charges. Use a
+trusted upstream and enforce model and spending restrictions there as well.
 
 ## Peer Deferred Transport v1
 
@@ -1138,7 +1149,7 @@ GitHub compatibility unverified.**
 - `anthropic` and `gemini` use request and response translation
 - translated `/v1/responses` support is intentionally conservative compared with the full upstream provider-native feature set
 - `opencode-zen` and `opencode-go` mix native and translated handling per
-  model `protocol`: `chat`/`responses` protocols are native pass-through for
+  literal model or rule `protocol`: `chat`/`responses` are native pass-through for
   one public operation each, `messages` is native Anthropic passthrough for
   `POST /v1/messages` (plus conservative translation for chat/responses),
   and `gemini` uses the conservative translation subsets. Operations a protocol does not serve, and

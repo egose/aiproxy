@@ -29,21 +29,28 @@ On an exact miss, [model-ID passthrough](configuration.md#model-id-passthrough)
 can admit a direct request if the enabled static provider has **exactly one**
 matching rule, the operation is declared on that rule, and the static bearer
 has its separate grant (or the operator opted into file-only anonymous use).
-The provider prefix selects the route; the proxy sends the suffix unchanged
-as the upstream `model`. Rule calls use ordinary transport, including SSE where
-supported, and never switch providers, models, or use peer deferred transport.
+The provider prefix selects the configured provider and its credential policy.
+OpenCode rules pin the protocol in configuration; neither the ID nor caller
+metadata can choose a protocol or switch between Zen and Go. Body-based
+adapters send the unchanged suffix in `model`. Gemini and Zen's `gemini`
+protocol instead use it as one bare ID segment in a fixed upstream path.
+Rule calls use ordinary transport, including SSE where supported, and never
+fail over to a different provider, model or protocol or use peer deferred transport.
 
 No match, overlapping matches, or a rule the caller cannot use preserve the
 same literal miss: `403 forbidden` if `allowed_models` excludes the name,
 otherwise `404 model_not_found`. Rule order, operation and grants never break
-a tie. The server logs ambiguity without exposing rule details in the client
-response.
+a tie. Even a match with the wrong ID shape for its protocol counts toward
+ambiguity. The server logs ambiguity without exposing rule details in the
+client response.
 
 Rules do not discover or register upstream models. If the upstream returns
 `404` for an unknown ID, the proxy uses its usual upstream error handling
-without trying another model. The rule label is for grants, not a callable
-model registration. Alias targets, inherited models and peer receiver models
-still require literal definitions.
+without trying another model. If the upstream later serves that ID, a matching
+request can work without changing or reloading the proxy configuration. The
+rule label is for grants and [unpriced usage grouping](api-reference.md#usage-and-scope),
+not a model registration. Alias targets, inherited models and peer receiver
+models still require literal definitions.
 
 ## Alias Routing
 
@@ -270,8 +277,10 @@ For `openai`, `openai-compatible`, `zenmux`, and `openrouter`, the proxy stays c
 
 Apart from explicitly configured ingress guardrails and reasoning stripping,
 pass-through providers preserve request JSON values and unknown extension fields,
-rewriting only the top-level `model` value before forwarding. Malformed JSON,
-non-object JSON bodies, and duplicate top-level `model` keys are rejected.
+rewriting the top-level `model` before forwarding. Malformed JSON, non-object
+JSON bodies, and duplicate top-level `model` keys are rejected. Rule calls
+have additional [selector checks](api-reference.md#direct-model-id-passthrough);
+those checks do not change literal or alias payload handling.
 
 Translated providers intentionally support a conservative OpenAI-style request subset. Unsupported top-level controls such as `tools`, `tool_choice`, `response_format`, `logprobs`, `parallel_tool_calls`, and unknown extension fields are rejected with `invalid_request` instead of being silently dropped.
 
@@ -293,7 +302,7 @@ The type selects the service, never the URL or credential:
 loopback rules as other providers). An override never reclassifies the
 service: auth, header, and protocol behavior stay type-driven.
 
-Every model declares a required `protocol`:
+Every literal model and passthrough rule declares a required `protocol`:
 
 | `protocol`  | Upstream request                                                                                                         | Serves public operations           |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
@@ -302,12 +311,13 @@ Every model declares a required `protocol`:
 | `messages`  | `POST <base>/messages`, model rewrite, JSON/SSE native passthrough (plus Messages translation subset for chat/responses) | `chat`, `responses` and `messages` |
 | `gemini`    | `POST <base>/models/<upstream>:generateContent` (JSON) / `:streamGenerateContent?alt=sse` (SSE); Zen only                | `chat` and `responses`             |
 
-A public operation the model's protocol does not serve is rejected before any
+A public operation the declared protocol does not serve is rejected before
 upstream I/O, as are `embeddings`, `images`, and audio operations on both
-OpenCode types. The same model name may use different protocols per service
-(for example `minimax-m3`, which is chat-protocol on Zen but
-messages-protocol on Go), so routing comes from explicit configuration, never
-from the model name. There is no generic `opencode` type.
+OpenCode types. A rule must also list the operation in `capabilities`; it
+does not inherit a model's protocol or defaults. The same model name may use
+different protocols per service (for example `minimax-m3`, which uses `chat`
+on Zen and `messages` on Go), so routing comes from explicit configuration,
+never from the model name. There is no generic `opencode` type.
 
 ### Session And Client Requirements
 
@@ -479,7 +489,7 @@ If `capabilities` is omitted, the proxy derives defaults from the provider type 
 
 <!-- docs-contract:capability-matrix:end -->
 
-Set explicit capabilities when you want the public catalog to reflect a narrower contract than the provider's default behavior, or to opt into one of the additional supported capabilities for that provider type. On `opencode-zen` and `opencode-go` the omitted default is protocol-aware (`chat` serves `chat`, `responses` serves `responses`, `messages` serves `chat`, `responses` and `messages`, `gemini` serves `chat` and `responses`), and capabilities outside the protocol-served set fail validation. `POST /v1/messages` is native Anthropic passthrough served only by provider type `anthropic` and `messages`-protocol Zen/Go models; every other provider type rejects it before upstream I/O.
+Set explicit capabilities when you want the public catalog to reflect a narrower contract than the provider's default behavior, or to opt into one of the additional supported capabilities for that provider type. On `opencode-zen` and `opencode-go` the omitted default for a literal model is protocol-aware (`chat` serves `chat`, `responses` serves `responses`, `messages` serves `chat`, `responses` and `messages`, `gemini` serves `chat` and `responses`), and capabilities outside the protocol-served set fail validation. Rules must declare their capabilities explicitly. `POST /v1/messages` is native Anthropic passthrough served only by `anthropic` and by `messages`-protocol Zen/Go routes; rules must explicitly include `messages` to serve it.
 
 ## `GET /v1/models` Metadata
 

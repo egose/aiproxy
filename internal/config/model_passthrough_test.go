@@ -2,10 +2,13 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/egose/aiproxy/internal/copilotlogin"
 )
 
 const passthroughSampleLiteral = `
@@ -289,30 +292,117 @@ func TestModelPassthroughLabelsAndBounds(t *testing.T) {
 }
 
 func TestModelPassthroughProviderScope(t *testing.T) {
+	const openAICapabilities = `["chat","responses","embeddings","images","audio_transcriptions","audio_speech"]`
+	enabledTypes := map[ProviderType]string{
+		ProviderTypeOpenAI:           openAICapabilities,
+		ProviderTypeOpenAICompatible: openAICapabilities,
+		ProviderTypeOpenRouter:       openAICapabilities,
+		ProviderTypeZenMux:           openAICapabilities,
+		ProviderTypeAnthropic:        `["chat","responses","messages"]`,
+		ProviderTypeGitHubCopilot:    `["chat"]`,
+		ProviderTypeOpenCodeZen:      `["chat","responses","messages"]`,
+		ProviderTypeOpenCodeGo:       `["chat","responses","messages"]`,
+		ProviderTypeGemini:           `["chat","responses","embeddings"]`,
+	}
 	for _, providerType := range ProviderTypes() {
 		t.Run(string(providerType), func(t *testing.T) {
+			caps, supported := enabledTypes[providerType]
+			if !supported {
+				caps = `["chat"]`
+			}
+			protocol := ""
+			if IsOpenCodeProviderType(providerType) {
+				protocol = `protocol = "messages"`
+			}
 			src := passthroughTestPrefix + fmt.Sprintf(`
 provider %q "router" {
   base_url = "https://router.example/v1"
   enabled = false
   model_passthrough "family" {
     match = "^.+$"
-    capabilities = ["chat","responses","embeddings","images","audio_transcriptions","audio_speech"]
+    %s
+    capabilities = %s
   }
-}`, providerType)
+}`, providerType, protocol, caps)
 			rt, err := Load([]byte(src), "providers.hcl")
-			switch providerType {
-			case ProviderTypeOpenAI, ProviderTypeOpenAICompatible, ProviderTypeOpenRouter, ProviderTypeZenMux:
-				if err != nil {
-					t.Fatal(err)
-				}
-				if rt.Catalog.ProviderCount() != 0 || rt.Catalog.DisabledProviderCount() != 1 {
-					t.Fatal("valid disabled provider was not retained only as disabled")
-				}
-			default:
+			if !supported {
 				if err == nil || !strings.Contains(err.Error(), "model_passthrough is not supported") {
 					t.Fatalf("unsupported provider: %v", err)
 				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rt.Catalog.ProviderCount() != 0 || rt.Catalog.DisabledProviderCount() != 1 {
+				t.Fatal("valid disabled provider was not retained only as disabled")
+			}
+			p := rt.Catalog.DisabledProviders()[0]
+			if _, match := p.MatchModelPassthrough("org/fixture"); len(p.ModelPassthroughs) != 1 || match != ModelPassthroughNoMatch {
+				t.Fatalf("disabled provider did not retain one inactive rule: %v, %v", len(p.ModelPassthroughs), match)
+			}
+		})
+	}
+}
+
+func TestModelPassthroughAnthropicCopilotInvalidCapabilities(t *testing.T) {
+	for _, tc := range []struct {
+		providerType ProviderType
+		unsupported  []Capability
+	}{
+		{ProviderTypeAnthropic, []Capability{CapabilityEmbeddings, CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech}},
+		{ProviderTypeGitHubCopilot, []Capability{CapabilityResponses, CapabilityMessages, CapabilityEmbeddings, CapabilityImages, CapabilityAudioTranscriptions, CapabilityAudioSpeech}},
+	} {
+		for _, capability := range tc.unsupported {
+			t.Run(string(tc.providerType)+"/"+string(capability), func(t *testing.T) {
+				src := passthroughTestPrefix + fmt.Sprintf(`
+provider %q "router" {
+  enabled = false
+  model_passthrough "family" {
+    match = ".+"
+    capabilities = ["chat", %q]
+  }
+}`, tc.providerType, capability)
+				if _, err := Load([]byte(src), "providers.hcl"); err == nil || !strings.Contains(err.Error(), "model_passthrough \"family\": capability") ||
+					!strings.Contains(err.Error(), "not supported by provider type") {
+					t.Fatalf("unsupported rule capability: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestModelPassthroughCopilotCredentialValidation(t *testing.T) {
+	secretsPath := writeCopilotCredential(t, "main", "fixture-copilot-token")
+	sidecar, err := copilotlogin.SidecarPath(secretsPath, "malformed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecar, []byte(`{"access_token":""}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ref := func(name string) string {
+		return fmt.Sprintf("\n  credential_ref {\n    name = %q\n    path = %q\n  }\n", name, secretsPath)
+	}
+	for _, tc := range []struct{ name, settings, want string }{
+		{"missing-reference", "", "require a resolvable credential_ref"},
+		{"missing-sidecar", ref("absent"), `credential "absent" not found`},
+		{"invalid-sidecar", ref("malformed"), `invalid credential "malformed"`},
+		{"invalid-reference", ref("bad/name"), "invalid credential name"},
+		{"api-key", `api_key = "fixture-key"`, "api_key and api_key_ref are not supported"},
+		{"caller-authorization", "forward_authorization = true\n" + ref("main"), "forward_authorization is not supported"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := passthroughTestPrefix + fmt.Sprintf(`
+provider "github-copilot" "copilot" {
+  %s
+  model_passthrough "family" {
+    match = ".+"
+    capabilities = ["chat"]
+  }
+}`, tc.settings)
+			if _, err := Load([]byte(src), "copilot.hcl"); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("credential validation = %v, want %q", err, tc.want)
 			}
 		})
 	}

@@ -42,6 +42,7 @@ type Request struct {
 	CopilotToken         string
 	UpstreamModel        string
 	ModelProtocol        config.ModelProtocol
+	ModelPassthrough     bool
 	UserAgent            string
 	ForwardUserAgent     bool
 	ForwardHeaders       []string
@@ -308,6 +309,14 @@ func (a *adapter) Do(ctx context.Context, r Request) (*Result, error) {
 	}
 	if r.BaseURL == "" {
 		r.BaseURL = desc.defaultBaseURL
+	}
+	if r.ModelPassthrough && config.ModelPassthroughUsesModelPath(r.ProviderType, r.ModelProtocol) {
+		if !config.IsBareModelPassthroughID(r.UpstreamModel) {
+			return nil, ErrInvalidRequest{Message: "model_passthrough requires a single bare model ID"}
+		}
+		if strings.ContainsAny(r.BaseURL, "?#") {
+			return nil, ErrInvalidRequest{Message: "base_url must not include a query or fragment for path-based model_passthrough rules"}
+		}
 	}
 	if r.DeferredTransport != nil && r.Operation == OpChatCompletions &&
 		(r.ProviderType != config.ProviderTypeOpenAICompatible || r.ForwardAuthorization || r.ExecutionLimits != nil) {

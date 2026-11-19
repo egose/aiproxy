@@ -305,20 +305,32 @@ The optional standalone Bun capture tool is documented in
 - Static `auth.client` blocks may also define optional `tenant` and
   `allowed_models` fields. `allowed_models` is enforced against literal public
   model and alias names.
-- Static concrete `openai`, `openai-compatible`, `openrouter`, and `zenmux`
+- Static concrete `openai`, `openai-compatible`, `openrouter`, `zenmux`,
+  `anthropic`, `gemini`, `opencode-zen`, `opencode-go`, and `github-copilot`
   providers may declare `model_passthrough "<rule>"` alongside or instead of
   literal models. Exact hits always win. On a miss, require a unique full Go
-  regexp match (32 rules/provider, 512 bytes/pattern, 256 bytes/valid lowercase
-  slash-separated suffix), declared capability, and a separate static client
+  regexp match (32 rules/provider, 512 bytes/pattern, 256 bytes/suffix),
+  explicit supported capability, and a separate System static client
   `allowed_model_passthroughs = ["<provider>/<rule>"]` grant. File-only `none`
   explicitly allows anonymous use of configured rules; DB keys, including System,
   cannot use them. Zero/overlapping/unusable rule matches keep the literal
-  `403`/`404`. Forward the unchanged suffix in the canonical JSON/multipart
-  `model`; reject `models` and `preset` on rule calls. No discovery, model
-  cards, alias targets, inheritance, peer transport or managed creation. Use
-  trusted upstream credentials and narrow regexes: rule usage is grouped under
+  `403`/`404`; protocol suitability never breaks a tie. Zen/Go rules require an
+  explicit `protocol` (`chat`, `responses`, `messages`, or Zen-only `gemini`);
+  other providers must omit it. Rule calls use the configured adapter,
+  destination and credential policy (Copilot uses its loaded `credential_ref`,
+  mock-only verification). Body adapters keep the lowercase slash-separated
+  grammar and send the suffix in `model`; Gemini and Zen `gemini` use one bare
+  ID in a fixed URL path. Path rules permit base path prefixes but no query or
+  fragment delimiters. Gemini rule embedding batches use `models/<id>` in every
+  generated `requests[].model`; literal and alias batches do not change.
+  Require a canonical JSON/multipart `model`; reject `models` and `preset`
+  on all rule calls and top-level `fallbacks` only on native Messages rule
+  calls, including after guardrail rewrites. No discovery, model cards, alias
+  targets, inheritance, peer transport, managed creation or new operations.
+  Use trusted upstreams and narrow regexes: rule usage is grouped under
   `<provider>/@passthrough/<rule>` and unpriced. CLI edits preserve declarations;
-  invalid `SIGHUP` candidates retain both rules and grants. See the exact-tested
+  `SIGHUP` publishes rules (including protocols) and grants together or retains
+  the prior snapshot. Admitted streams are unchanged. See the exact-tested
   [HCL/JSON configurations](website/docs/configuration.md#model-id-passthrough).
 - `GET /v1/billing/usage` is a rolling, process-local usage/cost estimate, not an
   invoice. DB bearers see only their immutable credential/workspace pair, including

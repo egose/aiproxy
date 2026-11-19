@@ -1477,11 +1477,11 @@ OpenCode providers where the default is protocol-aware (`chat` serves `chat`,
 ## Model-ID Passthrough
 
 To let clients address upstream IDs they already know, add named
-`model_passthrough` blocks to a concrete, file-configured `openai`,
-`openai-compatible`, `openrouter`, or `zenmux` provider. Static HCL and JSON
-(including inline config) support the same rules. A provider may have rules
-with or without literal models. Rules are validated even if the provider is
-disabled, but are active only when it is enabled.
+`model_passthrough` blocks to a concrete static provider of a type listed
+below. Static HCL and JSON (including inline config) support the same rules.
+A provider may have rules with or without literal models. Rules are validated
+even on disabled providers, but only enabled providers can serve them.
+Managed and derived providers cannot declare or inherit rules.
 
 - Rule labels are unique within a provider and use the provider name grammar
   (`[a-z0-9][a-z0-9._-]*`). A provider can declare at most 32 rules.
@@ -1490,22 +1490,52 @@ disabled, but are active only when it is enabled.
   `/`, even without `^` and `$`. Use `.*` for a regex wildcard; a bare `*` is
   invalid. `^.+$` intentionally matches every valid suffix. There is no glob
   syntax or capture-based rewriting.
-- The suffix is at most 256 bytes, with one or more `/`-separated
-  `[a-z0-9][a-z0-9._-]*` segments. It is not trimmed or lowercased. For IDs
-  with uppercase characters, `:free`, or other unsupported syntax, use a
-  literal model with `upstream_name`.
-- `capabilities` is required: list one or more distinct operations supported by
-  the provider type. These types accept `chat`, `responses`, `embeddings`,
-  `images`, `audio_transcriptions`, and `audio_speech`; there are no rule
-  defaults and no `messages` support.
-- Each static bearer needs a named `<provider>/<rule>` entry in
-  `allowed_model_passthroughs`, even if its separate literal `allowed_models`
-  is omitted or empty. Adding a rule label or an upstream ID to `allowed_models`
-  does not grant rule access, and rule grants cannot override literal denials.
-  Grants must reference declared rules; a grant to a disabled provider is valid
-  but cannot activate it. Database keys, including System keys, cannot use
-  rules. On a file-only `auth.mode = "none"` instance, declaring a rule opts
-  anonymous clients into it.
+- The suffix is at most 256 bytes. Body-based rules keep the existing grammar
+  of one or more `/`-separated `[a-z0-9][a-z0-9._-]*` segments. Gemini-style
+  path rules (`gemini` providers and Zen rules with `protocol = "gemini"`)
+  require one bare segment, not `models/<id>` or a full resource name. The
+  proxy does not trim, lowercase, URL-decode or remove prefixes from IDs.
+  A broad regex cannot allow characters or path components outside this
+  grammar. For IDs with unsupported syntax, use a literal `upstream_name`
+  where the adapter supports the ID.
+- `protocol` is required on each OpenCode rule and fixes its upstream
+  protocol. Other provider types must omit it; even an empty or `null`
+  declaration is invalid.
+- `capabilities` is required and has no rule defaults. List a nonempty subset
+  of distinct capabilities from the applicable row:
+
+| Provider type                                         | Rule `protocol` | Allowed `capabilities`                                                              | Where the ID goes           |
+| ----------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------- | --------------------------- |
+| `openai`, `openai-compatible`, `zenmux`, `openrouter` | Omit            | `chat`, `responses`, `embeddings`, `images`, `audio_transcriptions`, `audio_speech` | JSON or multipart `model`   |
+| `anthropic`                                           | Omit            | `chat`, `responses`, `messages`                                                     | Messages `model`            |
+| `github-copilot`                                      | Omit            | `chat`                                                                              | Chat `model`                |
+| `opencode-zen`, `opencode-go`                         | `chat`          | `chat`                                                                              | Chat `model`                |
+| `opencode-zen`, `opencode-go`                         | `responses`     | `responses`                                                                         | Responses `model`           |
+| `opencode-zen`, `opencode-go`                         | `messages`      | `chat`, `responses`, `messages`                                                     | Messages `model`            |
+| `gemini`                                              | Omit            | `chat`, `responses`, `embeddings`                                                   | One Gemini path segment     |
+| `opencode-zen` only                                   | `gemini`        | `chat`, `responses`                                                                 | One Zen Gemini path segment |
+
+The existing adapter still sets the request format, translation limits,
+destination and credential policy. Rules add no operations. Path-based rules
+allow `base_url` path prefixes but reject query or fragment delimiters, even
+an empty `?` or `#`. A static Copilot rule uses the existing loaded
+`credential_ref`; it adds no login or refresh behavior.
+[Copilot verification is mock-only](operations.md#mock-only-copilot-verification).
+
+Each static bearer needs a named `<provider>/<rule>` entry in
+`allowed_model_passthroughs`, even if its separate literal `allowed_models`
+is omitted or empty. Adding a rule label or an upstream ID to `allowed_models`
+does not grant rule access, and rule grants cannot override literal denials.
+Grants must reference declared rules; a grant to a disabled provider is valid
+but cannot activate it. Database keys, including System keys, cannot use
+rules. On a file-only `auth.mode = "none"` instance, declaring a rule opts
+anonymous clients into it.
+
+Rules are direct-only: they do not create model cards, perform discovery,
+register alias targets or enable peer deferred transport. Usage is
+[grouped by rule and unpriced](api-reference.md#usage-and-scope).
+
+### OpenAI-compatible example
 
 Replace the example `base_url` and set `ROUTER_API_KEY` and `CHAT_APP_TOKEN`
 before loading either configuration:
@@ -1598,6 +1628,109 @@ decides whether it serves that ID. `router/qwen3-chat` is a grant reference, not
 a model registration. The embeddings rule uses the same upstream but needs a
 separate grant. Families that share a policy can use alternation in a single
 rule rather than create overlapping rules.
+
+### OpenCode and Gemini example
+
+Set `OPENCODE_ZEN_API_KEY`, `GEMINI_API_KEY`, and `CHAT_APP_TOKEN`. Both
+providers in this example have rules but no literal models.
+
+```hcl title="model-id-passthrough-protocols.hcl"
+listener "http" "public" {
+  address = "127.0.0.1:8080"
+}
+
+provider "opencode-zen" "zen" {
+  api_key = env("OPENCODE_ZEN_API_KEY")
+
+  model_passthrough "claude-family" {
+    match        = "^claude-(haiku|sonnet|opus)-[a-z0-9._-]+$"
+    protocol     = "messages"
+    capabilities = ["chat", "responses", "messages"]
+  }
+
+  model_passthrough "gemini-family" {
+    match        = "^gemini-[0-9][a-z0-9._-]+$"
+    protocol     = "gemini"
+    capabilities = ["chat", "responses"]
+  }
+}
+
+provider "gemini" "google" {
+  api_key = env("GEMINI_API_KEY")
+
+  model_passthrough "embeddings" {
+    match        = "^gemini-embedding-[a-z0-9._-]+$"
+    capabilities = ["embeddings"]
+  }
+}
+
+auth "main" {
+  mode = "bearer_static"
+  client "chat-app" {
+    token                      = env("CHAT_APP_TOKEN")
+    allowed_model_passthroughs = ["zen/claude-family", "google/embeddings"]
+  }
+}
+```
+
+```json title="model-id-passthrough-protocols.json"
+{
+  "listener": {
+    "http": { "public": { "address": "127.0.0.1:8080" } }
+  },
+  "provider": {
+    "opencode-zen": {
+      "zen": {
+        "api_key": env("OPENCODE_ZEN_API_KEY"),
+        "model_passthrough": {
+          "claude-family": {
+            "match": "^claude-(haiku|sonnet|opus)-[a-z0-9._-]+$",
+            "protocol": "messages",
+            "capabilities": ["chat", "responses", "messages"]
+          },
+          "gemini-family": {
+            "match": "^gemini-[0-9][a-z0-9._-]+$",
+            "protocol": "gemini",
+            "capabilities": ["chat", "responses"]
+          }
+        }
+      }
+    },
+    "gemini": {
+      "google": {
+        "api_key": env("GEMINI_API_KEY"),
+        "model_passthrough": {
+          "embeddings": {
+            "match": "^gemini-embedding-[a-z0-9._-]+$",
+            "capabilities": ["embeddings"]
+          }
+        }
+      }
+    }
+  },
+  "auth": {
+    "main": {
+      "mode": "bearer_static",
+      "client": {
+        "chat-app": {
+          "token": env("CHAT_APP_TOKEN"),
+          "allowed_model_passthroughs": ["zen/claude-family", "google/embeddings"]
+        }
+      }
+    }
+  }
+}
+```
+
+The `chat-app` bearer can request `zen/claude-sonnet-4-6` on the rule's three
+operations. All three use Zen's Messages protocol, translating chat and
+Responses as usual. `zen/gemini-2.5-flash` matches a different Zen rule, but
+the bearer has no grant for it. For `/v1/embeddings`, use
+`google/gemini-embedding-001`, not `google/models/gemini-embedding-001`.
+Gemini puts the bare ID in its embeddings path; for a batch, the adapter also
+sets every generated `requests[].model` to `models/gemini-embedding-001`.
+These names illustrate routing; availability depends on the upstream and
+its credential.
 
 See [routing and miss behavior](providers-and-routing.md#direct-routing) and
 [safe rollout](operations.md#updating-model-id-passthrough).
