@@ -6,7 +6,7 @@
 <title data-rh="true">Providers and Routing | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/providers-and-routing/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Providers and Routing | aiproxy"><meta data-rh="true" name="description" content="aiproxy separates the client-facing model name from the concrete upstream target."><meta data-rh="true" property="og:description" content="aiproxy separates the client-facing model name from the concrete upstream target."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/providers-and-routing/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/providers-and-routing/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/providers-and-routing/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Providers and Routing","item":"https://aiproxy.pages.dev/docs/providers-and-routing"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
 <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.e50caa8a.css">
-<script src="/assets/js/runtime~main.54eb5342.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.613c7e99.js" defer="defer"></script>
 <script src="/assets/js/main.f0042d1c.js" defer="defer"></script>
 </head>
 <body>
@@ -26,13 +26,26 @@
 Model names are lowercase, must not contain spaces, and may contain <code>/</code> when
 every slash-separated segment follows the same lowercase name rule.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="direct-routing">Direct Routing<a href="#direct-routing" class="hash-link" aria-label="Direct link to Direct Routing" title="Direct link to Direct Routing" translate="no">​</a></h2>
-<p>Direct requests resolve to one configured provider/model pair and do not fail over.</p>
-<p>Use direct routing when the client intentionally wants a specific upstream model.</p>
-<p>Examples:</p>
-<ul>
-<li class=""><code>openai/gpt-4.1</code></li>
-<li class=""><code>localai/qwen3-32b</code></li>
-</ul>
+<p>Direct requests such as <code>openai/gpt-4.1</code> address one provider and do not fail
+over. An exact literal <code>model</code> definition always wins, even if the caller is
+denied, the operation is unsupported, or the upstream returns an error.</p>
+<p>On an exact miss, <a class="" href="/docs/configuration/#model-id-passthrough">model-ID passthrough</a>
+can admit a direct request if the enabled static provider has <strong>exactly one</strong>
+matching rule, the operation is declared on that rule, and the static bearer
+has its separate grant (or the operator opted into file-only anonymous use).
+The provider prefix selects the route; the proxy sends the suffix unchanged
+as the upstream <code>model</code>. Rule calls use ordinary transport, including SSE where
+supported, and never switch providers, models, or use peer deferred transport.</p>
+<p>No match, overlapping matches, or a rule the caller cannot use preserve the
+same literal miss: <code>403 forbidden</code> if <code>allowed_models</code> excludes the name,
+otherwise <code>404 model_not_found</code>. Rule order, operation and grants never break
+a tie. The server logs ambiguity without exposing rule details in the client
+response.</p>
+<p>Rules do not discover or register upstream models. If the upstream returns
+<code>404</code> for an unknown ID, the proxy uses its usual upstream error handling
+without trying another model. The rule label is for grants, not a callable
+model registration. Alias targets, inherited models and peer receiver models
+still require literal definitions.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="alias-routing">Alias Routing<a href="#alias-routing" class="hash-link" aria-label="Direct link to Alias Routing" title="Direct link to Alias Routing" translate="no">​</a></h2>
 <p>Aliases expose a virtual model name backed by one or more concrete targets.</p>
 <div class="language-hcl mb-6 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-950 text-slate-100 shadow-panel dark:border-slate-800 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="relative rounded-[inherit]"><pre tabindex="0" class="prism-code language-hcl codeBlock_qGQc thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_p187"><div class="token-line" style="color:#393A34"><span class="token plain">alias &quot;chat_default&quot; {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  algorithm = &quot;round_robin&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  target {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    provider = &quot;openai&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    model    = &quot;gpt-4o-mini&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  }</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  target {</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    provider = &quot;anthropic&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    model    = &quot;claude-sonnet&quot;</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">  }</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">}</span><br></div></code></pre></div></div>
@@ -318,7 +331,10 @@ additionally sends OpenRouter attribution headers (<code>HTTP-Referer: https://o
 <table><thead><tr><th>Provider type</th><th>Default capabilities when omitted</th><th>Additional supported capabilities</th></tr></thead><tbody><tr><td><code>openai</code></td><td><code>chat</code>, <code>responses</code>, <code>embeddings</code></td><td><code>images</code>, <code>audio_transcriptions</code>, <code>audio_speech</code></td></tr><tr><td><code>openai-compatible</code></td><td><code>chat</code>, <code>responses</code>, <code>embeddings</code></td><td><code>images</code>, <code>audio_transcriptions</code>, <code>audio_speech</code></td></tr><tr><td><code>anthropic</code></td><td><code>chat</code>, <code>responses</code>, <code>messages</code></td><td>None</td></tr><tr><td><code>gemini</code></td><td><code>chat</code>, <code>responses</code></td><td><code>embeddings</code></td></tr><tr><td><code>opencode-zen</code></td><td><code>chat</code>, <code>responses</code>, <code>messages</code>, or more (by protocol)</td><td>None</td></tr><tr><td><code>opencode-go</code></td><td><code>chat</code>, <code>responses</code>, <code>messages</code>, or more (by protocol)</td><td>None</td></tr><tr><td><code>github-copilot</code></td><td><code>chat</code></td><td>None</td></tr><tr><td><code>zenmux</code></td><td><code>chat</code>, <code>responses</code>, <code>embeddings</code></td><td><code>images</code>, <code>audio_transcriptions</code>, <code>audio_speech</code></td></tr><tr><td><code>openrouter</code></td><td><code>chat</code>, <code>responses</code>, <code>embeddings</code></td><td><code>images</code>, <code>audio_transcriptions</code>, <code>audio_speech</code></td></tr></tbody></table>
 <p>Set explicit capabilities when you want the public catalog to reflect a narrower contract than the provider&#x27;s default behavior, or to opt into one of the additional supported capabilities for that provider type. On <code>opencode-zen</code> and <code>opencode-go</code> the omitted default is protocol-aware (<code>chat</code> serves <code>chat</code>, <code>responses</code> serves <code>responses</code>, <code>messages</code> serves <code>chat</code>, <code>responses</code> and <code>messages</code>, <code>gemini</code> serves <code>chat</code> and <code>responses</code>), and capabilities outside the protocol-served set fail validation. <code>POST /v1/messages</code> is native Anthropic passthrough served only by provider type <code>anthropic</code> and <code>messages</code>-protocol Zen/Go models; every other provider type rejects it before upstream I/O.</p>
 <h2 class="anchor anchorTargetStickyNavbar_T7vg" id="get-v1models-metadata"><code>GET /v1/models</code> Metadata<a href="#get-v1models-metadata" class="hash-link" aria-label="Direct link to get-v1models-metadata" title="Direct link to get-v1models-metadata" translate="no">​</a></h2>
-<p>The model catalog includes both direct models and aliases.</p>
+<p>The model catalog includes only literal direct models and aliases available to
+the caller. Rule labels and matched IDs that lack a literal definition do not
+appear, even after successful inference. No automatic upstream discovery runs
+to populate the catalog.</p>
 <p>For direct models, the response includes metadata such as:</p>
 <ul>
 <li class=""><code>display_name</code></li>

@@ -174,22 +174,33 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "direct-routing",
       children: "Direct Routing"
-    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
-      children: "Direct requests resolve to one configured provider/model pair and do not fail over."
-    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
-      children: "Use direct routing when the client intentionally wants a specific upstream model."
-    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
-      children: "Examples:"
-    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
-      children: ["\n", (0,jsx_runtime.jsx)(_components.li, {
-        children: (0,jsx_runtime.jsx)(_components.code, {
-          children: "openai/gpt-4.1"
-        })
-      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
-        children: (0,jsx_runtime.jsx)(_components.code, {
-          children: "localai/qwen3-32b"
-        })
-      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Direct requests such as ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "openai/gpt-4.1"
+      }), " address one provider and do not fail\nover. An exact literal ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), " definition always wins, even if the caller is\ndenied, the operation is unsupported, or the upstream returns an error."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["On an exact miss, ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#model-id-passthrough",
+        children: "model-ID passthrough"
+      }), "\ncan admit a direct request if the enabled static provider has ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "exactly one"
+      }), "\nmatching rule, the operation is declared on that rule, and the static bearer\nhas its separate grant (or the operator opted into file-only anonymous use).\nThe provider prefix selects the route; the proxy sends the suffix unchanged\nas the upstream ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), ". Rule calls use ordinary transport, including SSE where\nsupported, and never switch providers, models, or use peer deferred transport."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["No match, overlapping matches, or a rule the caller cannot use preserve the\nsame literal miss: ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "403 forbidden"
+      }), " if ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allowed_models"
+      }), " excludes the name,\notherwise ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "404 model_not_found"
+      }), ". Rule order, operation and grants never break\na tie. The server logs ambiguity without exposing rule details in the client\nresponse."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Rules do not discover or register upstream models. If the upstream returns\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "404"
+      }), " for an unknown ID, the proxy uses its usual upstream error handling\nwithout trying another model. The rule label is for grants, not a callable\nmodel registration. Alias targets, inherited models and peer receiver models\nstill require literal definitions."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "alias-routing",
       children: "Alias Routing"
@@ -1265,7 +1276,7 @@ function _createMdxContent(props) {
         children: "GET /v1/models"
       }), " Metadata"]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
-      children: "The model catalog includes both direct models and aliases."
+      children: "The model catalog includes only literal direct models and aliases available to\nthe caller. Rule labels and matched IDs that lack a literal definition do not\nappear, even after successful inference. No automatic upstream discovery runs\nto populate the catalog."
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "For direct models, the response includes metadata such as:"
     }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {

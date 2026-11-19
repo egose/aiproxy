@@ -50,6 +50,10 @@ const toc = [{
   "id": "streaming",
   "level": 2
 }, {
+  "value": "Direct Model-ID Passthrough",
+  "id": "direct-model-id-passthrough",
+  "level": 2
+}, {
   "value": "Peer Deferred Transport v1",
   "id": "peer-deferred-transport-v1",
   "level": 2
@@ -718,6 +722,32 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "If an upstream stream fails after partial output, the proxy terminates the stream instead of fabricating a full JSON response."
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "direct-model-id-passthrough",
+      children: "Direct Model-ID Passthrough"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Use ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "<provider>/<upstream-id>"
+      }), " in the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), " field when an eligible direct\nrequest can use a ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#model-id-passthrough",
+        children: "model-ID passthrough rule"
+      }), ".\nExact literal models take priority. Rule matches use the same direct provider\nsettings, ingress guardrails and provider/root encrypted-reasoning policy as\nordinary inference; they neither contact model discovery nor use peer transport."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["A rule call requires exactly one top-level ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), " string in a JSON object,\nor one text form field named ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), " in multipart audio transcriptions. Use the\nexact lowercase field name and the unmodified ID, with no duplicates. Top-level\nJSON keys or multipart fields named ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "models"
+      }), " or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "preset"
+      }), " (including case\nvariants) are rejected on rule calls before upstream I/O. Literal and alias\npayload handling is unchanged."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The proxy forwards the admitted suffix as the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), " value. It does not verify\nthat the upstream offers the ID, how the upstream interprets virtual IDs or\nother parameters, or what the upstream actually runs or charges. Use a trusted\nupstream and enforce model and spending restrictions there as well."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "peer-deferred-transport-v1",
       children: "Peer Deferred Transport v1"
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
@@ -737,9 +767,9 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Caller chat transport follows the resolved model's local ", (0,jsx_runtime.jsx)(_components.code, {
         children: "deferred_transport"
-      }), ",\notherwise its provider's local compatibility default, otherwise ordinary\ntransport. A model block replaces the whole default, including when empty or\npartial. Direct and alias-target requests use the same precedence. The executor's\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), ",\notherwise its provider's local compatibility default, otherwise ordinary\ntransport. A model block replaces the whole default, including when empty or\npartial. Literal direct and alias-target requests use the same precedence. The\nexecutor's ", (0,jsx_runtime.jsx)(_components.code, {
         children: "deferred_receiver"
-      }), " is provider-only and additive: it permits private admission\nwithout forcing ordinary calls for the same models into jobs. Model placement\nchanges neither these v1 routes/schema nor the public support/capability matrices."]
+      }), " is provider-only and additive: it permits private\nadmission without forcing ordinary calls for the same models into jobs. Model\nplacement changes neither these v1 routes/schema nor the public support/capability\nmatrices."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "peer-routes-and-recognition",
       children: "Peer Routes And Recognition"
@@ -1596,21 +1626,33 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.code, {
         children: "GET /v1/models"
-      }), " lists only the models and aliases the key can use in its own\nworkspace. An empty workspace returns ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " lists only literal models and aliases the key can use in its own\nworkspace. An empty workspace returns ", (0,jsx_runtime.jsx)(_components.code, {
         children: "{\"object\":\"list\",\"data\":[]}"
       }), ". HCL\nproviders, models and aliases are System-only, and HCL client tokens are scoped\nto System. A database key is scoped to its owning workspace regardless of the\nissuer's roles."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.code, {
         children: "allowed_models"
-      }), " narrows the workspace by public name; omitting it or setting\n", (0,jsx_runtime.jsx)(_components.code, {
+      }), " narrows the workspace by exact public name; omitting it or\nsetting ", (0,jsx_runtime.jsx)(_components.code, {
         children: "[]"
-      }), " never grants access to another workspace. A name excluded by the allowlist\nreturns ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " never grants access to another workspace. For literal resolution a\nname excluded by the allowlist returns ", (0,jsx_runtime.jsx)(_components.code, {
         children: "403 forbidden"
-      }), " regardless of whether it exists. Otherwise missing\nand out-of-scope names return the same ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " regardless of whether\nit exists. Otherwise missing and out-of-scope names return the same\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "404 model_not_found"
-      }), ". An alias with a\nmissing or out-of-workspace target is entirely unavailable: it is not listed,\nand no part of its pool is tried. A derived provider whose base is missing or\nbelongs to another workspace is likewise unavailable. Allowing an alias does\nnot require listing its target names in ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ". An alias with a missing or out-of-workspace target is\nentirely unavailable: it is not listed, and no part of its pool is tried. A\nderived provider whose base is missing or belongs to another workspace is\nlikewise unavailable. Allowing an alias does not require listing its target\nnames in ", (0,jsx_runtime.jsx)(_components.code, {
         children: "allowed_models"
-      }), ", but cannot widen\nworkspace scope."]
+      }), ", but cannot widen workspace scope."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Only a System static bearer with a separate ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allowed_model_passthroughs"
+      }), " grant\ncan use a passthrough rule in hosted mode. Even a System DB key with the ID in\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "allowed_models"
+      }), " cannot use one. Rule matches do not appear in ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "/v1/models"
+      }), ";\nrequests that cannot use a rule keep the same ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "403"
+      }), "/", (0,jsx_runtime.jsx)(_components.code, {
+        children: "404"
+      }), " as a literal miss.\nExisting authentication, workspace and database freshness checks still apply."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "invitation-onboarding",
       children: "Invitation Onboarding"
@@ -2103,6 +2145,14 @@ function _createMdxContent(props) {
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Rows are grouped first by internal credential identity and explicit workspace,\nthen by the recorded tenant/client labels, requested public model, operation and\nHTTP status. Earlier and later labels can therefore appear as separate own-key\nrows. Credential/workspace identifiers are not emitted in these JSON summaries.\nOrdinary and deferred completions use the identity, scope and labels captured at\nadmission, including after a reload, edit, rotation or deletion."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Passthrough calls aggregate usage and metrics under the non-callable model\nidentity ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "<provider>/@passthrough/<rule>"
+      }), " (provider-local target\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "@passthrough/<rule>"
+      }), "), not by each caller-supplied ID. These rows report usage\nbut omit ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "estimated_cost_usd"
+      }), ": rules have no configured prices. Literal prices\nand credential/workspace reporting scopes do not change."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["The optional ", (0,jsx_runtime.jsx)(_components.code, {
         children: "estimated_cost_usd"

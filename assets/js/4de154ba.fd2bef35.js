@@ -98,6 +98,10 @@ const toc = [{
   "id": "reload-behavior",
   "level": 2
 }, {
+  "value": "Updating Model-ID Passthrough",
+  "id": "updating-model-id-passthrough",
+  "level": 3
+}, {
   "value": "Bounded Replica Convergence",
   "id": "bounded-replica-convergence",
   "level": 3
@@ -1122,6 +1126,8 @@ function _createMdxContent(props) {
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "provider and model inventory"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
+        children: "static model-ID passthrough rules and their static client grants"
+      }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "root and provider upstream header timeouts"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "provider TLS ClientHello selections and custom recipe contents"
@@ -1198,6 +1204,30 @@ function _createMdxContent(props) {
       }), " means the complete\nedit is in the database while the old runtime remains active: inspect server logs,\nresolve the failure and reload. ", (0,jsx_runtime.jsx)(_components.code, {
         children: "500 saved but response view unavailable"
       }), " means the\nedit was saved and activation succeeded, but the response view failed; read current\nstate before retrying, especially before repeating a create. These outcomes do not\npromise a distributed transaction between the database and running proxies."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
+      id: "updating-model-id-passthrough",
+      children: "Updating Model-ID Passthrough"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Edit the ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#model-id-passthrough",
+        children: "rule and grant declarations"
+      }), "\nin static configuration. There are no CLI flags or managed API/web controls to\nauthor them. Unrelated in-place ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy configure"
+      }), " edits to HCL preserve rule\nblocks and grant expressions; edits that cannot preserve them safely are\nrejected without rewriting the config. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy convert"
+      }), " preserves declarations\nbetween HCL and JSON and resolves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env()"
+      }), " as usual."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Use ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy validate"
+      }), " with the candidate config before sending ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), ".\nRules and grants activate together for new admissions on that replica; an\ninvalid regex or grant rejects the candidate and leaves both on the old\nsnapshot. Already-admitted requests, including streams, finish on their\noriginal runtime. Deploy and reload the file on each replica."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Grant narrow families. A broad regex can admit newly launched or more expensive\nIDs as soon as the upstream offers them, without a proxy reload or catalog\nupdate. Rule usage is grouped and unpriced locally, not free or cost-capped.\nUse trusted, appropriately scoped upstream credentials and upstream-side model\nand spend controls; the ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model"
+      }), " field alone cannot guarantee upstream selection\nor cost."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "bounded-replica-convergence",
       children: "Bounded Replica Convergence"

@@ -142,6 +142,10 @@ const toc = [{
   "id": "models",
   "level": 2
 }, {
+  "value": "Model-ID Passthrough",
+  "id": "model-id-passthrough",
+  "level": 2
+}, {
   "value": "Secrets And Environment Variables",
   "id": "secrets-and-environment-variables",
   "level": 2
@@ -510,6 +514,15 @@ function _createMdxContent(props) {
         children: (0,jsx_runtime.jsx)(_components.code, {
           children: "allowed_models"
         })
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "allowed_model_passthroughs"
+        }), " (named ", (0,jsx_runtime.jsx)(_components.a, {
+          href: "#model-id-passthrough",
+          children: "rule grants"
+        }), ",\nseparate from ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "allowed_models"
+        }), ")"]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["The optional ", (0,jsx_runtime.jsx)(_components.code, {
@@ -528,13 +541,13 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.code, {
         children: "allowed_models"
-      }), " narrows access to public names (", (0,jsx_runtime.jsx)(_components.code, {
+      }), " narrows access to literal public names (", (0,jsx_runtime.jsx)(_components.code, {
         children: "<provider>/<model>"
       }), " or\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "alias/<name>"
       }), "). Omit it or use ", (0,jsx_runtime.jsx)(_components.code, {
         children: "[]"
-      }), " for all models and aliases available in\nthe credential's own workspace. An alias can be allowed without granting its\ntarget names separately, but every target must still be available in the same\nworkspace, as must a derived provider's base. An invalid cross-workspace pool\nis unavailable as a whole, not a partially usable fallback route. Without\nmulti-tenancy, the allowlist applies to the file-only catalog as before."]
+      }), " for all literal models and aliases in the\ncredential's own workspace. An alias can be allowed without granting its\ntarget names separately, but every target must still be available in the same\nworkspace, as must a derived provider's base. An invalid cross-workspace pool\nis unavailable as a whole, not a partially usable fallback route. Without\nmulti-tenancy, the allowlist applies to the file-only catalog as before."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "providers",
       children: "Providers"
@@ -663,6 +676,13 @@ function _createMdxContent(props) {
           children: "model"
         }), " blocks (OpenCode models additionally require ", (0,jsx_runtime.jsx)(_components.code, {
           children: "protocol"
+        }), ")"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["nested ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "model_passthrough"
+        }), " rules (only on ", (0,jsx_runtime.jsx)(_components.a, {
+          href: "#model-id-passthrough",
+          children: "eligible static providers"
         }), ")"]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
@@ -1105,6 +1125,11 @@ function _createMdxContent(props) {
       }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Derived providers are flattened during config loading and reload. After a successful load, direct model strings, health, metrics, billing, and dashboard inventory use the derived provider's own name. Aliases still list each provider target explicitly."
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Derived providers can neither declare nor inherit ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "#model-id-passthrough",
+        children: "model-ID passthrough\nrules"
+      }), ". The base must have at least one literal model."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Declared base provider/model reasoning policies are copied by value. A local\nprovider ", (0,jsx_runtime.jsx)(_components.code, {
         children: "encrypted_reasoning"
@@ -2436,9 +2461,12 @@ function _createMdxContent(props) {
       id: "models",
       children: "Models"
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Each provider contains one or more ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Literal models are defined by nested ", (0,jsx_runtime.jsx)(_components.code, {
         children: "model"
-      }), " blocks:"]
+      }), " blocks. Eligible static providers\nmay instead or additionally declare ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "#model-id-passthrough",
+        children: "model-ID passthrough rules"
+      }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
       children: (0,jsx_runtime.jsx)(_components.code, {
         className: "language-hcl",
@@ -2551,6 +2579,132 @@ function _createMdxContent(props) {
       }), " and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "responses"
       }), ")."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "model-id-passthrough",
+      children: "Model-ID Passthrough"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["To let clients address upstream IDs they already know, add named\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "model_passthrough"
+      }), " blocks to a concrete, file-configured ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "openai"
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "openai-compatible"
+      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "openrouter"
+      }), ", or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "zenmux"
+      }), " provider. Static HCL and JSON\n(including inline config) support the same rules. A provider may have rules\nwith or without literal models. Rules are validated even if the provider is\ndisabled, but are active only when it is enabled."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.ul, {
+      children: ["\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Rule labels are unique within a provider and use the provider name grammar\n(", (0,jsx_runtime.jsx)(_components.code, {
+          children: "[a-z0-9][a-z0-9._-]*"
+        }), "). A provider can declare at most 32 rules."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "match"
+        }), " is a nonempty ", (0,jsx_runtime.jsx)(_components.a, {
+          href: "https://pkg.go.dev/regexp",
+          children: "Go regular expression"
+        }), "\nof at most 512 bytes. It must match the ", (0,jsx_runtime.jsx)(_components.strong, {
+          children: "entire"
+        }), " suffix after the first\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "/"
+        }), ", even without ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "^"
+        }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "$"
+        }), ". Use ", (0,jsx_runtime.jsx)(_components.code, {
+          children: ".*"
+        }), " for a regex wildcard; a bare ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "*"
+        }), " is\ninvalid. ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "^.+$"
+        }), " intentionally matches every valid suffix. There is no glob\nsyntax or capture-based rewriting."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["The suffix is at most 256 bytes, with one or more ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "/"
+        }), "-separated\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "[a-z0-9][a-z0-9._-]*"
+        }), " segments. It is not trimmed or lowercased. For IDs\nwith uppercase characters, ", (0,jsx_runtime.jsx)(_components.code, {
+          children: ":free"
+        }), ", or other unsupported syntax, use a\nliteral model with ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "upstream_name"
+        }), "."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "capabilities"
+        }), " is required: list one or more distinct operations supported by\nthe provider type. These types accept ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "chat"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "responses"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "embeddings"
+        }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "images"
+        }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "audio_transcriptions"
+        }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "audio_speech"
+        }), "; there are no rule\ndefaults and no ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "messages"
+        }), " support."]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["Each static bearer needs a named ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "<provider>/<rule>"
+        }), " entry in\n", (0,jsx_runtime.jsx)(_components.code, {
+          children: "allowed_model_passthroughs"
+        }), ", even if its separate literal ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "allowed_models"
+        }), "\nis omitted or empty. Adding a rule label or an upstream ID to ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "allowed_models"
+        }), "\ndoes not grant rule access, and rule grants cannot override literal denials.\nGrants must reference declared rules; a grant to a disabled provider is valid\nbut cannot activate it. Database keys, including System keys, cannot use\nrules. On a file-only ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "auth.mode = \"none\""
+        }), " instance, declaring a rule opts\nanonymous clients into it."]
+      }), "\n"]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Replace the example ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "base_url"
+      }), " and set ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "ROUTER_API_KEY"
+      }), " and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "CHAT_APP_TOKEN"
+      }), "\nbefore loading either configuration:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        metastring: "title=\"model-id-passthrough.hcl\"",
+        children: "listener \"http\" \"public\" {\n  address = \"127.0.0.1:8080\"\n}\n\nprovider \"openai-compatible\" \"router\" {\n  base_url = \"https://router.example/v1\"\n  api_key  = env(\"ROUTER_API_KEY\")\n\n  model \"qwen/qwen3-32b\" {\n    upstream_name = \"pinned-chat\"\n    capabilities  = [\"chat\"]\n  }\n\n  model_passthrough \"qwen3-chat\" {\n    match        = \"^qwen/qwen3-[0-9]+b(-[a-z0-9-]+)?$\"\n    capabilities = [\"chat\"]\n  }\n\n  model_passthrough \"embeddings\" {\n    match        = \"^openai/text-embedding-3-[a-z0-9-]+$\"\n    capabilities = [\"embeddings\"]\n  }\n}\n\nauth \"main\" {\n  mode = \"bearer_static\"\n  client \"chat-app\" {\n    token                      = env(\"CHAT_APP_TOKEN\")\n    allowed_models             = [\"router/qwen/qwen3-32b\"]\n    allowed_model_passthroughs = [\"router/qwen3-chat\"]\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["The equivalent JSON config uses rule labels as object keys and leaves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env()"
+      }), "\ncalls bare for aiproxy's environment substitution:"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-json",
+        metastring: "title=\"model-id-passthrough.json\"",
+        children: "{\n  \"listener\": {\n    \"http\": { \"public\": { \"address\": \"127.0.0.1:8080\" } }\n  },\n  \"provider\": {\n    \"openai-compatible\": {\n      \"router\": {\n        \"base_url\": \"https://router.example/v1\",\n        \"api_key\": env(\"ROUTER_API_KEY\"),\n        \"model\": {\n          \"qwen/qwen3-32b\": {\n            \"upstream_name\": \"pinned-chat\",\n            \"capabilities\": [\"chat\"]\n          }\n        },\n        \"model_passthrough\": {\n          \"qwen3-chat\": {\n            \"match\": \"^qwen/qwen3-[0-9]+b(-[a-z0-9-]+)?$\",\n            \"capabilities\": [\"chat\"]\n          },\n          \"embeddings\": {\n            \"match\": \"^openai/text-embedding-3-[a-z0-9-]+$\",\n            \"capabilities\": [\"embeddings\"]\n          }\n        }\n      }\n    }\n  },\n  \"auth\": {\n    \"main\": {\n      \"mode\": \"bearer_static\",\n      \"client\": {\n        \"chat-app\": {\n          \"token\": env(\"CHAT_APP_TOKEN\"),\n          \"allowed_models\": [\"router/qwen/qwen3-32b\"],\n          \"allowed_model_passthroughs\": [\"router/qwen3-chat\"]\n        }\n      }\n    }\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: [(0,jsx_runtime.jsx)(_components.code, {
+        children: "router/qwen/qwen3-32b"
+      }), " is a literal hit and sends ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "pinned-chat"
+      }), ".\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "router/qwen/qwen3-72b"
+      }), " has no literal and sends ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "qwen/qwen3-72b"
+      }), "; the upstream\ndecides whether it serves that ID. ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "router/qwen3-chat"
+      }), " is a grant reference, not\na model registration. The embeddings rule uses the same upstream but needs a\nseparate grant. Families that share a policy can use alternation in a single\nrule rather than create overlapping rules."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["See ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/providers-and-routing#direct-routing",
+        children: "routing and miss behavior"
+      }), " and\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/operations#updating-model-id-passthrough",
+        children: "safe rollout"
+      }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "secrets-and-environment-variables",
       children: "Secrets And Environment Variables"
@@ -2812,8 +2966,12 @@ function _createMdxContent(props) {
         }), " is declared explicitly or the provider type is\n", (0,jsx_runtime.jsx)(_components.code, {
           children: "opencode-zen"
         })]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["providers without any literal models or eligible ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "model_passthrough"
+        }), " rules"]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
-        children: "providers without any models"
+        children: "invalid, unsupported, duplicate or oversized model-ID passthrough declarations,\nand grants that do not reference declared static rules"
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["aliases without any targets (either ", (0,jsx_runtime.jsx)(_components.code, {
           children: "target"
