@@ -145,6 +145,10 @@ func (h *Handler) startCopilotFlow(deps Dependencies, w http.ResponseWriter, r *
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
+	if err := managedModelPassthroughJSONError(raw); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	name := strings.TrimSpace(req.ProviderName)
 	var workspaceStr string
 	if name == "" && req.WorkspaceID != nil && json.Unmarshal(req.WorkspaceID, &workspaceStr) != nil {

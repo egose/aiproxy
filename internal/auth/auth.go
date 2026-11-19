@@ -67,6 +67,7 @@ type Authenticator interface {
 
 type Authorizer interface {
 	Allow(principal *Principal, model string) bool
+	AllowModelPassthrough(principal *Principal, provider, rule string) bool
 }
 
 type AuthorizerFunc func(principal *Principal, model string) bool
@@ -75,7 +76,12 @@ func (f AuthorizerFunc) Allow(principal *Principal, model string) bool {
 	return f(principal, model)
 }
 
+func (AuthorizerFunc) AllowModelPassthrough(*Principal, string, string) bool {
+	return false
+}
+
 type nopAuthenticator struct{}
+type nopAuthorizer struct{}
 
 func NewAuthenticator(cfg config.Auth) Authenticator {
 	return NewAuthenticatorWithClients(cfg, nil)
@@ -126,9 +132,10 @@ func NewAuthorizer(cfg config.Auth) Authorizer {
 
 func NewAuthorizerWithClients(cfg config.Auth, dyn []DynamicClient) Authorizer {
 	if cfg.Mode == config.AuthModeNone {
-		return AuthorizerFunc(func(*Principal, string) bool { return true })
+		return nopAuthorizer{}
 	}
 	allowed := make(map[identity.CredentialID]map[string]struct{}, len(cfg.Clients)+len(dyn))
+	passthroughGrants := make(map[identity.CredentialID]map[string]struct{})
 	add := func(id identity.CredentialID, models []string) {
 		if len(models) == 0 {
 			allowed[id] = nil
@@ -141,18 +148,34 @@ func NewAuthorizerWithClients(cfg config.Auth, dyn []DynamicClient) Authorizer {
 		allowed[id] = set
 	}
 	for name, c := range cfg.Clients {
-		add(identity.StaticClientID(name), c.AllowedModels)
+		id := identity.StaticClientID(name)
+		add(id, c.AllowedModels)
+		if cfg.Mode == config.AuthModeBearerStatic && len(c.AllowedModelPassthroughs) > 0 {
+			grants := make(map[string]struct{}, len(c.AllowedModelPassthroughs))
+			for _, grant := range c.AllowedModelPassthroughs {
+				grants[grant] = struct{}{}
+			}
+			passthroughGrants[id] = grants
+		}
 	}
 	for _, d := range dyn {
 		if id := d.credentialID(); id.Valid() {
 			add(id, d.AllowedModels)
 		}
 	}
-	return &staticAuthorizer{allowed: allowed}
+	return &staticAuthorizer{allowed: allowed, passthroughGrants: passthroughGrants}
 }
 
 func (nopAuthenticator) Authenticate(r *http.Request) (*Principal, error) {
 	return nil, nil
+}
+
+func (nopAuthorizer) Allow(*Principal, string) bool {
+	return true
+}
+
+func (nopAuthorizer) AllowModelPassthrough(principal *Principal, _, _ string) bool {
+	return principal == nil
 }
 
 type staticAuthenticator struct {
@@ -167,7 +190,8 @@ type dynamicCredential struct {
 }
 
 type staticAuthorizer struct {
-	allowed map[identity.CredentialID]map[string]struct{}
+	allowed           map[identity.CredentialID]map[string]struct{}
+	passthroughGrants map[identity.CredentialID]map[string]struct{}
 }
 
 func (s *staticAuthenticator) Authenticate(r *http.Request) (*Principal, error) {
@@ -209,6 +233,11 @@ func (s *staticAuthorizer) Allow(principal *Principal, model string) bool {
 		return true
 	}
 	_, ok = allowed[model]
+	return ok
+}
+
+func (s *staticAuthorizer) AllowModelPassthrough(principal *Principal, provider, rule string) bool {
+	_, ok := s.passthroughGrants[principal.CredentialID()][provider+"/"+rule]
 	return ok
 }
 

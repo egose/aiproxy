@@ -730,6 +730,7 @@ build` from the `website` directory.
 
 - auth configuration
 - provider and model inventory
+- static model-ID passthrough rules and their static client grants
 - root and provider upstream header timeouts
 - provider TLS ClientHello selections and custom recipe contents
 - alias routing state
@@ -804,6 +805,28 @@ resolve the failure and reload. `500 saved but response view unavailable` means 
 edit was saved and activation succeeded, but the response view failed; read current
 state before retrying, especially before repeating a create. These outcomes do not
 promise a distributed transaction between the database and running proxies.
+
+### Updating Model-ID Passthrough
+
+Edit the [rule and grant declarations](configuration.md#model-id-passthrough)
+in static configuration. There are no CLI flags or managed API/web controls to
+author them. Unrelated in-place `aiproxy configure` edits to HCL preserve rule
+blocks and grant expressions; edits that cannot preserve them safely are
+rejected without rewriting the config. `aiproxy convert` preserves declarations
+between HCL and JSON and resolves `env()` as usual.
+
+Use `aiproxy validate` with the candidate config before sending `SIGHUP`.
+Rules and grants activate together for new admissions on that replica; an
+invalid regex or grant rejects the candidate and leaves both on the old
+snapshot. Already-admitted requests, including streams, finish on their
+original runtime. Deploy and reload the file on each replica.
+
+Grant narrow families. A broad regex can admit newly launched or more expensive
+IDs as soon as the upstream offers them, without a proxy reload or catalog
+update. Rule usage is grouped and unpriced locally, not free or cost-capped.
+Use trusted, appropriately scoped upstream credentials and upstream-side model
+and spend controls; the `model` field alone cannot guarantee upstream selection
+or cost.
 
 ### Bounded Replica Convergence
 

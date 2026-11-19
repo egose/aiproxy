@@ -1,5 +1,7 @@
 package config
 
+import "github.com/hashicorp/hcl/v2"
+
 type rawFile struct {
 	UpstreamHeaderTimeout string                 `hcl:"upstream_header_timeout,optional"`
 	UserAgent             string                 `hcl:"user_agent,optional"`
@@ -148,10 +150,11 @@ type rawAuth struct {
 }
 
 type rawClient struct {
-	Name          string   `hcl:"name,label"`
-	Token         string   `hcl:"token"`
-	Tenant        string   `hcl:"tenant,optional"`
-	AllowedModels []string `hcl:"allowed_models,optional"`
+	Name                     string         `hcl:"name,label"`
+	Token                    string         `hcl:"token"`
+	Tenant                   string         `hcl:"tenant,optional"`
+	AllowedModels            []string       `hcl:"allowed_models,optional"`
+	AllowedModelPassthroughs *hcl.Attribute `hcl:"allowed_model_passthroughs,optional"`
 }
 
 type rawRateLimit struct {
@@ -189,6 +192,7 @@ type rawProvider struct {
 	Enabled                *bool                  `hcl:"enabled,optional"`
 	Healthcheck            *rawHealthcheck        `hcl:"healthcheck,block"`
 	Models                 []rawModel             `hcl:"model,block"`
+	ModelPassthroughs      []rawModelPassthrough  `hcl:"model_passthrough,block"`
 }
 
 type rawHealthcheck struct {
@@ -222,6 +226,12 @@ type rawModel struct {
 	Pricing            *rawPricing            `hcl:"pricing,block"`
 	EncryptedReasoning *rawEncryptedReasoning `hcl:"encrypted_reasoning,block"`
 	DeferredTransport  *rawDeferredTransport  `hcl:"deferred_transport,block"`
+}
+
+type rawModelPassthrough struct {
+	Name         string         `hcl:"name,label"`
+	Match        *hcl.Attribute `hcl:"match"`
+	Capabilities *hcl.Attribute `hcl:"capabilities"`
 }
 
 type rawPricing struct {

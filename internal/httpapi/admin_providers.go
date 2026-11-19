@@ -345,7 +345,10 @@ func (req *adminModelUpsert) UnmarshalJSON(raw []byte) error {
 	}); err != nil {
 		return err
 	}
-	decoded.inputJSONError = adminJSONKeyError(raw, adminModelWritableFields)
+	decoded.inputJSONError = managedModelPassthroughJSONError(raw)
+	if decoded.inputJSONError == nil {
+		decoded.inputJSONError = adminJSONKeyError(raw, adminModelWritableFields)
+	}
 	*req = adminModelUpsert(decoded)
 	return nil
 }
@@ -426,7 +429,10 @@ func (req *adminProviderUpsert) UnmarshalJSON(raw []byte) error {
 	}); err != nil {
 		return err
 	}
-	decoded.inputJSONError = adminJSONKeyErrorWithCompatibility(raw, adminProviderWritableFields, []string{"tls_client_hello"}, false)
+	decoded.inputJSONError = managedModelPassthroughJSONError(raw)
+	if decoded.inputJSONError == nil {
+		decoded.inputJSONError = adminJSONKeyErrorWithCompatibility(raw, adminProviderWritableFields, []string{"tls_client_hello"}, false)
+	}
 	*req = adminProviderUpsert(decoded)
 	return nil
 }
@@ -484,7 +490,10 @@ func (req *adminCredentialUpsert) UnmarshalJSON(raw []byte) error {
 	}); err != nil {
 		return err
 	}
-	decoded.inputJSONError = adminJSONKeyErrorWithCompatibility(raw, adminCredentialWritableFields, strings.Fields(adminCredentialWritableFields), true)
+	decoded.inputJSONError = managedModelPassthroughJSONError(raw)
+	if decoded.inputJSONError == nil {
+		decoded.inputJSONError = adminJSONKeyErrorWithCompatibility(raw, adminCredentialWritableFields, strings.Fields(adminCredentialWritableFields), true)
+	}
 	*req = adminCredentialUpsert(decoded)
 	return nil
 }
@@ -1158,6 +1167,9 @@ func (h *Handler) buildDBModels(name string, reqModels *[]adminModelUpsert) ([]s
 		if err := validateManagedDeferredDeclarations(name, m.unsupportedDeferredDeclaration); err != nil {
 			return nil, err
 		}
+		if errors.Is(m.inputJSONError, errManagedModelPassthrough) {
+			return nil, m.inputJSONError
+		}
 		modelName := strings.TrimSpace(m.Name)
 		if modelName == "" {
 			return nil, errBad("model name is required")
@@ -1252,6 +1264,9 @@ func (h *Handler) providerViewByName(ctx context.Context, deps Dependencies, cla
 func (h *Handler) setProviderCredential(ctx context.Context, deps Dependencies, r *http.Request, claims *adminauth.Claims, name string, req adminCredentialUpsert) error {
 	if err := validateManagedDeferredDeclarations(name, req.unsupportedDeferredDeclaration); err != nil {
 		return err
+	}
+	if errors.Is(req.inputJSONError, errManagedModelPassthrough) {
+		return req.inputJSONError
 	}
 	if req.unsupportedReasoningDeclaration {
 		return fmt.Errorf("provider %q: encrypted_reasoning and models cannot be declared on a credential update", name)

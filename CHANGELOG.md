@@ -85,6 +85,11 @@
 
 ### Features
 
+- Add opt-in [model-ID passthrough](website/docs/configuration.md#model-id-passthrough):
+  static providers can forward matching upstream IDs without a literal model
+  entry. Literal routes take priority, static bearers need explicit rule grants,
+  and rule traffic is grouped and unpriced without discovery or new model cards.
+
 - Add signed-out `/invite` onboarding with public registration closed. Send a
   one-time code separately for the recipient to paste on the clean `/invite`
   page. Codes in URLs are ignored. Revoke and reissue pending invitations

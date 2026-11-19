@@ -54,6 +54,9 @@ func Validate(rt *Runtime) error {
 	if err := validateProviders(rt.Catalog.DisabledProviders(), false); err != nil {
 		return err
 	}
+	if err := validateCatalogModelPassthroughGrants(rt.Catalog, rt.Auth); err != nil {
+		return err
+	}
 	for _, p := range append(rt.Catalog.Providers(), rt.Catalog.DisabledProviders()...) {
 		if err := validateProviderDeferred(p, rt.Deferred); err != nil {
 			return err
@@ -301,8 +304,12 @@ func validateProviders(providers []Provider, requireCredential bool) error {
 		if requireCredential && !p.ForwardAuthorization && p.Type != ProviderTypeGitHubCopilot && p.APIKey == "" && p.Type != ProviderTypeOpenCodeZen {
 			return fmt.Errorf("provider %q: enabled providers require a non-empty api_key or a resolvable api_key_ref (set enabled = false to disable a provider intentionally; opencode-zen providers may omit the credential for keyless upstream access)", p.Name)
 		}
-		if len(p.Models) == 0 {
-			return fmt.Errorf("provider %q: at least one model is required", p.Name)
+		if len(p.ModelPassthroughs) != 0 {
+			if err := validateProviderModelPassthroughs(p); err != nil {
+				return fmt.Errorf("provider %q: %w", p.Name, err)
+			}
+		} else if len(p.Models) == 0 {
+			return fmt.Errorf("provider %q: at least one model or model_passthrough rule is required", p.Name)
 		}
 		for _, m := range p.Models {
 			if !IsLowercaseModelName(m.Name) {

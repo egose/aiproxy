@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
@@ -105,8 +104,8 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 				OwnerType     string   `json:"owner_type"`
 				OwnerID       string   `json:"owner_id"`
 			}
-			if err := json.NewDecoder(ioLimitReader(r)).Decode(&req); err != nil {
-				http.Error(w, "invalid body", http.StatusBadRequest)
+			if err := decodeManagedKeyBody(r, &req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 			workspace, ok := h.resolveKeyWriteWorkspace(deps, w, r, claims, req.WorkspaceID)
@@ -229,8 +228,8 @@ func (h *Handler) adminKeys(deps Dependencies, w http.ResponseWriter, r *http.Re
 				UserIDs       []string `json:"user_ids"`
 				TeamIDs       []string `json:"team_ids"`
 			}
-			if err := json.NewDecoder(ioLimitReader(r)).Decode(&req); err != nil {
-				http.Error(w, "invalid body", http.StatusBadRequest)
+			if err := decodeManagedKeyBody(r, &req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 			workspace, err := deps.AdminStore.GetWorkspace(ctx, target.WorkspaceID)

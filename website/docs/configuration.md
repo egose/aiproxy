@@ -216,6 +216,8 @@ Each static client may also define:
 
 - `tenant`
 - `allowed_models`
+- `allowed_model_passthroughs` (named [rule grants](#model-id-passthrough),
+  separate from `allowed_models`)
 
 The optional `rate_limit` block is local and in-memory:
 
@@ -225,9 +227,9 @@ The optional `rate_limit` block is local and in-memory:
   key's replacement gets a new bucket.
 - In `none` mode, all requests share the anonymous bucket.
 
-`allowed_models` narrows access to public names (`<provider>/<model>` or
-`alias/<name>`). Omit it or use `[]` for all models and aliases available in
-the credential's own workspace. An alias can be allowed without granting its
+`allowed_models` narrows access to literal public names (`<provider>/<model>` or
+`alias/<name>`). Omit it or use `[]` for all literal models and aliases in the
+credential's own workspace. An alias can be allowed without granting its
 target names separately, but every target must still be available in the same
 workspace, as must a derived provider's base. An invalid cross-workspace pool
 is unavailable as a whole, not a partially usable fallback route. Without
@@ -270,6 +272,7 @@ Common attributes:
   see [Peer Deferred Transport v1](#peer-deferred-transport-v1))
 - `enabled` (optional, default `true`)
 - nested `model` blocks (OpenCode models additionally require `protocol`)
+- nested `model_passthrough` rules (only on [eligible static providers](#model-id-passthrough))
 
 Providers normally declare exactly one of `api_key` or `api_key_ref`. Enabled
 providers with unresolved, empty, or missing credentials fail validation, with
@@ -607,6 +610,9 @@ is unchanged. Existing deployments should run
 [`validate --check-db` before upgrading](operations.md#workspace-isolation-upgrade-and-recovery).
 
 Derived providers are flattened during config loading and reload. After a successful load, direct model strings, health, metrics, billing, and dashboard inventory use the derived provider's own name. Aliases still list each provider target explicitly.
+
+Derived providers can neither declare nor inherit [model-ID passthrough
+rules](#model-id-passthrough). The base must have at least one literal model.
 
 Declared base provider/model reasoning policies are copied by value. A local
 provider `encrypted_reasoning` block replaces the inherited provider block, but
@@ -1430,7 +1436,8 @@ Precedence is provider `user_agent`, then root `user_agent`, then the `aiproxy/<
 
 ## Models
 
-Each provider contains one or more `model` blocks:
+Literal models are defined by nested `model` blocks. Eligible static providers
+may instead or additionally declare [model-ID passthrough rules](#model-id-passthrough).
 
 ```hcl
 model "gpt-4.1" {
@@ -1466,6 +1473,134 @@ Omitted `capabilities` default to the provider-type defaults, except on
 OpenCode providers where the default is protocol-aware (`chat` serves `chat`,
 `responses` serves `responses`, `messages` serves `chat`, `responses` and
 `messages`, `gemini` serves `chat` and `responses`).
+
+## Model-ID Passthrough
+
+To let clients address upstream IDs they already know, add named
+`model_passthrough` blocks to a concrete, file-configured `openai`,
+`openai-compatible`, `openrouter`, or `zenmux` provider. Static HCL and JSON
+(including inline config) support the same rules. A provider may have rules
+with or without literal models. Rules are validated even if the provider is
+disabled, but are active only when it is enabled.
+
+- Rule labels are unique within a provider and use the provider name grammar
+  (`[a-z0-9][a-z0-9._-]*`). A provider can declare at most 32 rules.
+- `match` is a nonempty [Go regular expression](https://pkg.go.dev/regexp)
+  of at most 512 bytes. It must match the **entire** suffix after the first
+  `/`, even without `^` and `$`. Use `.*` for a regex wildcard; a bare `*` is
+  invalid. `^.+$` intentionally matches every valid suffix. There is no glob
+  syntax or capture-based rewriting.
+- The suffix is at most 256 bytes, with one or more `/`-separated
+  `[a-z0-9][a-z0-9._-]*` segments. It is not trimmed or lowercased. For IDs
+  with uppercase characters, `:free`, or other unsupported syntax, use a
+  literal model with `upstream_name`.
+- `capabilities` is required: list one or more distinct operations supported by
+  the provider type. These types accept `chat`, `responses`, `embeddings`,
+  `images`, `audio_transcriptions`, and `audio_speech`; there are no rule
+  defaults and no `messages` support.
+- Each static bearer needs a named `<provider>/<rule>` entry in
+  `allowed_model_passthroughs`, even if its separate literal `allowed_models`
+  is omitted or empty. Adding a rule label or an upstream ID to `allowed_models`
+  does not grant rule access, and rule grants cannot override literal denials.
+  Grants must reference declared rules; a grant to a disabled provider is valid
+  but cannot activate it. Database keys, including System keys, cannot use
+  rules. On a file-only `auth.mode = "none"` instance, declaring a rule opts
+  anonymous clients into it.
+
+Replace the example `base_url` and set `ROUTER_API_KEY` and `CHAT_APP_TOKEN`
+before loading either configuration:
+
+```hcl title="model-id-passthrough.hcl"
+listener "http" "public" {
+  address = "127.0.0.1:8080"
+}
+
+provider "openai-compatible" "router" {
+  base_url = "https://router.example/v1"
+  api_key  = env("ROUTER_API_KEY")
+
+  model "qwen/qwen3-32b" {
+    upstream_name = "pinned-chat"
+    capabilities  = ["chat"]
+  }
+
+  model_passthrough "qwen3-chat" {
+    match        = "^qwen/qwen3-[0-9]+b(-[a-z0-9-]+)?$"
+    capabilities = ["chat"]
+  }
+
+  model_passthrough "embeddings" {
+    match        = "^openai/text-embedding-3-[a-z0-9-]+$"
+    capabilities = ["embeddings"]
+  }
+}
+
+auth "main" {
+  mode = "bearer_static"
+  client "chat-app" {
+    token                      = env("CHAT_APP_TOKEN")
+    allowed_models             = ["router/qwen/qwen3-32b"]
+    allowed_model_passthroughs = ["router/qwen3-chat"]
+  }
+}
+```
+
+The equivalent JSON config uses rule labels as object keys and leaves `env()`
+calls bare for aiproxy's environment substitution:
+
+```json title="model-id-passthrough.json"
+{
+  "listener": {
+    "http": { "public": { "address": "127.0.0.1:8080" } }
+  },
+  "provider": {
+    "openai-compatible": {
+      "router": {
+        "base_url": "https://router.example/v1",
+        "api_key": env("ROUTER_API_KEY"),
+        "model": {
+          "qwen/qwen3-32b": {
+            "upstream_name": "pinned-chat",
+            "capabilities": ["chat"]
+          }
+        },
+        "model_passthrough": {
+          "qwen3-chat": {
+            "match": "^qwen/qwen3-[0-9]+b(-[a-z0-9-]+)?$",
+            "capabilities": ["chat"]
+          },
+          "embeddings": {
+            "match": "^openai/text-embedding-3-[a-z0-9-]+$",
+            "capabilities": ["embeddings"]
+          }
+        }
+      }
+    }
+  },
+  "auth": {
+    "main": {
+      "mode": "bearer_static",
+      "client": {
+        "chat-app": {
+          "token": env("CHAT_APP_TOKEN"),
+          "allowed_models": ["router/qwen/qwen3-32b"],
+          "allowed_model_passthroughs": ["router/qwen3-chat"]
+        }
+      }
+    }
+  }
+}
+```
+
+`router/qwen/qwen3-32b` is a literal hit and sends `pinned-chat`.
+`router/qwen/qwen3-72b` has no literal and sends `qwen/qwen3-72b`; the upstream
+decides whether it serves that ID. `router/qwen3-chat` is a grant reference, not
+a model registration. The embeddings rule uses the same upstream but needs a
+separate grant. Families that share a policy can use alternation in a single
+rule rather than create overlapping rules.
+
+See [routing and miss behavior](providers-and-routing.md#direct-routing) and
+[safe rollout](operations.md#updating-model-id-passthrough).
 
 ## Secrets And Environment Variables
 
@@ -1624,7 +1759,9 @@ Startup fails on invalid configuration. Important checks include:
   `api_key = env("...")`; missing or empty credentials fail validation unless
   `enabled = false` is declared explicitly or the provider type is
   `opencode-zen`
-- providers without any models
+- providers without any literal models or eligible `model_passthrough` rules
+- invalid, unsupported, duplicate or oversized model-ID passthrough declarations,
+  and grants that do not reference declared static rules
 - aliases without any targets (either `target` blocks or the `providers`/`model` shorthand)
 - aliases combining `target` blocks with the `providers`/`model` shorthand, or shorthand with only one of `providers`/`model` set
 - alias targets that reference unknown providers or models

@@ -163,6 +163,49 @@ func TestStaticAndDatabaseCredentialsHaveIndependentModelPolicies(t *testing.T) 
 	}
 }
 
+func TestModelPassthroughGrantsAreSeparateAndSnapshotLocal(t *testing.T) {
+	grants := []string{"p/family"}
+	cfg := config.Auth{Mode: config.AuthModeBearerStatic, Clients: map[string]config.Client{
+		"shared":    {Token: "file-token", AllowedModels: []string{"p/literal"}, AllowedModelPassthroughs: grants},
+		"ungranted": {Token: "ungranted-token", AllowedModels: []string{"p/family", "p/requested"}},
+		"unlimited": {Token: "unlimited-token"},
+	}}
+	keys := []DynamicClient{{
+		TokenHash: store.TokenHash("database-token"), Name: "shared", AllowedModels: []string{"p/family", "p/requested"},
+		KeyID: uuid.New(), Workspace: identity.InWorkspace(store.SystemWorkspaceID),
+	}}
+	a := NewAuthenticatorWithClients(cfg, keys)
+	z := NewAuthorizerWithClients(cfg, keys)
+	granted := authenticatedPrincipal(t, a, "file-token")
+	if !z.AllowModelPassthrough(granted, "p", "family") || !z.Allow(granted, "p/literal") ||
+		z.Allow(granted, "p/family") || z.Allow(granted, "p/requested") || z.AllowModelPassthrough(granted, "other", "family") {
+		t.Fatal("literal allowlist and provider-local passthrough grant are not independent")
+	}
+	for _, token := range []string{"database-token", "ungranted-token", "unlimited-token"} {
+		if z.AllowModelPassthrough(authenticatedPrincipal(t, a, token), "p", "family") {
+			t.Fatalf("%s received a rule grant", token)
+		}
+	}
+	if z.AllowModelPassthrough(nil, "p", "family") || z.AllowModelPassthrough(&Principal{Name: "shared"}, "p", "family") {
+		t.Fatal("anonymous or label-only principal received a static grant")
+	}
+
+	grants[0] = "p/new-family"
+	refreshed := NewAuthorizerWithClients(cfg, keys)
+	if !z.AllowModelPassthrough(granted, "p", "family") || z.AllowModelPassthrough(granted, "p", "new-family") ||
+		refreshed.AllowModelPassthrough(granted, "p", "family") || !refreshed.AllowModelPassthrough(granted, "p", "new-family") {
+		t.Fatal("rebuilding policy changed a previous snapshot")
+	}
+
+	nop := NewAuthorizer(config.Auth{Mode: config.AuthModeNone})
+	if !nop.AllowModelPassthrough(nil, "p", "family") || nop.AllowModelPassthrough(granted, "p", "family") ||
+		nop.AllowModelPassthrough(authenticatedPrincipal(t, a, "database-token"), "p", "family") ||
+		NewAuthorizer(config.Auth{}).AllowModelPassthrough(nil, "p", "family") ||
+		AuthorizerFunc(func(*Principal, string) bool { return true }).AllowModelPassthrough(nil, "p", "family") {
+		t.Fatal("only configured no-auth policy can opt in an anonymous caller")
+	}
+}
+
 func TestWorkspaceScopeDistinguishesSystemFromAbsent(t *testing.T) {
 	system := identity.InWorkspace(store.SystemWorkspaceID)
 	systemKey := DynamicClient{TokenHash: store.TokenHash("system"), KeyID: uuid.New(), Workspace: system}

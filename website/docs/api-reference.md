@@ -64,6 +64,26 @@ which passes Anthropic SSE through verbatim.
 
 If an upstream stream fails after partial output, the proxy terminates the stream instead of fabricating a full JSON response.
 
+## Direct Model-ID Passthrough
+
+Use `<provider>/<upstream-id>` in the `model` field when an eligible direct
+request can use a [model-ID passthrough rule](configuration.md#model-id-passthrough).
+Exact literal models take priority. Rule matches use the same direct provider
+settings, ingress guardrails and provider/root encrypted-reasoning policy as
+ordinary inference; they neither contact model discovery nor use peer transport.
+
+A rule call requires exactly one top-level `model` string in a JSON object,
+or one text form field named `model` in multipart audio transcriptions. Use the
+exact lowercase field name and the unmodified ID, with no duplicates. Top-level
+JSON keys or multipart fields named `models` or `preset` (including case
+variants) are rejected on rule calls before upstream I/O. Literal and alias
+payload handling is unchanged.
+
+The proxy forwards the admitted suffix as the `model` value. It does not verify
+that the upstream offers the ID, how the upstream interprets virtual IDs or
+other parameters, or what the upstream actually runs or charges. Use a trusted
+upstream and enforce model and spending restrictions there as well.
+
 ## Peer Deferred Transport v1
 
 This private opt-in extension serves chat completions between a statically
@@ -77,10 +97,11 @@ and [operational limits](operations.md#peer-deferred-transport-v1).
 Caller chat transport follows the resolved model's local `deferred_transport`,
 otherwise its provider's local compatibility default, otherwise ordinary
 transport. A model block replaces the whole default, including when empty or
-partial. Direct and alias-target requests use the same precedence. The executor's
-`deferred_receiver` is provider-only and additive: it permits private admission
-without forcing ordinary calls for the same models into jobs. Model placement
-changes neither these v1 routes/schema nor the public support/capability matrices.
+partial. Literal direct and alias-target requests use the same precedence. The
+executor's `deferred_receiver` is provider-only and additive: it permits private
+admission without forcing ordinary calls for the same models into jobs. Model
+placement changes neither these v1 routes/schema nor the public support/capability
+matrices.
 
 ### Peer Routes And Recognition
 
@@ -323,21 +344,27 @@ header or token format changes are required.
 
 ### Model Access With Multi-tenancy
 
-`GET /v1/models` lists only the models and aliases the key can use in its own
+`GET /v1/models` lists only literal models and aliases the key can use in its own
 workspace. An empty workspace returns `{"object":"list","data":[]}`. HCL
 providers, models and aliases are System-only, and HCL client tokens are scoped
 to System. A database key is scoped to its owning workspace regardless of the
 issuer's roles.
 
-`allowed_models` narrows the workspace by public name; omitting it or setting
-`[]` never grants access to another workspace. A name excluded by the allowlist
-returns `403 forbidden` regardless of whether it exists. Otherwise missing
-and out-of-scope names return the same `404 model_not_found`. An alias with a
-missing or out-of-workspace target is entirely unavailable: it is not listed,
-and no part of its pool is tried. A derived provider whose base is missing or
-belongs to another workspace is likewise unavailable. Allowing an alias does
-not require listing its target names in `allowed_models`, but cannot widen
-workspace scope.
+`allowed_models` narrows the workspace by exact public name; omitting it or
+setting `[]` never grants access to another workspace. For literal resolution a
+name excluded by the allowlist returns `403 forbidden` regardless of whether
+it exists. Otherwise missing and out-of-scope names return the same
+`404 model_not_found`. An alias with a missing or out-of-workspace target is
+entirely unavailable: it is not listed, and no part of its pool is tried. A
+derived provider whose base is missing or belongs to another workspace is
+likewise unavailable. Allowing an alias does not require listing its target
+names in `allowed_models`, but cannot widen workspace scope.
+
+Only a System static bearer with a separate `allowed_model_passthroughs` grant
+can use a passthrough rule in hosted mode. Even a System DB key with the ID in
+`allowed_models` cannot use one. Rule matches do not appear in `/v1/models`;
+requests that cannot use a rule keep the same `403`/`404` as a literal miss.
+Existing authentication, workspace and database freshness checks still apply.
 
 ### Invitation Onboarding
 
@@ -677,6 +704,12 @@ HTTP status. Earlier and later labels can therefore appear as separate own-key
 rows. Credential/workspace identifiers are not emitted in these JSON summaries.
 Ordinary and deferred completions use the identity, scope and labels captured at
 admission, including after a reload, edit, rotation or deletion.
+
+Passthrough calls aggregate usage and metrics under the non-callable model
+identity `<provider>/@passthrough/<rule>` (provider-local target
+`@passthrough/<rule>`), not by each caller-supplied ID. These rows report usage
+but omit `estimated_cost_usd`: rules have no configured prices. Literal prices
+and credential/workspace reporting scopes do not change.
 
 The optional `estimated_cost_usd` uses current configured model prices.
 For an alias, it sums the recorded token usage of the targets actually used for

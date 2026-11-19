@@ -214,10 +214,11 @@ type Auth struct {
 }
 
 type Client struct {
-	Name          string
-	Token         string
-	Tenant        string
-	AllowedModels []string
+	Name                     string
+	Token                    string
+	Tenant                   string
+	AllowedModels            []string
+	AllowedModelPassthroughs []string `json:"-"`
 }
 
 type RateLimit struct {
@@ -305,6 +306,7 @@ type Provider struct {
 	CopilotToken                string
 	Enabled                     bool
 	Models                      []Model
+	ModelPassthroughs           []ModelPassthroughRule `json:"-"`
 	Healthcheck                 *ProviderHealthcheck
 
 	ModelByName map[string]Model

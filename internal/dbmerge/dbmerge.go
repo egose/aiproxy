@@ -327,6 +327,9 @@ func MaterializeProvider(row store.DBProvider, models []store.DBProviderModel, b
 		if string(base.Type) != row.Type {
 			return config.Provider{}, fmt.Errorf("provider %q: type %q must match base provider %q type %q", name, row.Type, row.Extends, base.Type)
 		}
+		if len(base.ModelPassthroughs) != 0 && len(base.Models) == 0 && len(base.ModelByName) == 0 {
+			return config.Provider{}, fmt.Errorf("provider %q: extends %q requires a base with at least one literal model", name, row.Extends)
+		}
 		deferredBase := base
 		deferredBase.Name = name
 		if err := config.ValidateManagedProviderDeferred(deferredBase); err != nil {
@@ -340,6 +343,7 @@ func MaterializeProvider(row store.DBProvider, models []store.DBProviderModel, b
 		}
 		base.TLSProfile = baseTLS.TLSProfile
 		p := cloneProvider(base)
+		p.ModelPassthroughs = nil
 		p.Name = name
 		p.DatabaseManaged = true
 		p.Workspace = identity.InWorkspace(row.WorkspaceID)

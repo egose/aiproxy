@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/egose/aiproxy/internal/identity"
@@ -63,6 +64,11 @@ func (c Catalog) Provider(name string) (Provider, bool) {
 	return cloneProvider(c.providers[i]), true
 }
 
+func (c Catalog) HasProvider(name string) bool {
+	_, ok := c.providerIndex[name]
+	return ok
+}
+
 func (c Catalog) Alias(name string) (Alias, bool) {
 	i, ok := c.aliasIndex[name]
 	if !ok {
@@ -72,15 +78,40 @@ func (c Catalog) Alias(name string) (Alias, bool) {
 }
 
 func (c Catalog) Model(providerName, modelName string) (Provider, Model, bool) {
-	provider, ok := c.Provider(providerName)
+	i, ok := c.providerIndex[providerName]
 	if !ok {
 		return Provider{}, Model{}, false
 	}
+	provider := c.providers[i]
 	model, ok := provider.ModelByName[modelName]
 	if !ok {
 		return Provider{}, Model{}, false
 	}
-	return provider, cloneModel(model), true
+	return cloneProvider(provider), cloneModel(model), true
+}
+
+func (c Catalog) MatchModelPassthrough(providerName, suffix string, workspace *identity.WorkspaceScope) (Provider, ModelPassthroughRule, ModelPassthroughMatch) {
+	if len(suffix) > MaxModelPassthroughSuffixBytes {
+		return Provider{}, ModelPassthroughRule{}, ModelPassthroughNoMatch
+	}
+	i, ok := c.providerIndex[providerName]
+	if !ok {
+		return Provider{}, ModelPassthroughRule{}, ModelPassthroughNoMatch
+	}
+	p := c.providers[i]
+	if _, exact := p.ModelByName[suffix]; exact {
+		return Provider{}, ModelPassthroughRule{}, ModelPassthroughNoMatch
+	}
+	if workspace != nil {
+		if _, scoped := workspace.ID(); !scoped || p.Workspace != *workspace {
+			return Provider{}, ModelPassthroughRule{}, ModelPassthroughNoMatch
+		}
+	}
+	rule, match := p.MatchModelPassthrough(suffix)
+	if match != ModelPassthroughMatched {
+		return Provider{}, ModelPassthroughRule{}, match
+	}
+	return cloneProvider(p), rule, match
 }
 
 func (c Catalog) ModelVisibleInWorkspace(publicModel string, workspace identity.WorkspaceScope) bool {
@@ -188,6 +219,7 @@ func cloneProvider(provider Provider) Provider {
 		out.DeferredReceiver = &deferred
 	}
 	out.Models = cloneModels(provider.Models)
+	out.ModelPassthroughs = slices.Clone(provider.ModelPassthroughs)
 	out.ModelByName = make(map[string]Model, len(out.Models)+len(provider.ModelByName))
 	for i := range out.Models {
 		model := &out.Models[i]

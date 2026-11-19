@@ -21,14 +21,29 @@ every slash-separated segment follows the same lowercase name rule.
 
 ## Direct Routing
 
-Direct requests resolve to one configured provider/model pair and do not fail over.
+Direct requests such as `openai/gpt-4.1` address one provider and do not fail
+over. An exact literal `model` definition always wins, even if the caller is
+denied, the operation is unsupported, or the upstream returns an error.
 
-Use direct routing when the client intentionally wants a specific upstream model.
+On an exact miss, [model-ID passthrough](configuration.md#model-id-passthrough)
+can admit a direct request if the enabled static provider has **exactly one**
+matching rule, the operation is declared on that rule, and the static bearer
+has its separate grant (or the operator opted into file-only anonymous use).
+The provider prefix selects the route; the proxy sends the suffix unchanged
+as the upstream `model`. Rule calls use ordinary transport, including SSE where
+supported, and never switch providers, models, or use peer deferred transport.
 
-Examples:
+No match, overlapping matches, or a rule the caller cannot use preserve the
+same literal miss: `403 forbidden` if `allowed_models` excludes the name,
+otherwise `404 model_not_found`. Rule order, operation and grants never break
+a tie. The server logs ambiguity without exposing rule details in the client
+response.
 
-- `openai/gpt-4.1`
-- `localai/qwen3-32b`
+Rules do not discover or register upstream models. If the upstream returns
+`404` for an unknown ID, the proxy uses its usual upstream error handling
+without trying another model. The rule label is for grants, not a callable
+model registration. Alias targets, inherited models and peer receiver models
+still require literal definitions.
 
 ## Alias Routing
 
@@ -468,7 +483,10 @@ Set explicit capabilities when you want the public catalog to reflect a narrower
 
 ## `GET /v1/models` Metadata
 
-The model catalog includes both direct models and aliases.
+The model catalog includes only literal direct models and aliases available to
+the caller. Rule labels and matched IDs that lack a literal definition do not
+appear, even after successful inference. No automatic upstream discovery runs
+to populate the catalog.
 
 For direct models, the response includes metadata such as:
 

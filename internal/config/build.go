@@ -259,6 +259,7 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 	provider.ForwardAuthorization = rawProvider.ForwardAuthorization
 	provider.DeferredTransport = nil
 	provider.DeferredReceiver = nil
+	provider.ModelPassthroughs = nil
 	for i := range provider.Models {
 		provider.Models[i].DeferredTransport = nil
 		provider.Models[i].EncryptedReasoningInherited = provider.Models[i].EncryptedReasoning != nil
@@ -324,10 +325,16 @@ func derivedProviderBase(local rawProvider, rawByName map[string]rawProvider) (r
 	if local.Type != base.Type {
 		return rawProvider{}, fmt.Errorf("type %q must match base provider %q type %q", local.Type, local.Extends, base.Type)
 	}
+	if len(base.Models) == 0 && len(base.ModelPassthroughs) != 0 {
+		return rawProvider{}, fmt.Errorf("extends %q requires a base with at least one literal model", local.Extends)
+	}
 	return base, nil
 }
 
 func validateDerivedProviderSurface(rawProvider rawProvider, syntax rawProviderSyntax, base rawProvider) error {
+	if len(rawProvider.ModelPassthroughs) != 0 {
+		return fmt.Errorf("derived provider cannot declare model_passthrough")
+	}
 	for _, name := range []string{"base_url", "allow_insecure_base_url", "tls_client_hello", "tls_client_hello_spec_file", "upstream_header_timeout", "user_agent", "forward_user_agent", "forward_headers", "enabled"} {
 		if syntax.Attrs[name] {
 			return fmt.Errorf("derived provider cannot declare %s", name)
@@ -603,6 +610,11 @@ func buildAuth(rawAuths []rawAuth) (Auth, error) {
 		}
 		client := Client{Name: c.Name, Token: c.Token, Tenant: c.Tenant, AllowedModels: make([]string, 0, len(c.AllowedModels))}
 		client.AllowedModels = append(client.AllowedModels, c.AllowedModels...)
+		grants, err := buildModelPassthroughGrants(a.Name, c)
+		if err != nil {
+			return Auth{}, err
+		}
+		client.AllowedModelPassthroughs = grants
 		auth.Clients[c.Name] = client
 	}
 	return auth, nil
@@ -628,6 +640,11 @@ func buildProvider(rawProvider rawProvider, syntax rawProviderSyntax, filename s
 		Enabled:                   true,
 		ModelByName:               make(map[string]Model),
 	}
+	rules, err := buildModelPassthroughs(rawProvider)
+	if err != nil {
+		return Provider{}, err
+	}
+	provider.ModelPassthroughs = rules
 	profile, err := buildProviderTLSProfile(provider, filename)
 	if err != nil {
 		return Provider{}, err

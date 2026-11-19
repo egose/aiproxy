@@ -72,6 +72,9 @@ func Load(src []byte, filename string) (*Runtime, error) {
 	if _, err := validateDeferredDeclarations(file.Body); err != nil {
 		return nil, err
 	}
+	if err := validateModelPassthroughBlockShapes(file.Body); err != nil {
+		return nil, err
+	}
 
 	var raw rawFile
 	if d := gohcl.DecodeBody(file.Body, nil, &raw); d.HasErrors() {
