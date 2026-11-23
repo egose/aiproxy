@@ -86,6 +86,10 @@ const toc = [{
   "id": "scoped-encrypted-reasoning",
   "level": 2
 }, {
+  "value": "Fixed Upstream Headers",
+  "id": "fixed-upstream-headers",
+  "level": 2
+}, {
   "value": "Upstream Header Timeout",
   "id": "upstream-header-timeout",
   "level": 2
@@ -250,6 +254,10 @@ function _createMdxContent(props) {
         })
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: ["optional root/provider/model/alias ", (0,jsx_runtime.jsx)(_components.code, {
+          children: "upstream_headers"
+        }), " map"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["optional root/provider/model/alias ", (0,jsx_runtime.jsx)(_components.code, {
           children: "encrypted_reasoning"
         }), " policy"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
@@ -310,7 +318,7 @@ function _createMdxContent(props) {
         }), " configures read, idle, and write timeouts"]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Listener address and timeout changes still require a restart, even though runtime state such as auth, providers, models, aliases, encrypted-reasoning policies, upstream header timeouts, access-log enablement, metrics, and provider-health config can reload on ", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Listener address and timeout changes still require a restart, even though runtime state such as auth, providers, models, aliases, encrypted-reasoning policies, fixed upstream headers, upstream header timeouts, access-log enablement, metrics, and provider-health config can reload on ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
       }), ". Logging level changes and enabling the dashboard after startup also require a restart."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
@@ -472,7 +480,10 @@ function _createMdxContent(props) {
           children: "x-api-key"
         }), " header values are always recorded as ", (0,jsx_runtime.jsx)(_components.code, {
           children: "[REDACTED]"
-        }), "."]
+        }), ". Applied\n", (0,jsx_runtime.jsx)(_components.a, {
+          href: "#fixed-upstream-headers",
+          children: "fixed header"
+        }), " values are also redacted in the\nproxy's upstream-request header capture."]
       }), "\n"]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Payload-log changes apply on ", (0,jsx_runtime.jsx)(_components.code, {
@@ -647,6 +658,13 @@ function _createMdxContent(props) {
         children: (0,jsx_runtime.jsx)(_components.code, {
           children: "upstream_header_timeout"
         })
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "upstream_headers"
+        }), " for ", (0,jsx_runtime.jsx)(_components.a, {
+          href: "#fixed-upstream-headers",
+          children: "fixed header values on static inference"
+        })]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "tls_client_hello"
@@ -1093,7 +1111,7 @@ function _createMdxContent(props) {
         children: "api_key_ref"
       }), ". It inherits the base provider type, ", (0,jsx_runtime.jsx)(_components.code, {
         children: "base_url"
-      }), ", effective upstream header timeout, TLS ClientHello settings/profile, enabled state, and all model blocks."]
+      }), ", effective upstream header timeout, TLS ClientHello settings/profile, enabled state, and model definitions."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: [(0,jsx_runtime.jsx)(_components.code, {
         children: "github-copilot"
@@ -1101,7 +1119,7 @@ function _createMdxContent(props) {
         children: "credential_ref"
       }), "; they cannot redefine ", (0,jsx_runtime.jsx)(_components.code, {
         children: "base_url"
-      }), " or model definitions, but may use the reasoning-only overlays below. ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " or model definitions, but may use existing-name reasoning and fixed-header overlays on static providers. ", (0,jsx_runtime.jsx)(_components.code, {
         children: "credential_ref"
       }), " is rejected on all other types, and ", (0,jsx_runtime.jsx)(_components.code, {
         children: "api_key"
@@ -1147,11 +1165,13 @@ function _createMdxContent(props) {
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Static derivatives inherit model definitions, ", (0,jsx_runtime.jsx)(_components.strong, {
         children: "not"
-      }), " base provider or model\ndeferred caller opt-ins, nor receiver opt-ins/limits. An existing-name model\noverlay may contain ", (0,jsx_runtime.jsx)(_components.code, {
+      }), " base provider or model\ndeferred caller opt-ins, receiver opt-ins/limits, or fixed header maps. An\nexisting-name model overlay may contain ", (0,jsx_runtime.jsx)(_components.code, {
         children: "encrypted_reasoning"
-      }), ", ", (0,jsx_runtime.jsx)(_components.code, {
+      }), ",\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "deferred_transport"
-      }), ", or both\n(at most one of each, at least one total). New model\nnames, definition fields (", (0,jsx_runtime.jsx)(_components.code, {
+      }), ", and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "upstream_headers"
+      }), " in any valid combination (at most\none of each, at least one total). New model\nnames, definition fields (", (0,jsx_runtime.jsx)(_components.code, {
         children: "upstream_name"
       }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "display_name"
@@ -1331,6 +1351,127 @@ function _createMdxContent(props) {
         href: "/docs/providers-and-routing#scoped-encrypted-reasoning",
         children: "recovery gates, streaming and alias budgets"
       }), "\nbefore enabling retry or pre-stripping."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
+      id: "fixed-upstream-headers",
+      children: "Fixed Upstream Headers"
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Use ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "upstream_headers"
+      }), " to set operator-chosen header values on inference HTTP\nrequests to ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "static providers"
+      }), ". It is an attribute at root, provider, model,\nand alias scope in HCL and JSON, including ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "$AIPROXY_CONFIG"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.table, {
+      children: [(0,jsx_runtime.jsx)(_components.thead, {
+        children: (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.th, {
+            children: "Route"
+          }), (0,jsx_runtime.jsx)(_components.th, {
+            children: "Highest to lowest priority, per header name"
+          })]
+        })
+      }), (0,jsx_runtime.jsxs)(_components.tbody, {
+        children: [(0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Direct model"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Model → provider → root → permitted caller value"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Alias"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Alias → selected target's model → selected target's provider → root → permitted caller value"
+          })]
+        }), (0,jsx_runtime.jsxs)(_components.tr, {
+          children: [(0,jsx_runtime.jsx)(_components.td, {
+            children: "Static model-ID passthrough"
+          }), (0,jsx_runtime.jsx)(_components.td, {
+            children: "Provider → root → permitted caller value"
+          })]
+        })]
+      })]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Names match case-insensitively. A fixed value is sent once and replaces all\ncaller values for that name, even when ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "forward_headers"
+      }), " permits it. With no\nfixed value for a name, normal caller forwarding is unchanged. Maps merge by\nname, not as whole maps: omission and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "{}"
+      }), " both add no local overrides. There\nis no deletion marker. The proxy resolves headers after authorization and\nrouting. On alias failover it keeps the alias overrides but recomputes the\nprovider/model layers for the new target. Same-target reasoning recovery uses\nthe same fixed values."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Declare an object, not a block, list, or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "null"
+      }), ". Each map and each effective\nfixed set is limited to 32 names and 16 KiB of\nname/value bytes. Names must be valid HTTP field names of at most 128 bytes\nand unique within a map; values must be nonblank strings of at most 4096 bytes\nwithout control characters. Invalid declarations, including on disabled\nproviders, and over-budget effective sets reject the config. Names reserved by\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "forward_headers"
+      }), " (including auth, framing, and ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "User-Agent"
+      }), "), ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "Accept-Encoding"
+      }), ",\nprivate deferred fields, and known adapter-owned headers on applicable targets\nare not configurable here. Use the dedicated credential and user-agent settings\nfor those headers."]
+    }), "\n", (0,jsx_runtime.jsx)(_components.p, {
+      children: "Example in HCL:"
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-hcl",
+        metastring: "title=\"fixed-upstream-headers.hcl\"",
+        children: "upstream_headers = {\n  \"X-App-Name\"    = \"internal\"\n  \"X-Environment\" = \"production\"\n}\nforward_headers = [\"X-App-Name\", \"X-Request-Tag\"]\n\nlistener \"http\" \"public\" { address = \"127.0.0.1:8080\" }\nauth \"main\" {\n  mode = \"bearer_static\"\n  client \"client\" { token = env(\"AIPROXY_CLIENT_TOKEN\") }\n}\n\nprovider \"openai-compatible\" \"primary\" {\n  base_url = \"https://gateway.example/v1\"\n  api_key  = env(\"PRIMARY_UPSTREAM_API_KEY\")\n  upstream_headers = {\n    \"X-App-Name\"       = \"primary\"\n    \"X-Upstream-Group\" = env(\"PRIMARY_UPSTREAM_GROUP\")\n  }\n  model \"chat\" {\n    upstream_name    = \"chat-model\"\n    upstream_headers = { \"x-app-name\" = \"primary-chat\" }\n  }\n}\n\nprovider \"openai-compatible\" \"backup\" {\n  extends = \"primary\"\n  api_key = env(\"BACKUP_UPSTREAM_API_KEY\")\n  model \"chat\" {\n    upstream_headers = { \"X-Account-Label\" = \"backup-chat\" }\n  }\n}\n\nalias \"public-chat\" {\n  algorithm        = \"round_robin\"\n  providers        = [\"primary\", \"backup\"]\n  model            = \"chat\"\n  upstream_headers = { \"x-app-name\" = \"public-chat\" }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Equivalent JSON (", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env()"
+      }), " is written bare, as in the rest of the config):"]
+    }), "\n", (0,jsx_runtime.jsx)(_components.pre, {
+      children: (0,jsx_runtime.jsx)(_components.code, {
+        className: "language-json",
+        metastring: "title=\"fixed-upstream-headers.json\"",
+        children: "{\n  \"upstream_headers\": { \"X-App-Name\": \"internal\", \"X-Environment\": \"production\" },\n  \"forward_headers\": [\"X-App-Name\", \"X-Request-Tag\"],\n  \"listener\": { \"http\": { \"public\": { \"address\": \"127.0.0.1:8080\" } } },\n  \"auth\": { \"main\": { \"mode\": \"bearer_static\", \"client\": { \"client\": { \"token\": env(\"AIPROXY_CLIENT_TOKEN\") } } } },\n  \"provider\": {\n    \"openai-compatible\": {\n      \"primary\": {\n        \"base_url\": \"https://gateway.example/v1\",\n        \"api_key\": env(\"PRIMARY_UPSTREAM_API_KEY\"),\n        \"upstream_headers\": { \"X-App-Name\": \"primary\", \"X-Upstream-Group\": env(\"PRIMARY_UPSTREAM_GROUP\") },\n        \"model\": { \"chat\": { \"upstream_name\": \"chat-model\", \"upstream_headers\": { \"x-app-name\": \"primary-chat\" } } }\n      },\n      \"backup\": {\n        \"extends\": \"primary\",\n        \"api_key\": env(\"BACKUP_UPSTREAM_API_KEY\"),\n        \"model\": { \"chat\": { \"upstream_headers\": { \"X-Account-Label\": \"backup-chat\" } } }\n      }\n    }\n  },\n  \"alias\": {\n    \"public-chat\": {\n      \"algorithm\": \"round_robin\",\n      \"providers\": [\"primary\", \"backup\"],\n      \"model\": \"chat\",\n      \"upstream_headers\": { \"x-app-name\": \"public-chat\" }\n    }\n  }\n}\n"
+      })
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Here ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "primary/chat"
+      }), " sends ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-App-Name: primary-chat"
+      }), ", whereas ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "backup/chat"
+      }), "\nsends ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-App-Name: internal"
+      }), ". Static derivatives do not inherit base provider\nor model maps; they may declare their own provider maps and existing-name\nmodel overlays. Either alias target sends ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-App-Name: public-chat"
+      }), ", not a\ncaller's ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-App-Name"
+      }), ", and can still forward a permitted ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Request-Tag"
+      }), ".\nBoth targets send ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Environment"
+      }), ", but only ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "primary"
+      }), " sends ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "X-Upstream-Group"
+      }), "."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Fixed headers are not sent on health probes, upstream model discovery, or\nOAuth/device requests. They are not sent in outgoing deferred peer control\nheaders or submit metadata. A deferred receiver applies its ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "own"
+      }), " scopes\nwhen its local inference targets a static provider. No database-managed\nprovider receives fixed headers, including System providers, derivatives of\nstatic providers, or targets of static aliases. A managed alias supplies no\nalias-level overrides; any otherwise-authorized static target still uses its\nroot/provider/model values. Authorization is unchanged."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["Send fixed headers only to trusted upstreams. Root or alias values must be safe\nfor every eligible destination, including fallbacks. Prefer HTTPS for sensitive\nvalues. The proxy masks applied values in its ", (0,jsx_runtime.jsx)(_components.strong, {
+        children: "upstream-request header capture"
+      }), "\nonly; it cannot redact upstream logs or values the upstream echoes in a response\nbody. There are no admin/API/dashboard fields or CLI editing flags for this map.\nSupported in-place ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "configure"
+      }), " edits to HCL preserve retained map expressions\nand ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env()"
+      }), " spelling without showing their values in previews. Explicit\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy convert"
+      }), " resolves ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "env()"
+      }), " and may write secrets to the output, including\nstdout; protect the result."]
+    }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
+      children: ["All four scopes reload together on a successful ", (0,jsx_runtime.jsx)(_components.code, {
+        children: "SIGHUP"
+      }), ". A rejected candidate\nleaves the old values active, and admitted requests (including later failover\nattempts) keep their original snapshot. With the example variables set, run\n", (0,jsx_runtime.jsx)(_components.code, {
+        children: "aiproxy validate --config fixed-upstream-headers.hcl"
+      }), " (or ", (0,jsx_runtime.jsx)(_components.code, {
+        children: ".json"
+      }), ") before reload."]
     }), "\n", (0,jsx_runtime.jsx)(_components.h2, {
       id: "upstream-header-timeout",
       children: "Upstream Header Timeout"
@@ -2515,6 +2656,13 @@ function _createMdxContent(props) {
         }), " narrows the operations exposed through the proxy"]
       }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
         children: [(0,jsx_runtime.jsx)(_components.code, {
+          children: "upstream_headers"
+        }), " can set ", (0,jsx_runtime.jsx)(_components.a, {
+          href: "#fixed-upstream-headers",
+          children: "fixed headers"
+        }), " on a static model"]
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: [(0,jsx_runtime.jsx)(_components.code, {
           children: "deferred_transport"
         }), " opts a static ", (0,jsx_runtime.jsx)(_components.code, {
           children: "openai-compatible"
@@ -3012,9 +3160,9 @@ function _createMdxContent(props) {
         children: "aiproxy convert ./config.json --config /etc/aiproxy/config.hcl\naiproxy convert --compact - --config /etc/aiproxy/config.hcl\n"
       })
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
-      children: ["Conversion materializes environment values, including secrets, in the output;\nthis also applies to stdout (", (0,jsx_runtime.jsx)(_components.code, {
+      children: ["Conversion materializes environment values, including secrets such as fixed\nupstream header values, in the output. This also applies to stdout (", (0,jsx_runtime.jsx)(_components.code, {
         children: "-"
-      }), "). On Linux and macOS, file output is staged in the destination\ndirectory and published atomically with exact ", (0,jsx_runtime.jsx)(_components.code, {
+      }), "). On\nLinux and macOS, file output is staged in the destination\ndirectory and published atomically with exact ", (0,jsx_runtime.jsx)(_components.code, {
         children: "0600"
       }), " permissions. Without\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "--force"

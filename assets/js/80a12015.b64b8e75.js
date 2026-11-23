@@ -236,6 +236,9 @@ function _createMdxContent(props) {
         children: "session_affinity"
       }), ", ", (0,jsx_runtime.jsx)(_components.code, {
         children: "encrypted_reasoning"
+      }), ", and ", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#fixed-upstream-headers",
+        children: "fixed upstream headers"
       }), ")."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
       children: "Aliases are useful when you want:"
@@ -974,7 +977,7 @@ function _createMdxContent(props) {
         children: "403"
       }), " means re-run ", (0,jsx_runtime.jsx)(_components.code, {
         children: "login"
-      }), " with the\nsame client ID/name and reload. Upstream headers are an allowlist only\n(", (0,jsx_runtime.jsx)(_components.code, {
+      }), " with the\nsame client ID/name and reload. The adapter sets its built-in headers\n(", (0,jsx_runtime.jsx)(_components.code, {
         children: "Authorization"
       }), " from the stored login, proxy ", (0,jsx_runtime.jsx)(_components.code, {
         children: "User-Agent"
@@ -984,9 +987,12 @@ function _createMdxContent(props) {
         children: "Openai-Intent"
       }), ", derived ", (0,jsx_runtime.jsx)(_components.code, {
         children: "x-initiator: user"
-      }), ", vision\nonly on image bodies); inbound auth/cookies/", (0,jsx_runtime.jsx)(_components.code, {
+      }), ", vision\nonly on image bodies). Static inference may also add non-reserved\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#fixed-upstream-headers",
+        children: "fixed upstream headers"
+      }), ".\nInbound auth/cookies/", (0,jsx_runtime.jsx)(_components.code, {
         children: "x-api-key"
-      }), "/caller Copilot\nmetadata are stripped. ", (0,jsx_runtime.jsx)(_components.code, {
+      }), "/caller Copilot metadata are stripped.\n", (0,jsx_runtime.jsx)(_components.code, {
         children: "GET {base}/models"
       }), " listing shares the same auth\nwithout changing the static proxy inventory. See ", (0,jsx_runtime.jsx)(_components.code, {
         children: "examples/github-copilot.hcl"

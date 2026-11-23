@@ -6,7 +6,7 @@
 <title data-rh="true">Operations | aiproxy</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" name="twitter:image" content="https://aiproxy.pages.dev/img/social-card.svg"><meta data-rh="true" property="og:url" content="https://aiproxy.pages.dev/docs/operations/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Operations | aiproxy"><meta data-rh="true" name="description" content="This page covers the commands and operational behavior that matter most for local development and production deployment."><meta data-rh="true" property="og:description" content="This page covers the commands and operational behavior that matter most for local development and production deployment."><link data-rh="true" rel="icon" href="/img/logo.svg"><link data-rh="true" rel="canonical" href="https://aiproxy.pages.dev/docs/operations/"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/operations/" hreflang="en"><link data-rh="true" rel="alternate" href="https://aiproxy.pages.dev/docs/operations/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Operations","item":"https://aiproxy.pages.dev/docs/operations"}]}</script><link rel="icon" type="image/svg+xml" href="/img/logo.svg">
 <meta name="robots" content="index, follow">
 <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/assets/css/styles.e50caa8a.css">
-<script src="/assets/js/runtime~main.79b31b8a.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.d8310c70.js" defer="defer"></script>
 <script src="/assets/js/main.f0042d1c.js" defer="defer"></script>
 </head>
 <body>
@@ -345,7 +345,8 @@ restart or successful <code>SIGHUP</code>.</p>
 only sparse existing-name reasoning overlays using a valid, loadable base
 inventory; they cannot repair a partial/invalid base, redefine models or relax
 credential/chain/deferred restrictions. Removing the last reasoning block removes
-a reasoning-only child model overlay, but retains a deferred sibling block.
+a reasoning-only child model overlay, but retains sibling deferred or fixed-header
+declarations.
 Inherited model policies still outrank child provider policies.</p>
 <h3 class="anchor anchorTargetStickyNavbar_T7vg" id="configuring-provider-tls-profiles">Configuring Provider TLS Profiles<a href="#configuring-provider-tls-profiles" class="hash-link" aria-label="Direct link to Configuring Provider TLS Profiles" title="Direct link to Configuring Provider TLS Profiles" translate="no">​</a></h3>
 <p>The wizard and scripted provider edits support the
@@ -461,6 +462,7 @@ instead of disabling verification or cycling profiles.</p>
 <li class="">provider TLS ClientHello selections and custom recipe contents</li>
 <li class="">alias routing state</li>
 <li class="">root/provider/model/alias encrypted-reasoning policies</li>
+<li class="">root/provider/model/alias <a class="" href="/docs/configuration/#fixed-upstream-headers">fixed upstream headers</a></li>
 <li class="">access-log enablement</li>
 <li class="">payload-log configuration</li>
 <li class="">metrics configuration</li>
@@ -1475,7 +1477,10 @@ kept: files older than the retention window are removed on rotation and by an
 hourly sweep; <code>&quot;0s&quot;</code> disables expiry. Bodies larger than <code>max_body_bytes</code> per
 side are truncated with <code>&quot;truncated&quot;: true</code> (<code>0</code> stores full bodies), and
 sensitive headers (<code>authorization</code>, <code>proxy-authorization</code>, <code>cookie</code>,
-<code>set-cookie</code>, <code>x-api-key</code>) are stored as <code>[REDACTED]</code>.</p>
+<code>set-cookie</code>, <code>x-api-key</code>) are stored as <code>[REDACTED]</code>. Applied
+<a class="" href="/docs/configuration/#fixed-upstream-headers">fixed upstream headers</a> are masked in
+the proxy&#x27;s upstream-request header capture, not in upstream logs or echoed
+response bodies.</p>
 <p>Only enable payload logging when you can protect the output directory:
 bodies contain prompts and completions. Changes apply on <code>SIGHUP</code> reload.</p>
 <p>Deferred inference additionally obeys its effective request/result and work

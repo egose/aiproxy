@@ -933,7 +933,7 @@ function _createMdxContent(props) {
         children: "SIGHUP"
       }), "."]
     }), "\n", (0,jsx_runtime.jsx)(_components.p, {
-      children: "Model controls alone never create definitions. On a derivative, they create\nonly sparse existing-name reasoning overlays using a valid, loadable base\ninventory; they cannot repair a partial/invalid base, redefine models or relax\ncredential/chain/deferred restrictions. Removing the last reasoning block removes\na reasoning-only child model overlay, but retains a deferred sibling block.\nInherited model policies still outrank child provider policies."
+      children: "Model controls alone never create definitions. On a derivative, they create\nonly sparse existing-name reasoning overlays using a valid, loadable base\ninventory; they cannot repair a partial/invalid base, redefine models or relax\ncredential/chain/deferred restrictions. Removing the last reasoning block removes\na reasoning-only child model overlay, but retains sibling deferred or fixed-header\ndeclarations.\nInherited model policies still outrank child provider policies."
     }), "\n", (0,jsx_runtime.jsx)(_components.h3, {
       id: "configuring-provider-tls-profiles",
       children: "Configuring Provider TLS Profiles"
@@ -1135,6 +1135,11 @@ function _createMdxContent(props) {
         children: "alias routing state"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "root/provider/model/alias encrypted-reasoning policies"
+      }), "\n", (0,jsx_runtime.jsxs)(_components.li, {
+        children: ["root/provider/model/alias ", (0,jsx_runtime.jsx)(_components.a, {
+          href: "/docs/configuration#fixed-upstream-headers",
+          children: "fixed upstream headers"
+        })]
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
         children: "access-log enablement"
       }), "\n", (0,jsx_runtime.jsx)(_components.li, {
@@ -2796,7 +2801,10 @@ function _createMdxContent(props) {
         children: "x-api-key"
       }), ") are stored as ", (0,jsx_runtime.jsx)(_components.code, {
         children: "[REDACTED]"
-      }), "."]
+      }), ". Applied\n", (0,jsx_runtime.jsx)(_components.a, {
+        href: "/docs/configuration#fixed-upstream-headers",
+        children: "fixed upstream headers"
+      }), " are masked in\nthe proxy's upstream-request header capture, not in upstream logs or echoed\nresponse bodies."]
     }), "\n", (0,jsx_runtime.jsxs)(_components.p, {
       children: ["Only enable payload logging when you can protect the output directory:\nbodies contain prompts and completions. Changes apply on ", (0,jsx_runtime.jsx)(_components.code, {
         children: "SIGHUP"
