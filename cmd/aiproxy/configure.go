@@ -913,6 +913,9 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 
 	options.BaseProviderNames, options.BaseProviderTypes = eligibleBaseProviders(doc.blocks)
 	options.ConfigFilename = configPath
+	if err := config.ValidateUpstreamHeaderDeclarations([]byte(doc.source), configPath); err != nil {
+		return err
+	}
 	if err := config.ValidateDeferredConfig([]byte(doc.source), configPath); err != nil {
 		return err
 	}
@@ -929,6 +932,7 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 	}
 	if existing != nil {
 		input.ModelPassthroughBlocks = existing.ModelPassthroughBlocks
+		input.UpstreamHeadersExpr = existing.UpstreamHeadersExpr
 	} else if containsName(providerNames, input.Name) {
 		return fmt.Errorf("provider %q already exists; use update to preserve its declarations", input.Name)
 	}
@@ -952,7 +956,7 @@ func runConfigureProvider(prompts *promptSession, configPath string, deleteBlock
 	if secretsUpdate.path != "" {
 		reviewLines = append(reviewLines, "Secrets update: "+secretsUpdate.path+" key "+secretsUpdate.key)
 	}
-	if err := prompts.confirmWrite("Review provider changes", buildReviewSummary(reviewLines, renderProviderBlock(input))); err != nil {
+	if err := prompts.confirmWrite("Review provider changes", buildReviewSummary(reviewLines, configedit.RenderProviderPreview(input, defaultSecretsPath()))); err != nil {
 		return err
 	}
 
@@ -1061,12 +1065,19 @@ func runConfigureAlias(prompts *promptSession, configPath string, deleteBlock bo
 		return nil
 	}
 
+	if err := config.ValidateUpstreamHeaderDeclarations([]byte(doc.source), configPath); err != nil {
+		return err
+	}
 	if err := config.ValidateDeferredConfig([]byte(doc.source), configPath); err != nil {
 		return err
 	}
-	input, err := promptAliasInput(prompts, doc.blocks, existingAliasInput(doc.blocks, nameForAction), options)
+	existing := existingAliasInput(doc.blocks, nameForAction)
+	input, err := promptAliasInput(prompts, doc.blocks, existing, options)
 	if err != nil {
 		return err
+	}
+	if existing != nil {
+		input.UpstreamHeadersExpr = existing.UpstreamHeadersExpr
 	}
 
 	updated, err := upsertBlock(doc.source, renderAliasBlock(input), func(block topLevelBlock) bool {
@@ -1075,7 +1086,7 @@ func runConfigureAlias(prompts *promptSession, configPath string, deleteBlock bo
 	if err != nil {
 		return err
 	}
-	if err := prompts.confirmWrite("Review alias changes", buildReviewSummary([]string{"Config path: " + configPath, "Action: " + action + " alias " + input.Name}, renderAliasBlock(input))); err != nil {
+	if err := prompts.confirmWrite("Review alias changes", buildReviewSummary([]string{"Config path: " + configPath, "Action: " + action + " alias " + input.Name}, configedit.RenderAliasPreview(input))); err != nil {
 		return err
 	}
 
@@ -2142,7 +2153,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
-		defaults.Models = preserveProviderModelDeferredTransports(models, defaults.Models)
+		defaults.Models = preserveProviderModelDeclarations(models, defaults.Models)
 	}
 	if options.NonInteractive {
 		if defaults.Extends == "" {
@@ -2169,7 +2180,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			defaults.ForwardUserAgent = false
 			defaults.ForwardHeaders = nil
 			defaults.Enabled = nil
-			defaults.Models = preservedProviderDeferredModelOverlays(existing, defaults.Extends)
+			defaults.Models = preservedProviderModelOverlays(existing, defaults.Extends)
 			defaults.Healthcheck = nil
 			return defaults, providerSecretsUpdate(defaults, options), nil
 		}
@@ -2326,7 +2337,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			if err != nil {
 				return providerInput{}, secretsUpdate{}, err
 			}
-			models := preservedProviderDeferredModelOverlays(existing, extends)
+			models := preservedProviderModelOverlays(existing, extends)
 			if strings.TrimSpace(extends) == "" {
 				models, err = promptProviderLiteralModels(prompts, providerType, defaults)
 				if err != nil {
@@ -2438,7 +2449,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			}
 			credential.APIKeyValue = strings.TrimSpace(apiKey)
 		}
-		models := preservedProviderDeferredModelOverlays(existing, extends)
+		models := preservedProviderModelOverlays(existing, extends)
 		if strings.TrimSpace(extends) == "" {
 			models, err = promptProviderLiteralModels(prompts, providerType, defaults)
 			if err != nil {
@@ -2571,7 +2582,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 		if err != nil {
 			return providerInput{}, secretsUpdate{}, err
 		}
-		models := preservedProviderDeferredModelOverlays(existing, extends)
+		models := preservedProviderModelOverlays(existing, extends)
 		if strings.TrimSpace(extends) == "" {
 			models, err = promptProviderLiteralModels(prompts, providerType, defaults)
 			if err != nil {
@@ -2665,7 +2676,7 @@ func promptProviderInput(prompts *promptSession, existing *providerInput, option
 			return providerInput{}, secretsUpdate{}, err
 		}
 	}
-	models := preservedProviderDeferredModelOverlays(existing, extends)
+	models := preservedProviderModelOverlays(existing, extends)
 	if strings.TrimSpace(extends) == "" {
 		models, err = promptProviderLiteralModels(prompts, providerType, defaults)
 		if err != nil {
@@ -2884,7 +2895,7 @@ func promptProviderModels(prompts *promptSession, providerType string, existing 
 			break
 		}
 	}
-	return preserveProviderModelDeferredTransports(models, existing), nil
+	return preserveProviderModelDeclarations(models, existing), nil
 }
 
 func promptProviderModelsInteractive(prompts *promptSession, providerType string, existing []providerModelInput) ([]providerModelInput, error) {
@@ -2954,6 +2965,7 @@ func promptProviderModelInteractive(prompts *promptSession, providerType string,
 	upstreamName := ""
 	protocol := ""
 	capabilities := defaultCapabilities(providerType)
+	upstreamHeadersExpr := ""
 	deferredTransportBlock := ""
 	var encryptedReasoning *configedit.EncryptedReasoningInput
 	if existing != nil {
@@ -2962,6 +2974,7 @@ func promptProviderModelInteractive(prompts *promptSession, providerType string,
 		upstreamName = existing.UpstreamName
 		protocol = existing.Protocol
 		capabilities = append([]string(nil), existing.Capabilities...)
+		upstreamHeadersExpr = existing.UpstreamHeadersExpr
 		deferredTransportBlock = existing.DeferredTransportBlock
 		encryptedReasoning = configedit.CloneEncryptedReasoningInput(existing.EncryptedReasoning)
 	}
@@ -2997,6 +3010,7 @@ func promptProviderModelInteractive(prompts *promptSession, providerType string,
 		UpstreamName:           strings.TrimSpace(upstreamName),
 		Protocol:               protocol,
 		Capabilities:           selectedCaps,
+		UpstreamHeadersExpr:    upstreamHeadersExpr,
 		DeferredTransportBlock: deferredTransportBlock,
 		EncryptedReasoning:     encryptedReasoning,
 	}, nil
@@ -4573,6 +4587,7 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 		input.ForwardUserAgent = boolVal
 	}
 	input.ForwardHeaders = parseQuotedListExpr(attributeExpr(src, parsed.Body, "forward_headers"))
+	input.UpstreamHeadersExpr = attributeExpr(src, parsed.Body, "upstream_headers")
 	input.ForwardAuthorization = parseBoolExpr(attributeExpr(src, parsed.Body, "forward_authorization"), false)
 	input.AllowInsecureBaseURL = parseBoolExpr(attributeExpr(src, parsed.Body, "allow_insecure_base_url"), false)
 	input.DeferredTransportBlock = nestedBlockSource(src, parsed.Body, "deferred_transport")
@@ -4625,6 +4640,7 @@ func existingProviderInput(blocks []topLevelBlock, name string) *providerInput {
 		model.Protocol = parseLiteralOrExpression(attributeExpr(src, modelBlock.Body, "protocol"))
 		model.Capabilities = parseQuotedListExpr(attributeExpr(src, modelBlock.Body, "capabilities"))
 		model.Pricing = parseModelPricingInput(src, modelBlock)
+		model.UpstreamHeadersExpr = attributeExpr(src, modelBlock.Body, "upstream_headers")
 		model.DeferredTransportBlock = nestedBlockSource(src, modelBlock.Body, "deferred_transport")
 		if policy := nestedBlockSource(src, modelBlock.Body, "encrypted_reasoning"); policy != "" {
 			model.EncryptedReasoning, err = configedit.ParseEncryptedReasoningBlock(policy)
@@ -4776,6 +4792,7 @@ func existingAliasInput(blocks []topLevelBlock, name string) *aliasInput {
 	}
 	input.Algorithm = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "algorithm"))
 	input.RetryStatusCodes = parseQuotedListExpr(attributeExpr(src, parsed.Body, "retry_status_codes"))
+	input.UpstreamHeadersExpr = attributeExpr(src, parsed.Body, "upstream_headers")
 	input.Providers = parseQuotedListExpr(attributeExpr(src, parsed.Body, "providers"))
 	input.Model = parseLiteralOrExpression(attributeExpr(src, parsed.Body, "model"))
 	if affinityBlock := findNestedBlock(parsed.Body, "session_affinity"); affinityBlock != nil {

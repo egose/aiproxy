@@ -26,6 +26,7 @@ type Runtime struct {
 	UserAgent             string
 	ForwardUserAgent      bool
 	ForwardHeaders        []string
+	UpstreamHeaders       UpstreamHeaders `json:"-"`
 	EncryptedReasoning    *EncryptedReasoning
 	Catalog               Catalog
 }
@@ -288,6 +289,7 @@ type Provider struct {
 	UserAgent                   string
 	ForwardUserAgent            bool
 	ForwardHeaders              []string
+	UpstreamHeaders             UpstreamHeaders `json:"-"`
 	ForwardAuthorization        bool
 	EncryptedReasoning          *EncryptedReasoning
 	EncryptedReasoningInherited bool
@@ -342,6 +344,7 @@ type Model struct {
 	UpstreamName                string
 	Protocol                    ModelProtocol
 	Capabilities                []Capability
+	UpstreamHeaders             UpstreamHeaders `json:"-"`
 	Pricing                     *ModelPricing
 	EncryptedReasoning          *EncryptedReasoning
 	EncryptedReasoningInherited bool
@@ -418,6 +421,7 @@ type Alias struct {
 	Workspace          identity.WorkspaceScope `json:"-"`
 	Algorithm          Algorithm
 	RetryStatusCodes   []int
+	UpstreamHeaders    UpstreamHeaders `json:"-"`
 	SessionAffinity    *SessionAffinity
 	EncryptedReasoning *EncryptedReasoning
 	Targets            []AliasTarget

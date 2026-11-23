@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync/atomic"
 	"testing"
 
@@ -18,16 +19,27 @@ func TestProviderAlternateClientRedirectIsolation(t *testing.T) {
 		for _, injected := range []bool{false, true} {
 			for _, status := range []int{302, 307, 308} {
 				t.Run(fmt.Sprintf("%s/injected=%t/%d", kind, injected, status), func(t *testing.T) {
+					const fixed = "synthetic-origin-only-value"
 					var calls atomic.Int32
 					destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }))
 					defer destination.Close()
-					origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, destination.URL, status) }))
+					origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						if !slices.Equal(r.Header.Values("X-Fixed"), []string{fixed}) {
+							t.Error("original origin did not receive the single configured header")
+						}
+						http.Redirect(w, r, destination.URL, status)
+					}))
 					defer origin.Close()
 					var client *http.Client
 					if injected {
 						client = origin.Client()
 					}
-					_, err := New().Do(context.Background(), Request{ProviderType: kind, BaseURL: origin.URL, APIKey: "synthetic", UpstreamModel: "test", Client: client, Inbound: httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), Body: []byte(`{"messages":[{"role":"user","content":"synthetic prompt"}]}`)})
+					_, err := New().Do(context.Background(), Request{
+						ProviderType: kind, BaseURL: origin.URL, APIKey: "synthetic", UpstreamModel: "test", Client: client,
+						Inbound:         httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil),
+						Body:            []byte(`{"messages":[{"role":"user","content":"synthetic prompt"}]}`),
+						UpstreamHeaders: map[string]string{"X-Fixed": fixed},
+					})
 					if !errors.Is(err, upstreamhttp.ErrRedirectOrigin) || calls.Load() != 0 {
 						t.Fatalf("calls=%d err=%v", calls.Load(), err)
 					}

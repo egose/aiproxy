@@ -130,7 +130,7 @@ Recommended layout:
 
 ## Reloading Config
 
-`aiproxy` supports runtime reload on `SIGHUP` for auth, providers, models, aliases, root and provider upstream header timeouts, access-log enablement, payload-log configuration, metrics config, provider-health config, and metrics-backed inventory state.
+`aiproxy` supports runtime reload on `SIGHUP` for auth, providers, models, aliases, [fixed upstream headers](configuration.md#fixed-upstream-headers), root and provider upstream header timeouts, access-log enablement, payload-log configuration, metrics config, provider-health config, and metrics-backed inventory state.
 
 Reload with:
 

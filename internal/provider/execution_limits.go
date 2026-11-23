@@ -412,15 +412,10 @@ func boundedExecutionError(err error) error {
 
 func executeUpstreamLimited(r Request, req *http.Request, handlers upstreamResponseHandlers) (*Result, error) {
 	s := r.execution
-	if r.ForwardAuthorization {
-		authorization, err := forwardedAuthorization(r)
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Authorization", authorization)
+	applied, err := prepareUpstreamHeaders(r, req)
+	if err != nil {
+		return nil, err
 	}
-	req.Header.Set("User-Agent", upstreamUserAgent(r))
-	applyForwardedHeaders(r, req)
 	for name := range req.Header {
 		if strings.HasPrefix(strings.ToLower(name), "x-aiproxy-deferred-") || strings.EqualFold(name, "X-Aiproxy-Deferred") {
 			delete(req.Header, name)
@@ -436,7 +431,7 @@ func executeUpstreamLimited(r Request, req *http.Request, handlers upstreamRespo
 	var sentBody []byte
 	truncated := false
 	if s.limits.SnapshotBytes > 0 {
-		sentHeaders = req.Header.Clone()
+		sentHeaders = snapshotUpstreamHeaders(req.Header, applied)
 		if req.Body != nil {
 			if req.GetBody == nil {
 				return nil, ErrInvalidRequest{Message: "deferred request snapshot requires a replayable body"}

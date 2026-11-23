@@ -34,6 +34,7 @@ func buildRuntime(raw *rawFile, filename string) (*Runtime, error) {
 		return nil, err
 	}
 	rt.Auth = auth
+	rt.UpstreamHeaders = declaredUpstreamHeaders(raw.UpstreamHeaders)
 	rt.EncryptedReasoning = buildEncryptedReasoning(raw.EncryptedReasoning)
 	if len(raw.Deferred) > 0 {
 		if len(raw.Deferred) > 1 {
@@ -188,7 +189,7 @@ func buildRuntime(raw *rawFile, filename string) (*Runtime, error) {
 		if err != nil {
 			return nil, fmt.Errorf("alias %q: %w", al.Name, err)
 		}
-		alias := Alias{Name: al.Name, Algorithm: Algorithm(al.Algorithm), RetryStatusCodes: retryCodes}
+		alias := Alias{Name: al.Name, Algorithm: Algorithm(al.Algorithm), RetryStatusCodes: retryCodes, UpstreamHeaders: declaredUpstreamHeaders(al.UpstreamHeaders)}
 		if al.SessionAffinity != nil {
 			headers := make([]string, 0, len(al.SessionAffinity.Headers))
 			for _, h := range al.SessionAffinity.Headers {
@@ -254,17 +255,24 @@ func buildDerivedProvider(rawProvider rawProvider, rawByName map[string]rawProvi
 	provider := cloneProvider(base)
 	provider.Name = rawProvider.Name
 	provider.Extends = rawProvider.Extends
+	provider.UpstreamHeaders = declaredUpstreamHeaders(rawProvider.UpstreamHeaders)
 	provider.EncryptedReasoningInherited = provider.EncryptedReasoning != nil
 	provider.TLSClientHelloInherited = true
 	provider.ForwardAuthorization = rawProvider.ForwardAuthorization
 	provider.DeferredTransport = nil
 	provider.DeferredReceiver = nil
 	provider.ModelPassthroughs = nil
+	localHeaders := make(map[string]UpstreamHeaders, len(rawProvider.Models))
+	for _, model := range rawProvider.Models {
+		localHeaders[model.Name] = declaredUpstreamHeaders(model.UpstreamHeaders)
+	}
 	for i := range provider.Models {
+		provider.Models[i].UpstreamHeaders = localHeaders[provider.Models[i].Name]
 		provider.Models[i].DeferredTransport = nil
 		provider.Models[i].EncryptedReasoningInherited = provider.Models[i].EncryptedReasoning != nil
 	}
 	for name, model := range provider.ModelByName {
+		model.UpstreamHeaders = localHeaders[name]
 		model.DeferredTransport = nil
 		model.EncryptedReasoningInherited = model.EncryptedReasoning != nil
 		provider.ModelByName[name] = model
@@ -386,8 +394,8 @@ func validateDerivedModelOverlays(local rawProvider, syntax []rawModelSyntax, ba
 		if err := validateDerivedModelOverlaySyntax(model.Name, syntax[i]); err != nil {
 			return err
 		}
-		if model.DeferredTransport == nil && model.EncryptedReasoning == nil {
-			return fmt.Errorf("derived provider cannot declare model blocks without encrypted_reasoning or deferred_transport; model %q requires a policy-only overlay", model.Name)
+		if model.DeferredTransport == nil && model.EncryptedReasoning == nil && model.UpstreamHeaders == nil {
+			return fmt.Errorf("derived provider cannot declare model blocks without encrypted_reasoning or deferred_transport or upstream_headers; model %q requires a policy-only overlay", model.Name)
 		}
 		if !inherited[model.Name] {
 			return fmt.Errorf("derived provider cannot declare new model %q; policy overlays require an existing inherited model name", model.Name)
@@ -398,20 +406,19 @@ func validateDerivedModelOverlays(local rawProvider, syntax []rawModelSyntax, ba
 
 func validateDerivedModelOverlaySyntax(modelName string, syntax rawModelSyntax) error {
 	for name := range syntax.Attrs {
-		return fmt.Errorf("derived provider cannot declare model blocks with %s; model %q supports only encrypted_reasoning and deferred_transport overlays", name, modelName)
+		if name != upstreamHeadersAttribute {
+			return fmt.Errorf("derived provider cannot declare model blocks with %s; model %q supports only encrypted_reasoning, deferred_transport, and upstream_headers overlays", name, modelName)
+		}
 	}
 	for name, count := range syntax.Blocks {
 		if name != "deferred_transport" && name != "encrypted_reasoning" && count > 0 {
-			return fmt.Errorf("derived provider cannot declare model blocks with %s; model %q supports only encrypted_reasoning and deferred_transport overlays", name, modelName)
+			return fmt.Errorf("derived provider cannot declare model blocks with %s; model %q supports only encrypted_reasoning, deferred_transport, and upstream_headers overlays", name, modelName)
 		}
 	}
 	for _, name := range []string{"encrypted_reasoning", "deferred_transport"} {
 		if syntax.Blocks[name] > 1 {
 			return fmt.Errorf("derived provider model %q supports at most one %s block", modelName, name)
 		}
-	}
-	if syntax.Blocks["deferred_transport"]+syntax.Blocks["encrypted_reasoning"] == 0 {
-		return fmt.Errorf("derived provider cannot declare model blocks without encrypted_reasoning or deferred_transport; model %q requires a policy-only overlay", modelName)
 	}
 	return nil
 }
@@ -630,6 +637,7 @@ func buildProvider(rawProvider rawProvider, syntax rawProviderSyntax, filename s
 		UserAgent:                 rootUserAgent,
 		ForwardUserAgent:          rootForwardUserAgent,
 		ForwardHeaders:            unionForwardHeaders(rootForwardHeaders, rawProvider.ForwardHeaders),
+		UpstreamHeaders:           declaredUpstreamHeaders(rawProvider.UpstreamHeaders),
 		ForwardAuthorization:      rawProvider.ForwardAuthorization,
 		AllowInsecureBaseURL:      rawProvider.AllowInsecureBaseURL != nil && *rawProvider.AllowInsecureBaseURL,
 		TLSClientHello:            rawProvider.TLSClientHello,
@@ -705,6 +713,7 @@ func buildProvider(rawProvider rawProvider, syntax rawProviderSyntax, filename s
 			upstream = m.Name
 		}
 		model := Model{Name: m.Name, DisplayName: m.DisplayName, UpstreamName: upstream, Protocol: ModelProtocol(m.Protocol), Capabilities: make([]Capability, 0, len(m.Capabilities))}
+		model.UpstreamHeaders = declaredUpstreamHeaders(m.UpstreamHeaders)
 		for _, c := range m.Capabilities {
 			model.Capabilities = append(model.Capabilities, Capability(c))
 		}

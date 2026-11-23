@@ -322,7 +322,7 @@ func applyProviderModelReasoningEdit(input *providerInput, name string, edit con
 		return fmt.Errorf("model %q: %w", name, err)
 	}
 	model.EncryptedReasoning = updated
-	if input.Extends != "" && updated == nil && strings.TrimSpace(model.DeferredTransportBlock) == "" {
+	if input.Extends != "" && updated == nil && strings.TrimSpace(model.DeferredTransportBlock) == "" && model.UpstreamHeadersExpr == "" {
 		input.Models = removeProviderModel(input.Models, name)
 		return nil
 	}

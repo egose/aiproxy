@@ -65,7 +65,7 @@ func Validate(rt *Runtime) error {
 	if err := validateAliases(rt.Catalog.Aliases(), rt.Catalog); err != nil {
 		return err
 	}
-	return nil
+	return validateCatalogUpstreamHeaders(rt.UpstreamHeaders, rt.Catalog)
 }
 
 func validateLogging(l Logging) error {
@@ -581,6 +581,9 @@ func isLoopbackHost(host string) bool {
 
 func validateAliases(aliases []Alias, catalog Catalog) error {
 	for _, a := range aliases {
+		if a.DatabaseManaged && a.UpstreamHeaders.declared() {
+			return fmt.Errorf("alias %q: upstream_headers is static-config-only", a.Name)
+		}
 		if !IsLowercaseName(a.Name) {
 			return fmt.Errorf("alias %q: name must be lowercase, no spaces, no '/', and start with [a-z0-9]", a.Name)
 		}

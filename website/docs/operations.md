@@ -543,7 +543,8 @@ Model controls alone never create definitions. On a derivative, they create
 only sparse existing-name reasoning overlays using a valid, loadable base
 inventory; they cannot repair a partial/invalid base, redefine models or relax
 credential/chain/deferred restrictions. Removing the last reasoning block removes
-a reasoning-only child model overlay, but retains a deferred sibling block.
+a reasoning-only child model overlay, but retains sibling deferred or fixed-header
+declarations.
 Inherited model policies still outrank child provider policies.
 
 ### Configuring Provider TLS Profiles
@@ -735,6 +736,7 @@ build` from the `website` directory.
 - provider TLS ClientHello selections and custom recipe contents
 - alias routing state
 - root/provider/model/alias encrypted-reasoning policies
+- root/provider/model/alias [fixed upstream headers](configuration.md#fixed-upstream-headers)
 - access-log enablement
 - payload-log configuration
 - metrics configuration
@@ -1995,7 +1997,10 @@ kept: files older than the retention window are removed on rotation and by an
 hourly sweep; `"0s"` disables expiry. Bodies larger than `max_body_bytes` per
 side are truncated with `"truncated": true` (`0` stores full bodies), and
 sensitive headers (`authorization`, `proxy-authorization`, `cookie`,
-`set-cookie`, `x-api-key`) are stored as `[REDACTED]`.
+`set-cookie`, `x-api-key`) are stored as `[REDACTED]`. Applied
+[fixed upstream headers](configuration.md#fixed-upstream-headers) are masked in
+the proxy's upstream-request header capture, not in upstream logs or echoed
+response bodies.
 
 Only enable payload logging when you can protect the output directory:
 bodies contain prompts and completions. Changes apply on `SIGHUP` reload.

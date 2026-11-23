@@ -223,6 +223,9 @@ func cloneProvider(provider Provider) Provider {
 	out.ModelByName = make(map[string]Model, len(out.Models)+len(provider.ModelByName))
 	for i := range out.Models {
 		model := &out.Models[i]
+		if !model.UpstreamHeaders.declared() {
+			model.UpstreamHeaders = provider.ModelByName[model.Name].UpstreamHeaders
+		}
 		if model.DeferredTransport == nil {
 			model.DeferredTransport = cloneDeferredTransport(provider.ModelByName[model.Name].DeferredTransport)
 		}

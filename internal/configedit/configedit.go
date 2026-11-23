@@ -69,6 +69,7 @@ type ProviderInput struct {
 	UserAgent                 string
 	ForwardUserAgent          bool
 	ForwardHeaders            []string
+	UpstreamHeadersExpr       string
 	ForwardAuthorization      bool
 	DeferredTransportBlock    string
 	DeferredReceiverBlock     string
@@ -113,6 +114,7 @@ type ProviderModelInput struct {
 	Protocol               string
 	Capabilities           []string
 	Pricing                *ModelPricingInput
+	UpstreamHeadersExpr    string
 	DeferredTransportBlock string
 	EncryptedReasoning     *EncryptedReasoningInput
 }
@@ -137,14 +139,15 @@ type ProviderHealthcheckInput struct {
 }
 
 type AliasInput struct {
-	Name               string
-	Algorithm          string
-	RetryStatusCodes   []string
-	Providers          []string
-	Model              string
-	SessionAffinity    *AliasSessionAffinityInput
-	EncryptedReasoning *AliasEncryptedReasoningInput
-	Targets            []AliasTargetInput
+	Name                string
+	Algorithm           string
+	RetryStatusCodes    []string
+	Providers           []string
+	Model               string
+	SessionAffinity     *AliasSessionAffinityInput
+	UpstreamHeadersExpr string
+	EncryptedReasoning  *AliasEncryptedReasoningInput
+	Targets             []AliasTargetInput
 }
 
 type AliasSessionAffinityInput struct {
@@ -311,6 +314,14 @@ func RenderAuthBlock(input AuthInput) string {
 }
 
 func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string {
+	return renderProviderBlock(input, defaultSecretsPath, false)
+}
+
+func RenderProviderPreview(input ProviderInput, defaultSecretsPath string) string {
+	return renderProviderBlock(input, defaultSecretsPath, true)
+}
+
+func renderProviderBlock(input ProviderInput, defaultSecretsPath string, preview bool) string {
 	var b strings.Builder
 	b.WriteString("provider ")
 	b.WriteString(strconv.Quote(input.ProviderType))
@@ -340,12 +351,13 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 		b.WriteString(RenderStringOrExpression(input.TLSClientHelloSpecFile))
 		b.WriteString("\n")
 	}
+	renderUpstreamHeaders(&b, input.UpstreamHeadersExpr, "  ", preview)
 	if input.Extends != "" {
 		b.WriteString("\n")
 		renderProviderCredential(&b, input, defaultSecretsPath)
 		renderProviderDeferredBlocks(&b, input)
 		renderEncryptedReasoningBlock(&b, input.EncryptedReasoning, "  ")
-		renderProviderModelBlocks(&b, input)
+		renderProviderModelBlocks(&b, input, preview)
 		renderModelPassthroughBlocks(&b, input.ModelPassthroughBlocks)
 		b.WriteString("}\n")
 		return b.String()
@@ -390,7 +402,7 @@ func RenderProviderBlock(input ProviderInput, defaultSecretsPath string) string 
 	if input.Healthcheck != nil {
 		b.WriteString(renderProviderHealthcheckBlock(input.Healthcheck))
 	}
-	renderProviderModelBlocks(&b, input)
+	renderProviderModelBlocks(&b, input, preview)
 	renderModelPassthroughBlocks(&b, input.ModelPassthroughBlocks)
 	b.WriteString("}\n")
 	return b.String()
@@ -404,9 +416,9 @@ func renderModelPassthroughBlocks(b *strings.Builder, blocks []string) {
 	}
 }
 
-func renderProviderModelBlocks(b *strings.Builder, input ProviderInput) {
+func renderProviderModelBlocks(b *strings.Builder, input ProviderInput, preview bool) {
 	for _, model := range input.Models {
-		if input.Extends != "" && strings.TrimSpace(model.DeferredTransportBlock) == "" && model.EncryptedReasoning == nil {
+		if input.Extends != "" && strings.TrimSpace(model.DeferredTransportBlock) == "" && model.EncryptedReasoning == nil && model.UpstreamHeadersExpr == "" {
 			continue
 		}
 		b.WriteString("\n  model ")
@@ -437,6 +449,7 @@ func renderProviderModelBlocks(b *strings.Builder, input ProviderInput) {
 				b.WriteString(renderModelPricingBlock(model.Pricing))
 			}
 		}
+		renderUpstreamHeaders(b, model.UpstreamHeadersExpr, "    ", preview)
 		if block := strings.TrimSpace(model.DeferredTransportBlock); block != "" {
 			b.WriteString("    ")
 			b.WriteString(block)
@@ -576,6 +589,14 @@ func renderIntOrQuoted(value string) string {
 }
 
 func RenderAliasBlock(input AliasInput) string {
+	return renderAliasBlock(input, false)
+}
+
+func RenderAliasPreview(input AliasInput) string {
+	return renderAliasBlock(input, true)
+}
+
+func renderAliasBlock(input AliasInput, preview bool) string {
 	var b strings.Builder
 	b.WriteString("alias ")
 	b.WriteString(strconv.Quote(input.Name))
@@ -588,6 +609,7 @@ func RenderAliasBlock(input AliasInput) string {
 		b.WriteString(RenderQuotedList(input.RetryStatusCodes))
 		b.WriteString("\n")
 	}
+	renderUpstreamHeaders(&b, input.UpstreamHeadersExpr, "  ", preview)
 	if input.SessionAffinity != nil {
 		b.WriteString("\n  session_affinity {\n")
 		if len(input.SessionAffinity.Headers) > 0 {
@@ -619,6 +641,17 @@ func RenderAliasBlock(input AliasInput) string {
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+func renderUpstreamHeaders(b *strings.Builder, expr, indent string, preview bool) {
+	if expr == "" {
+		return
+	}
+	if preview {
+		b.WriteString(indent + "# upstream_headers preserved (values hidden)\n")
+		return
+	}
+	b.WriteString(indent + "upstream_headers = " + expr + "\n")
 }
 
 func RenderProviderHealthBlock(input ProviderHealthInput) string {
@@ -820,6 +853,9 @@ func WriteFile(path string, body []byte, mode os.FileMode) error {
 }
 
 func ValidateGeneratedConfig(source []byte, filename string) error {
+	if err := config.ValidateUpstreamHeaderDeclarations(source, filename); err != nil {
+		return err
+	}
 	if err := config.ValidateProviderTLSProfiles(source, filename); err != nil {
 		return err
 	}
@@ -1048,6 +1084,15 @@ func TopLevelStringAttribute(source, name string) (string, error) {
 }
 
 func ParseTopLevelBlocks(source string) ([]TopLevelBlock, error) {
+	if file, diags := hclsyntax.ParseConfig([]byte(source), "config.hcl", hcl.Pos{Line: 1, Column: 1}); !diags.HasErrors() {
+		var blocks []TopLevelBlock
+		for _, block := range file.Body.(*hclsyntax.Body).Blocks {
+			rng := block.Range()
+			start, end := rng.Start.Byte, rng.End.Byte
+			blocks = append(blocks, TopLevelBlock{Type: block.Type, Labels: block.Labels, Start: start, End: end, Text: source[start:end]})
+		}
+		return blocks, nil
+	}
 	var blocks []TopLevelBlock
 	for i := 0; i < len(source); {
 		next, err := skipSpaceAndComments(source, i)

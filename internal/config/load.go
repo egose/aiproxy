@@ -75,6 +75,9 @@ func Load(src []byte, filename string) (*Runtime, error) {
 	if err := validateModelPassthroughBlockShapes(file.Body); err != nil {
 		return nil, err
 	}
+	if err := validateUpstreamHeaderDeclarations(file.Body); err != nil {
+		return nil, err
+	}
 
 	var raw rawFile
 	if d := gohcl.DecodeBody(file.Body, nil, &raw); d.HasErrors() {
@@ -143,6 +146,9 @@ func parseConfig(src []byte, filename string) (*hcl.File, error) {
 	if jsonFile, jsonDiags := json.Parse(src, filename); !jsonDiags.HasErrors() {
 		return jsonFile, nil
 	}
+	if err := upstreamHeadersParseError(file, diags); err != nil {
+		return nil, err
+	}
 	if err := encryptedReasoningParseError(file, diags); err != nil {
 		return nil, err
 	}
@@ -192,6 +198,7 @@ func annotateProviderSyntax(body hcl.Body, raw *rawFile) {
 				{Name: "user_agent"},
 				{Name: "forward_user_agent"},
 				{Name: "forward_headers"},
+				{Name: upstreamHeadersAttribute},
 				{Name: "api_key"},
 				{Name: "enabled"},
 			},

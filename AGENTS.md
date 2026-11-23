@@ -81,9 +81,9 @@ The server supports `SIGHUP`-triggered live config reload for auth, providers,
 models, static model-ID passthrough rules and grants, aliases, root and provider
 upstream header timeouts, provider TLS ClientHello profiles and custom recipes,
 root and provider user-agent settings, root/provider/model/alias encrypted-reasoning
-policies, access-log enablement, payload-log configuration, metrics config,
-provider-health config, ingress-guardrail policy, web UI enablement, and
-metrics-backed inventory state. When multi-tenancy is enabled, database-backed
+policies and fixed upstream headers, access-log enablement, payload-log
+configuration, metrics config, provider-health config, ingress-guardrail policy,
+web UI enablement, and metrics-backed inventory state. When multi-tenancy is enabled, database-backed
 providers, aliases, and inbound keys merge into the serving catalog on the same reload path (and
 automatically after admin API mutations and durable-revision polling every 2s);
 invalid catalogs retain the old catalog but keys refresh independently. DB-backed
@@ -225,9 +225,9 @@ The optional standalone Bun capture tool is documented in
   eligibility is additive and does not defer ordinary calls, but a receiver
   cannot coexist with any caller setting on the same provider. Static derivatives
   inherit model definitions, never base caller/receiver opt-ins; local existing-name
-  model overlays may contain `deferred_transport`, `encrypted_reasoning`, or both,
-  with no model definition attributes. Deferred opt-ins are incompatible
-  with `forward_authorization` and rejected on managed provider/credential writes
+  model overlays may contain `deferred_transport`, `encrypted_reasoning`, and/or
+  `upstream_headers`, with no model definition attributes. Deferred opt-ins are
+  incompatible with `forward_authorization` and rejected on managed provider/credential writes
   (including nested models) and managed inheritance. Callers require configured
   `api_key`/`api_key_ref` even when disabled. Peer control failures never authorize
   fresh inference. There are no CLI/web creation controls. Full configurations
@@ -245,6 +245,15 @@ The optional standalone Bun capture tool is documented in
   Both attributes also exist at root scope as defaults for all providers:
   a provider-level `user_agent` overrides the root value, while
   `forward_user_agent` is effective when set at either level.
+- Static `upstream_headers` maps at root/provider/model/alias scope merge names
+  case-insensitively, with alias > selected model > selected provider > root >
+  permitted caller value. Static derivatives never inherit base maps. Managed
+  destinations, probes, discovery and outgoing deferred control/submit metadata
+  get no fixed values; receiver inference uses local static scopes. The proxy
+  masks applied values in upstream-request captures, not upstream logs or echoed
+  responses. HCL edits preserve maps and hide values in previews; conversion
+  materializes `env()` values. See
+  [fixed upstream headers](website/docs/configuration.md#fixed-upstream-headers).
 - Provider-only `tls_client_hello` accepts `native` (omitted default), `chrome`,
   `chrome-133`, `safari`, `safari-16.0`, or `custom`. Pinned uTLS v1.8.2 maps aliases
   to bundled Chrome 133/Safari 16.0, never a live/latest browser catalog. Empty,
@@ -404,10 +413,11 @@ The optional standalone Bun capture tool is documented in
   into a dedicated field (never `api_key`), activates on restart/`SIGHUP`,
   and requires re-login + reload on `401`/`403`/revocation/expiry. Derived
   Copilot providers require their own local `credential_ref`. Upstream
-  inference is `POST {base}/chat/completions` with an allowlist only
+  inference is `POST {base}/chat/completions` with adapter-managed headers
   (`Authorization`, proxy `User-Agent`, `X-GitHub-Api-Version`,
   `Openai-Intent`, derived `x-initiator: user`, vision only on image bodies);
-  inbound auth/cookies/`x-api-key`/caller Copilot metadata are stripped.
+  static inference can add non-reserved fixed headers. Inbound auth/cookies/
+  `x-api-key`/caller Copilot metadata are stripped.
   `aiproxy configure provider --credential/--credential-path` references the
   saved login without OAuth networking or token display, and upstream model
   listing (`GET {base}/models`) shares the same auth without changing the

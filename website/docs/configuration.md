@@ -11,6 +11,7 @@ sidebar_position: 3
 - `logging`
 - `provider "<type>" "<name>"`
 - `alias "<name>"`
+- optional root/provider/model/alias `upstream_headers` map
 - optional root/provider/model/alias `encrypted_reasoning` policy
 - optional `deferred` executor policy
 
@@ -112,7 +113,7 @@ The listener block configures the inbound HTTP server.
 - `address` sets the listen address such as `:8080`
 - `timeouts` configures read, idle, and write timeouts
 
-Listener address and timeout changes still require a restart, even though runtime state such as auth, providers, models, aliases, encrypted-reasoning policies, upstream header timeouts, access-log enablement, metrics, and provider-health config can reload on `SIGHUP`. Logging level changes and enabling the dashboard after startup also require a restart.
+Listener address and timeout changes still require a restart, even though runtime state such as auth, providers, models, aliases, encrypted-reasoning policies, fixed upstream headers, upstream header timeouts, access-log enablement, metrics, and provider-health config can reload on `SIGHUP`. Logging level changes and enabling the dashboard after startup also require a restart.
 
 For most deployments, one HTTP listener is enough.
 
@@ -189,7 +190,9 @@ logging {
   `"truncated": true`. `0` stores full bodies. Binary bodies are base64
   encoded.
 - `authorization`, `proxy-authorization`, `cookie`, `set-cookie`, and
-  `x-api-key` header values are always recorded as `[REDACTED]`.
+  `x-api-key` header values are always recorded as `[REDACTED]`. Applied
+  [fixed header](#fixed-upstream-headers) values are also redacted in the
+  proxy's upstream-request header capture.
 
 Payload-log changes apply on `SIGHUP` reload without a restart.
 
@@ -263,6 +266,7 @@ Common attributes:
 - `api_key_ref`
 - `credential_ref` for `github-copilot` only (saved device-flow login)
 - `upstream_header_timeout`
+- `upstream_headers` for [fixed header values on static inference](#fixed-upstream-headers)
 - `tls_client_hello` (provider-only upstream TLS profile; see below)
 - `tls_client_hello_spec_file` (required only for static `custom` profiles)
 - `encrypted_reasoning` (whole-block policy; also supported at root, model and
@@ -592,9 +596,9 @@ provider "openai-compatible" "nvidia-2" {
 }
 ```
 
-A derived provider may be declared before or after its base. It normally declares `extends`, optional `display_name`, and exactly one local credential, either `api_key` or `api_key_ref`. It inherits the base provider type, `base_url`, effective upstream header timeout, TLS ClientHello settings/profile, enabled state, and all model blocks.
+A derived provider may be declared before or after its base. It normally declares `extends`, optional `display_name`, and exactly one local credential, either `api_key` or `api_key_ref`. It inherits the base provider type, `base_url`, effective upstream header timeout, TLS ClientHello settings/profile, enabled state, and model definitions.
 
-`github-copilot` derivatives instead require a local `credential_ref`; they cannot redefine `base_url` or model definitions, but may use the reasoning-only overlays below. `credential_ref` is rejected on all other types, and `api_key`/`api_key_ref` are rejected on Copilot blocks.
+`github-copilot` derivatives instead require a local `credential_ref`; they cannot redefine `base_url` or model definitions, but may use existing-name reasoning and fixed-header overlays on static providers. `credential_ref` is rejected on all other types, and `api_key`/`api_key_ref` are rejected on Copilot blocks.
 
 The type label remains required and must match the base. The base must exist, be enabled, and must not itself use `extends`; inheritance chains are rejected. Local `base_url`, `upstream_header_timeout`, `tls_client_hello`, `tls_client_hello_spec_file`, and `enabled` declarations are rejected instead of ignored, including explicit TLS defaults. Local `model` declarations are rejected except for existing-name policy overlays described below.
 
@@ -621,9 +625,10 @@ local existing-name `model` overlay; removing the overlay restores the base
 model declaration, not necessarily the child's provider policy.
 
 Static derivatives inherit model definitions, **not** base provider or model
-deferred caller opt-ins, nor receiver opt-ins/limits. An existing-name model
-overlay may contain `encrypted_reasoning`, `deferred_transport`, or both
-(at most one of each, at least one total). New model
+deferred caller opt-ins, receiver opt-ins/limits, or fixed header maps. An
+existing-name model overlay may contain `encrypted_reasoning`,
+`deferred_transport`, and `upstream_headers` in any valid combination (at most
+one of each, at least one total). New model
 names, definition fields (`upstream_name`, `display_name`, `protocol`,
 `capabilities`, `pricing`), empty model overlays and duplicate overlays are
 rejected, even if a forbidden field is empty, null or a default value.
@@ -787,6 +792,147 @@ but supported typed thinking/reasoning items and chat `reasoning`/
 Do not assume universal plaintext-reasoning preservation. See
 [recovery gates, streaming and alias budgets](providers-and-routing.md#scoped-encrypted-reasoning)
 before enabling retry or pre-stripping.
+
+## Fixed Upstream Headers
+
+Use `upstream_headers` to set operator-chosen header values on inference HTTP
+requests to **static providers**. It is an attribute at root, provider, model,
+and alias scope in HCL and JSON, including `$AIPROXY_CONFIG`.
+
+| Route                       | Highest to lowest priority, per header name                                                  |
+| --------------------------- | -------------------------------------------------------------------------------------------- |
+| Direct model                | Model → provider → root → permitted caller value                                             |
+| Alias                       | Alias → selected target's model → selected target's provider → root → permitted caller value |
+| Static model-ID passthrough | Provider → root → permitted caller value                                                     |
+
+Names match case-insensitively. A fixed value is sent once and replaces all
+caller values for that name, even when `forward_headers` permits it. With no
+fixed value for a name, normal caller forwarding is unchanged. Maps merge by
+name, not as whole maps: omission and `{}` both add no local overrides. There
+is no deletion marker. The proxy resolves headers after authorization and
+routing. On alias failover it keeps the alias overrides but recomputes the
+provider/model layers for the new target. Same-target reasoning recovery uses
+the same fixed values.
+
+Declare an object, not a block, list, or `null`. Each map and each effective
+fixed set is limited to 32 names and 16 KiB of
+name/value bytes. Names must be valid HTTP field names of at most 128 bytes
+and unique within a map; values must be nonblank strings of at most 4096 bytes
+without control characters. Invalid declarations, including on disabled
+providers, and over-budget effective sets reject the config. Names reserved by
+`forward_headers` (including auth, framing, and `User-Agent`), `Accept-Encoding`,
+private deferred fields, and known adapter-owned headers on applicable targets
+are not configurable here. Use the dedicated credential and user-agent settings
+for those headers.
+
+Example in HCL:
+
+```hcl title="fixed-upstream-headers.hcl"
+upstream_headers = {
+  "X-App-Name"    = "internal"
+  "X-Environment" = "production"
+}
+forward_headers = ["X-App-Name", "X-Request-Tag"]
+
+listener "http" "public" { address = "127.0.0.1:8080" }
+auth "main" {
+  mode = "bearer_static"
+  client "client" { token = env("AIPROXY_CLIENT_TOKEN") }
+}
+
+provider "openai-compatible" "primary" {
+  base_url = "https://gateway.example/v1"
+  api_key  = env("PRIMARY_UPSTREAM_API_KEY")
+  upstream_headers = {
+    "X-App-Name"       = "primary"
+    "X-Upstream-Group" = env("PRIMARY_UPSTREAM_GROUP")
+  }
+  model "chat" {
+    upstream_name    = "chat-model"
+    upstream_headers = { "x-app-name" = "primary-chat" }
+  }
+}
+
+provider "openai-compatible" "backup" {
+  extends = "primary"
+  api_key = env("BACKUP_UPSTREAM_API_KEY")
+  model "chat" {
+    upstream_headers = { "X-Account-Label" = "backup-chat" }
+  }
+}
+
+alias "public-chat" {
+  algorithm        = "round_robin"
+  providers        = ["primary", "backup"]
+  model            = "chat"
+  upstream_headers = { "x-app-name" = "public-chat" }
+}
+```
+
+Equivalent JSON (`env()` is written bare, as in the rest of the config):
+
+```json title="fixed-upstream-headers.json"
+{
+  "upstream_headers": { "X-App-Name": "internal", "X-Environment": "production" },
+  "forward_headers": ["X-App-Name", "X-Request-Tag"],
+  "listener": { "http": { "public": { "address": "127.0.0.1:8080" } } },
+  "auth": { "main": { "mode": "bearer_static", "client": { "client": { "token": env("AIPROXY_CLIENT_TOKEN") } } } },
+  "provider": {
+    "openai-compatible": {
+      "primary": {
+        "base_url": "https://gateway.example/v1",
+        "api_key": env("PRIMARY_UPSTREAM_API_KEY"),
+        "upstream_headers": { "X-App-Name": "primary", "X-Upstream-Group": env("PRIMARY_UPSTREAM_GROUP") },
+        "model": { "chat": { "upstream_name": "chat-model", "upstream_headers": { "x-app-name": "primary-chat" } } }
+      },
+      "backup": {
+        "extends": "primary",
+        "api_key": env("BACKUP_UPSTREAM_API_KEY"),
+        "model": { "chat": { "upstream_headers": { "X-Account-Label": "backup-chat" } } }
+      }
+    }
+  },
+  "alias": {
+    "public-chat": {
+      "algorithm": "round_robin",
+      "providers": ["primary", "backup"],
+      "model": "chat",
+      "upstream_headers": { "x-app-name": "public-chat" }
+    }
+  }
+}
+```
+
+Here `primary/chat` sends `X-App-Name: primary-chat`, whereas `backup/chat`
+sends `X-App-Name: internal`. Static derivatives do not inherit base provider
+or model maps; they may declare their own provider maps and existing-name
+model overlays. Either alias target sends `X-App-Name: public-chat`, not a
+caller's `X-App-Name`, and can still forward a permitted `X-Request-Tag`.
+Both targets send `X-Environment`, but only `primary` sends `X-Upstream-Group`.
+
+Fixed headers are not sent on health probes, upstream model discovery, or
+OAuth/device requests. They are not sent in outgoing deferred peer control
+headers or submit metadata. A deferred receiver applies its **own** scopes
+when its local inference targets a static provider. No database-managed
+provider receives fixed headers, including System providers, derivatives of
+static providers, or targets of static aliases. A managed alias supplies no
+alias-level overrides; any otherwise-authorized static target still uses its
+root/provider/model values. Authorization is unchanged.
+
+Send fixed headers only to trusted upstreams. Root or alias values must be safe
+for every eligible destination, including fallbacks. Prefer HTTPS for sensitive
+values. The proxy masks applied values in its **upstream-request header capture**
+only; it cannot redact upstream logs or values the upstream echoes in a response
+body. There are no admin/API/dashboard fields or CLI editing flags for this map.
+Supported in-place `configure` edits to HCL preserve retained map expressions
+and `env()` spelling without showing their values in previews. Explicit
+`aiproxy convert` resolves `env()` and may write secrets to the output, including
+stdout; protect the result.
+
+All four scopes reload together on a successful `SIGHUP`. A rejected candidate
+leaves the old values active, and admitted requests (including later failover
+attempts) keep their original snapshot. With the example variables set, run
+`aiproxy validate --config fixed-upstream-headers.hcl` (or `.json`) before reload.
 
 ## Upstream Header Timeout
 
@@ -1454,6 +1600,7 @@ model "gpt-4.1" {
   `responses`, `messages`, or `gemini`; `gemini` is Zen-only) and rejected on
   other provider types
 - `capabilities` narrows the operations exposed through the proxy
+- `upstream_headers` can set [fixed headers](#fixed-upstream-headers) on a static model
 - `deferred_transport` opts a static `openai-compatible` chat model into
   [peer caller transport](#caller-policy); `deferred_receiver` is provider-only
 
@@ -1783,8 +1930,9 @@ aiproxy convert ./config.json --config /etc/aiproxy/config.hcl
 aiproxy convert --compact - --config /etc/aiproxy/config.hcl
 ```
 
-Conversion materializes environment values, including secrets, in the output;
-this also applies to stdout (`-`). On Linux and macOS, file output is staged in the destination
+Conversion materializes environment values, including secrets such as fixed
+upstream header values, in the output. This also applies to stdout (`-`). On
+Linux and macOS, file output is staged in the destination
 directory and published atomically with exact `0600` permissions. Without
 `--force`, publication refuses an existing destination even if another process
 creates it during conversion. `--force` atomically replaces an existing regular

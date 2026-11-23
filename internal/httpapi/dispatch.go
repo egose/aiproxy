@@ -50,9 +50,11 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		deps.Metrics.RecordProviderSelection(op, r.Provider.Name+"/"+target, r.Provider.Name, target)
 	}
 	execution := deferredExecutionFromContext(ctx)
+	var targetModel config.Model
 	var transport *config.DeferredTransport
 	if !passthrough {
-		transport = config.EffectiveDeferredTransport(r.Provider, r.Model)
+		targetModel = r.Model
+		transport = config.EffectiveDeferredTransport(r.Provider, targetModel)
 	}
 	request := provider.Request{
 		Operation:            op,
@@ -67,6 +69,7 @@ func (h *Handler) dispatchDirect(deps Dependencies, ctx context.Context, op prov
 		UserAgent:            r.Provider.UserAgent,
 		ForwardUserAgent:     r.Provider.ForwardUserAgent,
 		ForwardHeaders:       r.Provider.ForwardHeaders,
+		UpstreamHeaders:      deps.Resolver.UpstreamHeaders(r.Provider, targetModel, nil),
 		ForwardAuthorization: r.Provider.ForwardAuthorization,
 		Version:              deps.Version,
 		Client:               clientForProvider(deps, r.Provider),
@@ -412,6 +415,7 @@ targetLoop:
 			UserAgent:            prov.UserAgent,
 			ForwardUserAgent:     prov.ForwardUserAgent,
 			ForwardHeaders:       prov.ForwardHeaders,
+			UpstreamHeaders:      deps.Resolver.UpstreamHeaders(prov, model, &r.Alias),
 			ForwardAuthorization: prov.ForwardAuthorization,
 			Version:              deps.Version,
 			Client:               clientForProvider(deps, prov),
