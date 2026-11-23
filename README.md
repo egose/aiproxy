@@ -233,8 +233,9 @@ provider "github-copilot" "copilot" {
 `credential_ref.path` defaults to the shared secrets path so the sidecar is
 found next to `keys.json`; set it explicitly only for a custom location.
 Derived `github-copilot` providers require their own local `credential_ref`
-and cannot redefine `base_url` or model definitions (reasoning-only existing-name
-model overlays are allowed). `api_key`/`api_key_ref` and
+and cannot redefine `base_url` or model definitions (existing-name overlays may
+configure reasoning or [fixed upstream headers](website/docs/configuration.md#fixed-upstream-headers)
+on static providers). `api_key`/`api_key_ref` and
 `protocol` are rejected on Copilot blocks, and
 `credential_ref` is rejected on all other types.
 
@@ -361,7 +362,8 @@ flags or writable managed/web fields.
 The server supports live config reload on `SIGHUP` for auth, providers, models,
 aliases, root and provider upstream header timeouts, provider TLS ClientHello
 profiles and custom recipes, access-log enablement,
-root/provider/model/alias encrypted-reasoning policies, payload-log configuration, metrics config, provider-health config,
+root/provider/model/alias encrypted-reasoning policies and fixed upstream headers,
+payload-log configuration, metrics config, provider-health config,
 ingress-guardrail policy, and
 metrics-backed inventory state.
 Peer deferred policy can reload subject to live reservation checks; removing its

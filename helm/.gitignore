@@ -1,3 +1,4 @@
 charts/
 template.yaml
 *.secret.yaml
+*.secret.json

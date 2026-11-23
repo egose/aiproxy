@@ -82,7 +82,7 @@ alias "chat_default" {
 }
 ```
 
-The shorthand cannot be combined with `target` blocks and supports the full alias feature set (`retry_status_codes`, `session_affinity`, `encrypted_reasoning`).
+The shorthand cannot be combined with `target` blocks and supports the full alias feature set (`retry_status_codes`, `session_affinity`, `encrypted_reasoning`, and [fixed upstream headers](configuration.md#fixed-upstream-headers)).
 
 Aliases are useful when you want:
 
@@ -423,11 +423,13 @@ provider "github-copilot" "copilot" {
 providers require their own local `credential_ref`. The token activates on
 restart/`SIGHUP`; sidecar-only changes are inert until reload, failed reloads
 keep the old runtime, and upstream `401`/`403` means re-run `login` with the
-same client ID/name and reload. Upstream headers are an allowlist only
+same client ID/name and reload. The adapter sets its built-in headers
 (`Authorization` from the stored login, proxy `User-Agent`,
 `X-GitHub-Api-Version`, `Openai-Intent`, derived `x-initiator: user`, vision
-only on image bodies); inbound auth/cookies/`x-api-key`/caller Copilot
-metadata are stripped. `GET {base}/models` listing shares the same auth
+only on image bodies). Static inference may also add non-reserved
+[fixed upstream headers](configuration.md#fixed-upstream-headers).
+Inbound auth/cookies/`x-api-key`/caller Copilot metadata are stripped.
+`GET {base}/models` listing shares the same auth
 without changing the static proxy inventory. See `examples/github-copilot.hcl`
 for a complete config.
 

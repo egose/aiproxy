@@ -55,6 +55,10 @@ func Convert(src []byte, filename string, compact bool) ([]byte, string, string,
 	src = trimLeadingWhitespace(src)
 	expanded := expandEnvCalls(src)
 	if file, diags := hclsyntax.ParseConfig(expanded, filename, hcl.Pos{Line: 1, Column: 1}); !diags.HasErrors() {
+		headerDeclarations, err := inspectUpstreamHeaderDeclarations(file.Body)
+		if err != nil {
+			return nil, "", "", err
+		}
 		if err := validateDeferredConfigBody(file.Body); err != nil {
 			return nil, "", "", err
 		}
@@ -79,12 +83,16 @@ func Convert(src []byte, filename string, compact bool) ([]byte, string, string,
 			return nil, "", "", err
 		}
 		out = append(out, '\n')
-		if err := checkConverted(out, filename, FormatJSON); err != nil {
+		if err := checkConverted(out, filename, FormatJSON, headerDeclarations); err != nil {
 			return nil, "", "", err
 		}
 		return out, FormatHCL, FormatJSON, nil
 	}
 	if file, jsonDiags := hcljson.Parse(expanded, filename); !jsonDiags.HasErrors() {
+		headerDeclarations, err := inspectUpstreamHeaderDeclarations(file.Body)
+		if err != nil {
+			return nil, "", "", err
+		}
 		if err := validateDeferredConfigBody(file.Body); err != nil {
 			return nil, "", "", err
 		}
@@ -92,7 +100,7 @@ func Convert(src []byte, filename string, compact bool) ([]byte, string, string,
 		if err != nil {
 			return nil, "", "", err
 		}
-		if err := checkConverted(out, filename, FormatHCL); err != nil {
+		if err := checkConverted(out, filename, FormatHCL, headerDeclarations); err != nil {
 			return nil, "", "", err
 		}
 		return out, FormatJSON, FormatHCL, nil
@@ -101,21 +109,47 @@ func Convert(src []byte, filename string, compact bool) ([]byte, string, string,
 	return nil, "", "", err
 }
 
-func checkConverted(out []byte, filename, format string) error {
+func checkConverted(out []byte, filename, format string, headerDeclarations int) error {
 	source := filename + ".converted." + format
 	if filename == "" || filename == EnvConfigFilename {
 		source = filename
 	}
-	if _, err := Load(out, source); err != nil {
+	rt, err := Load(out, source)
+	if err != nil {
 		return fmt.Errorf("converted config is invalid: %w", err)
 	}
+	if headerDeclarations != 0 && headerDeclarations != countConvertedUpstreamHeaderDeclarations(rt) {
+		return fmt.Errorf("conversion cannot preserve all upstream_headers declarations")
+	}
 	return nil
+}
+
+func countConvertedUpstreamHeaderDeclarations(rt *Runtime) int {
+	count := 0
+	add := func(headers UpstreamHeaders) {
+		if headers.declared() {
+			count++
+		}
+	}
+	add(rt.UpstreamHeaders)
+	for _, providers := range [...][]Provider{rt.Catalog.providers, rt.Catalog.disabledProviders} {
+		for _, provider := range providers {
+			add(provider.UpstreamHeaders)
+			for _, model := range provider.Models {
+				add(model.UpstreamHeaders)
+			}
+		}
+	}
+	for _, alias := range rt.Catalog.aliases {
+		add(alias.UpstreamHeaders)
+	}
+	return count
 }
 
 func jsonBodyObject(body *hclsyntax.Body) (map[string]interface{}, error) {
 	obj := make(map[string]interface{})
 	for name, attr := range body.Attributes {
-		val, err := jsonValue(attr.Expr)
+		val, err := jsonValue(name, attr.Expr)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
@@ -159,8 +193,23 @@ func setJSONPath(obj map[string]interface{}, path []string, leaf interface{}) {
 	cur[last] = leaf
 }
 
-func jsonValue(expr hcl.Expression) (interface{}, error) {
+func jsonValue(name string, expr hcl.Expression) (interface{}, error) {
 	val, diags := expr.Value(nil)
+	if name == upstreamHeadersAttribute {
+		invalid := fmt.Errorf("must be a map of non-null strings")
+		if diags.HasErrors() || val.IsNull() || !val.IsKnown() || !(val.Type().IsObjectType() || val.Type().IsMapType()) {
+			return nil, invalid
+		}
+		out := make(map[string]string, val.LengthInt())
+		for it := val.ElementIterator(); it.Next(); {
+			key, value := it.Element()
+			if value.IsNull() || !value.IsKnown() || value.Type() != cty.String {
+				return nil, invalid
+			}
+			out[key.AsString()] = value.AsString()
+		}
+		return out, nil
+	}
 	if diags.HasErrors() {
 		return nil, fmt.Errorf("cannot convert non-literal expression: %s", diags.Error())
 	}
@@ -283,6 +332,12 @@ func resolveConvertedTLSProfileReferences(root map[string]interface{}, filename 
 func writeHCLBody(body *hclwrite.Body, obj map[string]interface{}, depth int) error {
 	for _, name := range sortedJSONKeys(obj) {
 		val := obj[name]
+		if name == upstreamHeadersAttribute {
+			if err := writeHCLUpstreamHeaders(body, val); err != nil {
+				return err
+			}
+			continue
+		}
 		if isBlockValue(val) {
 			arity, ok := jsonBlockLabels[name]
 			if !ok {
@@ -304,6 +359,26 @@ func writeHCLBody(body *hclwrite.Body, obj map[string]interface{}, depth int) er
 		}
 		body.SetAttributeValue(name, cv)
 	}
+	return nil
+}
+
+func writeHCLUpstreamHeaders(body *hclwrite.Body, val interface{}) error {
+	obj, ok := val.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("upstream_headers must be a map of non-null strings")
+	}
+	attrs := make([]hclwrite.ObjectAttrTokens, 0, len(obj))
+	for _, key := range sortedJSONKeys(obj) {
+		value, ok := obj[key].(string)
+		if !ok {
+			return fmt.Errorf("upstream_headers must be a map of non-null strings")
+		}
+		attrs = append(attrs, hclwrite.ObjectAttrTokens{
+			Name:  hclwrite.TokensForValue(cty.StringVal(key)),
+			Value: hclwrite.TokensForValue(cty.StringVal(value)),
+		})
+	}
+	body.SetAttributeRaw(upstreamHeadersAttribute, hclwrite.TokensForObject(attrs))
 	return nil
 }
 

@@ -470,6 +470,9 @@ func (req *adminCredentialUpsert) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	if err := visitAdminJSONFields(raw, func(name string, value json.RawMessage) error {
+		if strings.EqualFold(name, "upstream_headers") {
+			return errors.New("upstream_headers is static-config-only")
+		}
 		if jsonFieldHasPrefix(name, "tls_client_hello") {
 			decoded.unsupportedTLSDeclaration = true
 		}

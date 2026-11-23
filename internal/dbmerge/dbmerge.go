@@ -226,6 +226,7 @@ func cloneProvider(base config.Provider) config.Provider {
 	out.APIKeyRef = nil // pragma: allowlist secret
 	out.CopilotCredentialRef = nil
 	out.CopilotToken = ""
+	out.UpstreamHeaders = config.UpstreamHeaders{}
 	out.EncryptedReasoning = config.CloneEncryptedReasoning(base.EncryptedReasoning)
 	out.Models = make([]config.Model, 0, len(base.Models)+len(base.ModelByName))
 	out.ModelByName = make(map[string]config.Model, len(base.Models)+len(base.ModelByName))
@@ -262,6 +263,7 @@ func cloneProvider(base config.Provider) config.Provider {
 }
 
 func cloneModel(model config.Model) config.Model {
+	model.UpstreamHeaders = config.UpstreamHeaders{}
 	model.Capabilities = append([]config.Capability(nil), model.Capabilities...)
 	model.EncryptedReasoning = config.CloneEncryptedReasoning(model.EncryptedReasoning)
 	if model.Pricing != nil {

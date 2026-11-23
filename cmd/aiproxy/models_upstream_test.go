@@ -12,12 +12,17 @@ import (
 	"github.com/egose/aiproxy/internal/config"
 )
 
-func TestRunModelsUpstreamOpenAIStyle(t *testing.T) {
+func TestRunModelsUpstreamOpenAIStyleOmitsFixedHeaders(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		if r.URL.Path != "/v1/models" {
 			t.Errorf("path = %s, want /v1/models", r.URL.Path)
+		}
+		for name := range r.Header {
+			if strings.HasPrefix(name, "X-Fixture-") {
+				t.Errorf("fixed inference header %s reached upstream discovery", name)
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o-mini"},{"id":"gpt-4.1"}]}`))
@@ -27,10 +32,12 @@ func TestRunModelsUpstreamOpenAIStyle(t *testing.T) {
 	cfg := writeModelsConfig(t, `
 listener "http" "public" { address = "127.0.0.1:0" }
 auth "main" { mode = "none" }
+upstream_headers = { X-Fixture-Root = "root-value" }
 provider "openai-compatible" "local" {
   base_url = "`+srv.URL+`"
   api_key = "sk-test"
-  model "gpt-4o-mini" {}
+  upstream_headers = { X-Fixture-Provider = "provider-value" }
+  model "gpt-4o-mini" { upstream_headers = { X-Fixture-Model = "model-value" } }
 }
 `)
 	var stdout, stderr bytes.Buffer

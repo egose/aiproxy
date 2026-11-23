@@ -41,6 +41,7 @@ type Resolver struct {
 	selectors          map[string]alias.Selector
 	cooldowns          *CooldownStore
 	encryptedReasoning *config.EncryptedReasoning
+	upstreamHeaders    config.UpstreamHeaders
 }
 
 func New(rt *config.Runtime) *Resolver {
@@ -58,6 +59,7 @@ func NewWithPrevious(rt *config.Runtime, previous *Resolver) *Resolver {
 		selectors:          selectors,
 		cooldowns:          cooldownsForCatalog(rt.Catalog, previous),
 		encryptedReasoning: config.CloneEncryptedReasoning(rt.EncryptedReasoning),
+		upstreamHeaders:    rt.UpstreamHeaders,
 	}
 }
 
@@ -151,6 +153,14 @@ func (r *Resolver) ResolveInWorkspace(publicModel string, workspace identity.Wor
 
 func (r *Resolver) EncryptedReasoning(provider config.Provider, model config.Model, alias *config.Alias) config.EncryptedReasoningResolution {
 	return config.ResolveEncryptedReasoning(r.encryptedReasoning, provider, model, alias)
+}
+
+func (r *Resolver) UpstreamHeaders(provider config.Provider, model config.Model, alias *config.Alias) map[string]string {
+	var root config.UpstreamHeaders
+	if r != nil {
+		root = r.upstreamHeaders
+	}
+	return config.ResolveUpstreamHeaders(root, provider, model, alias)
 }
 
 func (r *Resolver) Resolve(publicModel string) (ResolveResult, error) {

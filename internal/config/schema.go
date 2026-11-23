@@ -7,6 +7,7 @@ type rawFile struct {
 	UserAgent             string                 `hcl:"user_agent,optional"`
 	ForwardUserAgent      bool                   `hcl:"forward_user_agent,optional"`
 	ForwardHeaders        []string               `hcl:"forward_headers,optional"`
+	UpstreamHeaders       map[string]string      `hcl:"upstream_headers,optional"`
 	EncryptedReasoning    *rawEncryptedReasoning `hcl:"encrypted_reasoning,block"`
 	Listeners             []rawListener          `hcl:"listener,block"`
 	Auth                  []rawAuth              `hcl:"auth,block"`
@@ -179,6 +180,7 @@ type rawProvider struct {
 	UserAgent              string                 `hcl:"user_agent,optional"`
 	ForwardUserAgent       bool                   `hcl:"forward_user_agent,optional"`
 	ForwardHeaders         []string               `hcl:"forward_headers,optional"`
+	UpstreamHeaders        map[string]string      `hcl:"upstream_headers,optional"`
 	ForwardAuthorization   bool                   `hcl:"forward_authorization,optional"`
 	EncryptedReasoning     *rawEncryptedReasoning `hcl:"encrypted_reasoning,block"`
 	DeferredTransport      *rawDeferredTransport  `hcl:"deferred_transport,block"`
@@ -223,6 +225,7 @@ type rawModel struct {
 	UpstreamName       string                 `hcl:"upstream_name,optional"`
 	Protocol           string                 `hcl:"protocol,optional"`
 	Capabilities       []string               `hcl:"capabilities,optional"`
+	UpstreamHeaders    map[string]string      `hcl:"upstream_headers,optional"`
 	Pricing            *rawPricing            `hcl:"pricing,block"`
 	EncryptedReasoning *rawEncryptedReasoning `hcl:"encrypted_reasoning,block"`
 	DeferredTransport  *rawDeferredTransport  `hcl:"deferred_transport,block"`
@@ -248,6 +251,7 @@ type rawAlias struct {
 	RetryStatusCodes   []string               `hcl:"retry_status_codes,optional"`
 	Providers          []string               `hcl:"providers,optional"`
 	Model              string                 `hcl:"model,optional"`
+	UpstreamHeaders    map[string]string      `hcl:"upstream_headers,optional"`
 	SessionAffinity    *rawSessionAffinity    `hcl:"session_affinity,block"`
 	EncryptedReasoning *rawEncryptedReasoning `hcl:"encrypted_reasoning,block"`
 	Targets            []rawTarget            `hcl:"target,block"`

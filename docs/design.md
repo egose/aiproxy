@@ -1353,11 +1353,12 @@ views omit secret material. Public device sessions and provisioning handlers are
 subsequent WEB-COPILOT tasks, not part of this storage/runtime foundation.
 
 Inference is `POST {base}/chat/completions` with model rewrite and shared
-JSON/SSE pass-through handling. Upstream headers are an allowlist only:
+JSON/SSE pass-through handling. The adapter manages these built-in headers:
 `Authorization` from the stored login, proxy `User-Agent`,
 `X-GitHub-Api-Version`, `Openai-Intent`, derived `x-initiator: user`, and
 `Copilot-Vision-Request` only when the request body structurally contains
-image parts. Inbound authorization, cookies, `x-api-key`, and caller-supplied
+image parts. Static inference may add fixed non-reserved headers through the
+shared send path. Inbound authorization, cookies, `x-api-key`, and caller-supplied
 Copilot metadata are stripped, never trusted. Unsupported operations are
 rejected before auth/inference I/O; direct failures never change targets and
 aliases follow the standard configured status policy.
@@ -1846,10 +1847,10 @@ Base declared provider/model policies and pattern slices copy by value through
 candidate builds, ordered/indexed catalogs and admitted snapshots. Root fallback
 is never materialized as a local declaration. A child provider override cannot
 outrank a copied model policy. Static existing-name model overlays may contain
-reasoning, deferred transport, or both (one of each, at least one total), with
-no model attributes, new names or definition changes. Credentials remain local;
-enabled/concrete/same-type base and no-chain rules remain. Deferred base opt-ins
-remain non-inherited and retain their own eligibility constraints.
+reasoning, deferred transport, and fixed headers in any valid combination (one
+of each, at least one total), with no new names or definition changes. Credentials
+stay local; enabled/concrete/same-type base and no-chain rules remain. Deferred
+base opt-ins remain non-inherited and retain their own eligibility constraints.
 
 Managed providers/models store nullable sparse declarations: SQL NULL for
 absence, `{}` for reset, objects preserving explicit false/empty members.
@@ -1976,6 +1977,51 @@ Adapter categories:
 - near pass-through adapters for `openai` and `openai-compatible`
 - translation adapters for provider-native APIs such as `anthropic` and `gemini`
 
+### Fixed Upstream Headers
+
+`upstream_headers` is a static-only string map attribute at root, provider,
+model, and alias scope. Config loading checks map pairs before HCL evaluation or
+JSON decoding can coerce values or collapse duplicate names. Disabled
+declarations are included. The candidate catalog validates both individual
+maps and target-specific effective sets: up to 32 names and 16 KiB of
+name/value bytes, with a 128-byte name and 4096-byte value maximum. Proxy-owned
+names and applicable adapter-owned names are rejected. An empty explicit map
+and an absent map are distinct declarations but have the same merge behavior.
+
+After route authorization, inference resolves individual names case-insensitively
+from alias (if any) → model (if any) → provider → root → permitted caller
+values. Static model-ID passthrough has no model overlay. The resolver pins the
+root map to the same immutable snapshot as target and alias declarations.
+Failover recomputes the target layers and cannot copy a previous target's
+values. Same-target reasoning recovery reuses the resolved values. Successful
+`SIGHUP` swaps all four scopes together for new admissions; rejected candidates
+and later attempts in admitted requests keep the old snapshot.
+
+Ordinary and bounded receiver inference share outbound header preparation.
+Adapter headers remain authoritative; fixed values fill their own names before
+generic caller forwarding and are sent once. Before logging, the proxy masks
+applied values in a cloned upstream-request header snapshot, without changing
+the upstream request. This does not scrub upstream logs or echoed response
+headers or bodies. Operators must trust each destination that can receive a map,
+including any fallback of a root or alias declaration. Dedicated credentials
+and origin-bound redirects retain their existing controls.
+
+Static derivation copies no base provider/model maps, including in model indexes.
+It may declare local provider and existing-name model maps. Managed providers
+never receive any fixed headers (including System, derivatives of static bases,
+or targets of static aliases). Managed aliases cannot contribute overrides to
+static targets. Database/admin/dashboard surfaces do not store or expose the
+map, and workspace authorization is unchanged. Probes, discovery, device
+requests and outgoing peer HTTP controls/submit metadata never send fixed values;
+a receiver applies just its local scopes on eligible local inference.
+
+Conversion validates header declarations in both parsed formats before object
+conversion and emits attributes in either format, with the usual secret-bearing
+`env()` expansion. The HCL editor keeps raw map expressions on retained scopes
+without adding edit flags or putting those expressions into review previews.
+`TestDocumentedFixedUpstreamHeaders` loads the exact public examples in both
+formats.
+
 ## Streaming Behavior
 
 The current API supports streaming chat completions and streaming responses.
@@ -2096,8 +2142,8 @@ Static derivatives inherit model definitions but clear base provider and model
 caller opt-ins and receiver opt-ins/limits in both ordered/indexed model views.
 They may declare a local provider compatibility default or provider receiver,
 or local existing-name model overlays containing `deferred_transport`,
-`encrypted_reasoning`, or both. Reasoning declarations, unlike deferred opt-ins,
-are inherited by value as described above.
+`encrypted_reasoning`, and/or `upstream_headers`. Reasoning declarations, unlike
+deferred opt-ins and fixed maps, are inherited by value as described above.
 New model names, empty/duplicate overlays and definition fields are rejected by
 declaration presence, including explicit empty/null/default values.
 `HasCallerDeferredTransport` inspects provider storage and both model collections
@@ -3301,6 +3347,7 @@ Reload currently rebuilds and swaps:
 - provider/model catalog
 - static model-ID passthrough rules and grants in the same admission snapshot
 - alias routing state
+- root/provider/model/alias fixed upstream headers in the same admission snapshot
 - root and provider upstream header timeouts
 - provider TLS ClientHello profiles and custom recipe contents
 - access-log enablement

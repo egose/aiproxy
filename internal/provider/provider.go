@@ -46,6 +46,7 @@ type Request struct {
 	UserAgent            string
 	ForwardUserAgent     bool
 	ForwardHeaders       []string
+	UpstreamHeaders      map[string]string
 	ForwardAuthorization bool
 	Version              string
 	Body                 []byte
@@ -570,10 +571,7 @@ func defaultVersion(version string) string {
 	return version
 }
 
-func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHandlers) (*Result, error) {
-	if r.execution != nil {
-		return executeUpstreamLimited(r, req, handlers)
-	}
+func prepareUpstreamHeaders(r Request, req *http.Request) ([]string, error) {
 	if r.ForwardAuthorization {
 		authorization, err := forwardedAuthorization(r)
 		if err != nil {
@@ -582,8 +580,47 @@ func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHand
 		req.Header.Set("Authorization", authorization)
 	}
 	req.Header.Set("User-Agent", upstreamUserAgent(r))
+	var applied []string
+	for name, value := range r.UpstreamHeaders {
+		if config.IsReservedUpstreamHeader(r.ProviderType, name) || hasHeader(req.Header, name) {
+			continue
+		}
+		req.Header.Set(name, value)
+		applied = append(applied, name)
+	}
 	applyForwardedHeaders(r, req)
-	sentHeaders := req.Header.Clone()
+	return applied, nil
+}
+
+func hasHeader(headers http.Header, name string) bool {
+	for existing := range headers {
+		if strings.EqualFold(existing, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func snapshotUpstreamHeaders(headers http.Header, applied []string) http.Header {
+	snapshot := headers.Clone()
+	for _, name := range applied {
+		values := snapshot.Values(name)
+		for i := range values {
+			values[i] = "[REDACTED]"
+		}
+	}
+	return snapshot
+}
+
+func executeUpstream(r Request, req *http.Request, handlers upstreamResponseHandlers) (*Result, error) {
+	if r.execution != nil {
+		return executeUpstreamLimited(r, req, handlers)
+	}
+	applied, err := prepareUpstreamHeaders(r, req)
+	if err != nil {
+		return nil, err
+	}
+	sentHeaders := snapshotUpstreamHeaders(req.Header, applied)
 	sentBody, err := readUpstreamRequestBody(req)
 	if err != nil {
 		return nil, fmt.Errorf("read upstream request body: %w", err)
